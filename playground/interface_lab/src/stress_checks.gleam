@@ -4,6 +4,7 @@ import consumers/agent_policy
 import consumers/approval_context
 import consumers/child_admission
 import consumers/child_attachments
+import consumers/child_compensation
 import consumers/claim_ownership
 import consumers/collection_codec
 import consumers/conditional_graph
@@ -42,6 +43,7 @@ pub fn main() -> Nil {
   approval_context.probe()
   child_admission.probe()
   child_attachments.probe()
+  child_compensation.probe()
   claim_ownership.probe()
   execution_ownership.probe()
   foreign_observation.probe()
