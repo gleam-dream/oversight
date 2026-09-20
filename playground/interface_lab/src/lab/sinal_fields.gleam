@@ -130,3 +130,24 @@ fn append(left: List(a), right: List(a)) -> List(a) {
     [item, ..rest] -> [item, ..append(rest, right)]
   }
 }
+
+/// Re-express a field set with another Gleam type while keeping its logical field names and codecs.
+/// `from` and `to` are caller-supplied conversions; their inverse relationship is not proven.
+pub fn imap(fields: Fields(a), from: fn(a) -> b, to: fn(b) -> a) -> Fields(b) {
+  Fields(fields.names, fn(item) { fields.encode(to(item)) }, fn(raw) {
+    case fields.decode(raw) {
+      Ok(item) -> Ok(from(item))
+      Error(error) -> Error(error)
+    }
+  })
+}
+
+/// The declared logical field labels. This does not establish native BEAM keys.
+pub fn declared_names(fields: Fields(a)) -> List(String) {
+  fields.names
+}
+
+/// The identity field set: it contributes no logical labels.
+pub fn empty() -> Fields(Nil) {
+  Fields([], fn(_item) { Ok(FieldMap([])) }, fn(_raw) { Ok(Nil) })
+}

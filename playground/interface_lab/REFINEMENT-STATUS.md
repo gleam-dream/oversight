@@ -31,11 +31,11 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-two consumers compile with only their transitive source imports.
-- Thirty-three negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-four interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty-three consumers compile with only their transitive source imports.
+- Thirty-six negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-five interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `aad31c2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -113,3 +113,9 @@
 - Unsupported constraints are rejected explicitly. Duplicate keys, malformed supported forms, dialect failures, and schema invariants remain located failures.
 - The independent corpus reloads every emitted document and checks normalized contract equality before comparing value acceptance.
 - JSON byte parsing, general schema syntax, source generation, resource limits, and recursive references remain open.
+
+## Typed span events
+
+- [Typed span events](SPAN-EVENTS.md) compose domain records and empty field sets into distinct start, stop, and exception descriptors.
+- Reserved labels prevent application fields from replacing time, context, or exception fields. Ordinary `Result.Error` values remain on the stop-shaped completion path.
+- Symbolic layout probes establish logical field composition only. Native emission, timing, context identity, exception re-raising, and scoped attachment remain separate obligations.
