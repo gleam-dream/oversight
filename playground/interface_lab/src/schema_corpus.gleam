@@ -1,4 +1,5 @@
 // THROWAWAY: Actual emitted schemas and actual decoder outcomes, not hand-copied schemas.
+import consumers/enum_codec
 import consumers/object_codec
 import consumers/tagged_codec
 import lab/blueprint as b
@@ -51,6 +52,40 @@ fn cases(
 }
 
 pub fn main() -> Nil {
+  let assert Ok(priority) = enum_codec.priority_codec()
+  check("finite-priority", priority, [
+    v.Text("low"),
+    v.Text("normal"),
+    v.Text("urgent"),
+    v.Text("LOW"),
+    v.Text("critical"),
+    v.Text(""),
+    v.Int(1),
+    v.Null,
+  ])
+  let assert Ok(decorative) = enum_codec.decorative_label_codec()
+  check("finite-unusual-labels", decorative, [
+    v.Text(""),
+    v.Text("quoted \"雪猫"),
+    v.Text("雪猫"),
+    v.Bool(True),
+  ])
+  let assert Ok(priority_request) = enum_codec.priority_request_codec()
+  check("finite-object", priority_request, [
+    v.Object([#("priority", v.Text("urgent"))]),
+    v.Object([#("priority", v.Text("normal")), #("note", v.Null)]),
+    v.Object([#("priority", v.Text("low")), #("note", v.Text("hello"))]),
+    v.Object([#("priority", v.Text("critical"))]),
+    v.Object([#("priority", v.Null)]),
+    v.Object([#("priority", v.Text("low")), #("extra", v.Null)]),
+    v.Object([]),
+  ])
+  check("finite-list-nullable", b.list(b.nullable(priority)), [
+    v.Array([]),
+    v.Array([v.Text("low"), v.Null, v.Text("urgent")]),
+    v.Array([v.Text("normal"), v.Text("critical")]),
+    v.Null,
+  ])
   check("text", b.text(), [v.Text("hello"), v.Int(1), v.Null])
   check("integer", b.int(), [v.Int(0), v.Text("1"), v.Bool(True)])
   check("boolean", b.bool(), [v.Bool(False), v.Int(0)])

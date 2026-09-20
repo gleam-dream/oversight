@@ -119,10 +119,43 @@ pub fn bool() -> Codec(Bool) {
   Codec(..codec, schema: Ok(BoolSchema))
 }
 
+pub type EnumError {
+  EmptyEnum
+  DuplicateEnumLabel(String)
+  DuplicateEnumValue(first_index: Int, repeated_index: Int)
+}
+
+type EnumValueIndex {
+  NoEnumValue
+  EnumValueAt(Int)
+}
+
+// A single closed lookup table defines both directions. Empty labels are valid
+// strings; duplicate labels and native values would make that table ambiguous.
+pub fn string_enum(
+  variants: List(#(String, a)),
+) -> Result(Codec(a), EnumError) {
+  case validate_enum(variants, 0, [], []) {
+    Error(error) -> Error(error)
+    Ok(Nil) -> {
+      let labels = enum_labels(variants)
+      let codec =
+        new(fn(item) { encode_enum(item, variants) }, fn(raw) {
+          case raw {
+            value.Text(label) -> decode_enum(label, variants)
+            _ -> Error(CannotDecode("Expected a string enum label"))
+          }
+        })
+      Ok(Codec(..codec, schema: Ok(StringEnumSchema(labels))))
+    }
+  }
+}
+
 // Only supported constructors can attach this description to a Codec.
 // This is the accepted wire shape, not a proof of native roundtrip laws.
 pub type Schema {
   TextSchema
+  StringEnumSchema(List(String))
   IntSchema
   BoolSchema
   PairSchema(Schema, Schema)
@@ -150,6 +183,11 @@ pub fn schema(codec: Codec(a)) -> Result(Schema, SchemaError) {
 // this prototype. In particular Value has no floating-point number variant.
 pub fn schema_value(schema: Schema) -> Value {
   case schema {
+    StringEnumSchema(labels) ->
+      value.Object([
+        #("type", value.Text("string")),
+        #("enum", value.Array(enum_label_values(labels))),
+      ])
     IntegerRangeSchema(min, max) ->
       value.Object([
         #("type", value.Text("integer")),
@@ -206,6 +244,88 @@ pub fn schema_value(schema: Schema) -> Value {
         #("minItems", value.Int(2)),
         #("maxItems", value.Int(2)),
       ])
+  }
+}
+
+fn enum_label_values(labels: List(String)) -> List(Value) {
+  case labels {
+    [] -> []
+    [label, ..rest] -> [value.Text(label), ..enum_label_values(rest)]
+  }
+}
+
+fn validate_enum(
+  variants: List(#(String, a)),
+  index: Int,
+  seen_labels: List(String),
+  seen_values: List(#(Int, a)),
+) -> Result(Nil, EnumError) {
+  case variants {
+    [] ->
+      case index {
+        0 -> Error(EmptyEnum)
+        _ -> Ok(Nil)
+      }
+    [#(label, item), ..rest] ->
+      case contains(seen_labels, label) {
+        True -> Error(DuplicateEnumLabel(label))
+        False ->
+          case enum_value_index(item, seen_values) {
+            EnumValueAt(first_index) ->
+              Error(DuplicateEnumValue(first_index, index))
+            NoEnumValue ->
+              validate_enum(rest, index + 1, [label, ..seen_labels], [
+                #(index, item),
+                ..seen_values
+              ])
+          }
+      }
+  }
+}
+
+fn enum_value_index(item: a, seen_values: List(#(Int, a))) -> EnumValueIndex {
+  case seen_values {
+    [] -> NoEnumValue
+    [#(index, seen), ..rest] ->
+      case item == seen {
+        True -> EnumValueAt(index)
+        False -> enum_value_index(item, rest)
+      }
+  }
+}
+
+fn enum_labels(variants: List(#(String, a))) -> List(String) {
+  case variants {
+    [] -> []
+    [#(label, _), ..rest] -> [label, ..enum_labels(rest)]
+  }
+}
+
+fn encode_enum(
+  item: a,
+  variants: List(#(String, a)),
+) -> Result(Value, EncodeError) {
+  case variants {
+    [] -> Error(CannotEncode("Value is not in the string enum"))
+    [#(label, candidate), ..rest] ->
+      case item == candidate {
+        True -> Ok(value.Text(label))
+        False -> encode_enum(item, rest)
+      }
+  }
+}
+
+fn decode_enum(
+  label: String,
+  variants: List(#(String, a)),
+) -> Result(a, DecodeError) {
+  case variants {
+    [] -> Error(CannotDecode("Unknown string enum label"))
+    [#(candidate, item), ..rest] ->
+      case label == candidate {
+        True -> Ok(item)
+        False -> decode_enum(label, rest)
+      }
   }
 }
 

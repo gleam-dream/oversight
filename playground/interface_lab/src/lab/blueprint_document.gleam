@@ -97,8 +97,7 @@ fn parse_schema(
     Nothing -> {
       use kind <- bind(required_field(fields, "type", path))
       case kind {
-        value.Text("string") ->
-          parse_primitive(fields, path, blueprint.TextSchema)
+        value.Text("string") -> parse_string_schema(fields, path)
         value.Text("integer") -> parse_integer(fields, path)
         value.Text("boolean") ->
           parse_primitive(fields, path, blueprint.BoolSchema)
@@ -125,6 +124,7 @@ fn known_schema_keywords(
     fields,
     [
       "type",
+      "enum",
       "minimum",
       "maximum",
       "properties",
@@ -139,6 +139,74 @@ fn known_schema_keywords(
     ],
     path,
   )
+}
+
+fn parse_string_schema(
+  fields: List(#(String, value.Value)),
+  path: List(PathSegment),
+) -> Result(ParsedSchema, DocumentError) {
+  case lookup(fields, "enum") {
+    Nothing -> parse_primitive(fields, path, blueprint.TextSchema)
+    Something(raw) -> {
+      use _ <- bind(only_fields(fields, ["type", "enum"], path))
+      let enum_path = append_path(path, Property("enum"))
+      use labels <- bind(parse_enum_labels(raw, enum_path))
+      let invariants = case labels {
+        [] -> [InvariantLocation(runtime.EmptyStringEnum, enum_path)]
+        [_, ..] ->
+          case duplicate_enum_label(labels, [], 0) {
+            Nothing -> []
+            Something(#(label, index)) -> [
+              InvariantLocation(
+                runtime.DuplicateSchemaEnumLabel(label),
+                append_path(enum_path, Index(index)),
+              ),
+            ]
+          }
+      }
+      Ok(ParsedSchema(blueprint.StringEnumSchema(labels), invariants))
+    }
+  }
+}
+
+fn parse_enum_labels(
+  raw: value.Value,
+  path: List(PathSegment),
+) -> Result(List(String), DocumentError) {
+  case raw {
+    value.Array(items) -> parse_enum_label_items(items, path, 0, [])
+    _ -> Error(MalformedDocument(path, ExpectedArray))
+  }
+}
+
+fn parse_enum_label_items(
+  items: List(value.Value),
+  path: List(PathSegment),
+  index: Int,
+  reversed: List(String),
+) -> Result(List(String), DocumentError) {
+  case items {
+    [] -> Ok(reverse(reversed))
+    [value.Text(label), ..rest] ->
+      parse_enum_label_items(rest, path, index + 1, [label, ..reversed])
+    [_, ..] ->
+      Error(MalformedDocument(append_path(path, Index(index)), ExpectedText))
+  }
+}
+
+fn duplicate_enum_label(
+  labels: List(String),
+  seen: List(String),
+  index: Int,
+) -> Maybe(#(String, Int)) {
+  case labels {
+    [] -> Nothing
+    [label, ..rest] ->
+      case contains(seen, label) {
+        True -> Something(#(label, index))
+        False -> duplicate_enum_label(rest, [label, ..seen], index + 1)
+      }
+  }
 }
 
 fn check_known_keywords(
@@ -781,6 +849,10 @@ fn same_contract_error(
     -> left_name == right_name
     runtime.DuplicateSchemaTag(left_tag), runtime.DuplicateSchemaTag(right_tag)
     -> left_tag == right_tag
+    runtime.EmptyStringEnum, runtime.EmptyStringEnum -> True
+    runtime.DuplicateSchemaEnumLabel(left_label),
+      runtime.DuplicateSchemaEnumLabel(right_label)
+    -> left_label == right_label
     _, _ -> False
   }
 }
