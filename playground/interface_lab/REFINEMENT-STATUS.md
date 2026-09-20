@@ -36,7 +36,7 @@
 - Thirty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -170,3 +170,9 @@
 - [Resource authorization](RESOURCE-AUTHORIZATION.md) reuses existing Relay registries with explicit application context. Endpoint scopes and per-tool scopes remain separate checks.
 - Grants retain all accepted scopes; protected entry points reject wrong-resource and insufficient grants before policy or decoding. Hidden and denied named calls cannot invoke the tool handler.
 - The web-account policy compiles against both Warden identity and the independent API grant. Verifier provenance, protected transport routing, and runtime authorization remain explicit obligations.
+
+## Scoped observation follow-up
+
+- The [Sinal lifetime contract](../../research/sinal-lifetime-contract.md) proposes descriptor-aware handlers and nonempty attachment sets with ordinary closure-captured configuration.
+- Duplicate logical names must fail before registration because same-shaped descriptors may retain different decoders. Scoped attachment owns a private identifier; scope exit does not imply callback quiescence.
+- This refinement is a contract only. The proposed callback migration, admission checks, attachment signatures, and pinned native oracle remain to be executed.

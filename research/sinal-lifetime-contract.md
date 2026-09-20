@@ -3,9 +3,9 @@
 ## Question and status
 
 - The experiment asks how Sinal can expose typed spans and bounded handler lifetimes while preserving native `telemetry` behavior.
-- The current laboratory constructs typed events and classifies foreign callback failures. Its `emit`, `attach`, and `detach` functions remain unfinished runtime boundaries, and it has no span types.
+- The current laboratory constructs typed events, classifies foreign callback failures, and constructs symbolic typed span events in [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam). Its `emit`, `attach`, and `detach` functions remain unfinished runtime boundaries, while `attach_many` and scoped attachment are absent.
 - The original Sinal draft routes events through one actor per event and converts an ordinary returned error into a span exception. Both choices conflict with the selected native-facade direction.
-- This note proposes one constructive type probe followed by one native FFI oracle. It does not claim that `run_span`, attachment cleanup, timing, process identity, or crash propagation works before the native oracle passes.
+- This note proposes constructive span and callback probes followed by one native FFI oracle. It does not claim that `run_span`, attachment cleanup, timing, process identity, or crash propagation works before the native oracle passes.
 
 ## Pinned native contract
 
@@ -22,7 +22,7 @@
 ## Two error boundaries
 
 - Span work and telemetry handlers use `Result` for different contracts. A span-work `Result.Error` is an ordinary business result and selects the stop path.
-- The existing [observation contract](../playground/interface_lab/OBSERVATION-CONTRACT.md) treats a typed handler error as `HandlerReturned(error)`. The native adapter first calls `on_failure` with that `HandlerFailure`, then deliberately fails the raw telemetry callback so upstream removes it and emits `[telemetry, handler, failure]`.
+- The existing [observation contract](../playground/interface_lab/OBSERVATION-CONTRACT.md) treats a typed handler error as `HandlerReturned(error)`. The future native adapter first calls `on_failure` with the selected event and that `HandlerFailure`, then deliberately fails the raw telemetry callback so upstream removes it and emits `[telemetry, handler, failure]`.
 - Measurement and metadata decode failures follow the same adapter policy after classification. An unexpected handler raise, exit, or throw bypasses the typed handler error while remaining an upstream callback failure.
 - The adapter's deliberate callback failure does not convert a span-work domain error into a span exception. These paths meet only when instrumentation callback code itself fails during a start, stop, or exception event.
 
@@ -142,27 +142,73 @@ pub fn run_span(
 
 ## Attachment lifetime
 
-- Global `attach` and `detach` remain necessary for application-lifetime instrumentation. An `Attachment` is copyable, so explicit detachment cannot be statically single-use and repeated detachment remains a runtime `NotAttached` result.
-- A scoped bracket is useful for tests, request-local observation, and temporary plugins. It must not accept a caller-owned global handler identifier.
+- A handler attached to multiple same-shaped events must receive the selected `Event(m, d)`. Omitting the descriptor would erase the event identity supplied by native telemetry and force applications to duplicate that identity in metadata.
+- A failure callback must receive the same selected event as the handler. This event identifies the descriptor whose measurement decoding, metadata decoding, or declared handler result failed.
+- `event_name` exposes the logical descriptor name so applications can route observations without comparing decoder closures. It does not expose or establish the native atom name.
+- Application configuration remains ordinary data captured by the handler and failure-callback closures. Sinal adds no public handler-configuration object because closures already preserve the application type.
 
 ```gleam
-pub fn with_attachment(
-  event: Event(m, d),
+pub fn event_name(event: Event(m, d)) -> List(String)
+
+pub fn handler(
+  run: fn(Event(m, d), m, d) -> Result(Nil, e),
+) -> Handler(m, d, e)
+
+pub fn attach_many(
+  id: HandlerId,
+  first: Event(m, d),
+  rest: List(Event(m, d)),
   handler: Handler(m, d, e),
-  on_failure: fn(HandlerFailure(e)) -> Nil,
-  use: fn() -> a,
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+) -> Result(Attachment, AttachError)
+```
+
+- `first` plus `rest` makes the event set nonempty without adding a collection wrapper. The shared `m` and `d` parameters reject a differently shaped event before registration.
+- The proposed registration boundary must return `DuplicateEventName` through `AttachError` for duplicate logical names before attaching. Same-shaped descriptors may carry different decoders, so a native event name cannot choose safely between two such descriptors.
+- The native name adapter must preserve distinct admitted logical names as distinct native event names. This injective binding remains an FFI obligation.
+- The native callback configuration will need the event-to-descriptor relation, field decoders, handler closure, and failure callback. This private adapter configuration does not create a second public configuration vocabulary.
+- Global `attach`, `attach_many`, and `detach` remain necessary for application-lifetime instrumentation. An `Attachment` is copyable, so explicit detachment cannot be statically single-use and repeated detachment remains a runtime `NotAttached` result.
+- A scoped operation is useful for tests, request-local observation, and temporary plugins. It must not accept a caller-owned global handler identifier.
+
+```gleam
+pub fn with_attachments(
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  run: fn() -> a,
 ) -> Result(a, AttachError)
 ```
 
-- `with_attachment` allocates a fresh private native identifier for this attachment generation. It never returns that identifier or an `Attachment`, so another Sinal call cannot replace the registration under the same key.
-- After successful attachment, the native implementation detaches in an Erlang `after` path. It then returns an ordinary result or re-raises the original catchable error, exit, or throw.
+- The proposed `with_attachments` operation allocates a fresh private native identifier for one attachment generation. It returns neither the identifier nor an `Attachment`, so a Sinal caller cannot replace that scoped registration under the same key.
+- The proposed runtime implementation must detach after an ordinary return and after a catchable error, exit, or throw. Its signature cannot establish private-identifier freshness, cleanup execution, or re-raise fidelity, so no executable `try` or `after` behavior is claimed before the native oracle passes.
 - An untrappable kill, VM loss, or process loss before `after` runs may skip cleanup. The scoped API cannot promise a terminal span event or handler detachment for those terminations.
 - A cleanup `not_found` means the registration is already absent, usually because the handler failed and native telemetry removed it. It satisfies the scoped registration goal without proving that the handler remained installed for the whole scope.
 - A bracket that accepts a reusable public identifier is unsafe. If the original handler fails, another process can attach a replacement under the same identifier before cleanup, and the stale cleanup detaches the replacement.
 - The private-generation rule prevents that race among Sinal callers. Raw Erlang or Elixir code can inspect native handlers and deliberately reuse the private term, so safe cleanup assumes foreign code does not replace Sinal-owned scoped identifiers.
 - Upstream exposes no conditional detach operation. A list-then-detach check cannot close the race, and Sinal must not claim ownership-safe cleanup against arbitrary raw registry mutation.
 - Detachment prevents later registry lookups from selecting the handler. It does not wait for a callback that another emitting process already selected, so scope exit is not callback quiescence.
-- A scoped handler must not capture a resource that becomes invalid immediately after `with_attachment` returns unless the application separately excludes concurrent emission or joins its callback work.
+- A scoped handler must not capture a resource that becomes invalid immediately after `with_attachments` returns unless the application separately excludes concurrent emission or joins its callback work.
+
+## Constructive attachment probe
+
+- Extend `deliver_foreign` so its handler receives the exact `Event(m, d)` argument used for decoding. Deliver valid foreign maps to two same-shaped descriptors and require the shared handler to observe the selected descriptor for each delivery.
+- Use an application metadata record and closure-captured collector configuration in the same probe. Extra foreign fields remain tolerated, while malformed measurements, malformed metadata, and a declared handler error retain their existing `HandlerFailure` classifications.
+- Use a handler that panics if invoked after malformed measurement or metadata input. Successful execution proves that decoding still precedes the descriptor-aware handler.
+- Add a pure admission probe with two same-named descriptors that have different field codecs. It must reject the ambiguity without attaching or choosing one decoder.
+- Construct `attach_many` and `with_attachments` calls for two same-shaped descriptors without executing either operation. Compilation proves the nonempty event-set shape and callback agreement, but it proves no registration, overlap, cleanup, failure isolation, or callback quiescence.
+- Pass a `run` callback whose result type is itself `Result`. Type inference must preserve the ordinary application error inside `a` rather than reinterpret it as an attachment failure.
+
+## Migration and negative probes
+
+- Repository search finds six positive handler-constructor call sites and four negative attachment call sites. The migration changes their callback arity without changing their domain types.
+- [`foreign_observation.gleam`](../playground/interface_lab/src/consumers/foreign_observation.gleam) contains three handler constructors that must accept the selected event. Its valid, forbidden, and declared-failure callbacks are the constructive migration callers.
+- [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam) contains start, stop, and exception handler constructors that must accept their typed event. These callers preserve the existing distinct span-event shapes.
+- The proposed `playground/interface_lab/src/consumers/scoped_observation.gleam` caller defines `attach_many` and `with_attachments` calls for two same-shaped descriptors. It must not invoke either unfinished runtime operation from a probe.
+- [`handler_metadata.gleam`](../playground/interface_lab/negative/handler_metadata.gleam) must retain its metadata mismatch after the handler and failure-callback arities change. The failure must remain a disagreement between `Bool` handler metadata and `String` event metadata.
+- [`span_start_handler_for_stop.gleam`](../playground/interface_lab/negative/span_start_handler_for_stop.gleam), [`span_stop_measurements_for_start.gleam`](../playground/interface_lab/negative/span_stop_measurements_for_start.gleam), and [`span_stop_metadata_for_exception.gleam`](../playground/interface_lab/negative/span_stop_metadata_for_exception.gleam) must retain their current event-shape failures after the callback migration.
+- The proposed `playground/interface_lab/negative/attach_many_measurement_shape.gleam` fixture supplies `Event(Int, String)` first and `Event(Bool, String)` in `rest`. Its paired `.expect` file must select the compiler's measurement mismatch at the event list.
+- The proposed `playground/interface_lab/negative/with_attachments_metadata_shape.gleam` fixture supplies `Event(Int, String)` first and `Event(Int, Bool)` in `rest`. Its paired `.expect` file must select the compiler's metadata mismatch before the unfinished runtime boundary can execute.
 
 ## Native FFI oracle
 
@@ -171,14 +217,17 @@ pub fn with_attachment(
 - Compare start, stop, and exception atom names; exact native map keys; native time values; context equality within one invocation; context uniqueness across invocations; independent stop metadata; and owned-key collision behavior.
 - Return `Result.Error` normally and require a stop event. Raise, exit, and throw from supervised probe processes; require one exception event and the same class, reason, and stacktrace after re-raise.
 - Return a typed handler error and require `on_failure` reporting followed by upstream detachment and one handler-failure event. Keep this probe separate from the span-work `Result.Error` case.
+- Inspect the handler configuration carried by the upstream failure event when the adapter configuration retains Gleam closures. The public contract must disclose any observable captured application configuration or replace it with a non-secret indirection before claiming that closure-captured values remain private.
 - Nest a successful span and a crashing span. Require outer start, inner start, inner terminal, and outer terminal order; require distinct default contexts; and avoid a parent-child trace claim.
 - Attach a raw Erlang handler to a Sinal span and attach a Sinal handler to raw `telemetry:span/3`. Both directions must observe the same event names and maps.
-- Exercise normal scoped return, scoped crash, handler self-removal, and the public-ID replacement race. The first three establish intended cleanup; the last demonstrates why a caller-owned identifier is excluded from `with_attachment`.
+- Exercise normal scoped return, scoped crash, handler self-removal, and the public-ID replacement race. The first three establish intended cleanup; the last demonstrates why a caller-owned identifier is excluded from `with_attachments`.
+- Attach two same-shaped descriptors under one identifier and require the handler and failure callback to receive the descriptor selected by each native event name. Repeat with two overlapping identifiers whose handlers capture distinct application configurations, then detach one and require the other to remain registered.
 - Run a concurrent emitter across scope cleanup and record whether a previously selected callback finishes afterward. The result constrains documentation and resource-lifetime examples rather than creating a quiescence promise.
 
 ## Acceptance boundary
 
-- The constructive slice proves that one span definition supplies three distinct typed event shapes and that an ordinary `Completion(Result.Error(...))` stays on the normal completion path.
+- The implemented symbolic span slice proves that one span definition supplies three distinct typed event shapes and that an ordinary `Completion(Result.Error(...))` stays on the normal completion path.
+- The proposed callback probe would prove event-specific pure delivery, application metadata decoding, closure-captured configuration, and static agreement across a nonempty event set. None of that descriptor-aware evidence exists until the probe is implemented and run.
 - Injected symbolic observations prove pure layout and composition only. They do not prove native-term retention, native clocks, caller-process execution, crash capture, re-raise fidelity, registration cleanup, concurrency, or raw telemetry interoperability.
-- The native slice is required before `run_span` or `with_attachment` counts as exercised behavior. Publication of the event-and-span API waits for the pinned differential oracle.
+- The `attach_many` and `with_attachments` surfaces remain type-only until the pinned native oracle passes. The native slice is required before `run_span` or scoped cleanup counts as exercised behavior.
 - Sinal remains an independently usable telemetry facade. Span export, trace parent propagation, asynchronous forwarding, metrics aggregation, handler supervision, and ecosystem workflow control remain outside this contract.
