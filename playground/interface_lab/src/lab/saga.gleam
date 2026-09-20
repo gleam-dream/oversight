@@ -336,28 +336,6 @@ pub fn approval(
   Approval(descriptor, input, answer, error, undo_error)
 }
 
-// A plain child result cannot be used where a compensation receipt is required.
-// The receipt addresses the child's own run journal; no outer auto-undo occurs.
-pub type ChildCompletion(o) {
-  CompletedPlain(o)
-  CompletedWithCompensation(o, CompensationReceipt)
-}
-
-pub opaque type CompensationReceipt {
-  CompensationReceipt(child_run_id: String, child_revision: Int)
-}
-
-pub type ChildCompensationError {
-  ChildCompensationUnavailable
-  ChildCompensationFailed(Value)
-}
-
-pub fn request_child_compensation(
-  _receipt: CompensationReceipt,
-) -> Result(Nil, ChildCompensationError) {
-  todo as "request compensation from the child runner; the child owns its journal"
-}
-
 pub opaque type Definition(i, o, e, u) {
   Definition(
     id: DefinitionId,
@@ -496,8 +474,8 @@ pub fn define_approval(
 }
 
 // An opaque child owns its internal scheduling and compensation. This plain
-// child result carries only output; compensation-enabled completion remains a
-// separate ChildCompletion(CompensationReceipt) boundary.
+// child boundary carries only output; durable compensation authority is issued
+// separately by its owner through the Grind adapter.
 pub fn child(
   id: StepId,
   step_version: Version,

@@ -16,7 +16,7 @@
 | Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
 | Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                                         |
-| Saga → durable runner       | Unified definition signatures; child links, typed observation, exact submission receipts, and cancellation intent                   | Compensation receipts, persisted unfinished commands, snapshot codecs, and journal admission                     |
+| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                 | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission              |
 | Grind alone                 | Typed admission, scoped uniqueness, exact command recovery, response resolution, and claim acknowledgement arbitration              | Queue configuration, broader uniqueness policies, worker lifecycle, persisted history, and advanced job families |
 | Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                                        |
 | Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                |
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-five consumers compile with only their transitive source imports.
-- Sixty-four negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-six consumers compile with only their transitive source imports.
+- Sixty-seven negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -41,7 +41,7 @@
 ## Next integration priorities
 
 - **Fabric:** Extend the pure policy controller with observed token/time budgets, durable approvals, streaming, and explicit child execution. Preserve provider origin and uncertain-effect handling.
-- **Saga:** Extend child admission and cancellation intent with compensation-receipt issuance, redemption, and persisted unfinished commands. Exercise local runner outcomes over the canonical definition separately.
+- **Saga:** Extend the durable child contract with persisted unfinished commands. Exercise local compensation authority and local runner outcomes over the canonical definition separately.
 - **Grind:** Extend queue configuration, worker lifecycle, and persisted history around typed uniqueness admission. Keep broader uniqueness policies and backend concurrency evidence separate.
 - **Remaining scope:** Keep every unfinished family in [API coverage](../../API-COVERAGE.md), including provider profiles, protocol clients and servers, OAuth operations, dynamic graphs, and advanced job families.
 - **Runtime evidence:** Run pinned native telemetry, oidcc, concurrent storage, and queue/workflow recovery oracles after the relevant interface contracts are constructible. These obligations remain distinct from interface completion.
@@ -99,7 +99,7 @@
 - The consumer rebuilds a compatible contract and observes the same historical output after compensation changes. Stored metadata is checked before the retained decoder executes.
 - Strict link decoding rejects duplicate and unknown fields. Missing runs, pruned results, unavailable owners, and corrupt output remain distinct.
 - Native output and undo-error mismatches are compiler failures. Definition and codec versions are runtime compatibility checks.
-- [Child admission](CHILD-ADMISSION.md) adds scripted submission and cancellation intent. Compensation receipts, durable journaling, and actual restart recovery remain open.
+- [Child admission](CHILD-ADMISSION.md) adds scripted submission and cancellation intent. Durable compensation claims and redemption are exercised separately below. Local authority, durable journaling, and actual restart recovery remain open.
 
 ## Relay exchange ownership
 
@@ -190,7 +190,7 @@
 - [Child admission](CHILD-ADMISSION.md) retains encoded input and native codecs through new admission, command replay, and ambiguous replies. Exact accepted-request and stored-metadata checks precede handle construction.
 - Uncertain submission retains its original owner route. Invalid successful replies remain recoverable because admission may already have committed.
 - Cancellation records intent separately from eventual outcome and preserves historical child completion.
-- Immutable consumer receipts exercise replay and conflict without claiming shared storage, transaction isolation, or process recovery. Compensation ownership remains separate work.
+- Immutable consumer receipts exercise replay and conflict without claiming shared storage, transaction isolation, or process recovery. The compensation refinement below adds owner-issued claims and request admission.
 
 ## Agent policy and bounded model turns
 
@@ -204,3 +204,10 @@
 - [Typed uniqueness](UNIQUE-JOBS.md) keeps versioned projected keys separate from stable submission commands. Recovery retains the original route, exact request, and actual native codecs.
 - Existing jobs retain their actual queue route. Checked worker binding precedes typed result-handle construction; scheduled replacement preserves the prior job and payload.
 - Immutable records exercise candidate matching and command replay. Database concurrency, durable ledgers, broad replacement, bulk policies, and worker execution remain open.
+
+## Durable child compensation authority
+
+- [Child compensation](CHILD-COMPENSATION.md) keeps successful completion separate from an owner-issued compensation claim. Persisted references require owner-record validation and the actual undo-error codec before rebinding.
+- Claim and request recovery preserve original routing and commands. One claim admits one operation even if a caller copies the receipt and changes its command identifier.
+- Historical success remains representable after output pruning. Journal retention and compensation progress remain separate owner facts.
+- Immutable ledgers exercise replay, competing claims, lost replies, expiry, pruning, and typed undo observation. Concurrent storage, compensator execution, durable restart, and local authority remain open.

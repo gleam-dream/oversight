@@ -230,11 +230,15 @@ pub fn submit_durably(
   saga_grind.submit(queue, definition, input)
 }
 
-// In a real child run, the runner returns an opaque receipt only when the host
-// opts into compensation. Plain child completion is a separate public variant.
+// A completed child and a separately claimed compensation receipt are distinct.
+// Only the configured durable owner can confirm that claim; completion alone
+// does not grant compensation authority. Local receipt issuance remains open.
 pub type CheckoutChildResult {
   PlainCheckout(CheckoutReceipt)
-  CompensableCheckout(CheckoutReceipt, saga.CompensationReceipt)
+  CompensableCheckout(
+    CheckoutReceipt,
+    saga_grind.DurableCompensationReceipt(UndoFailure),
+  )
 }
 
 fn string_codec(a: fn(String) -> t, b: fn(t) -> String) -> Codec(t) {

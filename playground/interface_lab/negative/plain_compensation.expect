@@ -1,4 +1,3 @@
-# THROWAWAY: Intended consumer type error.
 Type mismatch
-CompensationReceipt
-ChildCompletion
+DurableCompensationReceipt
+DurableChildState

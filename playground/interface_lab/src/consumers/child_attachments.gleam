@@ -442,6 +442,7 @@ fn owner_with_read(
       read,
       saga_grind.unsupported_submission,
       saga_grind.unsupported_cancellation,
+      saga_grind.unsupported_compensation_port(),
     ),
   )
 }

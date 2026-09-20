@@ -820,6 +820,7 @@ fn owner_with_raw_callbacks(
       },
       submit,
       cancel,
+      saga_grind.unsupported_compensation_port(),
     )
   saga_grind.durable_owner(owner_id, port)
 }
