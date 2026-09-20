@@ -46,6 +46,57 @@ pub fn main() -> Nil {
     ]),
     "",
   )
+  fixture(
+    "enum_record",
+    b.ObjectSchema([
+      b.PropertySchema(
+        "gamma",
+        False,
+        b.StringEnumSchema([
+          "case",
+          "",
+          "é漢字😀",
+          "line\nbreak",
+          "quote\"label",
+          "back\\slash",
+        ]),
+      ),
+      b.PropertySchema(
+        "beta",
+        True,
+        b.NullableSchema(
+          b.StringEnumSchema([
+            "case",
+            "",
+            "é漢字😀",
+            "line\nbreak",
+            "quote\"label",
+            "back\\slash",
+          ]),
+        ),
+      ),
+      b.PropertySchema(
+        "alpha",
+        True,
+        b.StringEnumSchema([
+          "case",
+          "",
+          "é漢字😀",
+          "line\nbreak",
+          "quote\"label",
+          "back\\slash",
+        ]),
+      ),
+    ]),
+    "",
+  )
+  fixture(
+    "enum_single",
+    b.ObjectSchema([
+      b.PropertySchema("only", True, b.StringEnumSchema([""])),
+    ]),
+    "",
+  )
   escape_fixtures([
     "",
     "case",

@@ -10,16 +10,16 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                                     | Remaining interface work                                                                                            |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Composed codecs, finite string enums, located schema requirements, runtime contracts, document loading, and finite native generation | Number policy, enum generation, actual provider profiles, broader generation, and complete 1.x migration            |
-| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                    | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence              |
-| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                   | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility       |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Parallel execution, traversal, timed recovery, and definition migration                                             |
-| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                  | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
-| Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration              | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
-| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, symbolic typed span events, and scoped cleanup control      | Native name/map binding, telemetry integration, concurrent callback lifetime, and span execution                    |
-| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                   | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                   |
+| Boundary                    | Current evidence                                                                                                                                               | Remaining interface work                                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Composed codecs, finite string enums and generated enum fields, located schema requirements, runtime contracts, document loading, and finite native generation | Numeric vocabulary integration, actual provider profiles, broader generation, and complete 1.x migration            |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                                              | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence              |
+| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                                             | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility       |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                                                  | Parallel execution, traversal, timed recovery, and definition migration                                             |
+| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                                            | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
+| Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration                                        | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, symbolic typed span events, and scoped cleanup control                                | Native name/map binding, telemetry integration, concurrent callback lifetime, and span execution                    |
+| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                                             | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                   |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
@@ -34,7 +34,7 @@
 - Gleam 1.18.1: sixty consumers compile with only their transitive source imports.
 - Ninety negative fixtures fail with their intended single compiler diagnostic.
 - Forty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
-- Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
+- Sixteen generated modules compile and run independent native consumers; four compiler-negative cases reject invalid native type and codec boundaries.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -233,7 +233,8 @@
 - The [finite enum experiment](ENUM-CODECS.md) retains one checked label/value table through native encoding, decoding, schema rendering, document loading, and runtime validation. Duplicate labels and native values are construction errors.
 - A Relay consumer uses the same nested enum codec for declaration and dispatch. Runtime-validated wire values remain distinct from native enum values.
 - Independent schema checks include exact labels, empty strings, quotes, Unicode, unknown labels, and nested enum collections. The published JSON Blueprint compatibility probes remain valid after the core extension.
-- Source generation explicitly rejects enum schemas. Generated constructors, aliases, number policy, and broader legacy migration remain separate work.
+- [Finite enum field generation](ENUM-GENERATION.md) emits a distinct positional native enum type for each supported root-object field and preserves required, optional, and nullable wrappers. Generated modules compile and run downstream consumers without importing the generator.
+- Numeric enums, aliases, named or recursive enum schemas, stable application-selected names, and broader legacy migration remain separate work.
 
 ## Modern Relay server composition
 

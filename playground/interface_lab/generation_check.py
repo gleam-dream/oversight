@@ -46,6 +46,9 @@ fn expected_schema() -> v.Value
 @external(erlang, "generation_fixture_ffi", "name")
 fn expected_name() -> String
 
+@external(erlang, "generation_fixture_ffi", "enum_label")
+fn enum_label(index: Int) -> String
+
 pub fn main() -> Nil {
   let codec = document.codec()
   let assert Ok(expected) = loader.load(expected_schema())
@@ -101,6 +104,31 @@ ESCAPE = """
 """
 
 
+
+def enum_body(single=False):
+    # Fixed independent constructor contract, exercised against externally supplied labels.
+    lines = []
+    for index in range(1 if single else 6):
+        native = f"document.Document(document.Field0Value{index})" if single else (
+            f"document.Document(document.Field0Value{index}, "
+            f"b.NonNull(document.Field1Value{index}), b.Present(document.Field2Value{index}))")
+        fields = [f'#("only", v.Text(enum_label({index})))'] if single else [
+            f'#("{field}", v.Text(enum_label({index})))' for field in ["alpha", "beta", "gamma"]]
+        lines += [f"  let native = {native}", f"  let wire = v.Object([{', '.join(fields)}])",
+                  "  let assert Ok(decoded) = b.decode(codec, wire)",
+                  "  let assert True = decoded == native",
+                  "  let assert Ok(encoded) = b.encode(codec, native)",
+                  "  let assert True = encoded == wire"]
+    if not single:
+        lines += [
+            '  let assert Ok(document.Document(document.Field0Value0, b.Null, b.Missing)) = b.decode(codec, v.Object([#("alpha", v.Text("")), #("beta", v.Null)]))',
+            '  let assert Error(_) = b.decode(codec, v.Object([#("alpha", v.Text("unknown")), #("beta", v.Null)]))',
+            '  let assert Error(_) = b.decode(codec, v.Object([#("alpha", v.Int(0)), #("beta", v.Null)]))',
+            '  let assert Error(_) = b.decode(codec, v.Object([#("beta", v.Null)]))',
+            '  let assert Error(_) = b.decode(codec, v.Object([#("alpha", v.Text("")), #("beta", v.Null), #("gamma", v.Null)]))',
+        ]
+    return "\n".join(lines)
+
 def run(directory, *args):
     return subprocess.run(["gleam", *args], cwd=directory, text=True, capture_output=True)
 
@@ -148,9 +176,9 @@ def main():
     if result.returncode:
         raise SystemExit(result.stdout + result.stderr)
     cases = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
-    if {case["label"] for case in cases} != {"record", "empty", "primitives", "escape"}:
+    if {case["label"] for case in cases} != {"record", "empty", "primitives", "escape", "enum_record", "enum_single"}:
         raise SystemExit("FAIL: missing generated-source fixture family")
-    bodies = {"record": RECORD, "empty": EMPTY, "primitives": PRIMITIVES, "escape": ESCAPE}
+    bodies = {"record": RECORD, "empty": EMPTY, "primitives": PRIMITIVES, "escape": ESCAPE, "enum_record": enum_body(), "enum_single": enum_body(True)}
     for case in cases:
         with tempfile.TemporaryDirectory(prefix="oversight-generated-") as temp:
             directory = Path(temp)
@@ -161,9 +189,11 @@ def main():
                 COMMON + bodies[case["label"]] + "\n  Nil\n}\n"
             )
             (directory / "src" / "generation_fixture_ffi.erl").write_text(
-                "-module(generation_fixture_ffi).\n-export([schema/0,name/0]).\n"
+                "-module(generation_fixture_ffi).\n-export([schema/0,name/0,enum_label/1]).\n"
                 + "schema() -> " + wire_term(case["schema"]) + ".\n"
                 + "name() -> " + binary(case["name"]) + ".\n"
+                + "enum_label(Index) -> lists:nth(Index + 1, ["
+                + ",".join(binary(label) for label in ([""] if case["label"] == "enum_single" else sorted(["case", "", "é漢字😀", "line\nbreak", 'quote"label', "back\\slash"]))) + "]).\n"
             )
             copy_dependencies(directory)
             result = run(directory, "run", "-m", "generated_probe")
@@ -184,7 +214,16 @@ import lab/blueprint
 import lab/blueprint_runtime as runtime
 pub fn invalid(value: runtime.RuntimeContract) -> blueprint.Codec(document.Document) { value }
 """, ["Type mismatch", "RuntimeContract", "Codec"])
-    print(f"PASS: {len(cases)} generated modules compile and run native consumers; 2 native-boundary negatives pass")
+            if case["label"] == "enum_record":
+                check_negative(directory, """
+import generated/document
+pub fn invalid(value: String) -> document.Field0Enum { value }
+""", ["Type mismatch", "String", "Field0Enum"])
+                check_negative(directory, """
+import generated/document
+pub fn invalid(value: document.Field1Enum) -> document.Field0Enum { value }
+""", ["Type mismatch", "Field1Enum", "Field0Enum"])
+    print(f"PASS: {len(cases)} generated modules compile and run native consumers; 4 native-boundary negatives pass")
 
 
 if __name__ == "__main__":

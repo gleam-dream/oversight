@@ -23,7 +23,6 @@ pub type UnsupportedReason {
   ListSchema
   PairSchema
   TaggedSchema
-  StringEnumSchema
 }
 
 pub type GenerationError {
@@ -39,8 +38,25 @@ type RangeBinding {
   RangeBinding(name: String, minimum: Int, maximum: Int)
 }
 
+type EnumVariant {
+  EnumVariant(label: String, constructor: String)
+}
+
+type EnumBinding {
+  EnumBinding(
+    type_name: String,
+    codec_name: String,
+    variants: List(EnumVariant),
+  )
+}
+
 type Analysis {
-  Analysis(native_type: String, codec: String, range: Maybe(RangeBinding))
+  Analysis(
+    native_type: String,
+    codec: String,
+    range: Maybe(RangeBinding),
+    enumeration: Maybe(EnumBinding),
+  )
 }
 
 type Field {
@@ -87,17 +103,33 @@ fn analyse_schema(
   path: List(PathSegment),
 ) -> Result(Analysis, GenerationError) {
   case schema {
-    blueprint.TextSchema -> Ok(Analysis("String", "blueprint.text()", Nothing))
-    blueprint.StringEnumSchema(_) ->
-      Error(UnsupportedGeneration(path, StringEnumSchema))
-    blueprint.IntSchema -> Ok(Analysis("Int", "blueprint.int()", Nothing))
-    blueprint.BoolSchema -> Ok(Analysis("Bool", "blueprint.bool()", Nothing))
+    blueprint.TextSchema ->
+      Ok(Analysis("String", "blueprint.text()", Nothing, Nothing))
+    blueprint.StringEnumSchema(labels) -> {
+      let type_name = enum_type_name(index)
+      let codec_name = enum_codec_name(index)
+      Ok(Analysis(
+        type_name,
+        codec_name,
+        Nothing,
+        Something(EnumBinding(
+          type_name,
+          codec_name,
+          enum_variants(index, labels, 0),
+        )),
+      ))
+    }
+    blueprint.IntSchema ->
+      Ok(Analysis("Int", "blueprint.int()", Nothing, Nothing))
+    blueprint.BoolSchema ->
+      Ok(Analysis("Bool", "blueprint.bool()", Nothing, Nothing))
     blueprint.IntegerRangeSchema(minimum, maximum) -> {
       let binding = "bounded_" <> integer_to_string(index)
       Ok(Analysis(
         "Int",
         binding,
         Something(RangeBinding(binding, minimum, maximum)),
+        Nothing,
       ))
     }
     blueprint.NullableSchema(inner) -> {
@@ -110,6 +142,7 @@ fn analyse_schema(
         "blueprint.Nullable(" <> analysed.native_type <> ")",
         "blueprint.nullable(" <> analysed.codec <> ")",
         analysed.range,
+        analysed.enumeration,
       ))
     }
     blueprint.ObjectSchema(_) | blueprint.FieldSchema(_, _) ->
@@ -122,9 +155,11 @@ fn analyse_schema(
 }
 
 fn render_source(fields: List(Field)) -> String {
+  let enum_types = render_enum_types(fields)
   let declaration = render_type(fields)
   let function_body = render_codec_body(fields)
   "import lab/blueprint\n\n"
+  <> enum_types
   <> declaration
   <> "\n\npub fn codec() -> blueprint.Codec(Document) {\n"
   <> indent_lines(function_body, "  ")
@@ -138,6 +173,35 @@ fn render_type(fields: List(Field)) -> String {
       "pub type Document {\n  Document(\n"
       <> indent_lines(render_type_fields(fields), "    ")
       <> "  )\n}"
+  }
+}
+
+fn render_enum_types(fields: List(Field)) -> String {
+  case fields {
+    [] -> ""
+    [Field(_, _, _, Analysis(_, _, _, Nothing)), ..rest] ->
+      render_enum_types(rest)
+    [Field(_, _, _, Analysis(_, _, _, Something(binding))), ..rest] ->
+      render_enum_type(binding) <> "\n\n" <> render_enum_types(rest)
+  }
+}
+
+fn render_enum_type(binding: EnumBinding) -> String {
+  let EnumBinding(type_name, _, variants) = binding
+  "pub type "
+  <> type_name
+  <> " {\n"
+  <> indent_lines(enum_constructors(variants), "  ")
+  <> "}"
+}
+
+fn enum_constructors(variants: List(EnumVariant)) -> List(String) {
+  case variants {
+    [] -> []
+    [EnumVariant(_, constructor), ..rest] -> [
+      constructor,
+      ..enum_constructors(rest)
+    ]
   }
 }
 
@@ -168,7 +232,7 @@ fn map_type_fields(
 fn field_type(field: Field) -> String {
   let Field(_, _, required, analysis) = field
   case analysis {
-    Analysis(native_type, _, _) ->
+    Analysis(native_type, _, _, _) ->
       case required {
         True -> native_type
         False -> "blueprint.Optional(" <> native_type <> ")"
@@ -180,14 +244,17 @@ fn render_codec_body(fields: List(Field)) -> List(String) {
   append(
     range_bindings(fields),
     append(
-      property_bindings(fields),
-      append(combination_bindings(fields), [
-        "blueprint.imap(",
-        "  blueprint.object(" <> properties_value(fields) <> "),",
-        "  fn(raw) { " <> construct_document(fields) <> " },",
-        "  fn(document) { " <> deconstruct_document(fields) <> " },",
-        ")",
-      ]),
+      enum_bindings(fields),
+      append(
+        property_bindings(fields),
+        append(combination_bindings(fields), [
+          "blueprint.imap(",
+          "  blueprint.object(" <> properties_value(fields) <> "),",
+          "  fn(raw) { " <> construct_document(fields) <> " },",
+          "  fn(document) { " <> deconstruct_document(fields) <> " },",
+          ")",
+        ]),
+      ),
     ),
   )
 }
@@ -196,7 +263,7 @@ fn range_bindings(fields: List(Field)) -> List(String) {
   case fields {
     [] -> []
     [
-      Field(_, _, _, Analysis(_, _, Something(RangeBinding(name, min, max)))),
+      Field(_, _, _, Analysis(_, _, Something(RangeBinding(name, min, max)), _)),
       ..rest
     ] -> [
       "let assert Ok("
@@ -212,11 +279,41 @@ fn range_bindings(fields: List(Field)) -> List(String) {
   }
 }
 
+fn enum_bindings(fields: List(Field)) -> List(String) {
+  case fields {
+    [] -> []
+    [Field(_, _, _, Analysis(_, _, _, Nothing)), ..rest] -> enum_bindings(rest)
+    [Field(_, _, _, Analysis(_, _, _, Something(binding))), ..rest] -> [
+      render_enum_binding(binding),
+      ..enum_bindings(rest)
+    ]
+  }
+}
+
+fn render_enum_binding(binding: EnumBinding) -> String {
+  let EnumBinding(_, codec_name, variants) = binding
+  "let assert Ok("
+  <> codec_name
+  <> ") = blueprint.string_enum(["
+  <> join_inline(render_enum_values(variants))
+  <> "])"
+}
+
+fn render_enum_values(variants: List(EnumVariant)) -> List(String) {
+  case variants {
+    [] -> []
+    [EnumVariant(label, constructor), ..rest] -> [
+      "#(" <> string_literal(label) <> ", " <> constructor <> ")",
+      ..render_enum_values(rest)
+    ]
+  }
+}
+
 fn property_bindings(fields: List(Field)) -> List(String) {
   case fields {
     [] -> []
     [field, ..rest] -> {
-      let Field(index, name, required, Analysis(_, codec, _)) = field
+      let Field(index, name, required, Analysis(_, codec, _, _)) = field
       let property = case required {
         True ->
           "blueprint.required(" <> string_literal(name) <> ", " <> codec <> ")"
@@ -267,6 +364,35 @@ fn properties_value(fields: List(Field)) -> String {
     [Field(index, _, _, _)] -> "property_" <> integer_to_string(index)
     _ -> "properties_" <> integer_to_string(list_length(fields) - 1)
   }
+}
+
+fn enum_type_name(index: Int) -> String {
+  "Field" <> integer_to_string(index) <> "Enum"
+}
+
+fn enum_codec_name(index: Int) -> String {
+  "enum_codec_" <> integer_to_string(index)
+}
+
+fn enum_variants(
+  field_index: Int,
+  labels: List(String),
+  index: Int,
+) -> List(EnumVariant) {
+  case labels {
+    [] -> []
+    [label, ..rest] -> [
+      EnumVariant(label, enum_constructor_name(field_index, index)),
+      ..enum_variants(field_index, rest, index + 1)
+    ]
+  }
+}
+
+fn enum_constructor_name(field_index: Int, value_index: Int) -> String {
+  "Field"
+  <> integer_to_string(field_index)
+  <> "Value"
+  <> integer_to_string(value_index)
 }
 
 fn construct_document(fields: List(Field)) -> String {
