@@ -84,7 +84,15 @@ def main():
                 raise SystemExit(f"FAIL: {fixture.name} failed outside the intended consumer")
             print(f"PASS: {fixture.stem} rejected as expected")
     print(f"Checked positive consumers and {len(fixtures)} negative fixtures.")
-    print("This checks types only; it does not execute the todo runtime boundaries.")
+    probes = subprocess.run(
+        ["gleam", "run", "-m", "stress_checks"], cwd=ROOT, text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    if probes.returncode:
+        report_failure(probes.stdout)
+        raise SystemExit("FAIL: pure interface probes")
+    print("PASS: six pure interface probe groups")
+    print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
 
 
 if __name__ == "__main__":

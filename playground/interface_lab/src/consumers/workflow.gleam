@@ -41,20 +41,22 @@ fn propose_checkout(
 // The side effect belongs to the inner child definition. A denied decision is
 // an explicit business outcome and never falls through to checkout execution.
 fn execute_checkout(
-  decision: saga.ApprovalDecision(ApprovalAnswer),
+  approval: saga.ApprovalResult(CheckoutProposal, ApprovalAnswer),
 ) -> Result(CheckoutReceipt, WorkflowFailure) {
-  case decision {
+  case approval.decision {
     saga.Denied -> Error(WorkflowFailure("checkout approval denied"))
-    saga.Approved(_answer) ->
-      todo as "perform checkout in the child run and return its committed receipt"
+    saga.Approved(_answer) -> {
+      let CheckoutProposal(_proposed_checkout) = approval.input
+      todo as "perform the approved original checkout, not a proposal echoed by the approver"
+    }
   }
 }
 
 fn undo_checkout(
-  decision: saga.ApprovalDecision(ApprovalAnswer),
+  approval: saga.ApprovalResult(CheckoutProposal, ApprovalAnswer),
   _receipt: CheckoutReceipt,
 ) -> Result(Nil, UndoFailure) {
-  case decision {
+  case approval.decision {
     saga.Denied -> Ok(Nil)
     saga.Approved(_answer) ->
       todo as "compensate checkout from its committed receipt in the child journal"
@@ -82,7 +84,7 @@ pub fn workflow_definition() -> Definition(
   let proposal = checkout_proposal_codec()
   let receipt = checkout_receipt_codec()
   let confirmation = confirmation_codec()
-  let approval_input = approval_decision_codec(answer)
+  let approval_input = saga.approval_result_codec(proposal, answer)
   let proposal_agent = fabric.bounded(propose_checkout, [])
 
   let proposal_activity =
@@ -290,34 +292,6 @@ fn undo_failure_codec() -> Codec(UndoFailure) {
     let UndoFailure(text) = item
     text
   })
-}
-
-fn approval_decision_codec(
-  answer: Codec(ApprovalAnswer),
-) -> Codec(saga.ApprovalDecision(ApprovalAnswer)) {
-  blueprint.new(
-    fn(decision) {
-      case decision {
-        saga.Approved(value) ->
-          case blueprint.encode(answer, value) {
-            Error(error) -> Error(error)
-            Ok(encoded) -> Ok(value.Object([#("approved", encoded)]))
-          }
-        saga.Denied -> Ok(value.Object([#("denied", value.Bool(True))]))
-      }
-    },
-    fn(raw) {
-      case raw {
-        value.Object([#("approved", encoded)]) ->
-          case blueprint.decode(answer, encoded) {
-            Error(error) -> Error(error)
-            Ok(decoded) -> Ok(saga.Approved(decoded))
-          }
-        value.Object([#("denied", value.Bool(True))]) -> Ok(saga.Denied)
-        _ -> Error(blueprint.CannotDecode("Expected approval decision"))
-      }
-    },
-  )
 }
 
 fn required_definition_id(value: String) -> saga.DefinitionId {
