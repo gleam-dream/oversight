@@ -35,7 +35,8 @@ def main():
         report_failure(positive.stdout)
         raise SystemExit("FAIL: positive consumers do not compile")
     print("PASS: positive interface consumers compile")
-    for consumer in sorted((ROOT / "src" / "consumers").glob("*.gleam")):
+    consumers = sorted((ROOT / "src" / "consumers").glob("*.gleam"))
+    for consumer in consumers:
         with tempfile.TemporaryDirectory(prefix="oversight-consumer-") as temp:
             directory = Path(temp)
             shutil.copy2(ROOT / "gleam.toml", directory / "gleam.toml")
@@ -83,7 +84,7 @@ def main():
                 report_failure(result.stdout)
                 raise SystemExit(f"FAIL: {fixture.name} failed outside the intended consumer")
             print(f"PASS: {fixture.stem} rejected as expected")
-    print(f"Checked positive consumers and {len(fixtures)} negative fixtures.")
+    print(f"Checked {len(consumers)} isolated positive consumers and {len(fixtures)} negative fixtures.")
     probes = subprocess.run(
         ["gleam", "run", "-m", "stress_checks"], cwd=ROOT, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
