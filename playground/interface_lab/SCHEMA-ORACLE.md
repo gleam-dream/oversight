@@ -23,7 +23,7 @@
 ## Limits
 
 - A finite corpus is differential evidence, not a proof of schema equivalence or full JSON Schema conformance.
-- The laboratory Value type has no floating-point case. Integral floating-point JSON numbers and numeric normalization remain outside this comparison.
+- The laboratory Value type has no fractional-number case. Integral decimal/exponent forms and numeric normalization remain outside this comparison. The [selected number policy](../../research/blueprint-number-policy.md) requires exact decimal oracle inputs and separate schema-validity versus native-representation outcomes before this corpus expands.
 - Duplicate object keys are excluded from JSON export because native maps cannot retain them. Separate Gleam probes check their rejection before export.
 - The test adapter is not the proposed production parser, encoder, or Blueprint FFI.
 - This wave does not establish provider-specific schema subsets, performance, recursive schemas, or code generation.

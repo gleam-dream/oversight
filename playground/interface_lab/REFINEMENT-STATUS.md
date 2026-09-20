@@ -267,3 +267,9 @@
 - Distinct token kinds, scope parsing, explicit expiry units, and trusted adapter views provide a usable custody boundary. The public session exposes identity and custody references.
 - An immutable ledger probe retains installation evidence through lost acknowledgement, replay, conflicting material, and unavailable recovery. Recovery cannot invoke authorization-code exchange.
 - Reference stability, concurrent storage, secret redaction, cryptographic verification, persisted restoration, and refresh ownership remain runtime or subsequent interface work.
+
+## Exact numeric policy
+
+- [Number-policy research](../../research/blueprint-number-policy.md) records direct Node and OTP parser probes, pinned source hashes, and the distinction between JSON numeric semantics and native representation.
+- The selected direction uses an exact decimal leaf with checked native projections. A post-parse finite check cannot recover information already lost through rounding or underflow.
+- The numeric kernel, schema/transport integration, decimal oracle, resource limits, and cross-target consumer evidence remain unimplemented. Laboratory consumer and probe counts are unchanged.
