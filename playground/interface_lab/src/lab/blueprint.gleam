@@ -129,6 +129,11 @@ pub type Schema {
   FieldSchema(String, Schema)
   ListSchema(Schema)
   NullableSchema(Schema)
+  ObjectSchema(List(PropertySchema))
+}
+
+pub type PropertySchema {
+  PropertySchema(name: String, required: Bool, schema: Schema)
 }
 
 pub type SchemaError {
@@ -143,6 +148,13 @@ pub fn schema(codec: Codec(a)) -> Result(Schema, SchemaError) {
 // this prototype. In particular Value has no floating-point number variant.
 pub fn schema_value(schema: Schema) -> Value {
   case schema {
+    ObjectSchema(properties) ->
+      value.Object([
+        #("type", value.Text("object")),
+        #("properties", value.Object(property_schemas(properties))),
+        #("required", value.Array(required_names(properties))),
+        #("additionalProperties", value.Bool(False)),
+      ])
     TextSchema -> value.Object([#("type", value.Text("string"))])
     IntSchema -> value.Object([#("type", value.Text("integer"))])
     BoolSchema -> value.Object([#("type", value.Text("boolean"))])
@@ -180,29 +192,7 @@ pub fn schema_value(schema: Schema) -> Value {
 
 // A closed one-field object can describe protocol inputs without erasing a.
 pub fn field(name: String, inner: Codec(a)) -> Codec(a) {
-  let codec =
-    new(
-      fn(item) {
-        case encode(inner, item) {
-          Ok(raw) -> Ok(value.Object([#(name, raw)]))
-          Error(error) -> Error(EncodeAtField(name, error))
-        }
-      },
-      fn(raw) {
-        case raw {
-          value.Object([#(key, item)]) if key == name ->
-            case decode(inner, item) {
-              Ok(item) -> Ok(item)
-              Error(error) -> Error(DecodeAtField(name, error))
-            }
-          _ ->
-            Error(DecodeAtField(
-              name,
-              CannotDecode("Expected exactly one named field"),
-            ))
-        }
-      },
-    )
+  let codec = object(required(name, inner))
   let description = case inner.schema {
     Ok(schema) -> Ok(FieldSchema(name, schema))
     Error(error) -> Error(error)
@@ -314,5 +304,238 @@ fn decode_items(
             Error(error) -> Error(error)
           }
       }
+  }
+}
+
+pub type Optional(a) {
+  Missing
+  Present(a)
+}
+
+pub type PropertyError {
+  DuplicateProperty(String)
+}
+
+pub opaque type Properties(a) {
+  Properties(
+    encode: fn(a) -> Result(List(#(String, Value)), EncodeError),
+    decode: fn(List(#(String, Value))) -> Result(a, DecodeError),
+    names: List(String),
+    schemas: Result(List(PropertySchema), SchemaError),
+  )
+}
+
+pub fn empty() -> Properties(Nil) {
+  Properties(fn(_) { Ok([]) }, fn(_) { Ok(Nil) }, [], Ok([]))
+}
+
+pub fn required(name: String, codec: Codec(a)) -> Properties(a) {
+  Properties(
+    fn(item) { encode_property(name, codec, item) },
+    fn(fields) {
+      case lookup(fields, name) {
+        Missing ->
+          Error(DecodeAtField(name, CannotDecode("Missing required property")))
+        Present(raw) -> decode_property(name, codec, raw)
+      }
+    },
+    [name],
+    property_description(name, True, codec),
+  )
+}
+
+pub fn optional(name: String, codec: Codec(a)) -> Properties(Optional(a)) {
+  Properties(
+    fn(item) {
+      case item {
+        Missing -> Ok([])
+        Present(item) -> encode_property(name, codec, item)
+      }
+    },
+    fn(fields) {
+      case lookup(fields, name) {
+        Missing -> Ok(Missing)
+        Present(raw) ->
+          case decode_property(name, codec, raw) {
+            Ok(item) -> Ok(Present(item))
+            Error(error) -> Error(error)
+          }
+      }
+    },
+    [name],
+    property_description(name, False, codec),
+  )
+}
+
+pub fn combine(
+  left: Properties(a),
+  right: Properties(b),
+) -> Result(Properties(#(a, b)), PropertyError) {
+  case overlap(left.names, right.names) {
+    Present(name) -> Error(DuplicateProperty(name))
+    Missing ->
+      Ok(
+        Properties(
+          fn(items: #(a, b)) {
+            case left.encode(items.0) {
+              Error(error) -> Error(error)
+              Ok(a) ->
+                case right.encode(items.1) {
+                  Error(error) -> Error(error)
+                  Ok(b) -> Ok(append(a, b))
+                }
+            }
+          },
+          fn(fields) {
+            case left.decode(fields) {
+              Error(error) -> Error(error)
+              Ok(a) ->
+                case right.decode(fields) {
+                  Error(error) -> Error(error)
+                  Ok(b) -> Ok(#(a, b))
+                }
+            }
+          },
+          append(left.names, right.names),
+          case left.schemas, right.schemas {
+            Ok(a), Ok(b) -> Ok(append(a, b))
+            Error(error), _ -> Error(error)
+            _, Error(error) -> Error(error)
+          },
+        ),
+      )
+  }
+}
+
+// The complete object boundary owns unknown/duplicate-key checks exactly once.
+pub fn object(properties: Properties(a)) -> Codec(a) {
+  Codec(
+    fn(item) {
+      case properties.encode(item) {
+        Ok(fields) -> Ok(value.Object(fields))
+        Error(error) -> Error(error)
+      }
+    },
+    fn(raw) {
+      case raw {
+        value.Object(fields) ->
+          case check_keys(fields, properties.names, []) {
+            Ok(Nil) -> properties.decode(fields)
+            Error(error) -> Error(error)
+          }
+        _ -> Error(CannotDecode("Expected object"))
+      }
+    },
+    case properties.schemas {
+      Ok(properties) -> Ok(ObjectSchema(properties))
+      Error(error) -> Error(error)
+    },
+  )
+}
+
+fn property_description(
+  name: String,
+  required: Bool,
+  codec: Codec(a),
+) -> Result(List(PropertySchema), SchemaError) {
+  case codec.schema {
+    Ok(schema) -> Ok([PropertySchema(name, required, schema)])
+    Error(error) -> Error(error)
+  }
+}
+
+fn encode_property(
+  name: String,
+  codec: Codec(a),
+  item: a,
+) -> Result(List(#(String, Value)), EncodeError) {
+  case encode(codec, item) {
+    Ok(raw) -> Ok([#(name, raw)])
+    Error(error) -> Error(EncodeAtField(name, error))
+  }
+}
+
+fn decode_property(
+  name: String,
+  codec: Codec(a),
+  raw: Value,
+) -> Result(a, DecodeError) {
+  case decode(codec, raw) {
+    Ok(item) -> Ok(item)
+    Error(error) -> Error(DecodeAtField(name, error))
+  }
+}
+
+fn lookup(fields: List(#(String, Value)), name: String) -> Optional(Value) {
+  case fields {
+    [] -> Missing
+    [#(key, raw), ..] if key == name -> Present(raw)
+    [_, ..rest] -> lookup(rest, name)
+  }
+}
+
+fn contains(items: List(String), item: String) -> Bool {
+  case items {
+    [] -> False
+    [head, ..] if head == item -> True
+    [_, ..rest] -> contains(rest, item)
+  }
+}
+
+fn overlap(left: List(String), right: List(String)) -> Optional(String) {
+  case left {
+    [] -> Missing
+    [head, ..rest] ->
+      case contains(right, head) {
+        True -> Present(head)
+        False -> overlap(rest, right)
+      }
+  }
+}
+
+fn append(left: List(a), right: List(a)) -> List(a) {
+  case left {
+    [] -> right
+    [head, ..rest] -> [head, ..append(rest, right)]
+  }
+}
+
+fn check_keys(
+  fields: List(#(String, Value)),
+  names: List(String),
+  seen: List(String),
+) -> Result(Nil, DecodeError) {
+  case fields {
+    [] -> Ok(Nil)
+    [#(name, _), ..rest] ->
+      case contains(seen, name), contains(names, name) {
+        True, _ ->
+          Error(DecodeAtField(name, CannotDecode("Duplicate property")))
+        _, False -> Error(DecodeAtField(name, CannotDecode("Unknown property")))
+        False, True -> check_keys(rest, names, [name, ..seen])
+      }
+  }
+}
+
+fn property_schemas(
+  properties: List(PropertySchema),
+) -> List(#(String, Value)) {
+  case properties {
+    [] -> []
+    [PropertySchema(name, _, schema), ..rest] -> [
+      #(name, schema_value(schema)),
+      ..property_schemas(rest)
+    ]
+  }
+}
+
+fn required_names(properties: List(PropertySchema)) -> List(Value) {
+  case properties {
+    [] -> []
+    [PropertySchema(name, True, _), ..rest] -> [
+      value.Text(name),
+      ..required_names(rest)
+    ]
+    [_, ..rest] -> required_names(rest)
   }
 }
