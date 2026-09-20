@@ -94,6 +94,8 @@ def main():
     print("PASS: interface probe groups")
     import schema_check
     schema_check.main()
+    import generation_check
+    generation_check.main()
     print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
 
 

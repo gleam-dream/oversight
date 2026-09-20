@@ -16,6 +16,7 @@ import consumers/runtime_schemas
 import consumers/scheduled_jobs
 import consumers/schema_admission
 import consumers/schema_documents
+import consumers/schema_generation
 import consumers/shared_graph
 import consumers/shared_registry
 import consumers/span_events
@@ -42,6 +43,7 @@ pub fn main() -> Nil {
   runtime_schemas.probe()
   schema_admission.probe()
   schema_documents.probe()
+  schema_generation.probe()
   scheduled_jobs.probe()
   shared_graph.probe()
   shared_registry.probe()
