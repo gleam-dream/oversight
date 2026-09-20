@@ -19,7 +19,7 @@
 | Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                               | Restart behavior and usable compensation receipt issuance                      |
 | Grind alone                 | Typed workers, payload codecs, injected dependencies                                                              | Schedule/cancel lifecycle and persistence transactions                         |
 | Sinal alone                 | Map-shaped fields and foreign callback error classification                                                       | Native atom/map bridge and pinned telemetry behavior tests                     |
-| Warden alone                | Pending versus verified identities                                                                                | Configured clients and caller-owned concurrent login transactions              |
+| Warden alone                | Configured transactions, callback checks, and checked versus verified identities                                  | Atomic consumption and oidcc token-verification integration                    |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
