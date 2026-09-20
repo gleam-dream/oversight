@@ -2,7 +2,7 @@
 
 ## Status
 
-- This note selects the next numeric design direction from source inspection and small host probes. The numeric kernel and its integration remain unimplemented.
+- This note records the numeric direction selected from source inspection and host probes. The [standalone kernel](../playground/interface_lab/EXACT-NUMBERS.md) now has constructive consumer and independent oracle evidence. Integration into Value, schemas, and transports remains open.
 - Erlang/OTP remains the first production target. The design preserves explicit representation limits so portable components cannot silently change a number when another runtime is used.
 
 ## Contract evidence
@@ -37,17 +37,17 @@
 ```gleam
 pub opaque type JsonNumber
 
-pub fn parse_number(String) -> Result(JsonNumber, NumberError)
+pub fn parse_number(NumberLimits, String) -> Result(JsonNumber, NumberError)
 pub fn number_text(JsonNumber) -> String
-pub fn compare(JsonNumber, JsonNumber) -> Order
+pub fn compare(JsonNumber, JsonNumber) -> NumberOrder
 pub fn is_integer(JsonNumber) -> Bool
 pub fn from_int(Int) -> JsonNumber
-pub fn to_int_exact(JsonNumber) -> Result(Int, NativeNumberError)
-pub fn from_float_exact(Float) -> Result(JsonNumber, NonFinite)
-pub fn to_float_exact(JsonNumber) -> Result(Float, NativeNumberError)
+pub fn to_int_exact(JsonNumber, IntegerProjectionLimit) -> Result(Int, IntegerProjectionError)
+pub fn from_float_exact(Float) -> Result(JsonNumber, FloatConstructionError)
+pub fn to_float_exact(JsonNumber) -> Result(Float, FloatProjectionError)
 ```
 
-- These signatures are design sketches. Error cases, configured resource limits, negative-zero spelling, and canonical rendering must be settled by the kernel consumer.
+- The kernel consumer now exercises separate parse and integer-projection limits, positive canonical zero, compact scientific rendering, and distinct projection errors. These signatures summarize that prototype; they do not establish a promoted package API.
 - Exact conversion of decimal `0.1` to binary64 fails; `0.5` succeeds. Converting an existing binary64 `0.1` to an exact decimal must preserve its full binary rational value, not emit the shortest roundtrip spelling.
 - `from_int` preserves the native input it receives. It cannot reconstruct an integer already rounded before the call; JavaScript input policy remains explicit work.
 
@@ -59,8 +59,8 @@ pub fn to_float_exact(JsonNumber) -> Result(Float, NativeNumberError)
 - Published Blueprint 1.x adapters remain compatibility boundaries. Exact-number support does not imply historical decoder parity.
 - The independent schema oracle must parse exact decimal inputs and distinguish schema validity from native representability. Its current Boolean decoder/validator agreement is insufficient for that distinction.
 
-## Next experiments
+## Constructed boundary and next experiments
 
-- Construct the numeric leaf and a source-isolated consumer for equivalent forms, negative zero, large integers, exact projections, overflow, underflow, invalid grammar, and explicit resource rejection.
-- Reject accidental substitution of JsonNumber, Int, and Float in compiler-negative consumers.
+- The standalone consumer exercises equivalent forms, negative zero, large integers, exact projections, overflow, underflow, invalid grammar, and explicit resource rejection. Its 62-case oracle uses independent exact arithmetic and float-bit inspection.
+- Compiler negatives reject JsonNumber as Float and parse limits as integer-projection limits. Native integer and float construction remain explicit operations.
 - Integrate the leaf into Value, codecs, schema documents, validation, transport consumers, and generation through coherent follow-up waves. Byte parsing of complete JSON, numeric enums, multipleOf, all bound variants, and cross-target acceptance remain in scope.
