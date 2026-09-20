@@ -2,6 +2,7 @@
 import consumers/activity_contract
 import consumers/approval_context
 import consumers/child_attachments
+import consumers/claim_ownership
 import consumers/collection_codec
 import consumers/conditional_graph
 import consumers/config_codec
@@ -32,6 +33,7 @@ pub fn main() -> Nil {
   activity_contract.probe()
   approval_context.probe()
   child_attachments.probe()
+  claim_ownership.probe()
   execution_ownership.probe()
   foreign_observation.probe()
   derived_catalog.probe()

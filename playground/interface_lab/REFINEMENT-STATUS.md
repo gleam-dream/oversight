@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-six consumers compile with only their transitive source imports.
-- Forty negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty-seven consumers compile with only their transitive source imports.
+- Forty-two negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `7fcdb28`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -139,3 +139,10 @@
 - A pending tool turn retains its original continuation callback. Preparation validates exact result identifiers without opening; opening yields an adapter-owned source that can stream the next turn.
 - The consumer opens and consumes a second scripted stream through two providers sharing the same continuation and source types.
 - Copied live handles, concurrent reads, process loss, transport cleanup, backpressure, and continuation replay still require runtime evidence.
+
+## Current-attempt ownership
+
+- [Claim ownership](CLAIM-OWNERSHIP.md) separates retry accounting from ownership identity and renewal revision. Acknowledgement checks the current lease while permitting the original owner after renewal.
+- The injected store owns current-record lookup, clock selection, decision, and commit. Missing records, unavailability, and unknown commit preserve the submitted command without inventing a winner.
+- Cancellation intent, committed cancellation, and acknowledged attempt outcomes remain distinct. Retry and snooze acknowledgements do not finish the job.
+- Atomic storage, command receipts, renewal liveness, and job-state projection remain open.
