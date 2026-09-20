@@ -6,6 +6,7 @@ import consumers/config_codec
 import consumers/derived_catalog
 import consumers/execution_ownership
 import consumers/foreign_observation
+import consumers/login_transactions
 import consumers/offline_pipeline
 import consumers/shared_graph
 import consumers/shared_registry
@@ -20,6 +21,7 @@ pub fn main() -> Nil {
   derived_catalog.probe()
   conditional_graph.probe()
   config_codec.probe()
+  login_transactions.probe()
   offline_pipeline.probe()
   shared_graph.probe()
   shared_registry.probe()

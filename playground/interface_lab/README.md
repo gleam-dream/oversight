@@ -22,6 +22,8 @@ The [activity-contract refinement](ACTIVITY-CONTRACT.md) replaces the positional
 
 The [execution-ownership refinement](EXECUTION-OWNERSHIP.md) distinguishes direct activities and approvals from independently managed children.
 
+The [login-transaction refinement](LOGIN-TRANSACTIONS.md) checks concurrent callback binding without issuing verified identities.
+
 ## Run the experiment
 
 From the repository root:
