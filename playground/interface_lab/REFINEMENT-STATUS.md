@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-nine consumers compile with only their transitive source imports.
-- Forty-nine negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-one interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-one consumers compile with only their transitive source imports.
+- Fifty-three negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -157,10 +157,16 @@
 
 - The [Relay resource authorization contract](../../research/relay-resource-authorization-contract.md) proposes protected registry configuration, grant reuse checks, visibility filtering, and authorization on each named dispatch.
 - Application context remains explicit and application-owned. Warden identity and independently verified bearer grants cannot substitute for one another.
-- This contract has no implementation evidence yet. Protected transport integration, protocol responses, token verification, anonymous access, and pagination remain open.
+- The [resource authorization experiment](RESOURCE-AUTHORIZATION.md) now exercises the protected registry and grant checks. Protected transport integration, protocol responses, token verification, anonymous access, and pagination remain open.
 
 ## Verified login composition
 
 - [Verified login](VERIFIED-LOGIN.md) keeps consumption, backend invocation, attestation acceptance, and identity construction in one owner. The Warden facade shares that identity with existing request-scoped tools.
 - Configuration mismatch fails before store access; rejected consumption prevents exchange. Failed exchange and rejected attestations cannot restore pending state or issue identity.
 - The configured adapter remains a trust boundary. Live token verification, exception containment, atomic storage, and the full token/session lifecycle remain open.
+
+## Resource grant composition
+
+- [Resource authorization](RESOURCE-AUTHORIZATION.md) reuses existing Relay registries with explicit application context. Endpoint scopes and per-tool scopes remain separate checks.
+- Grants retain all accepted scopes; protected entry points reject wrong-resource and insufficient grants before policy or decoding. Hidden and denied named calls cannot invoke the tool handler.
+- The web-account policy compiles against both Warden identity and the independent API grant. Verifier provenance, protected transport routing, and runtime authorization remain explicit obligations.
