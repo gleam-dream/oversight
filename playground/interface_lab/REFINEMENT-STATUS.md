@@ -31,11 +31,12 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-seven consumers compile with only their transitive source imports.
-- Eighty-four negative fixtures fail with their intended single compiler diagnostic.
-- Forty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-eight consumers compile with only their transitive source imports.
+- Eighty-six negative fixtures fail with their intended single compiler diagnostic.
+- Forty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
+- Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -272,7 +273,8 @@
 
 - [Number-policy research](../../research/blueprint-number-policy.md) records direct Node and OTP parser probes, pinned source hashes, and the distinction between JSON numeric semantics and native representation.
 - The selected direction uses an exact decimal leaf with checked native projections. A post-parse finite check cannot recover information already lost through rounding or underflow.
-- The numeric kernel, schema/transport integration, decimal oracle, resource limits, and cross-target consumer evidence remain unimplemented. Laboratory consumer and probe counts are unchanged.
+- The [exact-number kernel](EXACT-NUMBERS.md) now implements checked parsing, normalized comparison, integer classification, native integer construction, and exact float construction and projection. Token and projection limits remain separate.
+- An independent Decimal/Fraction oracle checks 62 cases and inspects returned float bits. Schema/transport integration, cross-target evidence, and published migration remain open.
 
 ## Typed local activity recovery
 

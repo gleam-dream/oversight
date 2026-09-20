@@ -15,6 +15,7 @@ import consumers/enum_codec
 import consumers/execution_ownership
 import consumers/foreign_observation
 import consumers/injected_observation
+import consumers/json_numbers
 import consumers/local_execution
 import consumers/login_consumption
 import consumers/login_transactions
@@ -64,6 +65,7 @@ pub fn main() -> Nil {
   collection_codec.probe()
   local_execution.probe()
   injected_observation.probe()
+  json_numbers.probe()
   login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
