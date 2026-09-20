@@ -21,6 +21,7 @@ import consumers/shared_graph
 import consumers/shared_registry
 import consumers/span_events
 import consumers/standalone_jobs
+import consumers/stream_ownership
 import consumers/stream_progress
 import consumers/tagged_codec
 import consumers/tool_turns
@@ -51,6 +52,7 @@ pub fn main() -> Nil {
   standalone_jobs.probe()
   span_events.probe()
   stream_progress.probe()
+  stream_ownership.probe()
   tagged_codec.probe()
   tool_turns.probe()
   unified_workflow.probe()

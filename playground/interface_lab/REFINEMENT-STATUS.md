@@ -31,12 +31,12 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-five consumers compile with only their transitive source imports.
-- Thirty-eight negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty-six consumers compile with only their transitive source imports.
+- Forty negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `634b3c7`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `7fcdb28`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -132,3 +132,10 @@
 - [Worker outcomes](WORKER-OUTCOMES.md) keep ordinary typed functions reusable while resolving scheduling responses with explicit accounting, clock, and retry policy.
 - Unknown effects request reconciliation without invoking retry policy. Worker cancellation and proposed completion do not arbitrate an external cancellation race.
 - Claim identity, leases, atomic acknowledgement, committed history, and runtime scheduling remain open.
+
+## Stream terminal ownership
+
+- [Stream ownership](STREAM-OWNERSHIP.md) composes the progress grammar with terminal transitions, late-event suppression, protocol failure, and cleanup commands for one sequenced history.
+- A pending tool turn retains its original continuation callback. Preparation validates exact result identifiers without opening; opening yields an adapter-owned source that can stream the next turn.
+- The consumer opens and consumes a second scripted stream through two providers sharing the same continuation and source types.
+- Copied live handles, concurrent reads, process loss, transport cleanup, backpressure, and continuation replay still require runtime evidence.
