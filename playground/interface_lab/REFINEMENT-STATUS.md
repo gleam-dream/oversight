@@ -12,7 +12,7 @@
 
 | Boundary                    | Current evidence                                                                                                                    | Remaining interface work                                                                                         |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and 1.x compatibility                        |
+| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and complete 1.x migration                   |
 | Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
 | Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                                         |
@@ -36,7 +36,7 @@
 - Thirty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -211,3 +211,11 @@
 - Claim and request recovery preserve original routing and commands. One claim admits one operation even if a caller copies the receipt and changes its command identifier.
 - Historical success remains representable after output pruning. Journal retention and compensation progress remain separate owner facts.
 - Immutable ledgers exercise replay, competing claims, lost replies, expiry, pruning, and typed undo observation. Concurrent storage, compensator execution, durable restart, and local authority remain open.
+
+## Published Blueprint compatibility
+
+- The [separate compatibility playground](../blueprint_compatibility/README.md) runs actual pinned JSON Blueprint 1.7.1 and 1.1.0 dependencies without adding dependencies to this laboratory.
+- An explicit encoder adapts the current upstream decoder into the existing codec representation. Legacy message envelopes remain caller-owned; schema discovery remains unavailable.
+- Historical empty-constructor acceptance differs between the two releases. Independent validation exposes 1.7.1 empty-object and tuple schema disagreements; the adapter does not claim to correct them.
+- Two additional compiler negatives reject an upstream decoder as a native codec and an encoder for a different native type. These separate-project checks are not included in the laboratory counts above.
+- Complete source migration, recursive schemas, numeric support, error-path compatibility, generation integration, and the final package API remain open.
