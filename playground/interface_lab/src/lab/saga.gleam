@@ -497,6 +497,25 @@ pub fn encode_input(
   blueprint.encode(definition.input_codec, input)
 }
 
+// Codec accessors let a graph adapter retain typed definitions without
+// reaching into this module's representation.
+pub fn input_codec(definition: Definition(i, o, e, u)) -> Codec(i) {
+  definition.input_codec
+}
+
+pub fn output_codec(definition: Definition(i, o, e, u)) -> Codec(o) {
+  definition.output_codec
+}
+
+// The graph prototype retains this typed call boundary. Execution remains a
+// runtime responsibility; this adapter does not add a scheduler.
+pub fn run_child(
+  definition: Definition(i, o, e, u),
+  input: i,
+) -> ChildOutcome(o, e, u) {
+  execute_child(definition, input)
+}
+
 pub fn definition_identity(definition: Definition(i, o, e, u)) -> String {
   let DefinitionId(identity) = definition.id
   identity
