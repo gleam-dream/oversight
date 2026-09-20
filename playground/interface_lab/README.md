@@ -10,6 +10,8 @@ Read the [findings](FINDINGS.md) for the verified results and the representation
 
 The subsequent [public-interface stress exploration](STRESS-TESTS.md) covers 22 individual-library and cross-library scenarios. It records the expanded checks, small API corrections, and the contracts that are still missing.
 
+The [codec-derived catalog refinement](SCHEMA-CATALOG.md) connects supported codec schemas to package-specific tool discovery and dispatch.
+
 ## Run the experiment
 
 From the repository root:
@@ -20,7 +22,7 @@ nix develop --command python3 playground/interface_lab/check.py
 
 The command compiles the positive sources, compiles each consumer with only its transitive source imports, and checks each negative example in an isolated temporary project. A negative example passes only when the compiler rejects it with the expected diagnostic. The project uses the repository's Gleam 1.18.1 toolchain and has no external package dependencies.
 
-The command also executes six pure probe groups through `stress_checks`: codec composition, retained approval input, batch results, injected job dependencies, contextual tools, and scripted provider turns. It does not execute scheduler, storage, protocol, or other unfinished runtime boundaries.
+The command also executes pure probe groups through `stress_checks`: codec composition, retained approval input, batch results, injected job dependencies, contextual tools, scripted provider turns, and derived tool catalogs. It does not execute scheduler, storage, protocol, or other unfinished runtime boundaries.
 
 Named `todo` expressions identify unfinished runtime boundaries and produce expected compiler warnings. Running those functions would panic. The absence of production implementations is intentional; warnings-as-errors is not the acceptance gate for this experiment.
 
