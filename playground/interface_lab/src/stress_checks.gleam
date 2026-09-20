@@ -14,6 +14,7 @@ import consumers/login_transactions
 import consumers/object_codec
 import consumers/offline_pipeline
 import consumers/relay_exchanges
+import consumers/resource_authorization
 import consumers/runtime_schemas
 import consumers/scheduled_jobs
 import consumers/schema_admission
@@ -47,6 +48,7 @@ pub fn main() -> Nil {
   offline_pipeline.probe()
   object_codec.probe()
   relay_exchanges.probe()
+  resource_authorization.probe()
   runtime_schemas.probe()
   schema_admission.probe()
   schema_documents.probe()

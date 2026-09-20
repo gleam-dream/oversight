@@ -3,7 +3,7 @@
 ## Question and status
 
 - The experiment asks how Relay can admit one verified bearer grant, filter the tool catalog, and authorize each named dispatch without depending on Warden or introducing a global request context.
-- This note specifies a follow-up type experiment. It does not provide implementation evidence for bearer verification, HTTP challenges, protected-resource metadata, protocol errors, or authorization conformance.
+- The [resource authorization experiment](../playground/interface_lab/RESOURCE-AUTHORIZATION.md) now supplies the pure grant and protected-registry boundary. It does not establish bearer verification, HTTP challenges, protected-resource metadata, protocol errors, or authorization conformance.
 - The experiment keeps application context application-owned. Relay receives that context explicitly for listing and dispatch, because no current consumer requires a generic Relay request-context wrapper.
 
 ## Existing boundary
@@ -159,9 +159,9 @@ pub fn dispatch_granted(
 - `protection_config` retains one resource and its required endpoint scopes. `protect_registry` retains that configuration, the existing registry, and the tool policy without capturing application context.
 - `admit` accepts only an attestation whose audience list contains exactly the configured resource from `ProtectionConfig`. It rejects absent, duplicate, or additional audiences until a broader audience-policy experiment defines their meaning.
 - `admit` requires every endpoint scope from `ProtectionConfig`. It retains every actual granted scope rather than only the scopes required by the admitting configuration.
-- `grant_principal`, `grant_resource`, and `grant_scopes` provide read-only access to the accepted grant. No accessor returns the bearer token or verifier attestation.
+- `grant_principal`, `grant_resource`, and `grant_scopes` provide read-only access to the accepted grant. There is no dedicated accessor for the presented bearer token or verifier attestation; the generic principal accessor does not enforce redaction.
 - Per-tool requirements remain in `ToolPolicy`, because one endpoint-level scope list cannot express tenant-specific tool visibility.
-- `trust_verifier` records the configured verifier identity and purpose. `TestOnlyVerifier` remains visible in configuration and is never selected by Relay as a production default.
+- `trust_verifier` records the configured verifier identity and purpose. These labels do not enforce a production/test boundary, and grants do not authenticate verifier provenance. `TestOnlyVerifier` remains visible in configuration and is never selected by Relay as a production default.
 - `visible_declarations` and `dispatch_granted` first compare the grant's actual resource and scopes with the retained `ProtectionConfig`. A resource mismatch or missing endpoint scope returns before tool policy, argument decoding, or handler invocation.
 - `dispatch_granted` then resolves the declaration, re-evaluates visibility, and evaluates execution authorization with the current explicit application context. It invokes the existing registry only when the declaration remains visible and execution is authorized.
 
@@ -192,7 +192,7 @@ pub fn dispatch_granted(
 - The pure experiment can establish constructor ownership, exact resource comparison, endpoint-scope admission and reuse checks, visibility filtering, execution re-evaluation, early denial, and separation between Warden identity and Relay grant.
 - The pure experiment cannot establish that a configured verifier checked a signature, token status, expiry, issuer, audience, or sender constraint. A public attestation remains a trusted adapter assertion.
 - Re-evaluating policy on dispatch proves only that Relay invokes the callback with the supplied current context. It does not make policy lookup, tenant data, application mutation, and handler execution atomic.
-- The grant must not retain the bearer token. Runtime tests must establish that adapters, errors, observations, and downstream calls do not expose or forward it.
+- Relay must not add the presented bearer token as a grant field. The generic principal remains adapter-owned and may contain arbitrary data. Runtime tests must establish that adapters, errors, observations, and downstream calls do not expose or forward it.
 - HTTP bearer extraction, challenges, protected-resource metadata, status mapping, JWT validation, introspection, key rotation, and authorization conformance remain operational work from [API coverage](../API-COVERAGE.md#relay).
 
 ## Deferred coverage
@@ -205,6 +205,6 @@ pub fn dispatch_granted(
 
 - The production representation of `BearerToken` remains transport-owned, including whether extraction can avoid an intermediate application string.
 - The principal vocabulary remains adapter-owned. A later consumer must decide which stable issuer, subject, client, or workload identifiers Relay exposes for observations.
-- Scope comparison is exact in the first profile, while duplicate scope handling and diagnostic ordering remain unsettled.
+- The current pure profile retains the attested scope list and uses exact membership for requirements. It reports the first missing scope in configuration order; transport scope parsing and normalization remain unsettled.
 - The application-observation surface for internal inaccessible causes remains unsettled. It may be a returned internal error, an injected callback, or a Sinal event, while the external outcome remains identical.
 - A future multiple-audience profile must define accepted additional audiences and the applicable token-profile checks before relaxing the singleton resource rule.
