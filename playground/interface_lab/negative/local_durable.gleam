@@ -5,7 +5,7 @@ import lab/saga_grind
 
 pub fn invalid(
   queue: grind.Queue,
-  plan: saga.LocalPlan(Int, String, Nil, Nil),
+  execution: saga.LocalExecution(String, Nil, Nil),
 ) {
-  saga_grind.submit(queue, plan, 42)
+  saga_grind.submit(queue, execution, 42)
 }

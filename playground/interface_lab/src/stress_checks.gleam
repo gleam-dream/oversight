@@ -13,6 +13,7 @@ import consumers/derived_catalog
 import consumers/enum_codec
 import consumers/execution_ownership
 import consumers/foreign_observation
+import consumers/local_execution
 import consumers/login_consumption
 import consumers/login_transactions
 import consumers/modern_relay
@@ -55,6 +56,7 @@ pub fn main() -> Nil {
   conditional_graph.probe()
   config_codec.probe()
   collection_codec.probe()
+  local_execution.probe()
   login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
