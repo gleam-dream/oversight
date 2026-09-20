@@ -8,6 +8,8 @@ The checkpoint for the first interface experiment is commit `fb7d408`. This expl
 
 The brainstorming passes covered 22 scenarios. The implementation probes deliberately remain small. A successful compiler run is not evidence that all requested capabilities of the production libraries exist.
 
+The later [codec-derived catalog refinement](SCHEMA-CATALOG.md) addresses part of the schema/discovery gap below. The counts in this report describe its historical checkpoint.
+
 ## Verified evidence
 
 On 2026-09-19 with Gleam 1.18.1, all fourteen source-isolated consumers compiled and all fourteen negative examples failed with their intended type errors. Six pure probe groups also executed successfully: configuration codecs and error paths, retained approval input, offline batch outcomes, injected job dependencies, shared tenant registries, and two scripted provider/tool continuations. No unfinished runtime boundary was executed.
