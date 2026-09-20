@@ -20,6 +20,33 @@ pub type ToolResult {
   ToolFailed(id: CallId, error: Value)
 }
 
+pub type CallBatchError {
+  EmptyToolBatch
+  DuplicateCallId(CallId)
+}
+
+pub type ResultSetError {
+  UnknownToolResult(CallId)
+  DuplicateToolResult(CallId)
+  MissingToolResult(CallId)
+}
+
+// This validation belongs to the generic provider boundary so Fabric and
+// standalone structured calls agree on identity coverage before continuation.
+pub fn validate_calls(calls: List(ToolCall)) -> Result(Nil, CallBatchError) {
+  case calls {
+    [] -> Error(EmptyToolBatch)
+    [_, ..] -> validate_unique_calls(calls, [])
+  }
+}
+
+pub fn validate_results(
+  expected_calls: List(ToolCall),
+  results: List(ToolResult),
+) -> Result(Nil, ResultSetError) {
+  validate_result_ids(expected_calls, map_results(results, result_id), [])
+}
+
 // Schema is an explicit external data boundary, not a validated schema witness.
 // Blueprint schema derivation and provider dialect negotiation remain unproven.
 pub type ToolDeclaration {
@@ -68,5 +95,70 @@ pub fn result_id(result: ToolResult) -> CallId {
   case result {
     ToolSucceeded(id, _) -> id
     ToolFailed(id, _) -> id
+  }
+}
+
+fn validate_unique_calls(
+  calls: List(ToolCall),
+  seen: List(CallId),
+) -> Result(Nil, CallBatchError) {
+  case calls {
+    [] -> Ok(Nil)
+    [call, ..rest] ->
+      case contains(seen, call.id) {
+        True -> Error(DuplicateCallId(call.id))
+        False -> validate_unique_calls(rest, [call.id, ..seen])
+      }
+  }
+}
+
+fn validate_result_ids(
+  expected_calls: List(ToolCall),
+  supplied_ids: List(CallId),
+  seen: List(CallId),
+) -> Result(Nil, ResultSetError) {
+  case supplied_ids {
+    [] -> require_all_results(expected_calls, seen)
+    [id, ..rest] ->
+      case contains_call_id(expected_calls, id), contains(seen, id) {
+        False, _ -> Error(UnknownToolResult(id))
+        True, True -> Error(DuplicateToolResult(id))
+        True, False -> validate_result_ids(expected_calls, rest, [id, ..seen])
+      }
+  }
+}
+
+fn require_all_results(
+  expected_calls: List(ToolCall),
+  supplied_ids: List(CallId),
+) -> Result(Nil, ResultSetError) {
+  case expected_calls {
+    [] -> Ok(Nil)
+    [call, ..rest] ->
+      case contains(supplied_ids, call.id) {
+        True -> require_all_results(rest, supplied_ids)
+        False -> Error(MissingToolResult(call.id))
+      }
+  }
+}
+
+fn contains_call_id(calls: List(ToolCall), wanted: CallId) -> Bool {
+  case calls {
+    [] -> False
+    [call, ..rest] -> call.id == wanted || contains_call_id(rest, wanted)
+  }
+}
+
+fn contains(items: List(CallId), wanted: CallId) -> Bool {
+  case items {
+    [] -> False
+    [head, ..rest] -> head == wanted || contains(rest, wanted)
+  }
+}
+
+fn map_results(items: List(a), f: fn(a) -> b) -> List(b) {
+  case items {
+    [] -> []
+    [head, ..rest] -> [f(head), ..map_results(rest, f)]
   }
 }

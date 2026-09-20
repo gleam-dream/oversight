@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty consumers compile with only their transitive source imports.
-- Seventy-five negative fixtures fail with their intended single compiler diagnostic.
-- Forty-one interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-three consumers compile with only their transitive source imports.
+- Seventy-seven negative fixtures fail with their intended single compiler diagnostic.
+- Forty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -246,3 +246,10 @@
 - Successful activities retain native compensation closures before output encoding. Failure and cancellation preserve reverse completion order, located undo failures, and uncompensated successes.
 - Correlated completions protect the current state from foreign or repeated delivery. They do not prevent replaying copied state or repeating effects.
 - Approval, child, and choice nodes reject admission before callbacks. Retry policy, parallel scheduling, post-success compensation authority, and durable recovery remain open.
+
+## Configured structured model turns
+
+- [Structured turns](PROVIDER-STRUCTURED-TURNS.md) retain configured model options, schema policy, tool declarations, native output codecs, and the originating continuation through multiple buffered tool rounds.
+- Two scripted adapters exercise distinct native options and located policies. Unsupported schema, invalid request, and result identity failures reject before transport or continuation.
+- Output schema validation precedes native mapping. LLM and Fabric share call/result correlation without sharing application tool policy.
+- Real provider profiles, streaming admission, persisted continuation, usage accounting, and transport ownership remain open.
