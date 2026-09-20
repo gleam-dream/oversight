@@ -105,6 +105,31 @@
 - Uncertain installation returns owner-bound recovery for the same command and material. Recovery never repeats authorization-code exchange, and a contradictory receipt cannot resolve it.
 - The store must serialize installation and return stable history when an accepted command is retried. Scripted immutable ledgers do not prove durable atomicity, encryption, redaction, or concurrent installation.
 
+### Current login and custody declarations
+
+- Code below is a current prototype declaration excerpt: constructor definitions and function signatures retain the linked source module’s names and aliases; function bodies and unrelated declarations are omitted. These excerpts are not standalone modules or published package signatures, and no new compilation or runtime claim follows from this documentation pass.
+- [The canonical transaction module](playground/interface_lab/src/lab/warden_transaction.gleam) owns these types. [Verified login](playground/interface_lab/src/consumers/verified_login.gleam) and [session custody](playground/interface_lab/src/consumers/session_custody.gleam) exercise configured assertions and exact installation receipts; they do not invoke the production `oidcc` adapter.
+- `complete_login` requires a custody owner and returns `LoginCompletion`, rather than returning a Session immediately after a backend assertion. Recovery accepts the custody command and cannot replay the consumed authorization-code exchange. These laboratory protocol entry points remain internal design evidence under the freeze.
+
+```gleam
+pub type LoginCompletion {
+  LoginCompleted(Session)
+  LoginRecoveryRequired(CustodyRecoveryCommand)
+}
+
+pub fn complete_login(
+  store: TransactionStore,
+  backend: VerificationBackend,
+  custody_owner: CustodyOwner,
+  checked: CheckedOutcome,
+) -> Result(LoginCompletion, CompleteLoginError)
+
+pub fn recover_custody(
+  owner: CustodyOwner,
+  recovery: CustodyRecoveryCommand,
+) -> Result(CustodyRecoveryResult, CustodyRecoveryError)
+```
+
 ### 4.4 Custody-owned refresh
 
 - Refresh begins from the session's custody owner, provider binding, reference, revision, and original authentication evidence. It must reject a different owner or provider before calling a refresh port.
@@ -121,6 +146,35 @@
 - The pinned `oidcc` refresh overload requires expected subject and rejects an absent returned ID token as `sub_invalid`. This is narrower than OIDC's permitted response vocabulary, so the default adapter must declare that limitation.
 - The pinned refresh path sets `nonce: any`; Warden must separately retain and check relevant original continuity evidence. Its response extraction also omits absent refresh material, so custody must explicitly distinguish retain from replace.
 - A scripted alternative exercises absent-ID-token refresh without proving default adapter support. Run the shared response corpus through the actual pinned adapter before choosing a production alternative; never fabricate ID-token evidence to hide the mismatch.
+
+### Current refresh result and recovery declarations
+
+- [The same transaction owner](playground/interface_lab/src/lab/warden_transaction.gleam) defines a separate `RefreshBackend` and phase-specific recovery types. [The refresh consumer](playground/interface_lab/src/consumers/session_refresh.gleam) models reservation, rotation, quarantine, and publication; [the negative recovery consumer](playground/interface_lab/negative/refresh_recovery_phase.gleam) rejects reservation recovery as publication recovery.
+- These declarations preserve uncertainty explicitly without proving atomic storage or transport classification. Their unchanged-scope profile and scripted absent-ID-token capability do not narrow the broader requirements or establish pinned `oidcc` support.
+
+```gleam
+pub type RefreshResult {
+  RefreshCompleted(Session)
+  RefreshDidNotSend
+  RefreshRejectedByEndpoint
+  RefreshProviderQuarantined(RefreshReservationRecovery)
+  RefreshResponseQuarantined(RefreshValidationError, RefreshReservationRecovery)
+  RefreshReservationUnresolved(RefreshReservationRecovery)
+  RefreshPublicationUnresolved(RefreshPublicationRecovery)
+}
+
+pub fn refresh_session(
+  owner: CustodyOwner,
+  backend: RefreshBackend,
+  session: Session,
+  command_id: RefreshCommandId,
+) -> Result(RefreshResult, RefreshError)
+
+pub fn recover_refresh_publication(
+  owner: CustodyOwner,
+  recovery: RefreshPublicationRecovery,
+) -> Result(RefreshResult, RefreshError)
+```
 
 ### 4.5 Remaining provider operations
 

@@ -68,6 +68,32 @@
 - The LLM adapter admits exact tool schemas against its configured provider profile before rendering or transmitting declarations. Unsupported nested features, unavailable schemas, invalid local input, and remote rejection remain distinct outcomes.
 - Arbitrary schema-policy acceptance does not authenticate a provider or prove model compatibility. Fabric delegates generic call/result correlation and provider-bound admission to LLM while retaining application execution policy.
 
+### Current contextual registration
+
+- Code below is a current prototype declaration excerpt: constructor definitions and function signatures retain the linked source module’s names and aliases; function bodies and unrelated declarations are omitted. These excerpts are not standalone modules or published package signatures, and no new compilation or runtime claim follows from this documentation pass.
+- [Fabric's registry module](playground/interface_lab/src/lab/fabric.gleam) imports `Codec` from `lab/blueprint`. [The shared-registry consumer](playground/interface_lab/src/consumers/shared_registry.gleam) uses contextual handlers and codec-derived declarations; this schema-bearing seam does not require Blueprint for ordinary continuation serialization.
+
+```gleam
+pub fn context_tool(
+  name: String,
+  input: Codec(i),
+  output: Codec(o),
+  error: Codec(e),
+  handler: fn(context, i) -> Result(o, e),
+) -> ContextTool(context)
+
+pub fn registry(
+  tools: List(ContextTool(c)),
+) -> Result(Registry(c), RegistryError)
+
+pub fn dispatch(
+  registry: Registry(c),
+  context: c,
+  name: String,
+  input: Value,
+) -> Result(Value, DispatchError)
+```
+
 ### Turns, budgets, and outcomes
 
 - Fabric owns the bounded action controller and transcript. A model request may complete, produce pending tool calls, require approval, fail at the host boundary, exhaust its budget, or stop for uncertain-effect reconciliation.
@@ -80,6 +106,37 @@
 - An uncertain effect stops model continuation until explicit reconciliation. It must not be converted into an ordinary tool failure or automatic retry, and reconciliation must match the original action identity.
 - Report acceptance rejects foreign and repeated reports. Inspection and dry-run policy cannot fabricate successful tool results, and an issued denial cannot be replaced by success from another policy path.
 - Controller values remain copyable. Runtime ownership must serialize transitions, prevent replay of prepared invocations, establish incarnation freshness, contain foreign exceptions, and settle cancellation.
+
+### Current controller boundary
+
+- [The agent controller](playground/interface_lab/src/lab/fabric_agent.gleam) imports `model` as `lab/llm_turn` and `Value` from `lab/value`. The [policy consumer](playground/interface_lab/src/consumers/agent_policy.gleam) exercises allow, denial, approval, and report handling; [the negative approval consumer](playground/interface_lab/negative/approval_reference_is_not_invocation.gleam) rejects executing an approval reference as prepared work.
+- This `start` uses the buffered laboratory provider and preserves the native application context in `Controller`. It does not implement the full durable, streaming, token-budget, or elapsed-time requirements above.
+
+```gleam
+pub type PolicyDecision {
+  Allow
+  Deny(reason: String)
+  RequireApproval(ApprovalRequirement)
+}
+
+pub type Policy(context) =
+  fn(context, ActionDescription) -> Result(PolicyDecision, PolicyError)
+
+pub type Started(context, continuation) {
+  InitialFinished(Value)
+  InitialPendingActions(Controller(context, continuation))
+}
+
+pub fn start(
+  run: RunId,
+  incarnation: Incarnation,
+  limit: MaxModelTurns,
+  provider: model.Provider(continuation),
+  request: llm.Request,
+  registry: fabric.Registry(context),
+  policy: Policy(context),
+) -> Result(Started(context, continuation), AgentError)
+```
 
 ### Structured output, streaming, and context
 

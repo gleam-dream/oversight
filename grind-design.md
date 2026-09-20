@@ -15,8 +15,9 @@
   It does not remove any full-scope requirement below.
 - Storage engines, claim ledgers, processor protocols, callback receipts, and
   unfinished operations remain internal evidence until a runtime validates them.
-  Code sketches below express retained capabilities; they are not compiled package
-  APIs or evidence that those capabilities work.
+  Current excerpts below identify exact laboratory symbols and consumers; omitted
+  bodies are not standalone modules. Proposed sketches retain future capabilities
+  and use placeholder module/type names rather than claiming current package APIs.
 
 ---
 
@@ -26,7 +27,7 @@
 grind
 ├── grind.gleam            -- Oban{} supervisor/config, start/stop, insert/insert_all
 ├── grind/job.gleam         -- Job(args), JobId, JobState, Priority, AttemptError
-├── grind/worker.gleam      -- Worker(args), Changeset(args), PerformError
+├── grind/worker.gleam      -- Worker(i, o, e); admission and failure contracts
 ├── grind/backoff.gleam     -- Backoff strategies
 ├── grind/unique.gleam      -- Uniqueness(args)
 ├── grind/schedule.gleam    -- Schedule, cron AST, parse_cron
@@ -48,53 +49,36 @@ grind
 
 ## 2. Core types
 
-- The original persisted-job sketch below retains states, priorities, timestamps,
-  attempt history, and typed arguments as full-scope requirements. The initial
-  caller-facing handle is opaque; this record is not its replacement.
-- Suspended state appears in later admission and uniqueness contracts but is absent
-  from this original enum. The production state vocabulary and history projection
-  remain unresolved; implementations must not silently drop suspended jobs.
+- Current laboratory type excerpt from [`grind.gleam`](playground/interface_lab/src/lab/grind.gleam)
+  (`JobOutcome`, `JobState`); the [worker-outcomes consumer](playground/interface_lab/src/consumers/worker_outcomes.gleam)
+  exercises transition inputs. Opaque `JobId` is constructed by `job_id(String)`
+  in the laboratory; a production identifier/storage representation is not fixed.
 
 ```gleam
-// grind/job.gleam
-pub opaque type JobId { JobId(Int) }
-
-pub type JobState {
-  Available
-  Scheduled
-  Executing
-  Retryable
-  Completed
-  Discarded
-  Cancelled
+pub type JobOutcome(o, e) {
+  JobSucceeded(o)
+  JobFailed(e)
+  JobCancelled
 }
 
-pub type Priority { Highest  Higher  Normal  Lower  Lowest }
-
-pub type AttemptError {
-  AttemptError(attempt: Int, at: timestamp.Timestamp, error: String)
-}
-
-pub type Job(args) {
-  Job(
-    id: JobId,
-    args: args,
-    queue: String,
-    state: JobState,
-    attempt: Int,
-    max_attempts: Int,
-    priority: Priority,
-    tags: List(String),
-    scheduled_at: timestamp.Timestamp,
-    inserted_at: timestamp.Timestamp,
-    attempted_at: Option(timestamp.Timestamp),
-    errors: List(AttemptError),
-  )
+pub type JobState(o, e) {
+  JobScheduled(AvailableAt)
+  JobQueued
+  JobRunning(CancelIntent)
+  JobSuspended(Value)
+  JobFinished(JobOutcome(o, e))
 }
 ```
 
-`args` is a real type parameter, not `Dynamic` — a `Job(EmailArgs)` and a
-`Job(ResizeArgs)` are different types, and a worker can only ever receive its own.
+- `AvailableAt` is checked scheduled availability, `CancelIntent` records an
+  intent rather than proof of interruption, and `JobSuspended` retains prototype
+  encoded evidence. Its `Value` is a laboratory convenience, not mandatory Blueprint.
+- The full persisted projection still requires available/scheduled/executing/
+  retryable/completed/discarded/cancelled/suspended distinctions, priority, tags,
+  scheduled/inserted/attempted timestamps, typed arguments, maximum attempts,
+  and located attempt history. The smaller sum above does not settle that schema.
+- Initial public handles remain opaque `JobHandle(output, error)`. A proposed
+  persisted job record must not replace their retained native result contract.
 
 ---
 
@@ -111,6 +95,43 @@ pub type Job(args) {
   do not mandate that dependency. Encoded dispatch distinguishes input
   decoding, business failure, output encoding failure, and error encoding failure.
   Runtime failure never fabricates a value of the worker's business error type.
+
+Current laboratory signature/type excerpt from [`grind.gleam`](playground/interface_lab/src/lab/grind.gleam) (`worker`, `invoke`, `submit`, `submit_at`); consumer: [`standalone_jobs`](playground/interface_lab/src/consumers/standalone_jobs.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub fn worker(
+  id: WorkerId,
+  version: WorkerVersion,
+  input: Codec(i),
+  output: Codec(o),
+  error: Codec(e),
+  handler: fn(i) -> Result(o, e),
+) -> Worker(i, o, e)
+
+pub fn invoke(worker: Worker(i, o, e), input: i) -> Result(o, e)
+
+pub fn submit(
+  queue: Queue,
+  worker: Worker(i, o, e),
+  input: i,
+) -> Result(JobHandle(o, e), SubmitError)
+
+pub fn submit_at(
+  queue: Queue,
+  worker: Worker(i, o, e),
+  input: i,
+  available_at: AvailableAt,
+) -> Result(JobHandle(o, e), SubmitError)
+```
+
+These laboratory signatures use `lab/blueprint.Codec` as adapter convenience;
+ordinary job serialization must not require schema support. `worker_id` and
+`worker_version` validate identity/version; `available_at` checks a nonnegative
+UTC millisecond timestamp. `JobHandle(o, e)` retains the result/error relationship;
+submission failure cannot manufacture that handle. The
+[worker-input negative](playground/interface_lab/negative/worker_input.gleam)
+rejects an argument of the wrong native type. Submission uses an injected queue
+port; `poll` and `cancel` remain unfinished runtime operations.
 
 ### Typed admission and handles
 
@@ -154,6 +175,10 @@ pub type Job(args) {
 - Backoff remains configurable. The following original policy sketch does not
   establish Oban's timing distribution; deterministic policy probes use an injected
   clock, while timers, jitter, and retry latency require the pinned oracle.
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 // grind/backoff.gleam
@@ -227,6 +252,10 @@ pub fn delay_for(b: Backoff, attempt: Int) -> Int {
 
 ## 6. Scheduling & Cron
 
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
+
 ```gleam
 // grind/schedule.gleam
 pub type Field { Any  At(List(Int))  Step(Int) }
@@ -251,6 +280,10 @@ string every tick.
   Their crash, rescue, retention, and scheduling behavior needs runtime tests.
 
 ### Cron plugin
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 // grind/plugin.gleam
@@ -292,55 +325,37 @@ the same `Registered` machinery as regular jobs.
   extraction and cluster-wide failure recovery need an original black-box contract
   or licensed Pro oracle; the sketches below are not runtime evidence.
 
-```gleam
-// grind/queue.gleam
-pub type Partition {
-  PartitionByArgs(keys: List(String))
-  PartitionByWorker
-  PartitionByArgsAndWorker(keys: List(String))
-}
-
-pub type RateLimit {
-  RateLimit(allowed: Int, period: duration.Duration, partition: Option(Partition))
-}
-
-pub type GlobalLimit {
-  GlobalLimit(allowed: Int, partition: Option(Partition))
-}
-
-pub type QueueConfig {
-  QueueConfig(
-    name: String,
-    local_limit: Int,
-    global_limit: Option(GlobalLimit),   -- Pro: cap across the whole cluster
-    rate_limit: Option(RateLimit),        -- Pro: sliding-window throttle
-    paused: Bool,
-  )
-}
-
-pub fn queue(name: String, local_limit n: Int) -> QueueConfig {
-  QueueConfig(name:, local_limit: n, global_limit: None, rate_limit: None, paused: False)
-}
-pub fn with_global_limit(q: QueueConfig, g: GlobalLimit) -> QueueConfig { ... }
-pub fn with_rate_limit(q: QueueConfig, r: RateLimit) -> QueueConfig { ... }
-```
-
-Global limits and rate limits need cluster-wide coordination, which Oban Pro
-does via the database (a `producers`/counters table). Same here — the
-`Engine` (§9) exposes `try_claim(db, queue_name, partition_key) -> Result(Nil, Throttled)`,
-called by each node's queue producer actor before pulling more jobs. The
-_type_ of a rate limit is fully static; only the counter row is mutable
-shared state, same as Oban.
-
-Pausing/resuming a queue at runtime:
-
-```gleam
-pub fn pause(oban: Oban, queue_name: String) -> Result(Nil, Nil)
-pub fn resume(oban: Oban, queue_name: String) -> Result(Nil, Nil)
-pub fn scale(oban: Oban, queue_name: String, local_limit: Int) -> Result(Nil, Nil)
-```
+Advanced global/rate-limit configuration remains proposed: retain a positive
+allowance, period, and optional worker/argument partition. It must compose with
+the current route-keyed local configuration rather than introduce a second
+`QueueConfig` with raw names. Live pause/resume/scale must return typed owner,
+lookup, validation, and storage outcomes; no `Result(Nil, Nil)` facade is accepted.
 
 ---
+
+Current laboratory signature/type excerpt from [`grind_queue.gleam`](playground/interface_lab/src/lab/grind_queue.gleam) (`QueueConfig`, `local_concurrency`, `active_count`, `plan_dispatch`); consumer: [`queue_configuration`](playground/interface_lab/src/consumers/queue_configuration.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub type QueueConfigurationError {
+  LocalConcurrencyMustBePositive
+  ActiveCountMustNotBeNegative
+  DuplicateQueueRoute(route: grind.QueueRoute)
+}
+
+pub fn local_concurrency(
+  value: Int,
+) -> Result(LocalConcurrency, QueueConfigurationError)
+
+pub fn active_count(
+  value: Int,
+) -> Result(ActiveCount, QueueConfigurationError)
+
+pub fn plan_dispatch(config: QueueConfig, active: ActiveCount) -> DispatchPlan
+```
+
+`ProcessingMode` is `Processing` or `Paused`. Checked counts and route identity
+replace the raw-string, unchecked-limit configuration in the original sketch.
+The result is a pure demand plan, not a reservation or live processor command.
 
 ## 8. Runtime shape (queue producer/consumer actors)
 
@@ -383,6 +398,10 @@ pub fn scale(oban: Oban, queue_name: String, local_limit: Int) -> Result(Nil, Ni
 
 Each configured queue gets a supervised actor tree, mirroring Oban's
 `Producer` + per-job `Executor` tasks:
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 pub type ProducerMsg {
@@ -432,6 +451,10 @@ are left `Executing` for the `Lifeline` plugin to rescue on the next boot.
 
 Oban supports Postgres and SQLite3 engines; model that as a record of
 functions rather than a behaviour:
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 // grind/engine.gleam
@@ -496,32 +519,11 @@ so this module has zero knowledge of any worker's types.
 A DAG of named steps, each depending on others by name, with configurable
 behavior when an upstream step fails:
 
-```gleam
-// grind/workflow.gleam
-pub type DepsPolicy { WaitForCompletion  IgnoreDiscarded  IgnoreCancelled }
-
-pub opaque type Workflow {
-  Workflow(id: WorkflowId, steps: List(Step))
-}
-type Step {
-  Step(name: String, changeset: RawChangeset, deps: List(String), policy: DepsPolicy)
-}
-
-pub fn new() -> Workflow { Workflow(id: new_workflow_id(), steps: []) }
-
-pub fn add(
-  wf: Workflow,
-  name name: String,
-  worker worker: worker.Worker(args),
-  args args: args,
-  deps deps: List(String),
-) -> Workflow {
-  let raw = to_raw_changeset(worker, args)
-  Workflow(..wf, steps: [Step(name, raw, deps, WaitForCompletion), ..wf.steps])
-}
-
-pub fn insert(oban: Oban, wf: Workflow) -> Result(Nil, InsertError)
-```
+The proposed raw workflow retains a workflow identity, named job admissions,
+dependencies, and completion policies (wait for completion, ignore discarded,
+ignore cancelled). It uses canonical typed workers before erasure and must return
+construction/admission errors explicitly. No raw `Workflow` constructor or
+insert operation is implemented; typed Saga definitions do not substitute for it.
 
 The engine only marks a step `Available` once all its `deps` are in a
 satisfying state — a `workflow_deps` join table, as an unvalidated storage proposal.
@@ -531,14 +533,10 @@ satisfying state — a `workflow_deps` join table, as an unvalidated storage pro
 Different deps can produce different result types, so the workflow context
 takes a decoder per lookup instead of returning `Dynamic`:
 
-```gleam
-pub type WorkflowContext {
-  WorkflowContext(fetch: fn(step_name: String, decode.Decoder(a)) -> Result(a, WorkflowError))
-}
-
-// worker perform signature for a workflow step:
-perform: fn(job.Job(args), WorkflowContext) -> Result(Nil, worker.PerformError)
-```
+Result lookup remains proposed. It must accept the actual decoder for the
+requested step and return typed missing-result, failed-step, and decode outcomes.
+The original record implied a universally generic callback field; no such
+`WorkflowContext` is implemented or accepted as the current API.
 
 `fetch("resize_image", image_decoder)` looks up the named step's recorded
 output (§13) and decodes it against _your_ decoder — if you ask for the
@@ -551,28 +549,10 @@ wrong shape you get a typed `WorkflowError`, never a silent `Dynamic`.
 A batch inserts many jobs together and runs typed callback jobs when the
 batch reaches terminal states:
 
-```gleam
-// grind/batch.gleam
-pub opaque type Batch {
-  Batch(id: BatchId, jobs: List(RawChangeset), callbacks: Callbacks)
-}
-
-pub type Callbacks {
-  Callbacks(
-    on_complete: Option(RawChangeset),
-    on_attempted: Option(RawChangeset),
-    on_discarded: Option(RawChangeset),
-    on_cancelled: Option(RawChangeset),
-  )
-}
-
-pub fn new() -> Batch { Batch(new_batch_id(), [], Callbacks(None, None, None, None)) }
-pub fn add(b: Batch, worker: worker.Worker(a), args: a) -> Batch
-pub fn on_complete(b: Batch, worker: worker.Worker(a), args: a) -> Batch
-pub fn on_discarded(b: Batch, worker: worker.Worker(a), args: a) -> Batch
-
-pub fn insert(oban: Oban, b: Batch) -> Result(Nil, InsertError)
-```
+The proposed batch retains a batch identity, heterogeneous prepared jobs, and
+optional complete/attempted/discarded/cancelled callback admissions. Each callback
+must retain its canonical `Worker(input, output, error)` and matching input.
+No `Batch` constructor or insertion function exists in the laboratory.
 
 - Batch callback triggers remain required for complete, attempted, discarded, and
   cancelled aggregation. Heterogeneous entries, typed handles, cancellation, deduplicated
@@ -592,24 +572,10 @@ A worker that processes many jobs' args together as one call, flushed by
 count or timeout — Gleam models this as an alternate `perform` shape on the
 worker rather than a special job type:
 
-```gleam
-// grind/chunk.gleam
-pub type ChunkConfig(args) {
-  ChunkConfig(
-    size: Int,
-    timeout: duration.Duration,
-    perform: fn(List(job.Job(args))) -> List(#(job.JobId, Result(Nil, worker.PerformError))),
-  )
-}
-
-pub fn chunked(
-  name: String,
-  queue: String,
-  encode: fn(args) -> json.Json,
-  decode: decode.Decoder(args),
-  chunk: ChunkConfig(args),
-) -> worker.Worker(args)
-```
+The proposed integration retains the canonical `Worker(input, output, error)`
+and its actual encoding/decoding functions. No chunk/recorder/relay constructor
+is implemented by `lab/grind`; its additional configuration and result outcomes
+remain the requirements below, not a second worker type.
 
 - Chunking remains required with count and timeout flushing and per-job results.
   Tests must define missing or duplicate result IDs, partial failure, cancellation,
@@ -628,21 +594,10 @@ Captures a job's return value for later inspection (by workflows, batches,
 or relay) — this needs its own encode/decode pair since a job's _result_
 type is independent of its _args_ type:
 
-```gleam
-// grind/recorder.gleam
-pub type Recorder(args, result) {
-  Recorder(
-    encode_result: fn(result) -> json.Json,
-    decode_result: decode.Decoder(result),
-    perform: fn(job.Job(args)) -> Result(result, worker.PerformError),
-  )
-}
-
-pub fn recorded(
-  worker_base: worker.PartialWorker(args),
-  recorder: Recorder(args, result),
-) -> worker.Worker(args)
-```
+The proposed integration retains the canonical `Worker(input, output, error)`
+and its actual encoding/decoding functions. No chunk/recorder/relay constructor
+is implemented by `lab/grind`; its additional configuration and result outcomes
+remain the requirements below, not a second worker type.
 
 - Recording remains required independently of input type. Durable writes must retain
   result codec identity and version; typed handles alone do not implement recording.
@@ -658,22 +613,10 @@ through it with a caller-supplied decoder.
 Synchronous request/response over the job queue — insert a job, block the
 calling process until it completes, get a typed result back:
 
-```gleam
-// grind/relay.gleam
-pub type RelayError {
-  RelayTimeout
-  RelayJobFailed(reason: String)
-  RelayUndecodable
-}
-
-pub fn relay(
-  oban: Oban,
-  worker: worker.Worker(args),
-  args: args,
-  decode_result: decode.Decoder(result),
-  timeout_ms timeout_ms: Int,
-) -> Result(result, RelayError)
-```
+The proposed integration retains the canonical `Worker(input, output, error)`
+and its actual encoding/decoding functions. No chunk/recorder/relay constructor
+is implemented by `lab/grind`; its additional configuration and result outcomes
+remain the requirements below, not a second worker type.
 
 - The bounded waiting contract must distinguish timeout, job failure, cancellation,
   missing recorded result, and decoding failure. A timeout does not cancel delivery
@@ -701,29 +644,22 @@ potentially a node), with behavior to establish through an original contract or 
   backend failure, and native telemetry interoperability need runtime evidence; no
   universal lifecycle type is added.
 
-```gleam
-// HISTORICAL MECHANISM — superseded by package-owned Sinal descriptors.
-// The event families remain in scope; this sum and subscription API are not the current target.
-pub type Event {
-  JobStarted(job.JobId, queue: String, worker: String)
-  JobCompleted(job.JobId, duration: duration.Duration)
-  JobFailed(job.JobId, error: worker.PerformError, duration: duration.Duration, will_retry: Bool)
-  JobSnoozed(job.JobId, seconds: Int)
-  QueueStarted(queue: String)
-  QueuePaused(queue: String)
-  QueueShuttingDown(queue: String)
-  PluginRan(plugin: String, result: Result(Nil, String))
-}
-```
+Current descriptor construction and prototype field mapping live in
+[`grind_observations.gleam`](playground/interface_lab/src/lab/grind_observations.gleam);
+[`package_observations.gleam`](playground/interface_lab/src/consumers/package_observations.gleam)
+uses the cancellation fact after the pure transition. Other event families remain
+proposed package-owned descriptors, not a shared event enum.
 
-This earlier typed-sum proposal would have replaced `:telemetry.execute` and
-`process.Subject` subscriptions. It is retained only as historical rationale for
-the event families; the current design routes observations through Sinal's native
-registry after a state transition.
+The current design routes observations through Sinal after a state transition;
+the native telemetry adapter remains unimplemented.
 
 ---
 
 ## 16. Testing modes
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 // grind/testing.gleam
@@ -751,6 +687,10 @@ post-perform state, synchronously.
 - This retained runtime sketch illustrates intended supervision and plugin composition.
   Its string-only registration predates full-route/version registration (§3); final
   wiring must use that exact registry and keep runtime protocol constructors internal.
+
+Proposed, unimplemented sketch. Module names and supporting types below are
+placeholders, not laboratory exports. Validation, typed failures, and runtime
+ownership follow the requirements in this section; no body here proves parity.
 
 ```gleam
 import gleam/otp/static_supervisor as supervisor
