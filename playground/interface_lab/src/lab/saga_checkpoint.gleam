@@ -3,22 +3,22 @@ import lab/blueprint.{type Codec}
 import lab/saga.{
   type BranchSide, type Definition, type NodeAddress, type ScopedStepId,
 }
+import lab/saga_child_link.{type ChildLink}
+import lab/saga_run_identity as identity
 import lab/value.{type Value}
 
-pub opaque type RunId {
-  RunId(String)
-}
+pub type RunId =
+  identity.RunId
 
 pub fn run_id(value: String) -> RunId {
-  RunId(value)
+  identity.run_id(value)
 }
 
-pub opaque type CommandId {
-  CommandId(String)
-}
+pub type CommandId =
+  identity.CommandId
 
 pub fn command_id(value: String) -> CommandId {
-  CommandId(value)
+  identity.command_id(value)
 }
 
 pub type CancellationIntent {
@@ -65,7 +65,7 @@ pub type WaitReference {
     approval_id: String,
     answer_codec_version: Int,
   )
-  ChildWait(step_id: ScopedStepId, child_run_id: String, child_revision: Int)
+  ChildWait(step_id: ScopedStepId, link: ChildLink, child_revision: Int)
 }
 
 pub type AmbiguousEffect {

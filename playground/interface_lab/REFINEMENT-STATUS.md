@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-eight consumers compile with only their transitive source imports.
-- Twenty-eight negative fixtures fail with their intended single compiler diagnostic.
-- Twenty interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: twenty-nine consumers compile with only their transitive source imports.
+- Thirty negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-one interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -83,3 +83,11 @@
 ## Schema admission refinement
 
 - [Tool schema admission](SCHEMA-ADMISSION.md) retains exact structured schemas through typed policy rejection and admitted rendering. Real provider profiles and resource ownership remain open.
+
+## Child attachment and observation
+
+- [Child attachment](CHILD-ATTACHMENT.md) retains output, error, and undo-error codecs in a typed handle and persists only a nongeneric routing link.
+- The consumer rebuilds a compatible contract and observes the same historical output after compensation changes. Stored metadata is checked before the retained decoder executes.
+- Strict link decoding rejects duplicate and unknown fields. Missing runs, pruned results, unavailable owners, and corrupt output remain distinct.
+- Native output and undo-error mismatches are compiler failures. Definition and codec versions are runtime compatibility checks.
+- Submission, cancellation, compensation receipts, durable journaling, and actual restart recovery remain open.
