@@ -16,7 +16,7 @@
 
 ## Evidence
 
-- Thirty-eight accepted and rejected instances agree across text, integer, boolean, exact tuples, nullable lists, empty objects, optional nullable records, inclusive integer bounds, and tagged decisions.
+- Sixty-one accepted and rejected instances agree across text, integer, boolean, exact tuples, nullable lists, empty objects, optional nullable records, inclusive integer bounds, tagged decisions, finite string enums, unusual labels, and nested enum collections.
 - The records and decisions come from the same consumer codecs used for Relay integration.
 - Each original and normalized schema also passes the validator's schema-document check. Normalization preserves acceptance for these instances.
 

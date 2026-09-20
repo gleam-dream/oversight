@@ -10,16 +10,16 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                                    | Remaining interface work                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and complete 1.x migration                   |
-| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
-| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                                         |
-| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                 | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission              |
-| Grind alone                 | Typed admission, scoped uniqueness, exact command recovery, response resolution, and claim acknowledgement arbitration              | Queue configuration, broader uniqueness policies, worker lifecycle, persisted history, and advanced job families |
-| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                                        |
-| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                |
+| Boundary                    | Current evidence                                                                                                                     | Remaining interface work                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Composed codecs, finite string enums, located schema requirements, runtime contracts, document loading, and finite native generation | Number policy, enum generation, actual provider profiles, broader generation, and complete 1.x migration         |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                       | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
+| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                   | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Local runner outcomes, traversal, retry policy, and definition migration                                         |
+| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                  | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission              |
+| Grind alone                 | Typed admission, scoped uniqueness, exact command recovery, response resolution, and claim acknowledgement arbitration               | Queue configuration, broader uniqueness policies, worker lifecycle, persisted history, and advanced job families |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                              | Native name/map binding, registration, scoped cleanup, and span execution                                        |
+| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                   | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
@@ -31,11 +31,11 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-six consumers compile with only their transitive source imports.
-- Sixty-seven negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-seven consumers compile with only their transitive source imports.
+- Sixty-nine negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
-- Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
+- Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -219,3 +219,10 @@
 - Historical empty-constructor acceptance differs between the two releases. Independent validation exposes 1.7.1 empty-object and tuple schema disagreements; the adapter does not claim to correct them.
 - Two additional compiler negatives reject an upstream decoder as a native codec and an encoder for a different native type. These separate-project checks are not included in the laboratory counts above.
 - Complete source migration, recursive schemas, numeric support, error-path compatibility, generation integration, and the final package API remain open.
+
+## Finite string enums
+
+- The [finite enum experiment](ENUM-CODECS.md) retains one checked label/value table through native encoding, decoding, schema rendering, document loading, and runtime validation. Duplicate labels and native values are construction errors.
+- A Relay consumer uses the same nested enum codec for declaration and dispatch. Runtime-validated wire values remain distinct from native enum values.
+- Independent schema checks include exact labels, empty strings, quotes, Unicode, unknown labels, and nested enum collections. The published JSON Blueprint compatibility probes remain valid after the core extension.
+- Source generation explicitly rejects enum schemas. Generated constructors, aliases, number policy, and broader legacy migration remain separate work.

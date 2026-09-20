@@ -18,6 +18,8 @@ pub type ContractError {
   ReversedIntegerRange(minimum: Int, maximum: Int)
   DuplicateSchemaProperty(String)
   DuplicateSchemaTag(String)
+  EmptyStringEnum
+  DuplicateSchemaEnumLabel(String)
 }
 
 pub fn from_schema(
@@ -72,6 +74,7 @@ pub type PathSegment {
 
 pub type ValidationReason {
   ExpectedText
+  UnknownEnumLabel(String)
   ExpectedInteger
   ExpectedBoolean
   ExpectedArray
@@ -100,6 +103,7 @@ fn normalize(
 ) -> Result(blueprint.Schema, ContractError) {
   case schema {
     blueprint.TextSchema -> Ok(blueprint.TextSchema)
+    blueprint.StringEnumSchema(labels) -> normalize_string_enum(labels)
     blueprint.IntSchema -> Ok(blueprint.IntSchema)
     blueprint.BoolSchema -> Ok(blueprint.BoolSchema)
     blueprint.PairSchema(left, right) -> {
@@ -130,6 +134,48 @@ fn normalize(
       case minimum <= maximum {
         True -> Ok(blueprint.IntegerRangeSchema(minimum, maximum))
         False -> Error(ReversedIntegerRange(minimum, maximum))
+      }
+  }
+}
+
+fn normalize_string_enum(
+  labels: List(String),
+) -> Result(blueprint.Schema, ContractError) {
+  case labels {
+    [] -> Error(EmptyStringEnum)
+    [_, ..] ->
+      case duplicate_string(labels, []) {
+        Something(label) -> Error(DuplicateSchemaEnumLabel(label))
+        Nothing -> Ok(blueprint.StringEnumSchema(sort_strings(labels)))
+      }
+  }
+}
+
+fn duplicate_string(labels: List(String), seen: List(String)) -> Maybe(String) {
+  case labels {
+    [] -> Nothing
+    [label, ..rest] ->
+      case contains_string(seen, label) {
+        True -> Something(label)
+        False -> duplicate_string(rest, [label, ..seen])
+      }
+  }
+}
+
+fn sort_strings(labels: List(String)) -> List(String) {
+  case labels {
+    [] -> []
+    [label, ..rest] -> insert_string(label, sort_strings(rest))
+  }
+}
+
+fn insert_string(label: String, sorted: List(String)) -> List(String) {
+  case sorted {
+    [] -> [label]
+    [head, ..rest] ->
+      case string_less(label, head) {
+        True -> [label, ..sorted]
+        False -> [head, ..insert_string(label, rest)]
       }
   }
 }
@@ -243,6 +289,12 @@ fn validate_at(
   path: List(PathSegment),
 ) -> Result(Nil, ValidationError) {
   case schema, value {
+    blueprint.StringEnumSchema(labels), value.Text(label) ->
+      case contains_string(labels, label) {
+        True -> Ok(Nil)
+        False -> invalid(path, UnknownEnumLabel(label))
+      }
+    blueprint.StringEnumSchema(_), _ -> invalid(path, ExpectedText)
     blueprint.TextSchema, value.Text(_) -> Ok(Nil)
     blueprint.TextSchema, _ -> invalid(path, ExpectedText)
     blueprint.IntSchema, value.Int(_) -> Ok(Nil)

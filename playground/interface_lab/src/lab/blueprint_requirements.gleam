@@ -11,6 +11,7 @@ pub type Segment {
 
 pub type Feature {
   TextValues
+  StringEnumValues(List(String))
   IntegerValues
   BooleanValues
   ClosedObject
@@ -34,6 +35,7 @@ pub fn requirements(schema: b.Schema) -> List(Requirement) {
 fn at(schema: b.Schema, path: List(Segment)) -> List(Requirement) {
   case schema {
     b.TextSchema -> [Requirement(path, TextValues)]
+    b.StringEnumSchema(labels) -> [Requirement(path, StringEnumValues(labels))]
     b.IntSchema -> [Requirement(path, IntegerValues)]
     b.BoolSchema -> [Requirement(path, BooleanValues)]
     b.IntegerRangeSchema(min, max) -> [

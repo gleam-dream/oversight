@@ -23,6 +23,7 @@ pub type UnsupportedReason {
   ListSchema
   PairSchema
   TaggedSchema
+  StringEnumSchema
 }
 
 pub type GenerationError {
@@ -87,6 +88,8 @@ fn analyse_schema(
 ) -> Result(Analysis, GenerationError) {
   case schema {
     blueprint.TextSchema -> Ok(Analysis("String", "blueprint.text()", Nothing))
+    blueprint.StringEnumSchema(_) ->
+      Error(UnsupportedGeneration(path, StringEnumSchema))
     blueprint.IntSchema -> Ok(Analysis("Int", "blueprint.int()", Nothing))
     blueprint.BoolSchema -> Ok(Analysis("Bool", "blueprint.bool()", Nothing))
     blueprint.IntegerRangeSchema(minimum, maximum) -> {

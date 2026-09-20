@@ -10,6 +10,7 @@ import consumers/collection_codec
 import consumers/conditional_graph
 import consumers/config_codec
 import consumers/derived_catalog
+import consumers/enum_codec
 import consumers/execution_ownership
 import consumers/foreign_observation
 import consumers/login_consumption
@@ -45,6 +46,7 @@ pub fn main() -> Nil {
   child_attachments.probe()
   child_compensation.probe()
   claim_ownership.probe()
+  enum_codec.probe()
   execution_ownership.probe()
   foreign_observation.probe()
   derived_catalog.probe()
