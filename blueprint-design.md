@@ -271,6 +271,14 @@ generator. Unsupported shapes return located errors without dropping constraints
 A future command-line workflow, formatting, committed-output policy, and upgrade
 fixtures remain required tooling rather than a hidden compile phase.
 
+The [schema materialization experiment](docs/implementation/blueprint-schema-materialization/work-order.md)
+starts from `Codec(a)` instead. A codec already stores its
+`Result(Schema, SchemaError)`, so `schema` is an O(1) retrieval rather than a
+repeated traversal. The experiment emits functions that reconstruct that schema
+without constructing the codec and its closures, but those functions may still
+allocate the schema tree. It does not generate native types or codecs, change
+the runtime model, or imply constant evaluation.
+
 The experimental generator supports closed root objects with primitive, bounded
 integer, nullable, optional, and finite string-enum fields. It uses fixed module
 and record names, positional fields, and positional enum constructors. Sixteen

@@ -18,8 +18,10 @@ bodies are evidence for later implementation, not accepted public API.
   noninteger, and unsafe native inputs, while Erlang retains exact bignums.
   Integer projection also observes a caller-supplied digit limit and the target's
   native range. The current integer-only `Value.Int` migration is deferred.
-  Native source generation, including positional enums and planned application
-  naming, remains experimental tooling outside this facade.
+  Native type/codec generation and the narrower codec-schema materialization
+  experiment remain test/dev tooling outside this facade. Materialized schema
+  accessors reconstruct the schema already stored by a codec; they do not parse
+  external JSON Schema into native domain types or codecs.
 - **Standalone LLM:** provider-neutral requests and outcomes, tool declarations,
   calls and results, exact call-result correlation, configured capability
   admission, streamed progress and terminal events, and provider-origin
