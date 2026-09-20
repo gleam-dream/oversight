@@ -2,6 +2,7 @@
 import consumers/object_codec
 import consumers/tagged_codec
 import lab/blueprint as b
+import lab/blueprint_document as document
 import lab/blueprint_runtime as runtime
 import lab/value as v
 
@@ -11,6 +12,8 @@ fn emit(item: v.Value) -> Nil
 fn check(label: String, codec: b.Codec(a), instances: List(v.Value)) -> Nil {
   let assert Ok(schema) = b.schema(codec)
   let assert Ok(contract) = runtime.from_codec(codec)
+  let assert Ok(loaded) = document.load(b.schema_document(schema))
+  let assert True = runtime.same_schema(contract, loaded)
   cases(label, codec, contract, b.schema_document(schema), instances)
 }
 
