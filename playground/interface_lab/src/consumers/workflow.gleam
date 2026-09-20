@@ -160,7 +160,7 @@ pub fn workflow_definition() -> Definition(
       checkout_definition,
     )
   let checkout_child_definition =
-    saga.define(
+    saga.define_child(
       identity,
       definition_version,
       "checkout.assistant:v1:child",

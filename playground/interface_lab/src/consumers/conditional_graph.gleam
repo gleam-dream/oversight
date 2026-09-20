@@ -50,14 +50,14 @@ pub fn probe() -> Nil {
   let expected_edges = [
     graph.Dependency(
       graph.InputPort,
-      graph.DefinitionNode(required_node_id("approval")),
+      graph.ChildNode(required_node_id("approval")),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("approval")),
-      graph.DefinitionNode(required_node_id("selector")),
+      graph.ChildNode(required_node_id("approval")),
+      graph.ChildNode(required_node_id("selector")),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("selector")),
+      graph.ChildNode(required_node_id("selector")),
       graph.ChoiceNode(required_node_id("checkout-choice")),
     ),
   ]
@@ -332,7 +332,7 @@ fn require_add(
   id: graph.NodeId,
   definition: saga.Definition(a, b, Nil, Nil),
 ) -> #(graph.Builder(Order, Nil, Nil), graph.Port(b)) {
-  let assert Ok(result) = graph.add(builder, input, id, definition)
+  let assert Ok(result) = graph.add_child(builder, input, id, definition)
   result
 }
 
@@ -344,7 +344,8 @@ fn require_choice(
   right: saga.Definition(Order, Fulfilment, Nil, Nil),
   output: blueprint.Codec(Fulfilment),
 ) -> #(graph.Builder(Order, Nil, Nil), graph.Port(Fulfilment)) {
-  let assert Ok(result) = graph.choose(builder, input, id, left, right, output)
+  let assert Ok(result) =
+    graph.choose_children(builder, input, id, left, right, output)
   result
 }
 

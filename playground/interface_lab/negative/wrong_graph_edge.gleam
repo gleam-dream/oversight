@@ -11,5 +11,5 @@ pub fn invalid(
   #(graph.Builder(String, Nil, Nil), graph.Port(Int)),
   graph.BuildError,
 ) {
-  graph.add(builder, source, id, definition)
+  graph.add_child(builder, source, id, definition)
 }

@@ -138,6 +138,7 @@ pub opaque type Activity(i, o, e, u) {
     output_codec: Codec(o),
     error_codec: Codec(e),
     undo_error_codec: Codec(u),
+    adapter: ActivityAdapter(i, o, e, u),
   )
 }
 
@@ -234,6 +235,7 @@ pub fn activity(
     output,
     error,
     undo_error,
+    ActivityAdapter(descriptor, contract, execute, compensation),
   )
 }
 
@@ -348,7 +350,7 @@ pub fn define(
   structural_signature: String,
   activity: Activity(i, o, e, u),
 ) -> Definition(i, o, e, u) {
-  let Activity(node, input, output, error, undo_error) = activity
+  let Activity(node, input, output, error, undo_error, _) = activity
   Definition(
     id,
     definition_version,
@@ -409,7 +411,7 @@ pub fn child(
   error_codec_version: Version,
   undo_error_codec_version: Version,
   child_definition: Definition(i, o, e, u),
-) -> Activity(i, o, e, u) {
+) -> Child(i, o, e, u) {
   let descriptor =
     StepDescriptor(id, step_version, ChildStep, [
       input_codec_version,
@@ -450,7 +452,7 @@ pub fn child(
         }
     }
   }
-  Activity(
+  Child(
     ErasedNode(
       descriptor,
       invoke,
@@ -704,4 +706,66 @@ fn encode_many(
           }
       }
   }
+}
+
+// Child is not a direct activity and carries no automatic parent compensator.
+pub opaque type Child(i, o, e, u) {
+  Child(
+    node: ErasedNode(e, u),
+    input_codec: Codec(i),
+    output_codec: Codec(o),
+    error_codec: Codec(e),
+    undo_error_codec: Codec(u),
+  )
+}
+
+pub fn define_child(
+  id: DefinitionId,
+  definition_version: Version,
+  structural_signature: String,
+  child: Child(i, o, e, u),
+) -> Definition(i, o, e, u) {
+  let Child(node, input, output, error, undo) = child
+  Definition(
+    id,
+    definition_version,
+    structural_signature,
+    input,
+    output,
+    error,
+    undo,
+    [node],
+    [],
+  )
+}
+
+// These records expose retained typed callbacks for the graph adapter. They
+// are laboratory factoring surfaces, not certificates of executed effects.
+pub type ActivityAdapter(i, o, e, u) {
+  ActivityAdapter(
+    descriptor: StepDescriptor,
+    contract: ActivityContract(i, o, e, u),
+    execute: fn(i) -> Result(o, e),
+    compensation: Compensation(i, o, u),
+  )
+}
+
+pub fn activity_adapter(
+  activity: Activity(i, o, e, u),
+) -> ActivityAdapter(i, o, e, u) {
+  activity.adapter
+}
+
+pub type ApprovalAdapter(i, a) {
+  ApprovalAdapter(descriptor: StepDescriptor, input: Codec(i), answer: Codec(a))
+}
+
+pub fn approval_adapter(
+  approval: Approval(i, a, e, u),
+) -> ApprovalAdapter(i, a) {
+  ApprovalAdapter(
+    approval.node.descriptor,
+    approval.input_codec,
+    approval.answer_codec,
+  )
 }

@@ -11,5 +11,5 @@ pub fn invalid(
   right: saga.Definition(String, String, Nil, Nil),
   output: blueprint.Codec(Int),
 ) -> Result(#(graph.Builder(Int, Nil, Nil), graph.Port(Int)), graph.BuildError) {
-  graph.choose(builder, selected, id, left, right, output)
+  graph.choose_children(builder, selected, id, left, right, output)
 }

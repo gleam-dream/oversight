@@ -15,11 +15,13 @@
 | Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed input field, registry consistency                               | General records, tagged unions, refinements, and independent schema validation |
 | Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                            | Protocol name rules, visibility policy, transport conformance                  |
 | Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                               | Explicit provider schema subsets and streaming resource ownership              |
-| Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing | Direct activity versus child ownership, then one lowered definition model      |
+| Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing | One lowered definition model preserving explicit activity/child ownership      |
 | Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                               | Restart behavior and usable compensation receipt issuance                      |
 | Grind alone                 | Typed workers, payload codecs, injected dependencies                                                              | Schedule/cancel lifecycle and persistence transactions                         |
 | Sinal alone                 | Map-shaped fields and foreign callback error classification                                                       | Native atom/map bridge and pinned telemetry behavior tests                     |
 | Warden alone                | Pending versus verified identities                                                                                | Configured clients and caller-owned concurrent login transactions              |
+
+- Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
 ## Registration ergonomics
 
