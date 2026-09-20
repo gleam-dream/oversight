@@ -128,6 +128,88 @@ pub type Compensation(i, o, u) {
   Compensate(fn(i, o) -> Result(Nil, u))
 }
 
+pub type RecoveryConfigurationError {
+  AttemptLimitMustBePositive
+}
+
+pub opaque type AttemptLimit {
+  AttemptLimit(Int)
+}
+
+pub fn attempt_limit(
+  value: Int,
+) -> Result(AttemptLimit, RecoveryConfigurationError) {
+  case value {
+    n if n > 0 -> Ok(AttemptLimit(n))
+    _ -> Error(AttemptLimitMustBePositive)
+  }
+}
+
+pub fn attempt_limit_value(limit: AttemptLimit) -> Int {
+  let AttemptLimit(value) = limit
+  value
+}
+
+pub type RetryDelayError {
+  RetryDelayMustNotBeNegative
+}
+
+pub opaque type RetryDelay {
+  RetryDelay(milliseconds: Int)
+}
+
+pub fn retry_delay(milliseconds: Int) -> Result(RetryDelay, RetryDelayError) {
+  case milliseconds {
+    n if n >= 0 -> Ok(RetryDelay(n))
+    _ -> Error(RetryDelayMustNotBeNegative)
+  }
+}
+
+pub fn retry_delay_milliseconds(delay: RetryDelay) -> Int {
+  let RetryDelay(milliseconds) = delay
+  milliseconds
+}
+
+pub opaque type RetryBudget {
+  RetryBudget(limit: AttemptLimit, attempts_used: Int, attempts_remaining: Int)
+}
+
+pub fn retry_budget_limit(budget: RetryBudget) -> AttemptLimit {
+  budget.limit
+}
+
+pub fn retry_budget_attempts_used(budget: RetryBudget) -> Int {
+  budget.attempts_used
+}
+
+pub fn retry_budget_attempts_remaining(budget: RetryBudget) -> Int {
+  budget.attempts_remaining
+}
+
+pub type RecoveryDecision(o, e, u) {
+  RetryAfter(RetryDelay, RetryCancellation(e, u))
+  UseOutput(o, Compensation(Nil, o, u))
+  AbortAndCompensate(cause: e, cleanup_failures: List(u))
+  SuspendUnresolved(evidence: e, cleanup_failures: List(u))
+}
+
+pub type RetryCancellation(e, u) {
+  CompensateOnCancel
+  HoldOnCancel(evidence: e, cleanup_failures: List(u))
+}
+
+pub type RecoveryPolicy(i, o, e, u) {
+  RecoveryPolicy(
+    limit: AttemptLimit,
+    recover: fn(i, e, RetryBudget) -> RecoveryDecision(o, e, u),
+  )
+}
+
+pub type RecoveryConfiguration(i, o, e, u) {
+  RecoveryNotConfigured
+  RecoveryConfigured(RecoveryPolicy(i, o, e, u))
+}
+
 pub type ChildOutcome(o, e, u) {
   ChildSucceeded(o)
   ChildFailed(cause: e, undo_failures: List(u))
@@ -215,7 +297,7 @@ type Node(e, u) {
     inputs: List(Token),
     located_steps: List(LocatedStep),
     evaluate: fn(List(Value)) -> NodeOutcome(e, u),
-    local_activity: Maybe(fn(List(Value)) -> LocalActivityOutcome(e, u)),
+    local_activity: Maybe(fn(List(Value), Int) -> LocalActivityOutcome(e, u)),
     selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
     compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
     validate_inputs: List(fn(Value) -> Result(Nil, DecodeError)),
@@ -279,7 +361,29 @@ pub fn activity(
       error_codec_version,
       undo_error_codec_version,
     ])
-  Activity(ActivityAdapter(descriptor, contract, execute, compensation))
+  Activity(ActivityAdapter(
+    descriptor,
+    contract,
+    execute,
+    compensation,
+    RecoveryNotConfigured,
+  ))
+}
+
+pub fn recover_activity(
+  activity: Activity(i, o, e, u),
+  limit: AttemptLimit,
+  recover: fn(i, e, RetryBudget) -> RecoveryDecision(o, e, u),
+) -> Activity(i, o, e, u) {
+  let ActivityAdapter(descriptor, contract, execute, compensation, _) =
+    activity.adapter
+  Activity(ActivityAdapter(
+    descriptor,
+    contract,
+    execute,
+    compensation,
+    RecoveryConfigured(RecoveryPolicy(limit, recover)),
+  ))
 }
 
 pub type ApprovalDecision(a) {
@@ -381,6 +485,15 @@ pub type LocalUndoFailure(u) {
   LocalUndoFailed(at: NodeAddress, cause: u)
 }
 
+pub type LocalUnresolvedReason(e, u) {
+  LocalUnresolvedActivity(
+    at: NodeAddress,
+    cause: e,
+    evidence: e,
+    cleanup_failures: List(LocalUndoFailure(u)),
+  )
+}
+
 pub type LocalReport(o, e, u) {
   LocalExecutionSucceeded(output: o, uncompensated: List(NodeAddress))
   LocalExecutionFailed(
@@ -395,14 +508,24 @@ pub type LocalControlError {
   LocalCompletionDoesNotMatch
   LocalCancellationUnavailable
   LocalCompletionKindDoesNotMatch
+  LocalWakeDoesNotMatch
+  LocalWakeNotExpected
+  LocalRetryBudgetExhausted
+  LocalRecoveryDecisionPending
+  LocalEffectUnresolvedRequiresResolution
 }
 
 pub type LocalWorkDescriptor {
   LocalInputEncoding
   LocalActivityAt(NodeAddress)
+  LocalRecoveryAt(NodeAddress, attempts_used: Int)
   LocalAdapterAt(NodeAddress)
   LocalOutputDecoding
   LocalUndoAt(NodeAddress)
+}
+
+pub type LocalRetryDescriptor {
+  LocalRetryAt(NodeAddress, next_attempt: Int)
 }
 
 pub opaque type LocalExecution(o, e, u) {
@@ -413,6 +536,7 @@ pub opaque type LocalExecution(o, e, u) {
     encoded_input: Maybe(Value),
     values: List(#(Token, Value)),
     remaining_nodes: List(Node(e, u)),
+    attempts: List(#(NodeAddress, Int)),
     journal: List(LocalEffect(u)),
     phase: LocalStage(o, e, u),
   )
@@ -437,6 +561,7 @@ pub type LocalControl(o, e, u) {
   ContinueLocal
   CancelLocal
   CompleteLocal(LocalCompletion(o, e, u))
+  WakeLocal(LocalWake)
 }
 
 pub type LocalTransition(o, e, u) {
@@ -444,6 +569,9 @@ pub type LocalTransition(o, e, u) {
   LocalExecutionPaused(LocalExecution(o, e, u))
   LocalExecutionFinished(LocalExecution(o, e, u), LocalReport(o, e, u))
   LocalControlRejected(LocalExecution(o, e, u), LocalControlError)
+  LocalRetryScheduled(LocalExecution(o, e, u), LocalWake, RetryDelay)
+  LocalRetryBlocked(LocalExecution(o, e, u))
+  LocalExecutionUnresolved(LocalExecution(o, e, u), LocalUnresolvedReason(e, u))
 }
 
 type LocalKernel(o) {
@@ -457,6 +585,10 @@ type LocalKernel(o) {
 
 type LocalCorrelation {
   LocalCorrelation(run_id: Int, task_id: Int)
+}
+
+pub opaque type LocalWake {
+  LocalWake(correlation: LocalCorrelation, descriptor: LocalRetryDescriptor)
 }
 
 type LocalEffect(u) {
@@ -477,13 +609,59 @@ type LocalStage(o, e, u) {
     List(LocalEffect(u)),
     List(LocalUndoFailure(u)),
   )
+  LocalRecoveryReady(
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    e,
+    LocalRecoveryTask(e, u),
+  )
+  LocalRetryWaiting(
+    LocalWake,
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    e,
+    LocalRecoveryTask(e, u),
+    RetryCancellation(e, u),
+  )
+  LocalRetryReady(
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    e,
+    LocalRecoveryTask(e, u),
+    RetryCancellation(e, u),
+  )
+  LocalRetryBlockedStage(
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    e,
+    LocalRecoveryTask(e, u),
+    RetryCancellation(e, u),
+  )
+  LocalUnresolvedStage(
+    LocalUnresolvedReason(e, u),
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    LocalRecoveryTask(e, u),
+  )
   LocalAwaiting(LocalCorrelation, LocalPending(o, e, u))
   LocalTerminal(LocalReport(o, e, u))
 }
 
 type LocalPending(o, e, u) {
   LocalInputPending
-  LocalActivityPending(Node(e, u), List(Node(e, u)))
+  LocalActivityPending(Node(e, u), List(Node(e, u)), Int)
+  LocalRecoveryPending(
+    Node(e, u),
+    List(Node(e, u)),
+    Int,
+    e,
+    LocalRecoveryTask(e, u),
+  )
   LocalAdapterPending(Node(e, u), List(Node(e, u)))
   LocalFinalOutputPending
   LocalUndoPending(
@@ -497,6 +675,7 @@ type LocalPending(o, e, u) {
 type LocalWorkResult(o, e, u) {
   LocalInputEncoded(Result(Value, EncodeError))
   LocalActivityCompleted(LocalActivityOutcome(e, u))
+  LocalRecoveryCompleted(LocalRecoveryOutcome(e, u))
   LocalNodeEvaluated(NodeOutcome(e, u))
   LocalOutputDecoded(Result(o, DecodeError))
   LocalUndoCompleted(Result(Nil, u))
@@ -504,9 +683,29 @@ type LocalWorkResult(o, e, u) {
 
 type LocalActivityOutcome(e, u) {
   LocalActivityInputRejected(NodeBoundaryError)
-  LocalActivityFailed(e)
+  LocalActivityFailed(
+    e,
+    Maybe(LocalRecoveryTask(e, u)),
+    fn(Int) -> LocalActivityOutcome(e, u),
+  )
   LocalActivitySucceeded(Value, Maybe(fn() -> Result(Nil, u)))
   LocalActivityOutputRejected(EncodeError, Maybe(fn() -> Result(Nil, u)))
+}
+
+type LocalRecoveryTask(e, u) {
+  LocalRecoveryTask(
+    attempts_remaining: Int,
+    run: fn() -> LocalRecoveryOutcome(e, u),
+    retry: fn(Int) -> LocalActivityOutcome(e, u),
+  )
+}
+
+type LocalRecoveryOutcome(e, u) {
+  LocalRetryAfter(RetryDelay, RetryCancellation(e, u))
+  LocalRecoveryOutput(Value, Maybe(fn() -> Result(Nil, u)))
+  LocalRecoveryOutputRejected(EncodeError, Maybe(fn() -> Result(Nil, u)))
+  LocalRecoveryAbort(e, List(u))
+  LocalRecoverySuspend(e, List(u))
 }
 
 // Boundary versions describe values persisted by an independent child owner.
@@ -602,7 +801,7 @@ pub fn define(
   structural_signature: String,
   activity: Activity(i, o, e, u),
 ) -> Definition(i, o, e, u) {
-  let ActivityAdapter(descriptor, contract, _, _) = activity.adapter
+  let ActivityAdapter(descriptor, contract, _, _, _) = activity.adapter
   let StepId(activity_id) = descriptor.id
   let assert Ok(activity_node_id) = node_id(activity_id)
   let #(builder, input) =
@@ -795,7 +994,7 @@ pub fn add_activity(
   id: NodeId,
   activity: Activity(a, b, e, u),
 ) -> Result(#(Builder(i, e, u), Port(b)), BuildError) {
-  let ActivityAdapter(descriptor, contract, execute, compensation) =
+  let ActivityAdapter(descriptor, contract, execute, compensation, recovery) =
     activity.adapter
   let address = NamedAddress(id)
   let located =
@@ -814,6 +1013,7 @@ pub fn add_activity(
       contract.output.codec,
       execute,
       compensation,
+      recovery,
     ))
   let undo =
     activity_compensator(input.codec, contract.output.codec, compensation)
@@ -1134,6 +1334,7 @@ pub fn start_local(
         [],
         definition.nodes,
         [],
+        [],
         LocalInputReady,
       ))
     }
@@ -1148,6 +1349,7 @@ pub fn advance_local(
     ContinueLocal -> continue_local(execution)
     CancelLocal -> cancel_local(execution)
     CompleteLocal(completion) -> accept_local_completion(execution, completion)
+    WakeLocal(wake) -> wake_local(execution, wake)
   }
 }
 
@@ -1160,6 +1362,11 @@ pub fn perform_local(work: LocalWork(o, e, u)) -> LocalCompletion(o, e, u) {
 
 pub fn local_work_descriptor(work: LocalWork(o, e, u)) -> LocalWorkDescriptor {
   let LocalWork(_, descriptor, _) = work
+  descriptor
+}
+
+pub fn local_retry_descriptor(wake: LocalWake) -> LocalRetryDescriptor {
+  let LocalWake(_, descriptor) = wake
   descriptor
 }
 
@@ -1202,6 +1409,41 @@ fn continue_local(
     }
     LocalCompensationsReady(reason, pending, failures_reversed) ->
       continue_local_compensation(execution, reason, pending, failures_reversed)
+    LocalRecoveryReady(node, following, attempts_used, cause, task) -> {
+      let LocalRecoveryTask(_, run, _) = task
+      let perform = fn() { LocalRecoveryCompleted(run()) }
+      issue_local_work(
+        execution,
+        LocalRecoveryAt(node.address, attempts_used),
+        LocalRecoveryPending(node, following, attempts_used, cause, task),
+        perform,
+      )
+    }
+    LocalRetryReady(node, following, next_attempt, _, task, _) -> {
+      let LocalRecoveryTask(_, _, retry) = task
+      let attempted =
+        LocalExecution(
+          ..execution,
+          attempts: local_set_attempts_used(
+            execution.attempts,
+            node.address,
+            next_attempt,
+          ),
+        )
+      let perform = fn() { LocalActivityCompleted(retry(next_attempt)) }
+      issue_local_work(
+        attempted,
+        LocalActivityAt(node.address),
+        LocalActivityPending(node, following, next_attempt),
+        perform,
+      )
+    }
+    LocalRetryWaiting(_, _, _, _, _, _, _) ->
+      LocalControlRejected(execution, LocalWorkStillPending)
+    LocalRetryBlockedStage(_, _, _, _, _, _) ->
+      LocalControlRejected(execution, LocalRetryBudgetExhausted)
+    LocalUnresolvedStage(_, _, _, _, _) ->
+      LocalControlRejected(execution, LocalEffectUnresolvedRequiresResolution)
     LocalAwaiting(_, _) ->
       LocalControlRejected(execution, LocalWorkStillPending)
     LocalTerminal(report) -> LocalExecutionFinished(execution, report)
@@ -1271,13 +1513,24 @@ fn continue_local_nodes(
         Present(inputs) ->
           case node.label, node.local_activity {
             ActivityNode(_), Present(run_activity) -> {
+              let attempts_used =
+                local_attempts_used(node.address, execution.attempts) + 1
+              let attempted =
+                LocalExecution(
+                  ..execution,
+                  attempts: local_set_attempts_used(
+                    execution.attempts,
+                    node.address,
+                    attempts_used,
+                  ),
+                )
               let perform = fn() {
-                LocalActivityCompleted(run_activity(inputs))
+                LocalActivityCompleted(run_activity(inputs, attempts_used))
               }
               issue_local_work(
-                execution,
+                attempted,
                 LocalActivityAt(node.address),
-                LocalActivityPending(node, following),
+                LocalActivityPending(node, following, attempts_used),
                 perform,
               )
             }
@@ -1338,12 +1591,168 @@ fn cancel_local(
   case execution.phase {
     LocalInputReady | LocalNodesReady | LocalOutputReady(_) ->
       pause_local_cancellation(execution, execution.journal, [])
+    LocalRetryReady(node, following, next_attempt, cause, task, cancellation) ->
+      cancel_local_retry(
+        execution,
+        node,
+        following,
+        next_attempt - 1,
+        cause,
+        task,
+        cancellation,
+      )
     LocalCompensationsReady(_, _, _) ->
       LocalControlRejected(execution, LocalCancellationUnavailable)
+    LocalRecoveryReady(_, _, _, _, _) ->
+      LocalControlRejected(execution, LocalRecoveryDecisionPending)
+    LocalRetryWaiting(
+      _,
+      node,
+      following,
+      attempts_used,
+      cause,
+      task,
+      cancellation,
+    ) ->
+      cancel_local_retry(
+        execution,
+        node,
+        following,
+        attempts_used,
+        cause,
+        task,
+        cancellation,
+      )
+    LocalRetryBlockedStage(
+      node,
+      following,
+      attempts_used,
+      cause,
+      task,
+      cancellation,
+    ) ->
+      cancel_local_retry(
+        execution,
+        node,
+        following,
+        attempts_used,
+        cause,
+        task,
+        cancellation,
+      )
+    LocalUnresolvedStage(_, _, _, _, _) ->
+      LocalControlRejected(execution, LocalEffectUnresolvedRequiresResolution)
     LocalAwaiting(_, _) ->
       LocalControlRejected(execution, LocalWorkStillPending)
     LocalTerminal(report) -> LocalExecutionFinished(execution, report)
   }
+}
+
+fn cancel_local_retry(
+  execution: LocalExecution(o, e, u),
+  node: Node(e, u),
+  following: List(Node(e, u)),
+  attempts_used: Int,
+  cause: e,
+  task: LocalRecoveryTask(e, u),
+  cancellation: RetryCancellation(e, u),
+) -> LocalTransition(o, e, u) {
+  case cancellation {
+    CompensateOnCancel ->
+      pause_local_cancellation(execution, execution.journal, [])
+    HoldOnCancel(evidence, cleanup_failures) -> {
+      let reason =
+        LocalUnresolvedActivity(
+          node.address,
+          cause,
+          evidence,
+          located_undo_failures(node.address, cleanup_failures),
+        )
+      let unresolved =
+        LocalExecution(
+          ..execution,
+          phase: LocalUnresolvedStage(
+            reason,
+            node,
+            following,
+            attempts_used,
+            task,
+          ),
+        )
+      LocalExecutionUnresolved(unresolved, reason)
+    }
+  }
+}
+
+fn wake_local(
+  execution: LocalExecution(o, e, u),
+  wake: LocalWake,
+) -> LocalTransition(o, e, u) {
+  case execution.phase {
+    LocalRetryWaiting(
+      expected,
+      node,
+      following,
+      attempts_used,
+      cause,
+      task,
+      cancellation,
+    ) ->
+      case wake == expected {
+        False -> LocalControlRejected(execution, LocalWakeDoesNotMatch)
+        True -> {
+          let LocalWake(_, LocalRetryAt(_, next_attempt)) = expected
+          LocalExecutionPaused(
+            LocalExecution(
+              ..execution,
+              phase: LocalRetryReady(
+                node,
+                following,
+                next_attempt,
+                cause,
+                task,
+                cancellation,
+              ),
+              remaining_nodes: [node, ..following],
+            ),
+          )
+        }
+      }
+    _ -> LocalControlRejected(execution, LocalWakeNotExpected)
+  }
+}
+
+fn schedule_local_retry(
+  execution: LocalExecution(o, e, u),
+  node: Node(e, u),
+  following: List(Node(e, u)),
+  attempts_used: Int,
+  cause: e,
+  task: LocalRecoveryTask(e, u),
+  cancellation: RetryCancellation(e, u),
+  delay: RetryDelay,
+) -> LocalTransition(o, e, u) {
+  let descriptor = LocalRetryAt(node.address, attempts_used + 1)
+  let wake =
+    LocalWake(
+      LocalCorrelation(execution.run_id, execution.next_task_id),
+      descriptor,
+    )
+  let waiting =
+    LocalExecution(
+      ..execution,
+      next_task_id: execution.next_task_id + 1,
+      phase: LocalRetryWaiting(
+        wake,
+        node,
+        following,
+        attempts_used,
+        cause,
+        task,
+        cancellation,
+      ),
+    )
+  LocalRetryScheduled(waiting, wake, delay)
 }
 
 fn pause_local_cancellation(
@@ -1406,8 +1815,21 @@ fn accept_local_result(
         execution.journal,
         [],
       )
-    LocalActivityPending(node, following), LocalActivityCompleted(outcome) ->
-      accept_local_activity(execution, node, following, outcome)
+    LocalActivityPending(node, following, attempts_used),
+      LocalActivityCompleted(outcome)
+    -> accept_local_activity(execution, node, following, attempts_used, outcome)
+    LocalRecoveryPending(node, following, attempts_used, cause, task),
+      LocalRecoveryCompleted(outcome)
+    ->
+      accept_local_recovery(
+        execution,
+        node,
+        following,
+        attempts_used,
+        cause,
+        task,
+        outcome,
+      )
     LocalAdapterPending(node, following), LocalNodeEvaluated(outcome) ->
       accept_local_adapter(execution, node, following, outcome)
     LocalFinalOutputPending, LocalOutputDecoded(Ok(output)) ->
@@ -1444,6 +1866,7 @@ fn accept_local_activity(
   execution: LocalExecution(o, e, u),
   node: Node(e, u),
   following: List(Node(e, u)),
+  attempts_used: Int,
   outcome: LocalActivityOutcome(e, u),
 ) -> LocalTransition(o, e, u) {
   case outcome {
@@ -1457,12 +1880,19 @@ fn accept_local_activity(
         execution.journal,
         [],
       )
-    LocalActivityFailed(cause) ->
+    LocalActivityFailed(cause, Missing, _) ->
       pause_local_failure(
         execution,
         LocalApplicationCause(node.address, cause),
         execution.journal,
         [],
+      )
+    LocalActivityFailed(cause, Present(task), _) ->
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          phase: LocalRecoveryReady(node, following, attempts_used, cause, task),
+        ),
       )
     LocalActivitySucceeded(encoded, undo) -> {
       let journal = append(execution.journal, [LocalEffect(node.address, undo)])
@@ -1487,6 +1917,101 @@ fn accept_local_activity(
         journal,
         [],
       )
+    }
+  }
+}
+
+fn accept_local_recovery(
+  execution: LocalExecution(o, e, u),
+  node: Node(e, u),
+  following: List(Node(e, u)),
+  attempts_used: Int,
+  cause: e,
+  task: LocalRecoveryTask(e, u),
+  outcome: LocalRecoveryOutcome(e, u),
+) -> LocalTransition(o, e, u) {
+  case outcome {
+    LocalRetryAfter(delay, cancellation) -> {
+      let LocalRecoveryTask(attempts_remaining, _, _) = task
+      case attempts_remaining > 0 {
+        True ->
+          schedule_local_retry(
+            execution,
+            node,
+            following,
+            attempts_used,
+            cause,
+            task,
+            cancellation,
+            delay,
+          )
+        False ->
+          LocalRetryBlocked(
+            LocalExecution(
+              ..execution,
+              phase: LocalRetryBlockedStage(
+                node,
+                following,
+                attempts_used,
+                cause,
+                task,
+                cancellation,
+              ),
+            ),
+          )
+      }
+    }
+    LocalRecoveryOutput(encoded, undo) -> {
+      let journal = append(execution.journal, [LocalEffect(node.address, undo)])
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          values: append(execution.values, [#(node.token, encoded)]),
+          remaining_nodes: following,
+          journal: journal,
+          phase: LocalNodesReady,
+        ),
+      )
+    }
+    LocalRecoveryOutputRejected(error, undo) -> {
+      let journal = append(execution.journal, [LocalEffect(node.address, undo)])
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalNodeAt(node.address),
+          LocalActivityOutputEncodingFailed(error),
+        ),
+        journal,
+        [],
+      )
+    }
+    LocalRecoveryAbort(abort_cause, cleanup_failures) ->
+      pause_local_failure(
+        execution,
+        LocalApplicationCause(node.address, abort_cause),
+        execution.journal,
+        reverse(located_undo_failures(node.address, cleanup_failures)),
+      )
+    LocalRecoverySuspend(evidence, cleanup_failures) -> {
+      let reason =
+        LocalUnresolvedActivity(
+          node.address,
+          cause,
+          evidence,
+          located_undo_failures(node.address, cleanup_failures),
+        )
+      let unresolved =
+        LocalExecution(
+          ..execution,
+          phase: LocalUnresolvedStage(
+            reason,
+            node,
+            following,
+            attempts_used,
+            task,
+          ),
+        )
+      LocalExecutionUnresolved(unresolved, reason)
     }
   }
 }
@@ -1598,6 +2123,35 @@ fn located_undo_failures(
       LocalUndoFailed(address, failure),
       ..located_undo_failures(address, rest)
     ]
+  }
+}
+
+fn local_attempts_used(
+  address: NodeAddress,
+  attempts: List(#(NodeAddress, Int)),
+) -> Int {
+  case attempts {
+    [] -> 0
+    [#(candidate, count), ..rest] ->
+      case candidate == address {
+        True -> count
+        False -> local_attempts_used(address, rest)
+      }
+  }
+}
+
+fn local_set_attempts_used(
+  attempts: List(#(NodeAddress, Int)),
+  address: NodeAddress,
+  count: Int,
+) -> List(#(NodeAddress, Int)) {
+  case attempts {
+    [] -> [#(address, count)]
+    [#(candidate, _), ..rest] if candidate == address -> [
+      #(address, count),
+      ..rest
+    ]
+    [head, ..rest] -> [head, ..local_set_attempts_used(rest, address, count)]
   }
 }
 
@@ -1761,6 +2315,7 @@ pub type ActivityAdapter(i, o, e, u) {
     contract: ActivityContract(i, o, e, u),
     execute: fn(i) -> Result(o, e),
     compensation: Compensation(i, o, u),
+    recovery: RecoveryConfiguration(i, o, e, u),
   )
 }
 
@@ -1792,7 +2347,7 @@ fn register_named_node(
   label: NodeLabel,
   located: List(LocatedStep),
   evaluate: fn(List(Value)) -> NodeOutcome(e, u),
-  local_activity: Maybe(fn(List(Value)) -> LocalActivityOutcome(e, u)),
+  local_activity: Maybe(fn(List(Value), Int) -> LocalActivityOutcome(e, u)),
   selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
   compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
   validate_inputs: List(fn(Value) -> Result(Nil, DecodeError)),
@@ -1869,32 +2424,127 @@ fn activity_local_evaluator(
   output_codec: Codec(b),
   execute: fn(a) -> Result(b, e),
   compensation: Compensation(a, b, u),
-) -> fn(List(Value)) -> LocalActivityOutcome(e, u) {
-  fn(inputs) {
+  recovery: RecoveryConfiguration(a, b, e, u),
+) -> fn(List(Value), Int) -> LocalActivityOutcome(e, u) {
+  fn(inputs, attempts_used) {
     case inputs {
       [raw] ->
         case direct_input(source, target, raw) {
           Error(error) -> LocalActivityInputRejected(error)
           Ok(native_input) ->
-            case execute(native_input) {
-              Error(error) -> LocalActivityFailed(error)
-              Ok(native_output) -> {
-                // Capture the actual native values before crossing the output
-                // codec boundary. A failed encode still leaves undo authority.
-                let undo = case compensation {
-                  Uncompensated -> Missing
-                  Compensate(compensate) ->
-                    Present(fn() { compensate(native_input, native_output) })
-                }
-                case blueprint.encode(output_codec, native_output) {
-                  Ok(encoded) -> LocalActivitySucceeded(encoded, undo)
-                  Error(error) -> LocalActivityOutputRejected(error, undo)
-                }
-              }
-            }
+            run_local_activity(
+              native_input,
+              attempts_used,
+              output_codec,
+              execute,
+              compensation,
+              recovery,
+            )
         }
       other -> LocalActivityInputRejected(UnexpectedInputCount(length(other)))
     }
+  }
+}
+
+fn run_local_activity(
+  native_input: a,
+  attempts_used: Int,
+  output_codec: Codec(b),
+  execute: fn(a) -> Result(b, e),
+  compensation: Compensation(a, b, u),
+  recovery: RecoveryConfiguration(a, b, e, u),
+) -> LocalActivityOutcome(e, u) {
+  let retry = fn(next_attempt) {
+    run_local_activity(
+      native_input,
+      next_attempt,
+      output_codec,
+      execute,
+      compensation,
+      recovery,
+    )
+  }
+  case execute(native_input) {
+    Error(cause) ->
+      LocalActivityFailed(
+        cause,
+        recovery_task(
+          recovery,
+          native_input,
+          cause,
+          output_codec,
+          attempts_used,
+          retry,
+        ),
+        retry,
+      )
+    Ok(native_output) -> {
+      // Capture the actual native values before crossing the output codec
+      // boundary. A failed encode still leaves undo authority.
+      let undo = case compensation {
+        Uncompensated -> Missing
+        Compensate(compensate) ->
+          Present(fn() { compensate(native_input, native_output) })
+      }
+      case blueprint.encode(output_codec, native_output) {
+        Ok(encoded) -> LocalActivitySucceeded(encoded, undo)
+        Error(error) -> LocalActivityOutputRejected(error, undo)
+      }
+    }
+  }
+}
+
+fn recovery_task(
+  recovery: RecoveryConfiguration(i, o, e, u),
+  input: i,
+  cause: e,
+  output_codec: Codec(o),
+  attempts_used: Int,
+  retry: fn(Int) -> LocalActivityOutcome(e, u),
+) -> Maybe(LocalRecoveryTask(e, u)) {
+  case recovery {
+    RecoveryNotConfigured -> Missing
+    RecoveryConfigured(RecoveryPolicy(limit, recover)) -> {
+      let budget = make_retry_budget(limit, attempts_used)
+      Present(LocalRecoveryTask(
+        budget.attempts_remaining,
+        fn() {
+          lower_recovery_decision(recover(input, cause, budget), output_codec)
+        },
+        retry,
+      ))
+    }
+  }
+}
+
+fn make_retry_budget(limit: AttemptLimit, attempts_used: Int) -> RetryBudget {
+  let remaining = case attempt_limit_value(limit) - attempts_used {
+    count if count > 0 -> count
+    _ -> 0
+  }
+  RetryBudget(limit, attempts_used, remaining)
+}
+
+fn lower_recovery_decision(
+  decision: RecoveryDecision(o, e, u),
+  output_codec: Codec(o),
+) -> LocalRecoveryOutcome(e, u) {
+  case decision {
+    RetryAfter(delay, cancellation) -> LocalRetryAfter(delay, cancellation)
+    UseOutput(output, compensation) -> {
+      let undo = case compensation {
+        Uncompensated -> Missing
+        Compensate(compensate) -> Present(fn() { compensate(Nil, output) })
+      }
+      case blueprint.encode(output_codec, output) {
+        Ok(encoded) -> LocalRecoveryOutput(encoded, undo)
+        Error(error) -> LocalRecoveryOutputRejected(error, undo)
+      }
+    }
+    AbortAndCompensate(cause, cleanup_failures) ->
+      LocalRecoveryAbort(cause, cleanup_failures)
+    SuspendUnresolved(evidence, cleanup_failures) ->
+      LocalRecoverySuspend(evidence, cleanup_failures)
   }
 }
 

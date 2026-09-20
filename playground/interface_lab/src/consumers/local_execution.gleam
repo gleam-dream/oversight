@@ -548,6 +548,10 @@ fn cancel_after_two(
                       Error(ControllerRejected(error))
                     saga.LocalWorkIssued(_, _) ->
                       Error(UnexpectedControllerTransition)
+                    saga.LocalRetryScheduled(_, _, _)
+                    | saga.LocalRetryBlocked(_)
+                    | saga.LocalExecutionUnresolved(_, _) ->
+                      Error(UnexpectedControllerTransition)
                   }
                 }
               }
@@ -571,13 +575,21 @@ fn run_one_work(
       case saga.advance_local(waiting, saga.CompleteLocal(completion)) {
         saga.LocalExecutionPaused(next) -> Ok(#(next, descriptor))
         saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
-        saga.LocalExecutionFinished(_, _) | saga.LocalWorkIssued(_, _) ->
+        saga.LocalExecutionFinished(_, _)
+        | saga.LocalWorkIssued(_, _)
+        | saga.LocalRetryScheduled(_, _, _)
+        | saga.LocalRetryBlocked(_)
+        | saga.LocalExecutionUnresolved(_, _) ->
           Error(UnexpectedControllerTransition)
       }
     }
     saga.LocalExecutionPaused(_) -> Error(UnexpectedControllerTransition)
     saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
-    saga.LocalExecutionFinished(_, _) | saga.LocalWorkIssued(_, _) ->
+    saga.LocalExecutionFinished(_, _)
+    | saga.LocalWorkIssued(_, _)
+    | saga.LocalRetryScheduled(_, _, _)
+    | saga.LocalRetryBlocked(_)
+    | saga.LocalExecutionUnresolved(_, _) ->
       Error(UnexpectedControllerTransition)
   }
 }
@@ -603,12 +615,20 @@ fn drive_to_report_traced(
           }
         saga.LocalExecutionFinished(_, report) -> Ok(#(report, [descriptor]))
         saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
-        saga.LocalWorkIssued(_, _) -> Error(UnexpectedControllerTransition)
+        saga.LocalWorkIssued(_, _)
+        | saga.LocalRetryScheduled(_, _, _)
+        | saga.LocalRetryBlocked(_)
+        | saga.LocalExecutionUnresolved(_, _) ->
+          Error(UnexpectedControllerTransition)
       }
     }
     saga.LocalExecutionPaused(next) -> drive_to_report_traced(next)
     saga.LocalExecutionFinished(_, report) -> Ok(#(report, []))
     saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
+    saga.LocalRetryScheduled(_, _, _)
+    | saga.LocalRetryBlocked(_)
+    | saga.LocalExecutionUnresolved(_, _) ->
+      Error(UnexpectedControllerTransition)
   }
 }
 
@@ -632,12 +652,20 @@ fn drive_to_report(
         saga.LocalExecutionPaused(next) -> drive_to_report(next)
         saga.LocalExecutionFinished(_, report) -> Ok(report)
         saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
-        saga.LocalWorkIssued(_, _) -> Error(UnexpectedControllerTransition)
+        saga.LocalWorkIssued(_, _)
+        | saga.LocalRetryScheduled(_, _, _)
+        | saga.LocalRetryBlocked(_)
+        | saga.LocalExecutionUnresolved(_, _) ->
+          Error(UnexpectedControllerTransition)
       }
     }
     saga.LocalExecutionPaused(next) -> drive_to_report(next)
     saga.LocalExecutionFinished(_, report) -> Ok(report)
     saga.LocalControlRejected(_, error) -> Error(ControllerRejected(error))
+    saga.LocalRetryScheduled(_, _, _)
+    | saga.LocalRetryBlocked(_)
+    | saga.LocalExecutionUnresolved(_, _) ->
+      Error(UnexpectedControllerTransition)
   }
 }
 

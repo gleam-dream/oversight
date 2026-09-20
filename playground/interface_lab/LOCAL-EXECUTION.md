@@ -3,7 +3,7 @@
 ## Question
 
 - Can the canonical Saga definition retain enough local execution evidence to compensate completed activities without introducing another workflow builder?
-- The experiment uses serial, explicitly interpreted work. It supplies no scheduler, worker process, persistence, retry policy, or exception boundary.
+- The experiment uses serial, explicitly interpreted work. It supplies no scheduler, worker process, persistence, or exception boundary. The subsequent [activity recovery experiment](ACTIVITY-RECOVERY.md) adds typed retry and recovery decisions.
 
 ## Definition and admission
 
@@ -29,6 +29,6 @@
 
 ## Remaining scope
 
-- Retry exhaustion, compensation of a failing activity, in-flight cancellation, parallel execution, exception containment, approvals, and child execution remain separate experiments.
+- Typed retry exhaustion and failed-activity recovery are covered by [activity recovery](ACTIVITY-RECOVERY.md). In-flight cancellation, parallel execution, exception containment, approvals, and child execution remain separate experiments.
 - Local post-success compensation authority and durable compensation receipts retain different ownership requirements.
 - Checkpoint restoration, definition migration, OTP supervision, durable journals, and fault tests remain in [API coverage](../../API-COVERAGE.md).

@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-five consumers compile with only their transitive source imports.
-- Eighty negative fixtures fail with their intended single compiler diagnostic.
-- Forty-four interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-six consumers compile with only their transitive source imports.
+- Eighty-two negative fixtures fail with their intended single compiler diagnostic.
+- Forty-five interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -245,7 +245,7 @@
 - [Local execution](LOCAL-EXECUTION.md) interprets direct activities, shared dependencies, and adapters from the canonical definition. Callback work remains separate from reducer transitions.
 - Successful activities retain native compensation closures before output encoding. Failure and cancellation preserve reverse completion order, located undo failures, and uncompensated successes.
 - Correlated completions protect the current state from foreign or repeated delivery. They do not prevent replaying copied state or repeating effects.
-- Approval, child, and choice nodes reject admission before callbacks. Retry policy, parallel scheduling, post-success compensation authority, and durable recovery remain open.
+- Approval, child, and choice nodes reject admission before callbacks. Typed activity recovery is covered below; parallel scheduling, post-success compensation authority, and durable recovery remain open.
 
 ## Configured structured model turns
 
@@ -273,3 +273,10 @@
 - [Number-policy research](../../research/blueprint-number-policy.md) records direct Node and OTP parser probes, pinned source hashes, and the distinction between JSON numeric semantics and native representation.
 - The selected direction uses an exact decimal leaf with checked native projections. A post-parse finite check cannot recover information already lost through rounding or underflow.
 - The numeric kernel, schema/transport integration, decimal oracle, resource limits, and cross-target consumer evidence remain unimplemented. Laboratory consumer and probe counts are unchanged.
+
+## Typed local activity recovery
+
+- [Activity recovery](ACTIVITY-RECOVERY.md) extends the canonical activity with bounded attempts, replacement output, explicit rollback permission, and typed unresolved evidence.
+- Retry authorization and cancellation permission remain separate. Delayed and exhausted retries can retain uncertain effects without compensating prior work.
+- Recovery runs as issued work, retains native input across attempts, and captures replacement compensation before output encoding. Correlated wakes reject foreign and repeated delivery against the current execution.
+- Timers, unresolved-effect resolution, in-flight settlement, parallel attempts, persistence, and upstream behavioral parity remain open.
