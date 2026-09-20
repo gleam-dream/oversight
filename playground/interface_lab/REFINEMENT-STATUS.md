@@ -12,7 +12,7 @@
 
 | Boundary                    | Current evidence                                                                                                  | Next decisive question                                                         |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed input field, registry consistency                               | General records, tagged unions, refinements, and independent schema validation |
+| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed input field, lists, nulls, and registry consistency             | General records, tagged unions, refinements, and independent schema validation |
 | Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                            | Protocol name rules, visibility policy, transport conformance                  |
 | Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                               | Explicit provider schema subsets and streaming resource ownership              |
 | Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing | One lowered definition model preserving explicit activity/child ownership      |
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-two consumers compile with only their transitive source imports.
+- Gleam 1.18.1: twenty-three consumers compile with only their transitive source imports.
 - Twenty-three negative fixtures fail with their intended single compiler diagnostic.
-- Fourteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Fifteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -54,3 +54,7 @@
 - Record remaining obligations in the same commit as the refinement.
 - Do not count a typed placeholder as runtime evidence, or keep adding public types without a consumer that needs them.
 - Move to operational prototypes only after the relevant lifecycle and composition contracts fit together. Do not promote the current playground as production packages.
+
+## Collection refinement
+
+- [Collection and null codecs](COLLECTION-CODECS.md) retain indexed failures and explicit null representation. Optional properties and independent schema validation remain pending.
