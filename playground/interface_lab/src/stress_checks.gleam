@@ -1,5 +1,6 @@
 // THROWAWAY: Execute only pure interface composition probes, never runtime stubs.
 import consumers/approval_context
+import consumers/conditional_graph
 import consumers/config_codec
 import consumers/derived_catalog
 import consumers/foreign_observation
@@ -13,6 +14,7 @@ pub fn main() -> Nil {
   approval_context.probe()
   foreign_observation.probe()
   derived_catalog.probe()
+  conditional_graph.probe()
   config_codec.probe()
   offline_pipeline.probe()
   shared_graph.probe()
