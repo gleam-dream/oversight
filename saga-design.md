@@ -28,8 +28,12 @@ second accepted public builder.
 [Unified workflows](playground/interface_lab/UNIFIED-WORKFLOWS.md) establishes
 construction evidence. A typed activity retains its execution function,
 compensation policy, operation identity/version, and four versioned codecs
-(input, output, error, undo error). Blueprint supplies codecs; Saga owns the
-versions and compatibility of its persisted boundaries. A caller-supplied
+(input, output, error, undo error). Ordinary workflow persistence uses standard
+Gleam JSON encoders/decoders or an
+optional schema-independent codec abstraction. Blueprint is needed only for the
+runtime-authored JSON Schema surface below. Saga owns the versions and
+compatibility of its persisted boundaries; laboratory Blueprint imports are
+prototype convenience, not a production dependency requirement. A caller-supplied
 structural signature is an assertion, not a computed compatibility proof.
 
 The original conceptual types are:

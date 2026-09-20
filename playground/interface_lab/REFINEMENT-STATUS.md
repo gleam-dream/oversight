@@ -3,7 +3,7 @@
 ## Working direction
 
 - The [initial public API freeze](../../PUBLIC-API.md) records the intended facades and resolves the first-promotion boundary. Open and Partial coverage remains implementation backlog; it does not invite another interface-refinement wave.
-- Keep package boundaries independent. Shared codecs and ordinary typed functions provide reuse without a universal operation type or global request context.
+- Keep package boundaries independent. Blueprint is used only when JSON Schema is needed; ordinary JSON prefers standard Gleam encoders/decoders. Any optional reusable codec abstraction remains independent of Blueprint and schemas. Current laboratory imports are prototype convenience, not production dependencies; Blueprint exact-number policy governs its own schema/value model. Ordinary typed functions provide reuse without a universal operation type or global request context.
 - Use one eventual Saga authoring model for local and durable workflows. Keep execution capabilities explicit rather than hiding persistence behind a local-looking call.
 - Keep Fabric's tool-loop policy outside LLM provider continuations. Retain the originating provider with a pending continuation.
 - Derive tool discovery from each package's registered input codec. Treat schema availability and protocol compatibility as explicit admission checks.

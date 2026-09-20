@@ -28,16 +28,16 @@
 ### 2.1 Module and package ownership
 
 - Internal modules separate protocol values, revision codecs, registry construction, server dispatch, client behavior, transport, authorization, and test support. Conformance executables remain repository tooling.
-- [Blueprint](blueprint-design.md) owns `Value`, exact JSON numbers, codecs, schema ASTs, validation, and schema generation. Relay must not maintain the baseline's competing `JsonValue` integer/float algebra or independent `Schema(a)` DSL.
+- [Blueprint](blueprint-design.md) owns the JSON Schema-aware value/codec model, schema ASTs, validation, and schema generation used by declarations and schema-validated output. Relay must not duplicate that `Schema(a)` DSL. Ordinary protocol envelopes prefer standard Gleam JSON encoders/decoders, with any reusable codec abstraction independent of Blueprint.
 - Relay owns protocol-specific schema admission and revision-specific document encoding. Blueprint source generation remains experimental tooling outside the initial public facade; proposed `relay_gen` work remains optional protocol tooling rather than a published API claim.
 - [Warden](warden-design.md) owns web login and OIDC identity. Relay owns MCP bearer grants and authorization roles; neither package initially depends on the other.
 
 ### 2.2 Type safety and data contracts
 
-- Public `String` or `Dynamic` use requires a documented boundary justification; `Dynamic` must not become a public protocol contract. Extension payloads, metadata, and explicit raw-tool calls use Blueprint `Value` rather than unrestricted native values.
+- Public `String` or `Dynamic` use requires a documented boundary justification; `Dynamic` must not become a public protocol contract. Extension payloads, metadata, and explicit raw-tool calls retain checked JSON boundaries without requiring Blueprint. Blueprint values apply when those paths explicitly need JSON Schema validation.
 - Method names, protocol revisions, content variants, errors, roles, log levels, and stop reasons use typed alternatives. Names, cursors, resource URIs, progress tokens, session identifiers, scopes, and credentials use validated or opaque types where their ownership requires it.
 - Binary content remains bytes natively, with base64 confined to revision codecs. URI templates require parsed segments rather than unchecked substitution.
-- Exact Blueprint numbers are the serialization target. The current integer-only laboratory request identifiers and progress values are a subset; general numbers, fractional progress, and byte parsing remain open.
+- Blueprint’s exact-number policy applies when its schema/value model is used; ordinary protocol serialization retains its own explicit numeric contract. The current integer-only laboratory request identifiers and progress values are a subset; general numbers, fractional progress, and byte parsing remain open.
 - A tool retains its input codec, output codec, metadata, and typed handler before heterogeneous registration erases native types. Registry construction rejects duplicates and unavailable required schema metadata; declarations and dispatch derive from the same registry.
 - Admission must retain the actual Blueprint schema rather than independently handwritten JSON. Unsupported schema or dialect features require explicit outcomes instead of silent rewriting.
 - Handler context remains application-owned and explicit at listing and invocation. Contextual tools keep tenant, identity, and policy inputs outside the business argument schema; no universal request-context record is introduced.
@@ -46,7 +46,7 @@
 ### 2.3 Typed requests and results
 
 - Typed method values pair parameter and result codecs without requiring GADTs. Client-to-server and server-to-client method types remain distinct so direction is checked at the public boundary.
-- Typed tool references retain input and output contracts. An explicit raw call returns Blueprint values rather than claiming a native result type.
+- Typed tool references retain input and output contracts. An explicit raw call returns a checked JSON result rather than claiming a native result type; it does not require Blueprint.
 - Call outcomes distinguish structured output, content-only output, and tool execution failure from protocol, transport, and authorization errors. Retain the baseline structured output plus text-mirror compatibility intent through revision-specific result encoding.
 - Tool output-schema declarations, annotations, text/image/audio content, resource links, and embedded resources remain required server scope. The modern prototype's general JSON structured-content boundary does not establish those complete capabilities.
 - Modern complete results include `resultType: "complete"`, including tool failures with `isError: true`. The `2025-11-25` result codec omits `resultType`; shared native values must not collapse those wire contracts.
@@ -179,7 +179,7 @@
 | Runtime                         | Session churn, parallel calls, cancellation storms, supervisor isolation, bounded mailbox/process counts, owner termination, timeouts, stale callback isolation                                                                      |
 
 - Port scenarios and assertions with provenance; inspect licenses before copying source. The baseline's TypeScript/Python observations and uninspected Anubis feature descriptions have different evidence strength.
-- Blueprint owns schema-law and exact-number validation. Relay still owns proving that its admitted declarations and revision encoders preserve those contracts on the wire.
+- Blueprint owns schema-law and exact-number validation within its schema/value model. Relay proves that schema-aware declarations preserve those contracts on the wire; ordinary revision codecs retain independent numeric and roundtrip obligations.
 - Pure core tests retain the baseline Erlang/JavaScript cross-target ambition when that target is enabled. OTP 27/28 CI, reference-peer interoperability, and release hardening require actual implementation compatibility evidence.
 
 ### 4.4 Demonstrated subset and remaining work
@@ -195,7 +195,7 @@
 | Baseline capability                                                       | Disposition                                                                                                                                             | Remaining friction                                                                                                                 |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | Typed core, JSON-RPC, capabilities, ping, lifecycle                       | Retained with explicit modern and legacy strategies                                                                                                     | Baseline modern-draft/handshake assumptions are obsolete                                                                           |
-| Schema/codec/value DSL and generation                                     | Data contracts reassigned to Blueprint; protocol generation deferred tooling                                                                            | Exact numbers and schema dialect admission must replace duplicate JSON algebras                                                    |
+| Schema/codec/value DSL and generation                                     | JSON Schema-aware contracts reassigned to Blueprint; protocol generation deferred tooling                                                               | Blueprint exact numbers apply to schema-aware values; ordinary protocol JSON stays independent                                     |
 | Tools, annotations, structured output/output schema, all content variants | Retained; contextual registry and narrow modern calls demonstrated                                                                                      | Rich results, output declarations, protocol-specific admission remain partial                                                      |
 | Resources, templates, subscriptions, updates, completion                  | Retained backlog                                                                                                                                        | Revision-specific wire and runtime behavior unimplemented                                                                          |
 | Prompts, argument completion, change notifications                        | Retained backlog                                                                                                                                        | Full typed family and fixtures unimplemented                                                                                       |

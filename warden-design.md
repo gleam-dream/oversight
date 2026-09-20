@@ -14,7 +14,7 @@
 - Decode foreign terms at one boundary and expose typed outcomes. Public claim maps, token strings, or adapter attestations must not directly construct verified identity.
 - Opacity establishes constructor ownership within a configured trust model. It does not establish cryptographic correctness, honest adapters, secret erasure, or linear consumption of copyable values.
 - Warden owns web identity and session custody. [Relay](relay-design.md) owns MCP bearer grants, resource authorization, and MCP-specific client discovery; a Warden identity is not a Relay grant.
-- [Blueprint](blueprint-design.md) supplies data values and codecs where serialized contracts are required. Warden retains identity, token, provider, and session semantics without introducing a universal identity or persistence protocol.
+- Ordinary identity, token, and session JSON uses standard Gleam JSON encoders/decoders, with any reusable codec abstraction independent of schemas. [Blueprint](blueprint-design.md) is needed only when a particular integration requires JSON Schema; serialized state alone does not require it. Warden retains identity, token, provider, and session semantics without introducing a universal identity or persistence protocol.
 - The backend remains replaceable through typed operation contracts. Protocol expectations come from external specifications, vectors, upstream fixtures, and conformance assets; Warden-specific orchestration and ownership need their own tests.
 
 ## 3. Target design

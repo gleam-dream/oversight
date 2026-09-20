@@ -50,7 +50,9 @@ convention is not a native telemetry restriction or a substitute for atom safety
 
 The laboratory `FieldMap` uses string/value pairs and Blueprint codecs to test
 structure. It is not a native Erlang map and does not make JSON Blueprint a
-production dependency of Sinal. Native references, exception reasons, stacktraces,
+production dependency of Sinal. Telemetry does not require JSON Schema; any
+ordinary JSON export belongs to an adapter using standard Gleam JSON facilities,
+not a mandatory Blueprint dependency. Native references, exception reasons, stacktraces,
 and other BEAM terms must survive the intended native boundary without JSON
 serialization. Dynamic foreign terms remain confined to the adapter and are
 decoded before entering typed handlers.

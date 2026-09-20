@@ -105,7 +105,10 @@ pub type Job(args) {
   `fn(input) -> Result(output, error)` handler.
 - Ordinary invocation remains useful without a queue. Scheduling responses adapt
   the handler result; business functions need not depend on the scheduler.
-- Blueprint supplies serialization contracts. Encoded dispatch distinguishes input
+- Ordinary job payloads and recorded results use standard Gleam JSON encoders and
+  decoders, optionally grouped by a schema-independent codec abstraction. Blueprint
+  is needed only when an application requires JSON Schema; laboratory codec imports
+  do not mandate that dependency. Encoded dispatch distinguishes input
   decoding, business failure, output encoding failure, and error encoding failure.
   Runtime failure never fabricates a value of the worker's business error type.
 

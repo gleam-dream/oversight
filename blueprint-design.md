@@ -1,13 +1,15 @@
-# `blueprint` — typed JSON contracts
+# `blueprint` — typed JSON Schema contracts
 
 ## Scope and ownership
 
-Blueprint owns transport-independent JSON values, bidirectional native codecs,
-schema descriptions, and finite runtime validation. One contract supplies the
-encoding, decoding, and discoverable wire schema used by consumer packages.
-The original Relay `Schema(a)` and Fabric codec/schema boundary move here;
+Blueprint owns JSON Schema descriptions, schema-aware values and bidirectional
+codecs, and finite runtime validation. Its contract couples encoding and decoding
+with a discoverable schema when a consumer needs JSON Schema. The original
+Relay `Schema(a)` and Fabric schema-aware tool boundary move here;
 Relay retains protocol declarations and revision-specific generation, while
 Saga retains graph publication and workflow compatibility versions.
+
+Blueprint is required only for JSON Schema-aware paths (schema declaration, schema-derived validation, or runtime schema contracts). Ordinary JSON serialization should use standard Gleam JSON encoders and decoders. Any optional reusable codec abstraction must remain independent of Blueprint and schema support; no new codec package or API is prescribed. Schema availability is an explicit capability, not a universal serialization constraint.
 
 Blueprint does not register tools, authorize invocation, execute workflows, or
 open provider transports. Sinal's native BEAM fields are a separate contract.
@@ -29,7 +31,9 @@ number, array, and object values. It is not an arbitrary BEAM term or native
 value erasure. Object entries must preserve duplicate keys until the boundary
 can reject them; converting directly to a map loses that evidence.
 
-One opaque exact `Number` represents every JSON numeric value. It retains a
+Within Blueprint’s schema/value model, one opaque exact `Number` represents
+every JSON numeric value. This is not a representation mandate for ordinary
+Gleam JSON serialization outside that model. It retains a
 normalized decimal coefficient and exponent; comparison and mathematical
 integrality never pass through `Float`. Decimal or exponent spelling can denote
 an integer. Canonical zero is positive and canonical rendering uses compact
@@ -244,7 +248,8 @@ migration. Their archives omit upstream tests; test reuse needs a pinned source
 checkout. Source-only references such as glon and castor do not establish an
 adopted backend or executed oracle. Relay retains protocol revision snapshots,
 official-schema checks, and protocol codec roundtrips; Blueprint supplies the
-shared codec-law tests without claiming MCP conformance.
+schema-aware codec-law tests without claiming MCP conformance. Ordinary protocol
+codecs retain their own roundtrip tests without requiring Blueprint.
 
 ## Capability disposition
 
@@ -252,20 +257,20 @@ The baseline is Relay's schema/codec contract and Fabric's typed wire boundary
 in commit `9194f02`, expanded by the shared-foundation and Blueprint research.
 Deferred capabilities remain requirements; the initial facade is delivery scope.
 
-| Original or agreed capability                                      | Disposition and owner                                                         | Evidence and remaining obligation                                                                              |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| One definition yields encoder, decoder, and schema                 | Reassigned from Relay to Blueprint; retained as `Codec(a)`                    | Typed combinator probes; constructor and mapping laws remain required                                          |
-| Fabric native/wire agreement and schema identity                   | Reassigned data contract to Blueprint; graph compatibility stays Saga         | Codec-edge consumers; version labels do not prove wire compatibility                                           |
-| JSON null/bool/string/number/array/object without public `Dynamic` | Retained; number design expanded to exact `Number`                            | Kernel oracle only; `Value.Int`, parser, transport and schema migration pending                                |
-| Primitive/product codecs, fields, optionality, null, collections   | Retained and expanded in Blueprint                                            | Constructive native/runtime/schema corpus; parser and resource tests pending                                   |
-| Constraints, enums, `oneOf`, broader schema AST                    | Retained; finite subset demonstrated, broader families deferred               | Bounds, tagged and string-enum cases; string lengths, numeric enums, general unions and constraints pending    |
-| Unmodelled schema escape hatch                                     | Retained as unverified raw data boundary; validation unresolved beyond subset | Must not silently discard keywords or certify unavailable schema                                               |
-| Runtime-created schema values                                      | Expanded into finite contracts and opaque witnesses                           | Normalization, loader and native-boundary negatives; forms/Saga graph consumers and hostile-input work pending |
-| Native type/codec generation                                       | Retained future tooling; excluded initial facade                              | Positional records/enums compiled; named generation paused, broader and recursive profiles pending             |
-| JSON Blueprint 1.1.0 and 1.7.1 migration                           | Retained, partial compatibility                                               | Actual release probes; full source, wire, error, recursive and numeric migration unresolved                    |
-| Provider/protocol schema restrictions                              | Consumer-owned admission using Blueprint AST                                  | Scripted policy evidence only; real profiles and dialect lowering pending                                      |
-| Recursive schemas and references                                   | Retained deferred family                                                      | Needs finite/resource policy, recursive codec laws, independent validator and generation fixtures              |
-| Protocol generation, snapshots and conformance                     | Relay retains protocol tooling; Blueprint supplies codec core                 | Original Relay test obligations remain outside generic Blueprint conformance claims                            |
+| Original or agreed capability                                      | Disposition and owner                                                             | Evidence and remaining obligation                                                                              |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| One definition yields encoder, decoder, and schema                 | Reassigned from Relay to Blueprint; retained as `Codec(a)`                        | Typed combinator probes; constructor and mapping laws remain required                                          |
+| Fabric native/wire agreement and schema identity                   | Schema-aware contract belongs to Blueprint; ordinary serialization is independent | Codec-edge consumers; version labels do not prove wire compatibility                                           |
+| JSON null/bool/string/number/array/object without public `Dynamic` | Retained; number design expanded to exact `Number`                                | Kernel oracle only; `Value.Int`, parser, transport and schema migration pending                                |
+| Primitive/product codecs, fields, optionality, null, collections   | Retained and expanded in Blueprint                                                | Constructive native/runtime/schema corpus; parser and resource tests pending                                   |
+| Constraints, enums, `oneOf`, broader schema AST                    | Retained; finite subset demonstrated, broader families deferred                   | Bounds, tagged and string-enum cases; string lengths, numeric enums, general unions and constraints pending    |
+| Unmodelled schema escape hatch                                     | Retained as unverified raw data boundary; validation unresolved beyond subset     | Must not silently discard keywords or certify unavailable schema                                               |
+| Runtime-created schema values                                      | Expanded into finite contracts and opaque witnesses                               | Normalization, loader and native-boundary negatives; forms/Saga graph consumers and hostile-input work pending |
+| Native type/codec generation                                       | Retained future tooling; excluded initial facade                                  | Positional records/enums compiled; named generation paused, broader and recursive profiles pending             |
+| JSON Blueprint 1.1.0 and 1.7.1 migration                           | Retained, partial compatibility                                                   | Actual release probes; full source, wire, error, recursive and numeric migration unresolved                    |
+| Provider/protocol schema restrictions                              | Consumer-owned admission using Blueprint AST                                      | Scripted policy evidence only; real profiles and dialect lowering pending                                      |
+| Recursive schemas and references                                   | Retained deferred family                                                          | Needs finite/resource policy, recursive codec laws, independent validator and generation fixtures              |
+| Protocol generation, snapshots and conformance                     | Relay retains protocol tooling; Blueprint supplies schema-aware codec support     | Original Relay test obligations remain outside generic Blueprint conformance claims                            |
 
 ## Sources and unresolved friction
 
