@@ -20,6 +20,7 @@
 
 - A completed child's historical output remains separate from its compensation view. Later compensation does not rewrite the historical result.
 - Undo failures decode through the retained native undo-error codec. Reconciliation evidence remains an explicit raw-value boundary.
+- Attachment and observation share one `CompatibilityError` vocabulary inside their distinct operation errors. Metadata comparisons cannot report unrelated storage failures.
 - Missing runs, unavailable owners, unavailable retained results, and corrupt encoded results are different outcomes.
 - The prototype does not prove that equal version labels describe equal codecs. Applications must change their compatibility assertions when their encoding contracts change.
 - The prototype does not prove monotonically increasing revisions, retention, authorization, concurrent ownership, or linear use of a handle.

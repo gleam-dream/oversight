@@ -228,8 +228,9 @@ pub fn probe() -> Nil {
     )
   let changed_metadata_owner =
     owner_with("checkout-owner", run_id, wrong_output_version)
-  let assert Error(saga_grind.ObservedOutputCodecVersionMismatch) =
-    saga_grind.observe_child(changed_metadata_owner, malformed_handle)
+  let assert Error(saga_grind.ObservedIncompatible(
+    saga_grind.ChildOutputCodecVersionMismatch,
+  )) = saga_grind.observe_child(changed_metadata_owner, malformed_handle)
 
   let corrupt =
     stored(
@@ -272,7 +273,7 @@ pub fn probe() -> Nil {
   let other_owner = must_owner("other-owner")
   let other_reader =
     saga_grind.durable_owner(other_owner, fn(_) { Ok(completed) })
-  let assert Error(saga_grind.ChildOwnerMismatch) =
+  let assert Error(saga_grind.ChildIncompatible(saga_grind.ChildOwnerMismatch)) =
     saga_grind.reattach_child(other_reader, current_contract, link)
 
   let wrong_run_record =
@@ -290,8 +291,9 @@ pub fn probe() -> Nil {
       ),
     )
   let wrong_run_owner = owner_with("checkout-owner", run_id, wrong_run_record)
-  let assert Error(saga_grind.ChildRunIdentityMismatch) =
-    saga_grind.attach_child(wrong_run_owner, current_contract, run_id)
+  let assert Error(saga_grind.ChildIncompatible(
+    saga_grind.ChildRunIdentityMismatch,
+  )) = saga_grind.attach_child(wrong_run_owner, current_contract, run_id)
 
   let wrong_owner_record =
     stored(
@@ -309,7 +311,7 @@ pub fn probe() -> Nil {
     )
   let wrong_owner_record_reader =
     owner_with("checkout-owner", run_id, wrong_owner_record)
-  let assert Error(saga_grind.ChildOwnerMismatch) =
+  let assert Error(saga_grind.ChildIncompatible(saga_grind.ChildOwnerMismatch)) =
     saga_grind.attach_child(wrong_owner_record_reader, current_contract, run_id)
 
   let missing_owner =
@@ -353,11 +355,11 @@ fn assert_attach_mismatch(
   owner: saga_grind.DurableOwner,
   contract: saga.ChildContract(String, Receipt, ChildError, UndoError),
   run_id: identity.RunId,
-  expected: saga_grind.AttachError,
+  expected: saga_grind.CompatibilityError,
 ) -> Nil {
   case saga_grind.attach_child(owner, contract, run_id) {
     Error(actual) -> {
-      let assert True = actual == expected
+      let assert True = actual == saga_grind.ChildIncompatible(expected)
       Nil
     }
     Ok(_) -> panic as "incompatible child metadata unexpectedly attached"

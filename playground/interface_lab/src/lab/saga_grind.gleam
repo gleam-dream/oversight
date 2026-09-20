@@ -207,10 +207,10 @@ pub fn child_link(child: DurableChild(o, e, u)) -> child_link.ChildLink {
   child.link
 }
 
-pub type AttachError {
+// Compatibility has the same meaning during attachment and observation.
+// Storage and decoding failures remain specific to their operation.
+pub type CompatibilityError {
   ChildOwnerMismatch
-  ChildRunMissing
-  ChildOwnerUnavailable
   ChildRunIdentityMismatch
   ChildDefinitionIdentityMismatch
   ChildDefinitionVersionMismatch
@@ -219,6 +219,12 @@ pub type AttachError {
   ChildOutputCodecVersionMismatch
   ChildErrorCodecVersionMismatch
   ChildUndoErrorCodecVersionMismatch
+}
+
+pub type AttachError {
+  ChildIncompatible(CompatibilityError)
+  ChildRunMissing
+  ChildOwnerUnavailable
   ChildLinkInvalid
 }
 
@@ -234,7 +240,7 @@ pub fn attach_child(
     Ok(stored) -> {
       let OwnerId(owner_name) = owner_id
       case run_matches_contract(stored, owner_name, run_id, contract) {
-        Error(mismatch) -> Error(mismatch)
+        Error(mismatch) -> Error(ChildIncompatible(mismatch))
         Ok(Nil) -> {
           let versions = saga.child_contract_boundary_versions(contract)
           case
@@ -267,14 +273,14 @@ pub fn reattach_child(
   let DurableOwner(owner_id, read) = owner
   let OwnerId(owner_name) = owner_id
   case check_link_owner_and_contract(link, owner_name, contract) {
-    Error(mismatch) -> Error(mismatch)
+    Error(mismatch) -> Error(ChildIncompatible(mismatch))
     Ok(Nil) ->
       case read(child_link.run(link)) {
         Error(StoredRunMissing) -> Error(ChildRunMissing)
         Error(OwnerUnavailable) -> Error(ChildOwnerUnavailable)
         Ok(stored) ->
           case run_matches_link(stored, owner_name, link) {
-            Error(mismatch) -> Error(mismatch)
+            Error(mismatch) -> Error(ChildIncompatible(mismatch))
             Ok(Nil) -> Ok(child_for(link, contract))
           }
       }
@@ -330,17 +336,9 @@ pub type ChildDataError {
 }
 
 pub type ObserveError {
-  ObservedOwnerMismatch
+  ObservedIncompatible(CompatibilityError)
   ObservedRunMissing
   ObservedOwnerUnavailable
-  ObservedRunIdentityMismatch
-  ObservedDefinitionIdentityMismatch
-  ObservedDefinitionVersionMismatch
-  ObservedSignatureMismatch
-  ObservedInputCodecVersionMismatch
-  ObservedOutputCodecVersionMismatch
-  ObservedErrorCodecVersionMismatch
-  ObservedUndoErrorCodecVersionMismatch
   ChildResultUnavailable
   ChildStoredDataCorrupt(ChildDataError)
 }
@@ -354,32 +352,14 @@ pub fn observe_child(
   let DurableOwner(owner_id, read) = owner
   let OwnerId(owner_name) = owner_id
   case child_link.owner(child.link) == owner_name {
-    False -> Error(ObservedOwnerMismatch)
+    False -> Error(ObservedIncompatible(ChildOwnerMismatch))
     True ->
       case read(child_link.run(child.link)) {
         Error(StoredRunMissing) -> Error(ObservedRunMissing)
         Error(OwnerUnavailable) -> Error(ObservedOwnerUnavailable)
         Ok(stored) ->
           case run_matches_link(stored, owner_name, child.link) {
-            Error(ChildRunIdentityMismatch) ->
-              Error(ObservedRunIdentityMismatch)
-            Error(ChildOwnerMismatch) -> Error(ObservedOwnerMismatch)
-            Error(ChildDefinitionIdentityMismatch) ->
-              Error(ObservedDefinitionIdentityMismatch)
-            Error(ChildDefinitionVersionMismatch) ->
-              Error(ObservedDefinitionVersionMismatch)
-            Error(ChildSignatureMismatch) -> Error(ObservedSignatureMismatch)
-            Error(ChildInputCodecVersionMismatch) ->
-              Error(ObservedInputCodecVersionMismatch)
-            Error(ChildOutputCodecVersionMismatch) ->
-              Error(ObservedOutputCodecVersionMismatch)
-            Error(ChildErrorCodecVersionMismatch) ->
-              Error(ObservedErrorCodecVersionMismatch)
-            Error(ChildUndoErrorCodecVersionMismatch) ->
-              Error(ObservedUndoErrorCodecVersionMismatch)
-            Error(ChildRunMissing) -> Error(ObservedRunMissing)
-            Error(ChildOwnerUnavailable) -> Error(ObservedOwnerUnavailable)
-            Error(ChildLinkInvalid) -> Error(ObservedRunIdentityMismatch)
+            Error(mismatch) -> Error(ObservedIncompatible(mismatch))
             Ok(Nil) -> decode_stored_child(stored, child)
           }
       }
@@ -476,7 +456,7 @@ fn run_matches_contract(
   owner_name: String,
   run_id: identity.RunId,
   contract: ChildContract(i, o, e, u),
-) -> Result(Nil, AttachError) {
+) -> Result(Nil, CompatibilityError) {
   let versions = saga.child_contract_boundary_versions(contract)
   case stored.owner_id == owner_name {
     False -> Error(ChildOwnerMismatch)
@@ -526,7 +506,7 @@ fn run_matches_link(
   stored: StoredRun,
   owner_name: String,
   link: child_link.ChildLink,
-) -> Result(Nil, AttachError) {
+) -> Result(Nil, CompatibilityError) {
   case stored.owner_id == owner_name {
     False -> Error(ChildOwnerMismatch)
     True ->
@@ -583,7 +563,7 @@ fn check_link_owner_and_contract(
   link: child_link.ChildLink,
   owner_name: String,
   contract: ChildContract(i, o, e, u),
-) -> Result(Nil, AttachError) {
+) -> Result(Nil, CompatibilityError) {
   let versions = saga.child_contract_boundary_versions(contract)
   case child_link.owner(link) == owner_name {
     False -> Error(ChildOwnerMismatch)
