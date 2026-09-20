@@ -1127,11 +1127,101 @@ pub type CustodyReply {
   CustodyPortUnavailable
 }
 
+pub opaque type RefreshReservationRequest {
+  RefreshReservationRequest(
+    owner: CustodyOwnerId,
+    command_id: RefreshCommandId,
+    session: Session,
+    provider: ProviderBinding,
+  )
+}
+
+// This dispatch is returned only after the trusted owner has atomically
+// reserved a generation and recorded issuance. Gleam values are copyable; the
+// owner, not this type, must deduplicate commands across processes.
+pub opaque type RefreshDispatch {
+  RefreshDispatch(
+    request: RefreshReservationRequest,
+    current_tokens: TokenMaterial,
+    refresh_token: RefreshToken,
+    authentication: AuthenticationEvidence,
+  )
+}
+
+pub opaque type RefreshSettlementCommand {
+  RefreshSettlementCommand(
+    dispatch: RefreshDispatch,
+    value: RefreshSettlementValue,
+  )
+}
+
+pub opaque type RefreshSettlementReceipt {
+  RefreshSettlementReceipt(command: RefreshSettlementCommand)
+}
+
+// The command retains the original reservation and exact replacement material.
+// The owner must atomically match the reservation and expected session revision.
+pub opaque type RefreshPublicationCommand {
+  RefreshPublicationCommand(
+    request: RefreshReservationRequest,
+    dispatch: RefreshDispatch,
+    updated_tokens: TokenMaterial,
+  )
+}
+
+pub opaque type RefreshPublicationReceipt {
+  RefreshPublicationReceipt(
+    accepted_command: RefreshPublicationCommand,
+    reference: CustodyReference,
+    revision: CustodyRevision,
+  )
+}
+
+pub opaque type RefreshReservationRecovery {
+  RefreshReservationRecovery(
+    owner: CustodyOwnerId,
+    request: RefreshReservationRequest,
+    evidence: RefreshReservationRecoveryEvidence,
+  )
+}
+
+pub opaque type RefreshPublicationRecovery {
+  RefreshPublicationRecovery(
+    owner: CustodyOwnerId,
+    command: RefreshPublicationCommand,
+  )
+}
+
+pub opaque type RefreshPort {
+  RefreshPort(
+    reserve: fn(RefreshReservationRequest) -> RefreshReserveReply,
+    settle: fn(RefreshSettlementCommand) -> RefreshSettlementReply,
+    publish: fn(RefreshPublicationCommand) -> RefreshPublicationReply,
+    recover_reservation: fn(RefreshReservationRecovery) ->
+      RefreshReservationStatus,
+    recover_publication: fn(RefreshPublicationRecovery) ->
+      RefreshPublicationReply,
+  )
+}
+
+pub opaque type RefreshBackend {
+  RefreshBackend(
+    provider: ProviderBinding,
+    perform: fn(RefreshDispatch) -> RefreshProviderOutcome,
+  )
+}
+
+type RefreshOwnerPortChoice {
+  NoRefreshOwnerPort
+  RefreshOwnerPortInstalled(RefreshPort)
+}
+
 pub opaque type CustodyOwner {
   CustodyOwner(
     id: CustodyOwnerId,
     install: fn(CustodyCommand) -> CustodyReply,
     recover: fn(CustodyRecoveryCommand) -> CustodyReply,
+    refresh_port: RefreshOwnerPortChoice,
   )
 }
 
@@ -1142,6 +1232,214 @@ pub opaque type Session {
     custody_revision: CustodyRevision,
     provider: ProviderBinding,
     installation_id: CustodyInstallationId,
+  )
+}
+
+// Refresh callbacks are carried by the same canonical owner as login custody.
+// The adapter callbacks are trusted claims, not proof of durable serialization
+// or provider behavior. Session remains the only identity-bearing handle.
+pub opaque type RefreshCommandId {
+  RefreshCommandId(String)
+}
+
+pub type RefreshTokenUpdate {
+  RetainRefreshToken
+  ReplaceRefreshToken(RefreshToken)
+}
+
+pub type RefreshScopeUpdate {
+  RefreshScopesOmitted
+  RefreshScopesReturned(List(Scope))
+}
+
+pub type RefreshNonceUpdate {
+  RefreshNonceOmitted
+  RefreshNonceReturned(Nonce)
+}
+
+// A returned refresh ID token is an adapter attestation. Absence preserves the
+// already-verified identity and logout hint; presence is checked against them.
+pub type RefreshIdTokenUpdate {
+  RefreshIdTokenAbsent
+  RefreshIdTokenPresent(
+    identity: BackendAttestation,
+    nonce: RefreshNonceUpdate,
+    authentication_time: AuthenticationTime,
+    logout_id_token: LogoutIdToken,
+  )
+}
+
+pub type RefreshAttestation {
+  RefreshAttestation(
+    access_token: AccessToken,
+    expires_at: TokenExpiry,
+    refresh_token: RefreshTokenUpdate,
+    scopes: RefreshScopeUpdate,
+    id_token: RefreshIdTokenUpdate,
+  )
+}
+
+pub type RefreshProviderOutcome {
+  // The configured adapter proves it did not send a provider request.
+  ProvenNotSent
+  // A definite provider response rejected this attempt; generic transport
+  // failure must not be translated to this case.
+  EndpointRejected
+  // The request may have rotated the token but its outcome is not known.
+  ProviderOutcomeUnknown
+  RefreshAttested(RefreshAttestation)
+}
+
+pub type RefreshValidationError {
+  RefreshedIssuerMismatch
+  RefreshedAudienceMismatch
+  RefreshedAuthorizedPartyMismatch
+  RefreshedSubjectMismatch
+  RefreshedNonceMismatch
+  RefreshedAuthenticationTimeMismatch
+  RefreshedScopeChangeUnsupported
+}
+
+pub type RefreshReservationRejection {
+  RefreshSessionMissing
+  RefreshSessionStale
+  RefreshProviderBindingRejected
+  RefreshMaterialMissing
+  RefreshGenerationQuarantined
+  RefreshCommandConflict
+}
+
+pub type RefreshError {
+  RefreshOwnerHasNoPort
+  RefreshOwnerMismatch
+  RefreshSessionOwnerMismatch
+  RefreshSessionBindingMismatch
+  RefreshBackendConfigurationMismatch
+  RefreshReservationRejected(RefreshReservationRejection)
+}
+
+pub type RefreshRecordedValue {
+  RefreshNoSendRecorded
+  RefreshEndpointRejectionRecorded
+  RefreshProviderQuarantinedRecorded
+  RefreshInvalidResponseQuarantined(RefreshValidationError)
+  RefreshPublicationRecorded(RefreshPublicationReceipt)
+}
+
+pub type RefreshResult {
+  RefreshCompleted(Session)
+  RefreshDidNotSend
+  RefreshRejectedByEndpoint
+  RefreshProviderQuarantined(RefreshReservationRecovery)
+  RefreshResponseQuarantined(RefreshValidationError, RefreshReservationRecovery)
+  RefreshReservationUnresolved(RefreshReservationRecovery)
+  RefreshPublicationUnresolved(RefreshPublicationRecovery)
+}
+
+pub type RefreshReservationRecoveryEvidence {
+  NoRefreshEvidence
+  ReturnedRefreshDispatch(RefreshDispatch)
+  ReturnedRefreshRecord(RefreshRecordedOutcome)
+  SubmittedRefreshSettlement(RefreshSettlementCommand)
+  ReturnedRefreshSettlement(RefreshSettlementReceipt)
+  ReturnedRefreshRecovery(RefreshReservationRecovery)
+}
+
+pub type RefreshReservationStatus {
+  RefreshReservationStillPending
+  RefreshReservationRecorded(RefreshRecordedOutcome)
+  RefreshReservationStillQuarantined
+  RefreshReservationStatusUnknown
+  RefreshReservationStatusUnavailable
+}
+
+pub type RefreshSettlementValue {
+  RefreshNoSend
+  RefreshEndpointRejected
+  RefreshProviderUnknown
+  RefreshAttestationInvalid(RefreshValidationError)
+}
+
+pub type RefreshSettlementReply {
+  RefreshSettlementRecorded(RefreshSettlementReceipt)
+  RefreshSettlementUnknown
+  RefreshSettlementUnavailable
+}
+
+pub type RefreshPublicationReply {
+  RefreshPublicationAccepted(RefreshPublicationReceipt)
+  RefreshPublicationUnknown
+  RefreshPublicationUnavailable
+  RefreshPublicationRejected
+}
+
+pub type RefreshReserveReply {
+  RefreshDispatchIssued(RefreshDispatch)
+  RefreshCommandRecorded(RefreshRecordedOutcome)
+  RefreshCommandPending(RefreshReservationRecovery)
+  RefreshCommandBusy(RefreshReservationRecovery)
+  RefreshCommandRejected(RefreshReservationRejection)
+  RefreshCommandUnknown(RefreshReservationRecovery)
+}
+
+pub type RefreshReservationMetadata {
+  RefreshReservationMetadata(
+    owner: CustodyOwnerId,
+    command_id: RefreshCommandId,
+    session: Session,
+    provider: ProviderBinding,
+  )
+}
+
+pub type TrustedRefreshDispatchView {
+  TrustedRefreshDispatchView(
+    owner: CustodyOwnerId,
+    command_id: RefreshCommandId,
+    session_reference: CustodyReference,
+    session_revision: CustodyRevision,
+    provider: ProviderBinding,
+    identity: VerifiedIdentity,
+    refresh_token: String,
+    original_nonce: Nonce,
+    authentication_time: AuthenticationTime,
+    scopes: List(String),
+  )
+}
+
+pub type RefreshRecordedOutcome {
+  RefreshRecordedOutcome(
+    request: RefreshReservationRequest,
+    value: RefreshRecordedValue,
+  )
+}
+
+pub type RefreshSettlementContents {
+  RefreshSettlementContents(
+    dispatch: RefreshDispatch,
+    value: RefreshSettlementValue,
+  )
+}
+
+pub type RefreshPublicationContents {
+  RefreshPublicationContents(
+    request: RefreshReservationRequest,
+    dispatch: RefreshDispatch,
+    updated_tokens: TokenMaterial,
+  )
+}
+
+pub type RefreshPublicationRecoveryContents {
+  RefreshPublicationRecoveryContents(
+    owner: CustodyOwnerId,
+    command: RefreshPublicationCommand,
+  )
+}
+
+pub type RefreshReservationRecoveryContents {
+  RefreshReservationRecoveryContents(
+    owner: CustodyOwnerId,
+    request: RefreshReservationRequest,
+    evidence: RefreshReservationRecoveryEvidence,
   )
 }
 
@@ -1194,7 +1492,219 @@ pub fn custody_owner(
   install: fn(CustodyCommand) -> CustodyReply,
   recover: fn(CustodyRecoveryCommand) -> CustodyReply,
 ) -> CustodyOwner {
-  CustodyOwner(id, install, recover)
+  CustodyOwner(id, install, recover, NoRefreshOwnerPort)
+}
+
+pub fn refresh_command_id(
+  value: String,
+) -> Result(RefreshCommandId, InputError) {
+  checked_text(value, RefreshCommandId)
+}
+
+pub fn refresh_command_id_value(command_id: RefreshCommandId) -> String {
+  let RefreshCommandId(value) = command_id
+  value
+}
+
+pub fn refresh_backend(
+  provider: ProviderBinding,
+  perform: fn(RefreshDispatch) -> RefreshProviderOutcome,
+) -> RefreshBackend {
+  RefreshBackend(provider, perform)
+}
+
+pub fn refresh_port(
+  reserve: fn(RefreshReservationRequest) -> RefreshReserveReply,
+  settle: fn(RefreshSettlementCommand) -> RefreshSettlementReply,
+  publish: fn(RefreshPublicationCommand) -> RefreshPublicationReply,
+  recover_reservation: fn(RefreshReservationRecovery) ->
+    RefreshReservationStatus,
+  recover_publication: fn(RefreshPublicationRecovery) -> RefreshPublicationReply,
+) -> RefreshPort {
+  RefreshPort(
+    reserve,
+    settle,
+    publish,
+    recover_reservation,
+    recover_publication,
+  )
+}
+
+// Adds refresh custody to the same owner identity and existing session model.
+// The owner callbacks are an adapter seam; real atomicity and durable deduplication
+// remain responsibilities of the trusted implementation.
+pub fn with_refresh(owner: CustodyOwner, port: RefreshPort) -> CustodyOwner {
+  let CustodyOwner(id, install, recover, _) = owner
+  CustodyOwner(id, install, recover, RefreshOwnerPortInstalled(port))
+}
+
+pub fn refresh_reservation_metadata(
+  request: RefreshReservationRequest,
+) -> RefreshReservationMetadata {
+  let RefreshReservationRequest(owner, command_id, session, provider) = request
+  RefreshReservationMetadata(owner, command_id, session, provider)
+}
+
+// The trusted owner returns an issued dispatch only after reserving and
+// durably recording the command. Missing refresh material is a typed rejection.
+pub fn refresh_dispatch_issued(
+  request: RefreshReservationRequest,
+  current_tokens: TokenMaterial,
+  authentication: AuthenticationEvidence,
+) -> RefreshReserveReply {
+  let TokenMaterial(_, refresh_choice, _, _, _) = current_tokens
+  case refresh_choice {
+    NoRefreshToken -> RefreshCommandRejected(RefreshMaterialMissing)
+    RefreshTokenPresent(refresh_token) ->
+      RefreshDispatchIssued(RefreshDispatch(
+        request,
+        current_tokens,
+        refresh_token,
+        authentication,
+      ))
+  }
+}
+
+pub fn refresh_command_pending(
+  request: RefreshReservationRequest,
+) -> RefreshReserveReply {
+  RefreshCommandPending(make_reservation_recovery(request, NoRefreshEvidence))
+}
+
+pub fn refresh_command_pending_from_dispatch(
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+) -> RefreshReserveReply {
+  RefreshCommandPending(make_reservation_recovery(
+    request,
+    ReturnedRefreshDispatch(dispatch),
+  ))
+}
+
+pub fn refresh_command_busy_from_dispatch(
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+) -> RefreshReserveReply {
+  RefreshCommandBusy(make_reservation_recovery(
+    request,
+    ReturnedRefreshDispatch(dispatch),
+  ))
+}
+
+pub fn refresh_command_unknown(
+  request: RefreshReservationRequest,
+) -> RefreshReserveReply {
+  RefreshCommandUnknown(make_reservation_recovery(request, NoRefreshEvidence))
+}
+
+pub fn refresh_command_busy(
+  request: RefreshReservationRequest,
+) -> RefreshReserveReply {
+  RefreshCommandBusy(make_reservation_recovery(request, NoRefreshEvidence))
+}
+
+pub fn refresh_command_recorded(
+  request: RefreshReservationRequest,
+  value: RefreshRecordedValue,
+) -> RefreshReserveReply {
+  RefreshCommandRecorded(RefreshRecordedOutcome(request, value))
+}
+
+pub fn refresh_dispatch_reservation(
+  dispatch: RefreshDispatch,
+) -> RefreshReservationRequest {
+  let RefreshDispatch(request, _, _, _) = dispatch
+  request
+}
+
+pub fn trusted_refresh_dispatch_view(
+  dispatch: RefreshDispatch,
+) -> TrustedRefreshDispatchView {
+  let RefreshDispatch(
+    request,
+    TokenMaterial(_, _, _, _, scopes),
+    refresh_token,
+    AuthenticationEvidence(original_nonce, authentication_time),
+  ) = dispatch
+  let RefreshReservationRequest(owner, command_id, session, provider) = request
+  TrustedRefreshDispatchView(
+    owner,
+    command_id,
+    session_custody_reference(session),
+    session_custody_revision(session),
+    provider,
+    session_identity(session),
+    trusted_refresh_token_value(refresh_token),
+    original_nonce,
+    authentication_time,
+    scope_values(scopes),
+  )
+}
+
+pub fn refresh_settlement_contents(
+  command: RefreshSettlementCommand,
+) -> RefreshSettlementContents {
+  let RefreshSettlementCommand(dispatch, value) = command
+  RefreshSettlementContents(dispatch, value)
+}
+
+pub fn refresh_settlement_recorded(
+  command: RefreshSettlementCommand,
+) -> RefreshSettlementReply {
+  RefreshSettlementRecorded(RefreshSettlementReceipt(command))
+}
+
+pub fn refresh_settlement_unknown() -> RefreshSettlementReply {
+  RefreshSettlementUnknown
+}
+
+pub fn refresh_settlement_unavailable() -> RefreshSettlementReply {
+  RefreshSettlementUnavailable
+}
+
+pub fn refresh_publication_contents(
+  command: RefreshPublicationCommand,
+) -> RefreshPublicationContents {
+  let RefreshPublicationCommand(request, dispatch, updated_tokens) = command
+  RefreshPublicationContents(request, dispatch, updated_tokens)
+}
+
+pub fn refresh_publication_accepted(
+  accepted_command: RefreshPublicationCommand,
+  reference: CustodyReference,
+  revision: CustodyRevision,
+) -> RefreshPublicationReply {
+  RefreshPublicationAccepted(RefreshPublicationReceipt(
+    accepted_command,
+    reference,
+    revision,
+  ))
+}
+
+pub fn refresh_publication_unknown() -> RefreshPublicationReply {
+  RefreshPublicationUnknown
+}
+
+pub fn refresh_publication_unavailable() -> RefreshPublicationReply {
+  RefreshPublicationUnavailable
+}
+
+pub fn refresh_publication_rejected() -> RefreshPublicationReply {
+  RefreshPublicationRejected
+}
+
+pub fn refresh_reservation_recovery_contents(
+  recovery: RefreshReservationRecovery,
+) -> RefreshReservationRecoveryContents {
+  let RefreshReservationRecovery(owner, request, evidence) = recovery
+  RefreshReservationRecoveryContents(owner, request, evidence)
+}
+
+pub fn refresh_publication_recovery_contents(
+  recovery: RefreshPublicationRecovery,
+) -> RefreshPublicationRecoveryContents {
+  let RefreshPublicationRecovery(owner, command) = recovery
+  RefreshPublicationRecoveryContents(owner, command)
 }
 
 pub fn custody_installed(
@@ -1305,6 +1815,674 @@ pub fn session_installation_id(session: Session) -> CustodyInstallationId {
   installation_id
 }
 
+// Refresh is admitted only by the canonical owner that installed this session.
+// The owner validates the stored revision/provider and atomically reserves a
+// generation before returning an issued dispatch. Copyable Gleam values do not
+// prove cross-process once-only behavior; the trusted port owns deduplication.
+pub fn refresh_session(
+  owner: CustodyOwner,
+  backend: RefreshBackend,
+  session: Session,
+  command_id: RefreshCommandId,
+) -> Result(RefreshResult, RefreshError) {
+  let CustodyOwner(owner_id, _, _, owner_port) = owner
+  let Session(_, _, _, session_provider, installation_id) = session
+  let CustodyInstallationId(installation_owner, installed_provider, _) =
+    installation_id
+  let RefreshBackend(backend_provider, _) = backend
+  case owner_id == installation_owner {
+    False -> Error(RefreshSessionOwnerMismatch)
+    True ->
+      case installed_provider == session_provider {
+        False -> Error(RefreshSessionBindingMismatch)
+        True ->
+          case backend_provider == session_provider {
+            False -> Error(RefreshBackendConfigurationMismatch)
+            True ->
+              case owner_port {
+                NoRefreshOwnerPort -> Error(RefreshOwnerHasNoPort)
+                RefreshOwnerPortInstalled(port) -> {
+                  let request =
+                    RefreshReservationRequest(
+                      owner_id,
+                      command_id,
+                      session,
+                      session_provider,
+                    )
+                  let RefreshPort(reserve, _, _, _, _) = port
+                  reserve_refresh(
+                    owner,
+                    backend,
+                    request,
+                    port,
+                    reserve(request),
+                  )
+                }
+              }
+          }
+      }
+  }
+}
+
+pub fn recover_refresh_reservation(
+  owner: CustodyOwner,
+  recovery: RefreshReservationRecovery,
+) -> Result(RefreshResult, RefreshError) {
+  let CustodyOwner(owner_id, _, _, owner_port) = owner
+  let RefreshReservationRecovery(recovery_owner, request, _) = recovery
+  case
+    recovery_owner == owner_id
+    && reservation_request_owner_matches(request, owner_id)
+  {
+    False -> Error(RefreshOwnerMismatch)
+    True ->
+      case owner_port {
+        NoRefreshOwnerPort -> Error(RefreshOwnerHasNoPort)
+        RefreshOwnerPortInstalled(port) -> {
+          let RefreshPort(_, _, _, recover_reservation, _) = port
+          resolve_reservation_status(
+            owner_id,
+            request,
+            recovery,
+            recover_reservation(recovery),
+          )
+        }
+      }
+  }
+}
+
+pub fn recover_refresh_publication(
+  owner: CustodyOwner,
+  recovery: RefreshPublicationRecovery,
+) -> Result(RefreshResult, RefreshError) {
+  let CustodyOwner(owner_id, _, _, owner_port) = owner
+  let RefreshPublicationRecovery(recovery_owner, command) = recovery
+  let RefreshPublicationCommand(request, _, _) = command
+  case
+    recovery_owner == owner_id
+    && reservation_request_owner_matches(request, owner_id)
+  {
+    False -> Error(RefreshOwnerMismatch)
+    True ->
+      case owner_port {
+        NoRefreshOwnerPort -> Error(RefreshOwnerHasNoPort)
+        RefreshOwnerPortInstalled(port) -> {
+          let RefreshPort(_, _, _, _, recover_publication) = port
+          resolve_publication(
+            owner_id,
+            request,
+            command,
+            recovery,
+            recover_publication(recovery),
+          )
+        }
+      }
+  }
+}
+
+fn reserve_refresh(
+  owner: CustodyOwner,
+  backend: RefreshBackend,
+  request: RefreshReservationRequest,
+  port: RefreshPort,
+  reply: RefreshReserveReply,
+) -> Result(RefreshResult, RefreshError) {
+  case reply {
+    RefreshDispatchIssued(dispatch) ->
+      case refresh_dispatch_request(dispatch) == request {
+        True -> invoke_refresh_backend(owner, backend, port, request, dispatch)
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshDispatch(dispatch),
+            )),
+          )
+      }
+    RefreshCommandRecorded(recorded) ->
+      case recorded.request == request {
+        True -> resolve_recorded_outcome(owner, request, recorded)
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshRecord(recorded),
+            )),
+          )
+      }
+    RefreshCommandPending(recovery) ->
+      case refresh_recovery_matches(recovery, request) {
+        True -> Ok(RefreshReservationUnresolved(recovery))
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshRecovery(recovery),
+            )),
+          )
+      }
+    RefreshCommandBusy(recovery) ->
+      case refresh_recovery_matches(recovery, request) {
+        True -> Ok(RefreshReservationUnresolved(recovery))
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshRecovery(recovery),
+            )),
+          )
+      }
+    RefreshCommandRejected(rejection) ->
+      Error(RefreshReservationRejected(rejection))
+    RefreshCommandUnknown(recovery) ->
+      case refresh_recovery_matches(recovery, request) {
+        True -> Ok(RefreshReservationUnresolved(recovery))
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshRecovery(recovery),
+            )),
+          )
+      }
+  }
+}
+
+fn invoke_refresh_backend(
+  owner: CustodyOwner,
+  backend: RefreshBackend,
+  port: RefreshPort,
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+) -> Result(RefreshResult, RefreshError) {
+  let RefreshBackend(backend_provider, perform) = backend
+  let RefreshDispatch(actual_request, _, _, _) = dispatch
+  case actual_request == request && backend_provider == request.provider {
+    False ->
+      Ok(
+        RefreshReservationUnresolved(make_reservation_recovery(
+          request,
+          ReturnedRefreshDispatch(dispatch),
+        )),
+      )
+    True ->
+      case perform(dispatch) {
+        ProvenNotSent ->
+          settle_refresh(owner, port, request, dispatch, RefreshNoSend)
+        EndpointRejected ->
+          settle_refresh(
+            owner,
+            port,
+            request,
+            dispatch,
+            RefreshEndpointRejected,
+          )
+        ProviderOutcomeUnknown ->
+          settle_refresh(owner, port, request, dispatch, RefreshProviderUnknown)
+        RefreshAttested(attestation) ->
+          case validate_refresh_attestation(dispatch, attestation) {
+            Error(validation_error) ->
+              settle_refresh(
+                owner,
+                port,
+                request,
+                dispatch,
+                RefreshAttestationInvalid(validation_error),
+              )
+            Ok(updated_tokens) ->
+              publish_refresh(owner, port, request, dispatch, updated_tokens)
+          }
+      }
+  }
+}
+
+fn settle_refresh(
+  owner: CustodyOwner,
+  port: RefreshPort,
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+  value: RefreshSettlementValue,
+) -> Result(RefreshResult, RefreshError) {
+  let RefreshPort(_, settle, _, _, _) = port
+  let command = RefreshSettlementCommand(dispatch, value)
+  case settle(command) {
+    RefreshSettlementRecorded(receipt) -> {
+      let RefreshSettlementReceipt(accepted_command) = receipt
+      case accepted_command == command {
+        True -> result_for_settlement(owner, request, dispatch, value)
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshSettlement(receipt),
+            )),
+          )
+      }
+    }
+    RefreshSettlementUnknown | RefreshSettlementUnavailable ->
+      Ok(
+        RefreshReservationUnresolved(make_reservation_recovery(
+          request,
+          SubmittedRefreshSettlement(command),
+        )),
+      )
+  }
+}
+
+fn result_for_settlement(
+  _owner: CustodyOwner,
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+  value: RefreshSettlementValue,
+) -> Result(RefreshResult, RefreshError) {
+  case value {
+    RefreshNoSend -> Ok(RefreshDidNotSend)
+    RefreshEndpointRejected -> Ok(RefreshRejectedByEndpoint)
+    RefreshProviderUnknown ->
+      Ok(
+        RefreshProviderQuarantined(make_reservation_recovery(
+          request,
+          ReturnedRefreshDispatch(dispatch),
+        )),
+      )
+    RefreshAttestationInvalid(validation_error) ->
+      Ok(RefreshResponseQuarantined(
+        validation_error,
+        make_reservation_recovery(request, ReturnedRefreshDispatch(dispatch)),
+      ))
+  }
+}
+
+fn publish_refresh(
+  _owner: CustodyOwner,
+  port: RefreshPort,
+  request: RefreshReservationRequest,
+  dispatch: RefreshDispatch,
+  updated_tokens: TokenMaterial,
+) -> Result(RefreshResult, RefreshError) {
+  let RefreshPort(_, _, publish, _, _) = port
+  let command = RefreshPublicationCommand(request, dispatch, updated_tokens)
+  case publish(command) {
+    RefreshPublicationAccepted(receipt) ->
+      case confirmed_refresh_session(request, command, receipt) {
+        Ok(session) -> Ok(RefreshCompleted(session))
+        Error(Nil) ->
+          Ok(RefreshPublicationUnresolved(make_publication_recovery(command)))
+      }
+    RefreshPublicationUnknown
+    | RefreshPublicationUnavailable
+    | RefreshPublicationRejected ->
+      Ok(RefreshPublicationUnresolved(make_publication_recovery(command)))
+  }
+}
+
+fn resolve_reservation_status(
+  owner_id: CustodyOwnerId,
+  request: RefreshReservationRequest,
+  recovery: RefreshReservationRecovery,
+  status: RefreshReservationStatus,
+) -> Result(RefreshResult, RefreshError) {
+  case status {
+    RefreshReservationStillPending -> Ok(RefreshReservationUnresolved(recovery))
+    RefreshReservationStillQuarantined ->
+      Ok(RefreshProviderQuarantined(recovery))
+    RefreshReservationStatusUnknown | RefreshReservationStatusUnavailable ->
+      Ok(RefreshReservationUnresolved(recovery))
+    RefreshReservationRecorded(recorded) ->
+      case recorded.request == request {
+        True ->
+          resolve_recorded_outcome_for_recovery(owner_id, request, recorded)
+        False ->
+          Ok(
+            RefreshReservationUnresolved(make_reservation_recovery(
+              request,
+              ReturnedRefreshRecord(recorded),
+            )),
+          )
+      }
+  }
+}
+
+fn resolve_recorded_outcome_for_recovery(
+  owner_id: CustodyOwnerId,
+  request: RefreshReservationRequest,
+  recorded: RefreshRecordedOutcome,
+) -> Result(RefreshResult, RefreshError) {
+  case recorded.value {
+    RefreshNoSendRecorded -> Ok(RefreshDidNotSend)
+    RefreshEndpointRejectionRecorded -> Ok(RefreshRejectedByEndpoint)
+    RefreshProviderQuarantinedRecorded ->
+      Ok(
+        RefreshProviderQuarantined(make_reservation_recovery(
+          request,
+          ReturnedRefreshRecord(recorded),
+        )),
+      )
+    RefreshInvalidResponseQuarantined(validation_error) ->
+      Ok(RefreshResponseQuarantined(
+        validation_error,
+        make_reservation_recovery(request, ReturnedRefreshRecord(recorded)),
+      ))
+    RefreshPublicationRecorded(receipt) ->
+      resolve_recorded_publication(owner_id, request, recorded, receipt)
+  }
+}
+
+fn resolve_recorded_outcome(
+  owner: CustodyOwner,
+  request: RefreshReservationRequest,
+  recorded: RefreshRecordedOutcome,
+) -> Result(RefreshResult, RefreshError) {
+  let CustodyOwner(owner_id, _, _, _) = owner
+  resolve_recorded_outcome_for_recovery(owner_id, request, recorded)
+}
+
+fn resolve_recorded_publication(
+  owner_id: CustodyOwnerId,
+  request: RefreshReservationRequest,
+  recorded: RefreshRecordedOutcome,
+  receipt: RefreshPublicationReceipt,
+) -> Result(RefreshResult, RefreshError) {
+  let RefreshPublicationReceipt(command, _, _) = receipt
+  let RefreshPublicationCommand(actual_request, dispatch, _) = command
+  case
+    actual_request == request && refresh_dispatch_request(dispatch) == request
+  {
+    False ->
+      Ok(
+        RefreshReservationUnresolved(make_reservation_recovery(
+          request,
+          ReturnedRefreshRecord(recorded),
+        )),
+      )
+    True ->
+      case confirmed_refresh_session(request, command, receipt) {
+        Ok(session) -> Ok(RefreshCompleted(session))
+        Error(Nil) -> {
+          let _ = owner_id
+          Ok(RefreshPublicationUnresolved(make_publication_recovery(command)))
+        }
+      }
+  }
+}
+
+fn resolve_publication(
+  _owner_id: CustodyOwnerId,
+  request: RefreshReservationRequest,
+  command: RefreshPublicationCommand,
+  recovery: RefreshPublicationRecovery,
+  reply: RefreshPublicationReply,
+) -> Result(RefreshResult, RefreshError) {
+  case reply {
+    RefreshPublicationAccepted(receipt) ->
+      case confirmed_refresh_session(request, command, receipt) {
+        Ok(session) -> Ok(RefreshCompleted(session))
+        Error(Nil) -> Ok(RefreshPublicationUnresolved(recovery))
+      }
+    RefreshPublicationUnknown
+    | RefreshPublicationUnavailable
+    | RefreshPublicationRejected -> Ok(RefreshPublicationUnresolved(recovery))
+  }
+}
+
+fn confirmed_refresh_session(
+  request: RefreshReservationRequest,
+  command: RefreshPublicationCommand,
+  receipt: RefreshPublicationReceipt,
+) -> Result(Session, Nil) {
+  let RefreshPublicationCommand(actual_request, dispatch, _) = command
+  let RefreshPublicationReceipt(accepted_command, reference, revision) = receipt
+  let RefreshReservationRequest(owner, command_id, session, provider) = request
+  let Session(
+    identity,
+    old_reference,
+    old_revision,
+    session_provider,
+    installation_id,
+  ) = session
+  let CustodyInstallationId(installation_owner, installed_provider, _) =
+    installation_id
+  let RefreshDispatch(dispatch_request, _, _, _) = dispatch
+  case
+    accepted_command == command
+    && actual_request == request
+    && dispatch_request == request
+    && owner == installation_owner
+    && provider == session_provider
+    && installed_provider == session_provider
+    && reference == old_reference
+    && revision != old_revision
+    && command_id == request.command_id
+  {
+    True ->
+      Ok(Session(
+        identity,
+        reference,
+        revision,
+        session_provider,
+        installation_id,
+      ))
+    False -> Error(Nil)
+  }
+}
+
+fn validate_refresh_attestation(
+  dispatch: RefreshDispatch,
+  attestation: RefreshAttestation,
+) -> Result(TokenMaterial, RefreshValidationError) {
+  let RefreshAttestation(
+    new_access_token,
+    new_expiry,
+    refresh_update,
+    scope_update,
+    id_token_update,
+  ) = attestation
+  let RefreshDispatch(
+    request,
+    current_tokens,
+    previous_refresh_token,
+    authentication,
+  ) = dispatch
+  let RefreshReservationRequest(_, _, session, provider) = request
+  let Session(identity, _, _, _, _) = session
+  let TokenMaterial(_, _, current_logout_hint, _, current_scopes) =
+    current_tokens
+  let ProviderBinding(client, _) = provider
+  let next_refresh_choice = case refresh_update {
+    RetainRefreshToken -> RefreshTokenPresent(previous_refresh_token)
+    ReplaceRefreshToken(replacement) -> RefreshTokenPresent(replacement)
+  }
+  case accepted_refresh_scopes(scope_update, current_scopes) {
+    Error(error) -> Error(error)
+    Ok(scopes) ->
+      case
+        accepted_refresh_identity(
+          client,
+          identity,
+          authentication,
+          id_token_update,
+          current_logout_hint,
+        )
+      {
+        Error(error) -> Error(error)
+        Ok(logout_hint) ->
+          Ok(token_material(
+            new_access_token,
+            next_refresh_choice,
+            logout_hint,
+            new_expiry,
+            scopes,
+          ))
+      }
+  }
+}
+
+fn accepted_refresh_scopes(
+  update: RefreshScopeUpdate,
+  current_scopes: List(Scope),
+) -> Result(List(Scope), RefreshValidationError) {
+  case update {
+    RefreshScopesOmitted -> Ok(current_scopes)
+    RefreshScopesReturned(returned_scopes) ->
+      case same_scope_set(current_scopes, returned_scopes) {
+        True -> Ok(current_scopes)
+        False -> Error(RefreshedScopeChangeUnsupported)
+      }
+  }
+}
+
+fn same_scope_set(left: List(Scope), right: List(Scope)) -> Bool {
+  let normalized_right = normalize_scopes(right)
+  scope_count(left) == scope_count(normalized_right)
+  && scopes_contained(left, normalized_right)
+}
+
+fn scope_count(scopes: List(Scope)) -> Int {
+  case scopes {
+    [] -> 0
+    [_, ..rest] -> 1 + scope_count(rest)
+  }
+}
+
+fn scopes_contained(scopes: List(Scope), in candidates: List(Scope)) -> Bool {
+  case scopes {
+    [] -> True
+    [next, ..rest] ->
+      contains_scope(next, candidates) && scopes_contained(rest, candidates)
+  }
+}
+
+fn accepted_refresh_identity(
+  client: Client,
+  identity: VerifiedIdentity,
+  original_authentication: AuthenticationEvidence,
+  update: RefreshIdTokenUpdate,
+  current_logout_hint: LogoutIdTokenChoice,
+) -> Result(LogoutIdTokenChoice, RefreshValidationError) {
+  case update {
+    RefreshIdTokenAbsent -> Ok(current_logout_hint)
+    RefreshIdTokenPresent(
+      attestation,
+      returned_nonce,
+      returned_authentication_time,
+      new_logout_hint,
+    ) ->
+      case refresh_identity_matches(client, identity, attestation) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case original_authentication {
+            AuthenticationEvidence(original_nonce, original_authentication_time) ->
+              case
+                refresh_nonce_matches(returned_nonce, original_nonce)
+                && refresh_authentication_time_matches(
+                  returned_authentication_time,
+                  original_authentication_time,
+                )
+              {
+                True -> Ok(LogoutIdTokenPresent(new_logout_hint))
+                False ->
+                  case refresh_nonce_matches(returned_nonce, original_nonce) {
+                    False -> Error(RefreshedNonceMismatch)
+                    True -> Error(RefreshedAuthenticationTimeMismatch)
+                  }
+              }
+          }
+      }
+  }
+}
+
+fn refresh_identity_matches(
+  client: Client,
+  identity: VerifiedIdentity,
+  attestation: BackendAttestation,
+) -> Result(Nil, RefreshValidationError) {
+  let Client(expected_issuer, expected_client_id, _) = client
+  let VerifiedIdentity(identity_issuer, Subject(identity_subject)) = identity
+  let BackendAttestation(issuer, audiences, authorized_party, subject) =
+    attestation
+  case issuer == expected_issuer && issuer == identity_issuer {
+    False -> Error(RefreshedIssuerMismatch)
+    True ->
+      case audiences == [expected_client_id] {
+        False -> Error(RefreshedAudienceMismatch)
+        True ->
+          case authorized_party_matches(authorized_party, expected_client_id) {
+            False -> Error(RefreshedAuthorizedPartyMismatch)
+            True ->
+              case subject == identity_subject {
+                True -> Ok(Nil)
+                False -> Error(RefreshedSubjectMismatch)
+              }
+          }
+      }
+  }
+}
+
+fn refresh_nonce_matches(update: RefreshNonceUpdate, original: Nonce) -> Bool {
+  case update {
+    RefreshNonceOmitted -> True
+    RefreshNonceReturned(returned) -> returned == original
+  }
+}
+
+fn refresh_authentication_time_matches(
+  returned: AuthenticationTime,
+  original: AuthenticationTime,
+) -> Bool {
+  case returned, original {
+    NoAuthenticationTime, _ -> True
+    AuthenticationTimePresent(_), NoAuthenticationTime -> False
+    AuthenticationTimePresent(returned_time),
+      AuthenticationTimePresent(original_time)
+    -> returned_time == original_time
+  }
+}
+
+fn reservation_request_owner_matches(
+  request: RefreshReservationRequest,
+  owner_id: CustodyOwnerId,
+) -> Bool {
+  let RefreshReservationRequest(request_owner, _, session, provider) = request
+  let Session(_, _, _, session_provider, installation_id) = session
+  let CustodyInstallationId(installation_owner, installed_provider, _) =
+    installation_id
+  request_owner == owner_id
+  && installation_owner == owner_id
+  && provider == session_provider
+  && provider == installed_provider
+}
+
+fn refresh_dispatch_request(
+  dispatch: RefreshDispatch,
+) -> RefreshReservationRequest {
+  let RefreshDispatch(request, _, _, _) = dispatch
+  request
+}
+
+fn refresh_recovery_matches(
+  recovery: RefreshReservationRecovery,
+  request: RefreshReservationRequest,
+) -> Bool {
+  let RefreshReservationRecovery(_, recovery_request, _) = recovery
+  recovery_request == request
+}
+
+fn make_reservation_recovery(
+  request: RefreshReservationRequest,
+  evidence: RefreshReservationRecoveryEvidence,
+) -> RefreshReservationRecovery {
+  let RefreshReservationRequest(owner, _, _, _) = request
+  RefreshReservationRecovery(owner, request, evidence)
+}
+
+fn make_publication_recovery(
+  command: RefreshPublicationCommand,
+) -> RefreshPublicationRecovery {
+  let RefreshPublicationCommand(request, _, _) = command
+  let RefreshReservationRequest(owner, _, _, _) = request
+  RefreshPublicationRecovery(owner, command)
+}
+
 pub fn verified_subject(identity: VerifiedIdentity) -> String {
   let VerifiedIdentity(_, Subject(value)) = identity
   value
@@ -1337,7 +2515,7 @@ pub fn recover_custody(
   owner: CustodyOwner,
   recovery: CustodyRecoveryCommand,
 ) -> Result(CustodyRecoveryResult, CustodyRecoveryError) {
-  let CustodyOwner(owner_id, _, recover) = owner
+  let CustodyOwner(owner_id, _, recover, _) = owner
   let CustodyRecoveryCommand(recovery_owner, command) = recovery
   case owner_id == recovery_owner {
     False -> Error(RecoveryOwnerMismatch)
@@ -1392,7 +2570,7 @@ fn exchange_consumed_code(
       case validate_attestation(client, nonce, attestation) {
         Error(error) -> Error(error)
         Ok(#(identity, tokens, authentication)) -> {
-          let CustodyOwner(owner_id, install, _) = custody_owner
+          let CustodyOwner(owner_id, install, _, _) = custody_owner
           let provider = ProviderBinding(client, declaration)
           let installation_id =
             CustodyInstallationId(owner_id, provider, transaction_id)
@@ -1516,7 +2694,7 @@ fn make_recovery(
   owner: CustodyOwner,
   command: CustodyCommand,
 ) -> CustodyRecoveryCommand {
-  let CustodyOwner(owner_id, _, _) = owner
+  let CustodyOwner(owner_id, _, _, _) = owner
   CustodyRecoveryCommand(owner_id, command)
 }
 

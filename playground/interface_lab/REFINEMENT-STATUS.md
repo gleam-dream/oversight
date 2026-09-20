@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-eight consumers compile with only their transitive source imports.
-- Eighty-six negative fixtures fail with their intended single compiler diagnostic.
-- Forty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-nine consumers compile with only their transitive source imports.
+- Eighty-eight negative fixtures fail with their intended single compiler diagnostic.
+- Forty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
@@ -289,3 +289,10 @@
 - Selection performs no decoding or execution. Explicit invocation preserves each worker's existing native codecs and failure categories; ordinary typed invocation remains available.
 - A process-local test adapter carries the actual admitted record into later selection and invocation, with no handler execution during submission.
 - Registration grants no scheduling or claim authority. Handler metadata, process lifetime, live configuration changes, code retention, and persisted migration remain open.
+
+## Custody-owned session refresh
+
+- [Session refresh](SESSION-REFRESH.md) extends the canonical session with owner-bound reservation, provider settlement, token rotation, and exact publication receipts.
+- Unknown provider effects quarantine the generation. Lost publication acknowledgements retain the original recovery command; recovery cannot invoke the provider.
+- Scripted ledger probes cover competing callers, replay, stale revisions, identity continuity, and contradictory receipts. Distinct recovery types prevent crossing reservation and publication phases.
+- Concurrent durable storage, safe uncertain-dispatch resumption, provider error detail, reconciliation, secret custody, and pinned adapter conformance remain open.
