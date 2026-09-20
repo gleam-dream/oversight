@@ -1,6 +1,7 @@
 // THROWAWAY: Execute only pure interface composition probes, never runtime stubs.
 import consumers/activity_contract
 import consumers/approval_context
+import consumers/child_admission
 import consumers/child_attachments
 import consumers/claim_ownership
 import consumers/collection_codec
@@ -36,6 +37,7 @@ import consumers/worker_outcomes
 pub fn main() -> Nil {
   activity_contract.probe()
   approval_context.probe()
+  child_admission.probe()
   child_attachments.probe()
   claim_ownership.probe()
   execution_ownership.probe()
