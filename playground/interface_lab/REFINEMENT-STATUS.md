@@ -42,7 +42,7 @@
 
 1. Exercise the local runner contract over the canonical Saga definition.
 2. Complete child attachment, reattachment, cancellation, typed completion, and compensation-receipt issuance. Completion alone is not parent compensation authority.
-3. Connect the schema vocabulary to each protocol/provider capability check, then establish streaming resource ownership.
+3. Connect the schema vocabulary to each protocol/provider capability check, then establish streaming resource ownership through the [proposed owner experiment](../../research/llm-stream-ownership-contract.md).
 4. Test actual boundaries against pinned oracles: native telemetry, oidcc with atomic transaction consumption, and transactional queue/workflow recovery.
 
 - The laboratory module names identify responsibilities, not new permanent packages. No package interface is promoted by these checks alone.
