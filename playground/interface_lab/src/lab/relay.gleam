@@ -107,6 +107,8 @@ fn describe(
   case schema {
     Ok(blueprint.FieldSchema(_, _) as schema) -> Ok(Declaration(name, schema))
     Ok(blueprint.ObjectSchema(_) as schema) -> Ok(Declaration(name, schema))
+    Ok(blueprint.TaggedSchema(_, _, _, _) as schema) ->
+      Ok(Declaration(name, schema))
     Ok(_) -> Error(InputMustBeObject)
     Error(error) -> Error(SchemaUnavailable(error))
   }
