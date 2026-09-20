@@ -15,7 +15,7 @@
 | Blueprint → tool catalogs   | Composed codecs, finite string enums, located schema requirements, runtime contracts, document loading, and finite native generation | Number policy, enum generation, actual provider profiles, broader generation, and complete 1.x migration            |
 | Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                    | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence              |
 | Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                   | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility       |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Parallel execution, traversal, retry policy, and definition migration                                               |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Parallel execution, traversal, timed recovery, and definition migration                                             |
 | Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                  | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
 | Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration              | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
 | Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                              | Native name/map binding, registration, scoped cleanup, and span execution                                           |
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-six consumers compile with only their transitive source imports.
-- Eighty-two negative fixtures fail with their intended single compiler diagnostic.
-- Forty-five interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-seven consumers compile with only their transitive source imports.
+- Eighty-four negative fixtures fail with their intended single compiler diagnostic.
+- Forty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -280,3 +280,10 @@
 - Retry authorization and cancellation permission remain separate. Delayed and exhausted retries can retain uncertain effects without compensating prior work.
 - Recovery runs as issued work, retains native input across attempts, and captures replacement compensation before output encoding. Correlated wakes reject foreign and repeated delivery against the current execution.
 - Timers, unresolved-effect resolution, in-flight settlement, parallel attempts, persistence, and upstream behavioral parity remain open.
+
+## Queue-bound worker registration
+
+- [Worker registration](WORKER-REGISTRY.md) binds heterogeneous canonical workers to exact queue routes and deployed versions. Duplicate registrations reject; multiple versions coexist without implicit fallback.
+- Selection performs no decoding or execution. Explicit invocation preserves each worker's existing native codecs and failure categories; ordinary typed invocation remains available.
+- A process-local test adapter carries the actual admitted record into later selection and invocation, with no handler execution during submission.
+- Registration grants no scheduling or claim authority. Handler metadata, process lifetime, live configuration changes, code retention, and persisted migration remain open.

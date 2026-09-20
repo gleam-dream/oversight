@@ -86,6 +86,12 @@ pub fn invoke(worker: Worker(i, o, e), input: i) -> Result(o, e) {
   worker.handler(input)
 }
 
+// Registry adapters can inspect identity without gaining access to a worker's
+// native handler or codecs.
+pub fn worker_identity(worker: Worker(i, o, e)) -> #(WorkerId, WorkerVersion) {
+  #(worker.id, worker.version)
+}
+
 pub fn invoke_value(
   worker: Worker(i, o, e),
   input: Value,

@@ -44,6 +44,7 @@ import consumers/unified_workflow
 import consumers/unique_jobs
 import consumers/verified_login
 import consumers/worker_outcomes
+import consumers/worker_registry
 
 pub fn main() -> Nil {
   activity_contract.probe()
@@ -91,4 +92,5 @@ pub fn main() -> Nil {
   unique_jobs.probe()
   verified_login.probe()
   worker_outcomes.probe()
+  worker_registry.probe()
 }
