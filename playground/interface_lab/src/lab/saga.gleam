@@ -372,6 +372,93 @@ pub opaque type Definition(i, o, e, u) {
   )
 }
 
+// Boundary versions describe values persisted by an independent child owner.
+// They do not claim to fingerprint or prove codec compatibility.
+pub type BoundaryVersions {
+  BoundaryVersions(
+    input: Version,
+    output: Version,
+    error: Version,
+    undo_error: Version,
+  )
+}
+
+// The contract retains the deployed definition and the codecs that anchor its
+// native output, failure, and compensation-failure types.
+pub opaque type ChildContract(i, o, e, u) {
+  ChildContract(
+    definition: Definition(i, o, e, u),
+    boundary_versions: BoundaryVersions,
+  )
+}
+
+pub fn child_contract(
+  definition: Definition(i, o, e, u),
+  boundary_versions: BoundaryVersions,
+) -> ChildContract(i, o, e, u) {
+  ChildContract(definition, boundary_versions)
+}
+
+pub fn child_contract_definition(
+  contract: ChildContract(i, o, e, u),
+) -> Definition(i, o, e, u) {
+  contract.definition
+}
+
+pub fn child_contract_identity(contract: ChildContract(i, o, e, u)) -> String {
+  definition_identity(contract.definition)
+}
+
+pub fn child_contract_version(contract: ChildContract(i, o, e, u)) -> Int {
+  definition_version_number(contract.definition)
+}
+
+pub fn child_contract_signature(contract: ChildContract(i, o, e, u)) -> String {
+  definition_signature(contract.definition)
+}
+
+pub fn child_contract_input_codec(
+  contract: ChildContract(i, o, e, u),
+) -> Codec(i) {
+  contract.definition.input_codec
+}
+
+pub fn child_contract_output_codec(
+  contract: ChildContract(i, o, e, u),
+) -> Codec(o) {
+  contract.definition.output.codec
+}
+
+pub fn child_contract_error_codec(
+  contract: ChildContract(i, o, e, u),
+) -> Codec(e) {
+  contract.definition.error_codec
+}
+
+pub fn child_contract_undo_error_codec(
+  contract: ChildContract(i, o, e, u),
+) -> Codec(u) {
+  contract.definition.undo_error_codec
+}
+
+pub fn child_contract_boundary_versions(
+  contract: ChildContract(i, o, e, u),
+) -> #(Int, Int, Int, Int) {
+  let BoundaryVersions(input, output, error, undo_error) =
+    contract.boundary_versions
+  #(
+    version_number(input),
+    version_number(output),
+    version_number(error),
+    version_number(undo_error),
+  )
+}
+
+fn version_number(version: Version) -> Int {
+  let Version(number) = version
+  number
+}
+
 pub fn define(
   id: DefinitionId,
   definition_version: Version,
