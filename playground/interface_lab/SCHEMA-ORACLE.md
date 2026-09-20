@@ -8,7 +8,8 @@
 
 - `schema_corpus` derives each schema from the actual codec and obtains each acceptance result by invoking its decoder.
 - A test-only Erlang adapter exports those values as JSON using OTP's JSON encoder.
-- `schema_check.py` checks each generated document with `jsonschema.Draft202012Validator` and compares acceptance with the decoder result.
+- The same codec creates a runtime contract. The corpus invokes its validator and renders its normalized schema.
+- `schema_check.py` checks both generated documents with `jsonschema.Draft202012Validator` and compares acceptance with the static decoder and runtime validator results.
 - The development shell provides Python and jsonschema from the existing Nix lock. The exercised jsonschema version is 4.26.0.
 - The normal interface gate runs this comparison after the pure composition probes.
 
@@ -16,7 +17,7 @@
 
 - Thirty-eight accepted and rejected instances agree across text, integer, boolean, exact tuples, nullable lists, empty objects, optional nullable records, inclusive integer bounds, and tagged decisions.
 - The records and decisions come from the same consumer codecs used for Relay integration.
-- Each emitted schema also passes the validator's schema-document check.
+- Each original and normalized schema also passes the validator's schema-document check. Normalization preserves acceptance for these instances.
 
 ## Limits
 

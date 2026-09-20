@@ -2,6 +2,7 @@
 import consumers/object_codec
 import consumers/tagged_codec
 import lab/blueprint as b
+import lab/blueprint_runtime as runtime
 import lab/value as v
 
 @external(erlang, "schema_corpus_ffi", "emit")
@@ -9,12 +10,14 @@ fn emit(item: v.Value) -> Nil
 
 fn check(label: String, codec: b.Codec(a), instances: List(v.Value)) -> Nil {
   let assert Ok(schema) = b.schema(codec)
-  cases(label, codec, b.schema_document(schema), instances)
+  let assert Ok(contract) = runtime.from_codec(codec)
+  cases(label, codec, contract, b.schema_document(schema), instances)
 }
 
 fn cases(
   label: String,
   codec: b.Codec(a),
+  contract: runtime.RuntimeContract,
   schema: v.Value,
   instances: List(v.Value),
 ) -> Nil {
@@ -25,15 +28,21 @@ fn cases(
         Ok(_) -> True
         Error(_) -> False
       }
+      let runtime_accepted = case runtime.validate(contract, instance) {
+        Ok(_) -> True
+        Error(_) -> False
+      }
       emit(
         v.Object([
           #("label", v.Text(label)),
           #("schema", schema),
           #("instance", instance),
           #("accepted", v.Bool(accepted)),
+          #("runtime_accepted", v.Bool(runtime_accepted)),
+          #("normalized_schema", b.schema_document(runtime.schema(contract))),
         ]),
       )
-      cases(label, codec, schema, rest)
+      cases(label, codec, contract, schema, rest)
     }
   }
 }
