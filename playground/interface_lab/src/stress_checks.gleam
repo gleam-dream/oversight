@@ -15,6 +15,7 @@ import consumers/relay_exchanges
 import consumers/runtime_schemas
 import consumers/scheduled_jobs
 import consumers/schema_admission
+import consumers/schema_documents
 import consumers/shared_graph
 import consumers/shared_registry
 import consumers/standalone_jobs
@@ -39,6 +40,7 @@ pub fn main() -> Nil {
   relay_exchanges.probe()
   runtime_schemas.probe()
   schema_admission.probe()
+  schema_documents.probe()
   scheduled_jobs.probe()
   shared_graph.probe()
   shared_registry.probe()

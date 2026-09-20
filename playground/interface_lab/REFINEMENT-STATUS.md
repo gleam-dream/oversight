@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-one consumers compile with only their transitive source imports.
+- Gleam 1.18.1: thirty-two consumers compile with only their transitive source imports.
 - Thirty-three negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Twenty-four interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -106,3 +106,10 @@
 - Static codecs supply contracts only when their schemas are available. Runtime contracts and witnesses cannot substitute for native codecs or application records.
 - The independent schema oracle compares all four acceptance paths on its existing corpus.
 - Document loading, source generation, dynamic graph publication, numeric normalization, limits, and schema migration remain open.
+
+## Finite schema document loading
+
+- [Finite schema documents](SCHEMA-DOCUMENTS.md) enter the existing runtime-contract boundary through a strict parser for Blueprint's rendered forms.
+- Unsupported constraints are rejected explicitly. Duplicate keys, malformed supported forms, dialect failures, and schema invariants remain located failures.
+- The independent corpus reloads every emitted document and checks normalized contract equality before comparing value acceptance.
+- JSON byte parsing, general schema syntax, source generation, resource limits, and recursive references remain open.
