@@ -31,12 +31,12 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-seven consumers compile with only their transitive source imports.
-- Forty-two negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty-eight consumers compile with only their transitive source imports.
+- Forty-five negative fixtures fail with their intended single compiler diagnostic.
+- Thirty interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `7fcdb28`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `73d9c91`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -146,3 +146,9 @@
 - The injected store owns current-record lookup, clock selection, decision, and commit. Missing records, unavailability, and unknown commit preserve the submitted command without inventing a winner.
 - Cancellation intent, committed cancellation, and acknowledged attempt outcomes remain distinct. Retry and snooze acknowledgements do not finish the job.
 - Atomic storage, command receipts, renewal liveness, and job-state projection remain open.
+
+## Login consumption
+
+- [Login consumption](LOGIN-CONSUMPTION.md) keeps stored revisions and terminal records in the existing transaction owner. Binding checks produce typed code or denial outcomes without deciding expiry.
+- The injected store owns current-record lookup, authoritative clock sampling, and consumption. Terminal records take precedence over stale revisions; unknown commit never grants exchange authority.
+- Public consumption returns no secret-bearing capability. Concurrent storage and private backend-to-identity orchestration remain open.

@@ -2,6 +2,6 @@
 import lab/warden
 import lab/warden_transaction as login
 
-pub fn invalid(checked: login.CheckedCallback) {
+pub fn invalid(checked: login.CheckedOutcome) {
   warden.subject(checked)
 }
