@@ -221,7 +221,12 @@ reports are `/private/tmp/gleam-dream-sinal-wave3.log` and
 `/private/tmp/gleam-dream-blueprint-wave3.log`. Reported success is not the Sol
 Medium verdict. Final [`review-3.md`](review-3.md) retains both snapshots with changes required; all listed findings must close first in Wave 4.
 
-## Wave 4: ready to launch
+## Wave 4: launched
+
+- External runs use the requested sandbox flags with no model override.
+  Output logs: `/private/tmp/gleam-dream-sinal-wave4.log` and
+  `/private/tmp/gleam-dream-blueprint-wave4.log`, with sibling `.stderr` files.
+  Review remains pending; a running process is not a completed delivery.
 
 - Shared handoff: [`wave-4-work-order.md`](wave-4-work-order.md).
 - Sinal target: close review evidence gaps and finish native race/fault quality,
@@ -234,10 +239,10 @@ Medium verdict. Final [`review-3.md`](review-3.md) retains both snapshots with c
 - This wave aims to finish both approved initial releases. Wave 5 is created only
   for a concrete blocker returned by implementation or review.
 
-| Package        | Wave 4 baseline                            | External session/log | Delivery    | Review              |
-| -------------- | ------------------------------------------ | -------------------- | ----------- | ------------------- |
-| Sinal          | `13105a1777d01d6e1904ae624409ff2f25c739aa` | pending launch       | not started | Sol Medium required |
-| JSON Blueprint | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | pending launch       | not started | Sol Medium required |
+| Package        | Wave 4 baseline                            | External session/log | Delivery | Review              |
+| -------------- | ------------------------------------------ | -------------------- | -------- | ------------------- |
+| Sinal          | `13105a1777d01d6e1904ae624409ff2f25c739aa` | session `5958`       | running  | Sol Medium required |
+| JSON Blueprint | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | session `8390`       | running  | Sol Medium required |
 
 ## Subsequent roadmap
 
