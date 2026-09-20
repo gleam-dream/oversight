@@ -1,639 +1,224 @@
-# Typed Gleam OIDC / OAuth 2.0 Relying Party — Design
+# Warden — typed OIDC relying party and OAuth client
 
-**Status:** Draft v0.1 · **Date:** 2026-09-19 · **Working package name:** `warden` (check Hex availability)
-**Target:** Gleam on Erlang/OTP 27+ · **Backend (v1):** [`oidcc`](https://github.com/erlef/oidcc) via FFI
+## 1. Purpose, scope, and status
 
-Items marked **[VERIFY]** are claims I could not confirm from public docs and must be resolved by a spike (§9) before the design is frozen.
+- Warden provides a typed Gleam OIDC relying party and OAuth client on Erlang/OTP 27+. The default implementation must reuse pinned `oidcc` through a narrow Erlang boundary rather than implement a second protocol or cryptographic core.
+- This design consolidates the baseline at `9194f02` with transaction, verification, custody, and refresh findings. The initial [public facade](PUBLIC-API.md) does not remove broader [coverage](API-COVERAGE.md#warden); unimplemented operations remain requirements rather than completed APIs.
+- Required baseline operations remain discovery, authorization-code login, refresh, client credentials, userinfo, introspection, and RP-initiated logout. Later protocol families and explicit gaps retain their separate dispositions in §4.8.
+- Authorization-server implementation, implicit/hybrid/password flows, and JavaScript runtime support remain excluded from the initial package. A social-provider quirks catalog remains optional later work, with Assent as a reference rather than the default backend.
+- Historical upstream certification does not certify Warden or the selected newer backend version. Scripted attestations and storage histories establish interface behavior only.
 
----
+## 2. Design principles and ownership
 
-## 1. Goals, scope, non-goals
-
-### Goals
-
-1. Give Gleam applications a **strongly typed, hard-to-misuse** OIDC Relying Party (RP) and OAuth 2.0 client API.
-2. **Inherit correctness from a certified, audited implementation** (`oidcc`) rather than re-implementing protocol or crypto logic.
-3. Keep the backend **replaceable**: one narrow seam, a backend-agnostic test suite, and a documented migration path (§5).
-4. Make validation **externally sourced**: OpenID Foundation conformance suite, RFC test vectors, third-party OPs, and the upstream library's own fixtures — not bespoke tests we wrote ourselves (§6).
-
-### Non-goals (v1)
-
-- Writing or re-implementing JOSE, crypto, discovery, JWKS handling, or ID-token validation. (Facade rule, §2.)
-- Building an OAuth/OIDC **authorization server**. Use Keycloak, Ory, Boruta, etc.
-- Implicit, hybrid and resource-owner-password flows (deprecated by current OAuth security guidance; also outside oidcc's certified profiles).
-- JavaScript target support. `gleam.toml` pins `target = "erlang"`.
-- A catalogue of social-login provider quirks (GitHub, Apple, …). Possible later as a separate `warden_providers` package, using Elixir's `assent` as a reference for quirks.
-
----
-
-## 2. Design principles
-
-| #   | Principle                               | Consequence                                                                                                                                                            |
-| --- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1  | **Delegate, don't reimplement**         | Any check `oidcc` performs stays in `oidcc`. The facade only adds checks `oidcc` leaves to the caller, in exactly one module (`warden/login`), each with its own test. |
-| P2  | **Parse at the edge, typed inside**     | The Erlang shim converts terms to Gleam types once. No `Dynamic` escapes the FFI module.                                                                               |
-| P3  | **Insecure states are unrepresentable** | Opaque types with validating constructors (`Issuer`, `State`, `Nonce`, `PkceVerifier`, `Pending`, tokens). If you hold a `VerifiedIdentity`, it was verified.          |
-| P4  | **Secure defaults; opting out is loud** | PKCE S256 and nonce are always on. Anything weaker requires a function prefixed `unsafe_`, which appears in review greps and CI lints.                                 |
-| P5  | **One seam**                            | All backend-specific code sits behind the `Backend` record (§4.9). Nothing above it mentions `oidcc`.                                                                  |
-| P6  | **Tests come from outside**             | We write adapters and harnesses, not protocol tests from scratch.                                                                                                      |
-
----
+- Delegate backend protocol checks to `oidcc`; implement missing caller obligations in one canonical Warden owner. Document every deliberate stricter policy and test its option mapping.
+- Decode foreign terms at one boundary and expose typed outcomes. Public claim maps, token strings, or adapter attestations must not directly construct verified identity.
+- Opacity establishes constructor ownership within a configured trust model. It does not establish cryptographic correctness, honest adapters, secret erasure, or linear consumption of copyable values.
+- Warden owns web identity and session custody. [Relay](relay-design.md) owns MCP bearer grants, resource authorization, and MCP-specific client discovery; a Warden identity is not a Relay grant.
+- [Blueprint](blueprint-design.md) supplies data values and codecs where serialized contracts are required. Warden retains identity, token, provider, and session semantics without introducing a universal identity or persistence protocol.
+- The backend remains replaceable through typed operation contracts. Protocol expectations come from external specifications, vectors, upstream fixtures, and conformance assets; Warden-specific orchestration and ownership need their own tests.
 
 ## 3. Target design
 
-### 3.1 Layers
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│ Application (wisp / mist handlers, sessions, storage)        │
-└───────────────▲──────────────────────────────────────────────┘
-                │ typed public API  (warden, warden/login, warden/token, …)
-┌───────────────┴──────────────────────────────────────────────┐
-│ Facade (pure Gleam)                                          │
-│  • typed domain model, opaque constructors                   │
-│  • state / PKCE-verifier / nonce generation                  │
-│  • callback parsing, state comparison, Pending lifecycle     │
-│  • error taxonomy + mapping                                  │
-└───────────────▲──────────────────────────────────────────────┘
-                │ Backend record (the seam, §4.9)
-┌───────────────┴───────────────┐      ┌────────────────────────┐
-│ warden/backend/oidcc            │      │ (future) native backend│
-│  Gleam decoders + Erlang shim │      │  gose + kryptos + HTTP │
-└───────────────▲───────────────┘      └────────────────────────┘
-                │ Erlang calls
-┌───────────────┴──────────────────────────────────────────────┐
-│ oidcc (certified, audited) → erlang-jose → OTP crypto/ssl    │
-└──────────────────────────────────────────────────────────────┘
-```
-
-### 3.2 Repository / module layout
-
-Single Hex package for v1. Splitting later is easier than merging, but opaque types cannot be constructed across packages, so v1 stays one package **[see open question Q3]**.
-
-```
-src/
-  warden.gleam                  # top-level operations (begin_login, complete_login, refresh, …)
-  warden/issuer.gleam           # Issuer (validated https URL)
-  warden/provider.gleam         # Provider handle, supervision child spec
-  warden/client.gleam           # Client, ClientId, ClientAuth, Secret, RedirectUri
-  warden/scope.gleam            # Scope
-  warden/login.gleam            # AuthRequest, Pending, Callback, parse_callback, state/PKCE logic
-  warden/token.gleam            # Tokens, AccessToken, RefreshToken, IdTokenHint, TokenType
-  warden/identity.gleam         # Identity, StandardClaims, Claims, UserKey
-  warden/error.gleam            # error types
-  warden/store.gleam            # PendingStore interface + ETS-actor reference impl
-  warden/entropy.gleam          # injectable randomness (deterministic in tests)
-  warden/backend.gleam          # Backend record definition (the seam)
-  warden/backend/oidcc.gleam    # oidcc implementation (decoders, mapping)
-  warden/backend/mock.gleam     # in-memory backend for application developers' tests
-src/warden_oidcc_ffi.erl        # the ONLY Erlang file; shape conversion, no logic
-test/                         # unit, contract, corpus tests
-conformance/                  # reference RP app + harness for the OIDF suite (separate Gleam project)
-```
-
-### 3.3 Responsibility matrix
-
-Who performs each security-relevant step. **The "oidcc" rows are assumptions taken from its feature list and must be confirmed against its source in spike S1.** Where oidcc leaves a step to the caller, the facade owns it.
-
-| Step                                                                            | Owner                         | Notes                                                                                                                |
-| ------------------------------------------------------------------------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Discovery, issuer exact-match, metadata caching                                 | oidcc                         | via its provider configuration worker                                                                                |
-| JWKS fetch, refresh on unknown `kid`                                            | oidcc                         | README lists automatic JWK refreshing                                                                                |
-| Authorization URL construction, PKCE challenge (S256)                           | oidcc                         | facade supplies the verifier                                                                                         |
-| **PKCE verifier generation**                                                    | **facade**                    | 32 bytes CSPRNG → base64url (43 chars); entropy injectable for the RFC 7636 App. B vector                            |
-| **`state` generation and comparison**                                           | **facade**                    | constant-time compare; single-use via `PendingStore.take`                                                            |
-| **`nonce` generation**                                                          | **facade**                    | passed to oidcc for both request and validation **[VERIFY: oidcc rejects a missing/mismatched nonce when supplied]** |
-| RFC 9207 `iss` response parameter check                                         | oidcc or facade **[VERIFY]**  | oidcc lists RFC 9207 support; confirm it is enforced on the callback path, else facade enforces                      |
-| Callback param parsing (duplicates, code+error together)                        | **facade**                    | RFC 6749 §4.1.2                                                                                                      |
-| Code exchange, client authentication                                            | oidcc                         | `client_secret_basic/post/jwt`, `private_key_jwt`                                                                    |
-| ID token signature, `alg` pinning, `iss`, `aud`, `azp`, `exp`, `nbf`, `at_hash` | oidcc                         | never the facade                                                                                                     |
-| Userinfo `sub` match                                                            | facade **enforces via types** | `expected: Subject` is a required argument                                                                           |
-| Pending TTL                                                                     | **facade**                    | default 10 min, plus store-level expiry                                                                              |
-| Error mapping to typed taxonomy                                                 | **facade**                    | golden-tested (§6, V1)                                                                                               |
-| TLS verification, timeouts, SSRF policy for discovery/JWKS                      | **facade config → shim**      | never rely on library/OTP defaults; see §3.5                                                                         |
-
-### 3.4 Process model
-
-- `oidcc` runs a **provider configuration worker** (a supervised process, registered by name) that discovers and refreshes metadata and JWKS.
-- The facade exposes `provider.child_spec(config)` returning a child specification for a `gleam_otp` supervisor (exact types depend on the pinned `gleam_otp`). The worker's registered name is created **once at startup** from a typed name (e.g. `gleam/erlang/process.new_name`), never from user-supplied strings, to avoid unbounded atom creation.
-- `Provider` is an opaque handle: `#(Backend, BackendHandle)`.
-- Worker crash → supervisor restart. Calls made while unavailable return `Error(ProviderUnavailable(_))`; they never panic.
-
-### 3.5 FFI boundary rules
-
-1. **One Erlang file** (`warden_oidcc_ffi.erl`), ≤ ~300 lines, containing only: argument conversion (Gleam term → oidcc option map), record → map flattening for decoders, and normalising `{ok, _} | {error, _}`. No conditionals about security. Anything with logic lives in Gleam.
-2. Every value coming back is decoded with `gleam/dynamic/decode` into a Gleam type inside `warden/backend/oidcc`. Decoder failure → `Error(Backend(MalformedBackendResponse(_)))`, never a crash.
-3. **Error mapping is total.** Each known oidcc error reason maps to a specific variant; anything else maps to `Backend(Unmapped(String))` — kept for forward compatibility and logged, never treated as success.
-4. **Explicit TLS policy** in the shim: `verify_peer`, OS/`public_key:cacerts_get()` trust anchors, hostname check, bounded timeouts, and a size cap on responses, passed through oidcc's request options **[VERIFY exact option names in the pinned version]**. A test asserts that a self-signed OP is rejected.
-5. **Private-key material** (`private_key_jwt`, DPoP) crosses the boundary as a JWK JSON string — one of the few places an encoded string is genuinely required (§4.12). The Gleam type is opaque and redacted.
-6. Function names/arity in the shim are pinned to the exact oidcc version. An oidcc bump that changes them fails compilation of the shim or the contract tests, not production.
-
-### 3.6 Dependency and version policy
-
-- Pin `oidcc` (and transitively `jose`) to **exact versions** with a committed lockfile. Upgrades are deliberate PRs that must pass the full validation gate (§6.9).
-- oidcc requires **OTP 27 or newer**; CI matrix: minimum and latest supported OTP.
-- Note on upstream risk: the EEF deprecated `oidcc_cowboy` for lack of usage, so upstream does prune what nobody uses. Track `oidcc` maintenance health as a standing item (§9).
-- **Certification is version-specific.** The certification listing shows `oidcc` **3.0.0**; current releases are newer (3.8.0 at time of writing). We may say "built on a certified library" but must not say "certified" for the facade or for newer oidcc versions unless we run and submit the suite ourselves (§6.3).
-
-### 3.7 Login sequence
-
-```
-App                Facade                     oidcc                   OP
- │ begin_login ───►  gen state, nonce, verifier
- │                   build Pending ─────────► create_redirect_url ───► (URL only)
- │ ◄── #(Uri, Pending)
- │ store.put(pending) ; redirect user ─────────────────────────────► authenticate
- │ ◄──────────────────────── redirect back with code, state, iss ────
- │ parse_callback(params)
- │ store.take(id) ──► Pending (single use, TTL)
- │ complete_login:
- │   check state == pending.state  (constant time)
- │   check iss param if present    (or delegate, S1)
- │   ─────────────────────────────► retrieve_token ─────────────────► token endpoint
- │                                   validate ID token (sig/alg/iss/aud/exp/nonce/at_hash)
- │ ◄── Session(tokens, identity)    ◄────────────────────────────────
-```
-
----
-
-## 4. Library API
-
-Snippets are illustrative Gleam; final signatures are settled during M1.
-
-### 4.1 Core opaque types
-
-```gleam
-// warden/issuer
-pub opaque type Issuer { Issuer(Uri) }
-pub type IssuerError { NotHttps NotAbsolute HasQueryOrFragment Malformed }
-pub fn parse(String) -> Result(Issuer, IssuerError)
-pub fn unsafe_allow_http_for_testing(String) -> Result(Issuer, IssuerError)  // localhost only
-pub fn to_string(Issuer) -> String
-
-// warden/login
-pub opaque type State { State(String) }         // 256-bit, from Entropy
-pub opaque type Nonce { Nonce(String) }
-pub opaque type PkceVerifier { PkceVerifier(String) }
-pub opaque type Pending { Pending(/* state, nonce, verifier, redirect_uri,
-                                     issuer, client_id, created_at, expires_at */) }
-pub opaque type AuthCode { AuthCode(String) }
-
-// warden/scope — open only where the spec is open
-pub type Scope { OpenId Profile Email Address Phone OfflineAccess Custom(String) }
-```
-
-### 4.2 Provider
-
-```gleam
-pub type ProviderConfig {
-  ProviderConfig(
-    issuer: Issuer,
-    name: process.Name(ProviderMessage),   // created once at startup
-    http: HttpPolicy,                      // timeouts, size caps, TLS (secure defaults)
-    refresh: RefreshPolicy,                // metadata/JWKS refresh intervals
-    allowed_id_token_algs: Option(List(SigningAlg)),  // pin; default = from client registration
-  )
-}
-pub fn child_spec(ProviderConfig) -> supervision.ChildSpecification(Provider)  // oidcc backend
-pub fn child_spec_with(Backend, ProviderConfig) -> supervision.ChildSpecification(Provider)
-pub fn issuer(Provider) -> Issuer
-```
-
-### 4.3 Client
-
-```gleam
-pub type ClientAuth {
-  NoAuth                                  // public client (PKCE only)
-  SecretBasic(Secret)
-  SecretPost(Secret)
-  SecretJwt(Secret)
-  PrivateKeyJwt(key: SigningKey, alg: SigningAlg)
-}
-pub type Client { Client(id: ClientId, auth: ClientAuth, redirect_uri: RedirectUri) }
-// Secret and SigningKey are opaque; reveal() is explicit; constructors trim/reject empty.
-// RedirectUri is validated: absolute, no fragment; https unless loopback.
-```
-
-### 4.4 Login flow
-
-```gleam
-pub type AuthRequest {
-  AuthRequest(
-    scopes: List(Scope),                 // OpenId is always added
-    prompt: List(Prompt),                // None_ | Login | Consent | SelectAccount
-    max_age: Option(Duration),
-    login_hint: Option(String),
-    acr_values: List(String),
-    ui_locales: List(String),
-    extra: List(#(String, String)),      // escape hatch; cannot override reserved names
-    par: Bool,                           // use pushed authorization request (RFC 9126)
-  )
-}
-pub fn default_request() -> AuthRequest
-
-pub type Callback {
-  CallbackCode(code: AuthCode, state: State, iss: Option(String))
-  CallbackError(error: AuthorizationErrorCode, description: Option(String),
-                state: Option(State), iss: Option(String))
-}
-pub type CallbackParseError {
-  MissingParameter(String)
-  DuplicateParameter(String)      // e.g. two `code` params → reject
-  AmbiguousResponse               // code and error both present
-}
-
-// Top-level operations (warden.gleam)
-pub fn begin_login(Provider, Client, AuthRequest) -> Result(#(Uri, Pending), LoginError)
-pub fn begin_login_with(Provider, Client, AuthRequest, Entropy) -> Result(#(Uri, Pending), LoginError)
-pub fn parse_callback(params: List(#(String, String))) -> Result(Callback, CallbackParseError)
-pub fn complete_login(Provider, Client, Pending, Callback) -> Result(Session, LoginError)
-```
-
-`complete_login` consumes a `Pending` obtained from `PendingStore.take`, so the compiler pushes callers toward single-use handling. State comparison happens **before** any network request.
-
-### 4.5 Tokens and identity
-
-```gleam
-pub type Session { Session(tokens: Tokens, identity: Identity) }
-
-pub type Tokens {
-  Tokens(
-    access: AccessToken,               // opaque; token.reveal(access) to obtain the string
-    token_type: TokenType,             // Bearer | DPoP | OtherType(String); case-insensitive parse
-    expires_at: Option(Timestamp),
-    refresh: Option(RefreshToken),
-    scopes: Option(List(Scope)),
-    id_token_hint: Option(IdTokenHint),   // for logout only; not a trusted identity source
-  )
-}
-
-pub opaque type Identity { ... }            // constructible only by a backend after verification
-pub fn key(Identity) -> UserKey             // (issuer, sub): the ONLY stable identity key
-pub fn subject(Identity) -> Subject
-pub fn standard(Identity) -> StandardClaims // typed: email: Option(String), email_verified: Option(Bool), …
-pub fn auth_time(Identity) -> Option(Timestamp)
-pub fn acr(Identity) -> Option(String)
-pub fn amr(Identity) -> List(String)
-pub fn decode_claims(Identity, decode.Decoder(a)) -> Result(a, ClaimsError)   // custom claims
-```
-
-`UserKey` deliberately makes "key users by email" awkward; `email` is a claim, not an identity.
-
-### 4.6 Other operations
-
-```gleam
-pub fn refresh(Provider, Client, Tokens) -> Result(Tokens, RefreshError)
-pub fn client_credentials(Provider, Client, List(Scope)) -> Result(Tokens, TokenError)
-pub fn userinfo(Provider, Client, Tokens, expected: Subject) -> Result(UserinfoClaims, UserinfoError)
-pub fn introspect(Provider, Client, token: AccessToken) -> Result(Introspection, IntrospectError)
-pub type Introspection { Active(IntrospectionClaims) | Inactive }
-pub fn end_session_url(Provider, Client, LogoutRequest) -> Result(Uri, LogoutError)
-// LogoutError includes NoEndSessionEndpoint when the OP does not advertise one.
-```
-
-`expected: Subject` is required so a caller cannot skip the userinfo `sub` check.
-
-### 4.7 Errors
-
-Closed variants, matched exhaustively by callers:
-
-```gleam
-pub type LoginError {
-  ProviderUnavailable(ProviderError)
-  AuthorizationDenied(code: AuthorizationErrorCode, description: Option(String))
-  StateMismatch
-  PendingExpired
-  IssuerParamMismatch(expected: Issuer, got: String)
-  TokenEndpoint(TokenEndpointError)          // enum of RFC 6749 §5.2 codes + Other(String)
-  IdToken(IdTokenFailure)
-  Backend(BackendError)                      // MalformedBackendResponse | Unmapped(String)
-}
-pub type IdTokenFailure {
-  BadSignature UnsupportedAlg(String) NoneAlgRejected KeyNotFound
-  Expired NotYetValid IssuerMismatch AudienceMismatch AzpMismatch
-  NonceMismatch AtHashMismatch MissingClaim(String) Malformed
-}
-```
-
-Error values never contain secrets or raw tokens. A test asserts that `string.inspect` of every error variant is free of secret material.
-
-### 4.8 Pending store
-
-```gleam
-pub type PendingStore {
-  PendingStore(
-    put: fn(Pending) -> Result(PendingId, StoreError),
-    take: fn(PendingId) -> Result(Option(Pending), StoreError),   // atomic, single-use
-  )
-}
-```
-
-`PendingId` is an opaque random 256-bit handle (goes in a signed cookie). Reference implementations: an ETS-backed actor, and a cookie-sealed store using AEAD from `kryptos`/`gleam_crypto` for stateless deployments. The `take`-once semantics is what defeats callback replay.
-
-### 4.9 Backend interface (the seam)
-
-```gleam
-pub type Backend {
-  Backend(
-    start_provider:      fn(ProviderConfig) -> Result(BackendHandle, ProviderError),
-    authorization_url:   fn(BackendHandle, Client, AuthorizationParams) -> Result(Uri, LoginError),
-    exchange_code:       fn(BackendHandle, Client, AuthCode, ExchangeParams) -> Result(Session, LoginError),
-    refresh:             fn(BackendHandle, Client, Tokens) -> Result(Tokens, RefreshError),
-    client_credentials:  fn(BackendHandle, Client, List(Scope)) -> Result(Tokens, TokenError),
-    userinfo:            fn(BackendHandle, Client, Tokens, Subject) -> Result(UserinfoClaims, UserinfoError),
-    introspect:          fn(BackendHandle, Client, AccessToken) -> Result(Introspection, IntrospectError),
-    end_session_url:     fn(BackendHandle, Client, LogoutRequest) -> Result(Uri, LogoutError),
-  )
-}
-```
-
-A record of functions is Gleam's idiom for this (no traits/behaviours). It is intentionally **high-level and effectful**: it returns verified results, so a future backend can implement it with a totally different internal structure (sans-IO, different HTTP client) without the facade caring.
-
-### 4.10 Feature scope
-
-Derived from oidcc's published feature list; gaps are called out explicitly rather than silently filled.
-
-| Capability                                                       | v1            | Source                              |
-| ---------------------------------------------------------------- | ------------- | ----------------------------------- |
-| Discovery, JWKS auto-refresh                                     | ✅            | oidcc                               |
-| Authorization code + PKCE + nonce                                | ✅            | oidcc + facade                      |
-| Client auth: basic, post, `client_secret_jwt`, `private_key_jwt` | ✅            | oidcc                               |
-| ID token validation                                              | ✅            | oidcc                               |
-| Refresh token, client credentials                                | ✅            | oidcc                               |
-| Userinfo (incl. JWT response)                                    | ✅            | oidcc                               |
-| Introspection (RFC 7662)                                         | ✅            | oidcc                               |
-| RP-Initiated Logout                                              | ✅            | oidcc                               |
-| RFC 9207 issuer identification                                   | ✅            | oidcc **[VERIFY enforcement path]** |
-| PAR (RFC 9126), Request Objects (JAR)                            | v1.1          | oidcc                               |
-| DPoP (RFC 9449)                                                  | v1.1          | oidcc                               |
-| JARM, FAPI 2.0 Security / Message Signing profiles               | v2 (optional) | oidcc                               |
-| `jwt_bearer` grant                                               | v1.1          | oidcc                               |
-| Dynamic client registration                                      | later         | oidcc                               |
-| **Token revocation (RFC 7009)**                                  | ❌ gap        | not in oidcc's list **[VERIFY]**    |
-| **Device authorization grant (RFC 8628)**                        | ❌ gap        | not in oidcc's list                 |
-| **Token exchange (RFC 8693)**                                    | ❌ gap        | not in oidcc's list                 |
-| **Back-/front-channel logout**                                   | ❌ gap        | oidcc lists only RP-initiated       |
-| Implicit / hybrid / ROPC                                         | ⛔ excluded   | by design                           |
-
-**Gap policy:** a gap stays unsupported, or is contributed upstream to oidcc, or — only if unavoidable — implemented as a small isolated module with its own external test sources and an explicit security review. We do not quietly grow a second protocol core.
-
-### 4.11 Usage sketch (wisp, illustrative)
-
-```gleam
-pub fn login(req: Request, ctx: Context) -> Response {
-  let request = login.AuthRequest(..login.default_request(), scopes: [scope.Profile, scope.Email])
-  case warden.begin_login(ctx.provider, ctx.client, request) {
-    Ok(#(url, pending)) -> {
-      let assert Ok(id) = { ctx.store.put }(pending)
-      wisp.redirect(uri.to_string(url))
-      |> wisp.set_cookie(req, "warden_pending", store.id_to_string(id), wisp.Signed, 600)
-    }
-    Error(e) -> log_and_500(e)
-  }
-}
-
-pub fn callback(req: Request, ctx: Context) -> Response {
-  use params <- result.try(callback_params(req))            // query, or form body for form_post
-  use cb <- result.try(warden.parse_callback(params) |> result.map_error(bad_request))
-  use id <- result.try(pending_cookie(req))
-  use pending <- result.try(take_pending(ctx.store, id))   // None → 400 (replay/expired)
-  case warden.complete_login(ctx.provider, ctx.client, pending, cb) {
-    Ok(session) -> start_app_session(identity.key(session.identity), session)
-    Error(login.StateMismatch) -> wisp.bad_request()
-    Error(e) -> log_and_401(e)
-  }
-}
-```
-
-### 4.12 Where strings remain (and why)
-
-| String                                                             | Reason                                                                               |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
-| `Scope.Custom(String)`, `acr_values`, `login_hint`, `extra` params | Spec-open vocabularies                                                               |
-| Custom claims                                                      | Accessed only through a caller-supplied `Decoder`, never as loose maps               |
-| JWK JSON at the FFI boundary for `private_key_jwt` / DPoP          | oidcc consumes JWKs; wrapped in an opaque, redacted `SigningKey`                     |
-| Opaque token values                                                | Opaque by definition; wrapped in `AccessToken`/`RefreshToken` with explicit `reveal` |
-
-Everything else (URLs, algorithms, error codes, grant types, token types, prompts, response types) is a Gleam type.
-
----
-
-## 5. Replaceability
-
-### 5.1 Why we might replace oidcc
-
-- A need for the **JavaScript target** or **zero-FFI** deployment.
-- oidcc maintenance risk, OTP-version constraints, or a required feature it will not accept upstream.
-- A wish to gain typed internals (e.g. injectable clock, sans-IO) that oidcc does not offer.
-
-### 5.2 What makes it cheap
-
-1. **The `Backend` record** is the only thing a new implementation must provide (§4.9). Application code never imports `oidcc`.
-2. **Backend-agnostic tests**: contract and corpus suites take a `Backend` value (`contract.run(backend)`); conformance runs the reference RP through the public API only. A second backend must pass the _same_ suites unchanged.
-3. **oidcc becomes the oracle**: the differential harness (V7) runs the same scenarios through both backends and fails on any accept/reject disagreement.
-4. **Types encode semantics, not oidcc's shapes**: error taxonomy, `Identity`, `Tokens` are ours.
-
-### 5.3 Candidate replacement stack
-
-`gose` (typed JOSE, algorithm pinning, keys validated at construction) + `kryptos` (crypto) + `gleam_http`/`gleam_httpc` + our own discovery/JWKS cache actor. **gose is pure Gleam, requires OTP 27+ or Node 22+, does not support X.509 parameters or JWE compression, and is a young library** — it earns trust only by passing the same external suites, with oidcc/erlang-jose as differential oracles.
-
-### 5.4 Migration procedure
-
-1. Implement the new backend behind `Backend` (separate module or package).
-2. Pass: contract suite → corpus suite → differential suite vs oidcc → OIDF conformance for the same profiles (results compared test-by-test against oidcc's).
-3. **Shadow verification** in staging for side-effect-free operations only (ID-token/JWT validation, discovery parsing): run both backends, serve oidcc's result, log disagreements. Authorization codes are single-use and cannot be shadowed.
-4. Flip the default in `provider.child_spec`; keep oidcc backend available for at least one release.
-5. Remove only after a full release cycle without divergence.
-
----
-
-## 6. Validation plan
-
-Principle: **we adapt and drive externally-owned test assets; we do not author protocol expectations.** Where we write code, it is a harness or adapter.
-
-### 6.1 V0 — Supply chain
-
-- Exact pins + lockfile; CI fails on retired/vulnerable Hex packages; SBOM per release.
-- Review oidcc and erlang-jose changelogs and security advisories on every bump.
-
-### 6.2 V1 — Facade unit tests (Gleam)
-
-Scope: only code we own.
-
-- `Issuer.parse` accept/reject tables; `RedirectUri` rules.
-- `parse_callback`: duplicates, code+error together, missing state, empty values, `iss` variants; property tests (qcheck) for arbitrary parameter lists — no crash, deterministic classification.
-- `Pending`: TTL, single-use through `PendingStore`, state constant-time compare (behavioural check + code review).
-- **PKCE**: RFC 7636 Appendix B vector through injected `Entropy`; verifier length/charset properties.
-- **Error mapping golden tests**: enumerate every error reason oidcc can return (from its dialyzer types/source) and assert a mapping exists; unknown reasons must hit `Unmapped`, never `Ok`.
-- Redaction: `string.inspect` of every error and of `Client` contains no secret.
-- FFI decoders: fuzz with arbitrary Erlang terms; must return `Error`, never crash.
-
-### 6.3 V2 — OpenID Foundation conformance suite (primary gate)
-
-The suite acts as a fake OP and the RP under test performs real flows against it, including negative tests where the OP returns invalid data (e.g. an ID token signed with the wrong algorithm) and the RP must reject it.
-
-**Reference RP app** (`conformance/`): a minimal Gleam web app built **only on the public API** (no backdoors), exposing login start, callback, form_post callback, third-party-initiated login, and RP-initiated logout endpoints.
-
-**Profiles to run** — those oidcc itself is certified for: Config RP, Basic RP, Form Post RP, 3rd-party-initiated RP, RP-Initiated Logout RP. Optional later: FAPI RP plans, and the non-certification "relying party tests" plan for extra configurations.
-
-**Harness**: an HTTP driver with a cookie jar that starts each test in the suite, calls the RP's entry point, follows redirects, and fetches the suite's log/result for each test. We model it on two existing automations rather than inventing one: `erlef/oidcc_conformance` (oidcc's own) and `panva/openid-client-conformance-tests`. **[VERIFY: real browser is not required for the RP plans.]**
-
-**Local vs hosted**: a local suite instance is fine for CI and internal use (self-signed certs; the RP's TLS policy needs a test-only trust anchor injected via config, not by weakening defaults). Results from a local instance cannot be used for certification; only the hosted suite counts.
-
-**Acceptance criteria**
-
-- Every test in each profile PASSES, or is documented as WARNING/SKIPPED with the _same_ status as in oidcc's submitted certification logs (the `oidcc_conformance` repo stores those).
-- Logs are archived as CI artifacts per release.
-
-**Certification claim policy**: "built on an OpenID-certified library" is accurate. "Certified" applies only if we submit our own run to the hosted suite for a specific version (check current OIDF fee/membership terms).
-
-### 6.4 V3 — Crypto / JOSE assets (only where we touch them)
-
-oidcc/erlang-jose own JOSE correctness. We validate only what the facade or shim does:
-
-- `private_key_jwt` assertion generation, verified by an independent verifier (panva/jose in Node) in the interop rig.
-- If DPoP is enabled: RFC 9449 example vectors.
-- Wycheproof (Google) and RFC 7515/7517/7520 vectors become mandatory **only** when a native backend/gose is introduced (§5), run against it.
-
-### 6.5 V4 — Behavioural equivalence with raw oidcc ("transparency" tests)
-
-A shared **scenario corpus** (data files, not code): valid token; bad signature; `alg: none`; HS/RS confusion; unknown `kid` then JWKS rotation; wrong `iss`/`aud`/`azp`; expired / not-yet-valid; nonce missing/mismatch; `at_hash` mismatch; missing `sub`; oversized/garbage responses; token endpoint errors.
-Each scenario runs (a) directly against oidcc from an Erlang test module and (b) through the facade. Assert equivalent accept/reject class and mapped error. This proves the facade neither weakens nor accidentally strengthens oidcc's behaviour, and it is the same corpus the future backend must satisfy.
-
-### 6.6 V5 — Interoperability with real OPs
-
-Containers (Testcontainers or docker compose): Keycloak, Ory Hydra, Dex, `panva/node-warden-provider` (scriptable, itself certified), and a scriptable mock OP (e.g. navikt `mock-oauth2-server`) for failure injection.
-Recorded discovery + JWKS fixtures (no secrets in CI) for Google, Microsoft Entra (multi-tenant issuer templating), Okta, Auth0 to catch metadata quirks. Optional nightly job against live test tenants using dedicated, low-privilege apps.
-Ported cases from oidcc's own fixtures (`priv/test/fixtures`) and, where relevant, `assent`, subject to license review (oidcc is Apache-2.0) with attribution.
-
-### 6.6b V5b — Attack matrix (from RFC 9700, the OAuth Security BCP)
-
-Each row is a named, automated test using the mock OP and the reference RP.
-
-| Threat                                                  | Expected behaviour                                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| CSRF / login CSRF (wrong or missing `state`)            | `StateMismatch`, no network call made                                                       |
-| Authorization-code replay against RP                    | `PendingStore.take` returns `None` on second use                                            |
-| Code injection / PKCE downgrade (OP ignores verifier)   | Exchange fails; RP never accepts a session                                                  |
-| Mix-up (`iss` response param differs)                   | `IssuerParamMismatch`                                                                       |
-| Token substitution (ID token for other `aud`/`azp`)     | `IdToken(AudienceMismatch)` / `AzpMismatch`                                                 |
-| Replayed ID token (wrong `nonce`)                       | `IdToken(NonceMismatch)`                                                                    |
-| Algorithm confusion, `alg: none`                        | `IdToken(NoneAlgRejected)` / `UnsupportedAlg`                                               |
-| Redirect URI manipulation                               | Rejected client-side config validation; OP rejection surfaces as typed error                |
-| Malicious metadata (issuer mismatch in discovery doc)   | Provider start fails / stays unavailable                                                    |
-| SSRF via discovery/JWKS URLs pointing at internal hosts | Blocked by `HttpPolicy` (private/loopback ranges denied by default) **[VERIFY hook point]** |
-| Self-signed / wrong-host TLS on OP                      | Connection rejected                                                                         |
-| Duplicate callback parameters (`code=a&code=b`)         | `DuplicateParameter`                                                                        |
-
-### 6.7 V6 — Non-functional
-
-Provider worker crash/restart; concurrent JWKS refresh under load; timeout and oversize-response handling; no secret leakage in logs (log-capture assertions); memory/atom-table growth check on repeated provider starts.
-
-### 6.8 V7 — Contract + differential suite (for future backends)
-
-`contract.run(backend)` executes V1-adjacent behavioural tests and the V4 corpus for any `Backend` value; a differential runner executes two backends side by side and fails on any disagreement.
-
-### 6.9 Release gates and upgrade playbook
-
-| Gate | Blocks release if…                                                                      |
-| ---- | --------------------------------------------------------------------------------------- |
-| V0   | unpinned/retired/advisory-flagged dependency                                            |
-| V1   | any failure                                                                             |
-| V2   | any conformance regression vs the previous release or vs oidcc's certification baseline |
-| V4   | any divergence from raw oidcc without an approved, documented reason                    |
-| V5b  | any attack row fails                                                                    |
-| V5   | any supported-OP interop failure                                                        |
-
-**oidcc bump playbook**: bump pin → compile shim → V1/V4 → V2 conformance run → diff results against the previous run → read changelog/security notes → tag.
-
-### 6.10 Traceability (feature → assets)
-
-| Feature                                      | Primary external asset                              | Ours                            |
-| -------------------------------------------- | --------------------------------------------------- | ------------------------------- |
-| Code flow, ID-token validation               | OIDF Basic/Config RP plans                          | reference RP                    |
-| Form post                                    | OIDF Form Post RP plan                              | form_post endpoint              |
-| 3rd-party initiated login                    | OIDF 3rd-party-init plan                            | `iss`/`target_link_uri` handler |
-| RP-initiated logout                          | OIDF RP-Initiated Logout plan                       | logout endpoint                 |
-| PKCE                                         | RFC 7636 App. B                                     | entropy injection               |
-| Refresh / client credentials / introspection | Keycloak, Hydra, Dex, node-warden-provider          | interop tests                   |
-| `private_key_jwt`, DPoP                      | independent verifier (panva/jose), RFC 9449 vectors | key-handling tests              |
-| Attack resistance                            | RFC 9700 threat list                                | V5b matrix                      |
-
----
-
-## 7. Security requirements checklist
-
-- [ ] PKCE S256 and `nonce` on every authorization request; no API to disable.
-- [ ] `state` ≥ 128 bits from a CSPRNG; constant-time comparison; single-use via atomic `take`.
-- [ ] Issuer must be `https` (loopback exception only through `unsafe_*` constructor).
-- [ ] ID-token `alg` pinned from provider/client configuration, never from the token header; `none` rejected.
-- [ ] Explicit TLS verification, bounded timeouts and response sizes for discovery, JWKS and token requests; SSRF deny-list default.
-- [ ] Secrets and tokens are opaque, never logged, never in error values.
-- [ ] Identity key is `(iss, sub)`; email is never an identifier.
-- [ ] Facade never re-implements a check oidcc performs; deviations are documented in §3.3.
-- [ ] Pending TTL enforced in facade and store.
-- [ ] No `let assert`/`panic` in library code paths reachable from network input (CI lint).
-- [ ] Reference cookie store uses AEAD with key rotation; signed cookies only as a fallback.
-
----
-
-## 8. Roadmap
-
-| Milestone       | Deliverable                                                                                      | Exit criterion                                              |
-| --------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| **M0**          | Spikes S1–S5 (§9)                                                                                | Responsibility matrix (§3.3) fully resolved; Q1–Q4 answered |
-| **M1**          | Package skeleton, shim, `Provider`, `begin_login`/`complete_login`, `PendingStore`, V0/V1        | Round trip against Keycloak in CI                           |
-| **M2**          | Reference RP + conformance harness; Basic, Config, Form Post, 3rd-party-init                     | All tests match oidcc baseline                              |
-| **M3**          | Refresh, userinfo, introspection, client credentials, RP-Initiated Logout; V4 corpus; V5b matrix | RP-Initiated plan green; attack matrix green                |
-| **M4**          | `private_key_jwt`, PAR, JAR, DPoP; interop matrix (V5)                                           | Independent-verifier tests green                            |
-| **M5**          | Hardening (V6), docs, examples, mock backend, 1.0                                                | All release gates green                                     |
-| **M6 (opt.)**   | JARM / FAPI 2.0 profiles                                                                         | FAPI RP plans green                                         |
-| **M7 (future)** | Native backend spike on gose behind `Backend`                                                    | Contract + differential suites green                        |
-
----
-
-## 9. Risks, open questions, verification backlog
-
-### Spikes (M0)
-
-- **S1 — oidcc source audit.** For each row of §3.3 marked oidcc/[VERIFY], read the code path and record file/function. Especially: nonce enforcement, RFC 9207 `iss` handling, `at_hash`/`azp` behaviour, refresh-response ID-token rules, how `alg` is pinned, request options for TLS/timeouts/size caps, SSRF hook point.
-- **S2 — API surface pin.** Enumerate oidcc's exported functions for the pinned version (client-context construction, redirect creation, token retrieval/refresh/client-credentials, userinfo, introspection, logout URL, DPoP/PAR options) and write the shim against them. Names in this document are indicative.
-- **S3 — Harness feasibility.** Run the OIDF suite locally in Docker; drive one Basic RP test with a minimal Gleam app and a scripted HTTP client; confirm no real browser needed.
-- **S4 — Gap check.** Confirm whether revocation, device grant, token exchange and back-channel logout exist in the pinned oidcc; decide policy per §4.10.
-- **S5 — Error catalogue.** Extract all error reasons from oidcc to seed the golden mapping test.
-
-### Open questions
-
-- **Q1.** Which OIDF profiles must we _claim_ (vs merely pass)? Decides whether to pursue our own certification.
-- **Q2.** Is time injectable in oidcc (beyond clock-skew tolerance)? If not, tests rely on real-time fixtures and the native backend later adds an explicit `now`.
-- **Q3.** Package split: a separate `warden_backend_native` package cannot construct opaque `Identity`/`Tokens`. Options: keep one package; or expose constructors from an `internal` module (verify the pinned Gleam compiler's enforcement and add a CI lint).
-- **Q4.** Is `gleam_otp`'s supervision API stable enough to expose `child_spec` typed directly, or do we wrap it?
-- **Q5.** Resource-server use (validating API access tokens): use oidcc introspection only, or also local JWT validation (would need oidcc's JWT-validation entry point, or gose)? Keep behind the same `Backend`.
-
-### Risks
-
-| Risk                                               | Mitigation                                                                                     |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Upstream deprecation/slowdown of oidcc             | Seam + contract suites + native-backend path (§5); track health each release                   |
-| Facade weakens oidcc by mis-mapping options        | V4 transparency tests; minimal shim; matrix in §3.3                                            |
-| Conformance suite drift (new plans/versions)       | Pin suite version in CI; scheduled upgrade job                                                 |
-| Certification confusion (claims we cannot support) | Claim policy in §6.3                                                                           |
-| Gleam ecosystem churn (`gleam_otp`, `wisp`)        | Keep framework code in examples/adapters, core depends on stdlib + erlang/otp/http/crypto only |
-
----
-
-## 10. References
-
-- oidcc (features, certification, security audit, OTP27 minimum): https://github.com/erlef/oidcc · https://hexdocs.pm/oidcc
-- oidcc conformance harness and submitted certifications: https://github.com/erlef/oidcc_conformance
-- OpenID certified implementations list (oidcc 3.0.0 profiles): https://openid.net/developers/certified
-- OIDF RP conformance testing (suite acts as OP): https://openid.net/certification/connect_rp_testing/
-- OIDF logout RP testing: https://openid.net/certification/logout_rp_testing/
-- OIDF FAPI RP testing (local vs hosted): https://openid.net/certification/fapi_rp_testing/
-- Example per-library automation: https://github.com/panva/openid-client-conformance-tests
-- erlang-jose: https://github.com/potatosalad/erlang-jose
-- gose (Gleam JOSE/COSE): https://hexdocs.pm/gose
-- glow_auth (Gleam OAuth 2 helpers): https://hexdocs.pm/glow_auth
-- Boruta (Elixir provider core, for AS-side reference): https://github.com/malach-it/boruta_auth
-- Assent (Elixir multi-provider, quirks reference): https://github.com/pow-auth/assent
-- RFC 6749, 7009, 7636, 7662, 8628, 8693, 9126, 9207, 9449, 9700; OpenID Connect Core 1.0, Discovery 1.0, RP-Initiated Logout 1.0
+### 3.1 Package, modules, and processes
+
+- One Erlang-target Hex package contains provider/client configuration, login transactions, identity, tokens, session custody, refresh, errors, stores, entropy, and backend adapters. Framework handlers remain examples or thin adapters.
+- One named Erlang boundary performs `oidcc` argument conversion, record flattening, exception containment, and sanitized error classification. The baseline approximate 300-line target is a review constraint, not permission to omit required HTTP ownership or security handling.
+- The provider configuration worker owns discovery, metadata refresh, and JWKS refresh under supervision. Provider handles remain opaque; unavailable workers return typed errors rather than panics.
+- Registered names are allocated once at trusted startup and never by converting request strings to atoms. Supervisor child-spec exposure remains subject to the selected `gleam_otp` API.
+- Login transaction storage and session custody have distinct owners and protocols. Neither a live process handle nor a copyable checked callback substitutes for durable storage authority.
+
+### 3.2 Configuration and authorization planning
+
+- Issuer configuration requires an absolute HTTPS URI with no query or fragment and exact issuer matching. Any loopback-only HTTP test constructor must be explicit; production configuration must exclude issuer-regex quirks.
+- Redirect configuration requires an absolute URI without a fragment, HTTPS except for a defined loopback policy, and exact reuse through authorization and exchange. The prototype's nonempty string constructors do not yet establish those rules.
+- Client authentication retains public-client, secret-basic, secret-post, secret-JWT, and private-key-JWT alternatives. Secrets and signing keys remain opaque with explicit trusted-adapter access and redacted errors.
+- Provider configuration retains client identity, allowed signing algorithms, HTTP limits, TLS policy, metadata/JWKS refresh policy, and the supervised provider binding. Algorithms must come from configured policy rather than untrusted token headers; `none` must reject.
+- Authorization options retain scopes, prompt, maximum authentication age, login hint, ACR values, UI locales, and permitted extension parameters. `openid` is added for login; extension parameters must not override reserved names.
+- Login planning creates independent material for concurrent tabs and issuers. It binds transaction identifier, issuer, client, redirect, state, nonce, PKCE verifier/challenge, creation time, and expiry.
+- State and nonce use trusted cryptographic entropy; the baseline state target is 256 bits and must never fall below its 128-bit security requirement. PKCE uses 32 random bytes encoded as a 43-character base64url verifier, with S256 derived from that same verifier.
+- Authorization output exposes the challenge rather than the verifier. PKCE S256 and nonce are mandatory for login; weaker defaults must not be inferred from backend permissiveness.
+- Pending lifetime retains the baseline ten-minute default with explicit policy. Production entropy, challenge derivation, URL construction, browser binding, and clock behavior remain obligations beyond injected laboratory material.
+
+### 3.3 Responsibility matrix and pinned verification policy
+
+| Responsibility                                                        | Owner                                         | Required contract                                                                          |
+| --------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Discovery, metadata and JWKS refresh                                  | `oidcc` worker through bounded HTTP           | Exact issuer and configured transport policy                                               |
+| State, nonce, PKCE material, transaction binding                      | Warden                                        | Trusted entropy, S256, exact retained values                                               |
+| Callback parsing and RFC 9207 issuer comparison                       | Warden                                        | Validate before consumption/exchange; backend receives a code rather than the raw callback |
+| Authorization URL, code exchange, client authentication               | `oidcc` adapter                               | Exact configured provider, redirect, client, verifier, and nonce                           |
+| Signature, algorithm, issuer, audience, time, nonce, authorized party | `oidcc` with explicit Warden options          | Required ID token and strict audience profile                                              |
+| Access-token hash                                                     | `oidcc`                                       | Conditional check when `at_hash` and access token are present                              |
+| Identity construction and session installation                        | Warden canonical owner                        | Accepted binding checks and confirmed custody receipt                                      |
+| Userinfo subject continuity                                           | Backend call configured by Warden             | Required expected subject                                                                  |
+| Refresh serialization, rotation, publication                          | Custody owner plus configured refresh adapter | Owner/provider binding, exact revision/command receipts, uncertainty retention             |
+| TLS, SSRF, limits, redaction, exception mapping                       | Configured adapter boundary                   | Explicit runtime tests; never assumed from upstream defaults                               |
+
+- The pinned login adapter supplies retained `redirect_uri`, nonce, and verifier with `require_pkce: true`, `trusted_audiences: []`, and `validate_azp: client_id`. It requires an ID token before returning an identity attestation.
+- `require_pkce: true` alone permits backend metadata supporting plain PKCE; Warden must establish S256 during authorization planning. The backend nonce default is `any`, so omission of the retained nonce would weaken validation.
+- The first audience profile accepts exactly the configured client, with a matching authorized party when present. Multiple audiences require an explicit later policy defining mandatory authorized-party behavior.
+- The pinned path validates signature, configured algorithms, exact issuer, audience, expiry, not-before, required claims, nonce, and a present authorized party. `at_hash` remains conditional rather than an unconditional response property.
+
+### 3.4 HTTP, FFI, and secret handling
+
+- Pin `oidcc = "3.9.0"` and its resolved dependencies with a committed lockfile. Shim function names and arities, option maps, return shapes, and error mappings must be tested against that exact backend.
+- Foreign decoding must reject malformed shapes without crashing. Foreign exceptions and exits require explicit containment at supported boundaries; no unexpected backend term may become success.
+- Error mapping matches closed outer shapes and discards embedded response bodies, claims, tokens, and arbitrary terms. Unknown failures become sanitized unmapped errors without a generic term formatter, replacing the baseline's unsafe `Unmapped(String)` diagnostic intent.
+- Errors and observations must exclude authorization codes, state, nonce, verifier, client secrets, tokens, raw claims, and formatted foreign terms. Audit fields are limited to nonsecret identifiers, classifications, and timing.
+- Opaque wrappers do not prevent VM inspection or crash dumps. Runtime logging, crash-dump policy, trusted adapter views, and secret storage remain explicit operational responsibilities.
+- HTTP configuration must pass peer verification, system trust anchors, hostname checking, and bounded timeout through the pinned request options. Test providers use explicit trusted-CA configuration rather than disabling verification.
+- Discovery, JWKS, token, and other provider responses require size bounds and SSRF policy. Default buffered HTTP behavior does not prove limits before allocation, and a request-options map does not by itself prove private-address or redirect rejection.
+- The malicious-provider harness must test private endpoints, DNS rebinding, cross-host redirects, oversized fixed/chunked bodies, timeout, invalid certificates, unknown-key refresh, and malformed adapter returns. If the selected seam cannot reject before connection and body allocation, use a bounded custom HTTP adapter or separately owned discovery/JWKS retrieval while retaining `oidcc` protocol/JOSE reuse.
+- Private signing material may cross the trusted FFI boundary in the required JWK representation. That boundary conversion does not authorize exposing it in ordinary public errors or application context.
+
+## 4. Public operations and internal ownership contracts
+
+### 4.1 Callback parsing and checked transactions
+
+- Raw query and form-post parsing must reject duplicates, missing required values, empty codes, ambiguous code-plus-error responses, and invalid shapes. Issuer-less callbacks require explicit provider policy rather than assumed acceptance.
+- Stored transactions bind immutable material to a revision. A store must never reuse a revision after changing that material.
+- Callback checking compares state in constant time and issuer against the stored binding before any network request. An invalid state or issuer must not consume the legitimate transaction.
+- A checked code or checked denial retains transaction identity, revision, expiry, and private binding material. Neither value is a verified identity or proof of consumption.
+- Correctly bound provider denial consumes the transaction terminally without invoking exchange. Raw provider error descriptions do not become secret-bearing public diagnostics.
+
+### 4.2 Atomic consumption and exchange
+
+- Consumption is a store-owned atomic operation: acquire the critical section, load the current record, inspect status/revision, sample the clock, decide, and commit. No caller timestamp may substitute for the locked clock sample.
+- A matching terminal consumed record takes precedence over revision comparison so a losing callback reports replay rather than an unrelated revision change. A pending revision mismatch rejects before expiry or mutation.
+- A matching pending transaction is valid only while `now < expires_at`; equality rejects. Confirmed consumption changes it to terminal before the token request begins.
+- Bounded terminal records distinguish replay and expiry from missing storage. Missing record, unavailable storage, and unknown commit remain distinct outcomes; none authorizes exchange.
+- The high-level login operation rejects a differently bound backend before accessing the store. It privately creates the exchange request only after confirmed consumption, using the exact consumed transaction and checked code.
+- Public consumption exposes sanitized disposition without a secret-bearing exchange capability. Copyable checked values cannot enforce single use; concurrent storage must admit exactly one backend invocation.
+- Exchange binds provider, exact issuer, client authentication, redirect, code, nonce, and verifier. Callback state is absent because Warden already checked it against that revision.
+- A known endpoint rejection, identity rejection, or uncertain exchange leaves the transaction consumed. Warden never restores pending state or silently repeats a possibly transmitted code.
+- Generic `oidcc` HTTP failure does not prove no transmission and maps conservatively to unknown exchange outcome. Connection retry is permitted only with proven no-send evidence; the initial consumed-login contract otherwise requires a new login even after proven provider unavailability.
+
+### 4.3 Identity, tokens, claims, and session custody
+
+- A configured verification adapter returns a public attestation rather than constructing identity. Warden validates shape and original issuer/client/audience/subject bindings before its canonical module issues opaque identity.
+- The production constructor binds the pinned `oidcc` path. Explicit custom-adapter configuration records adapter identity and purpose; labels alone cannot prove an adapter honest or enforce a production/test barrier.
+- Stable identity uses `(issuer, subject)`; email remains an optional claim. Standard claims, authentication time, ACR, AMR, and caller-decoded custom claims remain required public data capabilities.
+- Access tokens, refresh tokens, and logout-only ID-token hints remain distinct types. Session exposes confirmed custody references and identity rather than a general token accessor; trusted adapter views support storage and request construction.
+- Token response contracts retain token type, expiry, granted scopes, optional refresh material, and original authentication evidence. Token type remains extensible where the protocol is open; missing expiry is not fabricated.
+- Scope validation preserves case and rejects invalid delimiters or bytes. The demonstrated ASCII scope profile does not settle every provider-specific scope or expiry policy.
+- Custody installation retains the exact verified identity, provider binding, authentication evidence, and tokens under one stable command. A usable session requires an accepted-command receipt matching owner, command, material, identity, reference, and revision.
+- Uncertain installation returns owner-bound recovery for the same command and material. Recovery never repeats authorization-code exchange, and a contradictory receipt cannot resolve it.
+- The store must serialize installation and return stable history when an accepted command is retried. Scripted immutable ledgers do not prove durable atomicity, encryption, redaction, or concurrent installation.
+
+### 4.4 Custody-owned refresh
+
+- Refresh begins from the session's custody owner, provider binding, reference, revision, and original authentication evidence. It must reject a different owner or provider before calling a refresh port.
+- Reservation binds the expected revision and caller command identifier. Only a matching newly issued dispatch authorizes the provider call; pending, competing, recorded, or uncertain replies do not authorize another dispatch.
+- Missing refresh material is a typed rejection. Custody material is a trusted stored fact, not independently authenticated by possession of a Session value.
+- Proven no-send, definite endpoint rejection, uncertain transmission, and successful attestation remain distinct outcomes. Known settlement requires an exact recorded receipt; command replay returns recorded outcome rather than repeating the provider request.
+- Unknown provider outcome quarantines the token generation because the provider may have rotated it. Invalid successful output also requires reconciliation rather than releasing the predecessor for ordinary retry.
+- An absent refreshed ID token preserves established identity without creating a new authentication event. Present evidence must retain issuer, subject, audience, and applicable original nonce/authentication-time continuity under the selected profile.
+- Omitted refresh token retains current material; explicit replacement supersedes it. The demonstrated profile requires returned scopes to remain unchanged and compares them as case-sensitive sets rather than ordered lists.
+- That unchanged-scope profile and its original-identity checks are selected prototype policy, not the complete OAuth response vocabulary. Broader permitted scope transitions and authentication-evidence profiles remain retained operation requirements requiring explicit policy and external fixtures; neither this profile nor the pinned absent-ID-token limitation silently narrows future backend capability.
+- Publication commits access material and replacement refresh material together, bound to exact dispatch and expected revision. A valid receipt retains the session reference, matches the command, and advances the revision before a new Session is issued.
+- Lost or contradictory publication acknowledgement retains the exact owner-bound recovery command. Publication recovery must not call the provider; reservation recovery has a different type and cannot silently clear quarantine or authorize redispatch.
+- Automatic recovery from uncertain reservation remains unresolved where dispatch authority cannot be established. Reconciliation, reauthentication policy, and retry hints require explicit behavior rather than inference from opaque values.
+- The pinned `oidcc` refresh overload requires expected subject and rejects an absent returned ID token as `sub_invalid`. This is narrower than OIDC's permitted response vocabulary, so the default adapter must declare that limitation.
+- The pinned refresh path sets `nonce: any`; Warden must separately retain and check relevant original continuity evidence. Its response extraction also omits absent refresh material, so custody must explicitly distinguish retain from replace.
+- A scripted alternative exercises absent-ID-token refresh without proving default adapter support. Run the shared response corpus through the actual pinned adapter before choosing a production alternative; never fabricate ID-token evidence to hide the mismatch.
+
+### 4.5 Remaining provider operations
+
+- Client credentials must return typed token outcomes independently of login identity. Its scopes, authentication method, expiry, errors, and custody policy remain operation-specific requirements.
+- Userinfo must require expected subject and reject a response whose subject differs. JSON and JWT userinfo responses remain retained backend capabilities requiring exact adapter tests.
+- Introspection distinguishes active claims, inactive token, and transport/backend failure. Introspection does not itself authorize a Relay resource or establish a web login.
+- RP-initiated logout retains typed request configuration, logout-only ID-token hints, and an explicit missing-end-session-endpoint outcome. Local session/custody disposition and provider logout behavior require separate tests.
+- Third-party-initiated login and form-post callbacks remain required reference-RP paths, including issuer and target-link handling. The initial parsed callback facade does not establish their HTTP behavior.
+- Each operation needs an independent consumer, typed error family, exact pinned call mapping, and provider fixtures. General backend effectful functions must not collapse their distinct authority or retry rules.
+
+### 4.6 Stores and application integration
+
+- Transaction storage retains an ETS-backed reference target and a durable-store port with atomic revision/status/expiry checks. Browser cookies may carry an opaque random transaction reference under application session policy.
+- The baseline cookie-sealed store requires authenticated encryption and key rotation if pursued. Encryption alone cannot establish atomic take-once replay prevention; a stateless-only cookie implementation must not claim the demonstrated store contract without a shared replay authority.
+- Applications may install confirmed identity and session references in their own sessions and pass identity through request-scoped tools. Browser binding, persisted custody restoration, session expiry, revocation, and logout remain runtime obligations.
+- Storage ports, commands, receipts, and recovery values are internal design evidence until runtime implementation validates them. Laboratory visibility does not promote unfinished protocol machinery into the frozen public API.
+
+### 4.7 Error contracts
+
+- Login distinguishes malformed callback, binding mismatch, expiry, replay, changed revision, storage failure, unknown commit, provider denial, definite exchange rejection, uncertain exchange, and rejected identity.
+- Token validation retains specific sanitized categories for bad signature, unsupported/none algorithm, missing key, issuer/audience/authorized-party mismatch, expiry/not-before, nonce, access-token hash, missing claims, and malformed response.
+- Provider, refresh, userinfo, introspection, logout, and custody errors remain distinct where their recovery consequences differ. Unmapped backend failure and foreign exception never become success or include formatted raw values.
+- No network-reachable library path may rely on panic or unchecked assertion for malformed input. Scripted panic sentinels prove call ordering only; actual exception containment still requires runtime tests.
+
+### 4.8 Full capability disposition
+
+| Baseline capability                                                  | Disposition                                                            | Remaining evidence or friction                                                          |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Discovery and JWKS auto-refresh                                      | Retained `oidcc` reuse                                                 | Bounded HTTP, provider supervision, rotation, SSRF, and malformed metadata tests        |
+| Code flow, S256, nonce, state, RFC 9207                              | Retained; pure transaction/consumption partially demonstrated          | Entropy, challenge derivation, parsing, browser binding, exact FFI options, concurrency |
+| Basic/post/secret-JWT/private-key-JWT client authentication          | Retained                                                               | Configuration and independent assertion verification                                    |
+| ID-token validation, typed identity, claims                          | Retained                                                               | Concrete `oidcc` adapter and external crypto/claim oracles                              |
+| Tokens and sessions                                                  | Retained with custody ownership replacing public token bags            | Exact installation, redaction, expiry, durable restoration                              |
+| Refresh                                                              | Retained with reservation, rotation, quarantine, publication, recovery | Atomic owner, actual adapter, absent-ID-token limitation, reconciliation                |
+| Client credentials, userinfo including JWT, introspection, RP logout | Retained required operations                                           | Independent typed consumers and runtime provider cases remain open                      |
+| PAR, JAR, DPoP, JWT-bearer grant                                     | Retained later capability slices                                       | Pinned backend mapping and respective external suites                                   |
+| Dynamic registration                                                 | Retained later scope                                                   | Configuration, provider compatibility, and external evidence                            |
+| JARM and FAPI 2.0 security/message-signing                           | Retained optional later scope                                          | Profile-specific conformance required                                                   |
+| Revocation, device grant, token exchange, back/front-channel logout  | Retained explicit gaps                                                 | Verify backend support; remain unsupported until an explicit growth decision            |
+| Implicit, hybrid, password flows; JS runtime                         | Baseline exclusions retained                                           | No implied support from backend capability                                              |
+| Replaceable backend and application mock                             | Retained                                                               | Same operation contracts and external corpus, explicit custom trust                     |
+| Stateless cookie-only single use                                     | Unsupported security inference removed                                 | AEAD does not prove shared replay prevention                                            |
+| Resource-server authorization                                        | MCP policy assigned to Relay; introspection remains Warden             | Verified web identity and resource grant are distinct authorities                       |
+
+## 5. Backend replaceability
+
+- Applications depend on Warden operations rather than `oidcc` records. Verification and refresh use separately configured contracts; remaining provider operations extend the seam without allowing arbitrary backend identity construction.
+- A replacement must pass the same operation contracts, external corpus, differential tests, and selected conformance profiles. Deliberate Warden restrictions must be documented so a difference from permissive raw defaults is not misclassified as accidental drift.
+- The baseline native candidate remains `gose` plus crypto and HTTP libraries with owned discovery/JWKS caching. Its maturity, algorithm support, X.509/JWE limitations, runtime requirements, and suitability require verification at the selected version rather than inherited trust.
+- Replacement procedure remains contract tests, corpus, differential tests, and conformance before switching defaults. Shadow only side-effect-free verification/parsing in staging; never send single-use authorization codes or rotating refresh tokens to two backends.
+- Retain the previous backend for at least one release after a default change. Separate-package publication must preserve opaque ownership through explicit attestation contracts rather than exposing identity constructors.
+
+## 6. Validation plan and external oracles
+
+| Gate                         | Required assets and scenarios                                                                                                                                                     | Acceptance limit                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| V0 Supply chain              | Exact pins/lockfile, advisory and retirement checks, release SBOM, changelog/security review                                                                                      | Upgrades are deliberate; upstream certification does not transfer                                |
+| V1 Owned facade              | URI/redirect tables, callback parsing/property tests, constant-time state review, RFC 7636 Appendix B, transaction races, FFI term fuzzing, total error mapping, secret sentinels | Scripted ordering does not establish crypto or atomic stores                                     |
+| V2 OIDF                      | Public-API reference RP; Basic, Config, Form Post, third-party initiation, RP logout; optional later FAPI and additional RP plans                                                 | Run current pinned plans and archive logs; historical warnings/skips require explicit comparison |
+| V3 JOSE boundary             | Independent `panva/jose` verification of private-key JWT, RFC 9449 DPoP vectors; Wycheproof and RFC 7515/7517/7520 for a native backend                                           | Do not claim revalidation of all upstream crypto from wrapper tests                              |
+| V4 Raw-backend differential  | Identical external scenario corpus through raw `oidcc` and Warden                                                                                                                 | Reject unexplained disagreement; record stricter facade policy explicitly                        |
+| V5 Provider interoperability | Keycloak, Hydra, Dex, scriptable provider/mock; recorded Google/Entra/Okta/Auth0 metadata and JWKS; optional dedicated live tenants                                               | Use no secret fixtures; confirm exact provider names/versions before execution                   |
+| V5b Attack matrix            | RFC 9700 threats plus callback, transport, and refresh attacks                                                                                                                    | Every required row must pass before production acceptance                                        |
+| V6 Operational               | Worker crash/restart, concurrent refresh, timeouts, body bounds, process/memory/atom growth, logging, storage loss                                                                | Real runtime and network evidence required                                                       |
+| V7 Replacement               | Same contract/corpus and differential runs against each backend                                                                                                                   | Equivalent declared semantics rather than identical foreign record shapes                        |
+
+- The reference RP must expose login start, query/form callback, third-party initiation, and RP logout using public APIs only. Harnesses are modeled on `erlef/oidcc_conformance` and `panva/openid-client-conformance-tests`; browser-free automation remains to be proven.
+- Local conformance uses explicit test trust anchors and supports CI evidence. Certification requires the applicable hosted submission for the exact Warden release; historical upstream logs cannot substitute for it.
+- Preserve the baseline release gates: no vulnerable/unpinned dependency, no owned-facade failure, no conformance regression, no unexplained backend divergence, no failing attack row, and no supported-provider interoperability failure. Archive results per release and compare every backend upgrade.
+- The code/token corpus must include valid tokens, bad signatures, `alg: none`, HS/RS confusion, unknown keys and rotation, wrong issuer/audience/authorized party, expired/not-yet-valid claims, missing/mismatched nonce, bad `at_hash`, missing subject, malformed/oversized responses, and endpoint errors.
+- Add encrypted unsigned ID-token rejection at the pinned fixed backend. Login tests must also prove required-ID-token enforcement and strict audience/authorized-party option mapping rather than merely echoing adapter declarations.
+- Attack tests retain login CSRF, code replay, injection/PKCE downgrade, issuer mix-up, token substitution, nonce replay, algorithm confusion, redirect manipulation, malicious discovery, SSRF, wrong-host/self-signed TLS, and duplicate callback parameters.
+- Concurrent consumption tests must race two callbacks and observe one exchange, then hold the lock across exact expiry and observe no exchange. Include missing storage, unknown commit, backend crashes, and post-send transport loss without retry.
+- Custody tests must lose installation acknowledgement, recover the same command without exchange, and reject foreign owner or altered material. Refresh tests must cover retain/replace, absent/present ID token, changed identity/nonce/authentication time/scopes, overlapping commands, stale revision, and lost response after provider rotation.
+- Refresh publication tests must reject mismatched command, unchanged revision, foreign session reference, and contradictory acknowledgements while retaining the original recovery command. Recovery must never redispatch the provider.
+- Seed each secret with a distinct sentinel and inspect errors, observations, and foreign failure mappings. Negative compiler consumers must distinguish token kinds, checked/consumed/verified values, attestations, custody ownership, and reservation versus publication recovery.
+
+## 7. Pinned evidence and claims
+
+- The accepted backend pin is `oidcc` `3.9.0`, Apache-2.0, source `aa212d52d0140addf057c34917b734647401b34e`; annotated tag object `e5bad400ecb538bc0d826d54516fd7ee3b1cb2a8`. The recorded vulnerable range through `3.8.0` makes the baseline's older release reference unsuitable.
+- [Verification research](research/warden-verification-contract.md) records exact source paths for nonce, PKCE, audience, authorized party, ID-token presence, `at_hash`, and failure handling. [Refresh research](research/warden-refresh-contract.md) pins `oidcc_token.erl` SHA-256 `289be9bcb0e4677cba3dc98a3b4675070aec7beb27054726da395166b85ac2e3` and records absent-ID-token and nonce-continuity limitations.
+- [Protocol/auth research](research/protocol-auth-boundaries.md) records historical `oidcc` `3.0.0` certification for Basic, Config, Form Post, and third-party-initiated RP. Refresh and RP logout runs in the upstream harness are additional evidence, not additional certified-profile claims for Warden.
+- The recorded upstream conformance harness revision is `b632d9745b9490229ebca004b4df9928e1457d51`. The current suite version, exact provider fixtures, imported source licenses, and selected profile versions must be pinned before executable acceptance claims.
+- RFC 6749, 7636, 7662, 9126, 9207, 9449, and 9700 plus OIDC Core, Discovery, and RP-Initiated Logout supply operation expectations. RFC 7009, 8628, and 8693 remain sources for explicit gaps rather than claims of implementation.
+
+## 8. Demonstrated evidence and freeze
+
+- [Login transactions](playground/interface_lab/LOGIN-TRANSACTIONS.md) demonstrates two-tab binding with synthetic entropy/challenges. [Login consumption](playground/interface_lab/LOGIN-CONSUMPTION.md) demonstrates revision/status/expiry transitions through an injected store, not concurrent shared storage.
+- [Verified login](playground/interface_lab/VERIFIED-LOGIN.md) demonstrates private consume-and-exchange orchestration and canonical identity construction after configured assertions. It does not invoke `oidcc`, derive PKCE, or validate a signature.
+- [Session custody](playground/interface_lab/SESSION-CUSTODY.md) demonstrates exact installation and recovery using immutable ledger transitions. [Session refresh](playground/interface_lab/SESSION-REFRESH.md) demonstrates reservation, settlement, quarantine, publication, and recovery with scripted callbacks.
+- Those probes do not establish TLS, SSRF protection, foreign exception containment, cryptographic correctness, durable atomicity, or security certification. The real backend and storage oracles remain open requirements.
+- The initial public freeze retains validated configuration, login outcomes, opaque identity/session, and typed session-operation outcomes as intended facades. Unfinished store protocols remain internal, and all original unimplemented capability families remain backlog.
+- Do not begin another interface-refinement wave. Reopen the frozen public API only when real implementation produces a concrete caller mismatch.
+
+## 9. Remaining decisions and potential loss
+
+- The source audit resolved several baseline uncertainties, including callback issuer ownership, explicit nonce/PKCE options, strict audience behavior, required login ID token, and refresh mismatch. It did not execute the actual adapter or prove HTTP bounds.
+- Remaining adapter work includes exact exported-call mapping, error catalog, default refresh strategy, bounded HTTP seam, time injection/skew, provider supervision types, and conformance-driver feasibility.
+- Certification scope, custom verifier trust, persisted custody restoration, cookie replay authority, refresh reconciliation, and gap adoption remain explicit decisions. A small initial facade must not settle them by omission.
+- Preserve source provenance and notices when adapting upstream fixtures. Confirm the baseline's scriptable provider reference before pinning it; its draft `node-warden-provider` spelling is not an accepted dependency identifier.
+- No supported baseline operation is dropped. Changes remove unsafe assumptions about inherited certification, copyable single-use values, raw error formatting, and stateless cookie replay prevention while preserving their intended security and recovery obligations.

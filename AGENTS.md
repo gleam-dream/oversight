@@ -4,16 +4,19 @@
 
 `oversight` holds the design docs for the [gleam-dream](https://github.com/gleam-dream)
 organization's packages — production-grade, composable Gleam libraries. Each
-`*-design.md` file is the design for one package:
+`*-design.md` file records one package's full scope, initial facade, and
+reference evidence:
 
-| Design doc         | Package  | Ports/wraps                            |
-| ------------------ | -------- | -------------------------------------- |
-| `grind-design.md`  | `grind`  | Oban (job queue)                       |
-| `sinal-design.md`  | `sinal`  | `:telemetry`                           |
-| `saga-design.md`   | `saga`   | Reactor (saga/DAG)                     |
-| `relay-design.md`  | `relay`  | MCP                                    |
-| `warden-design.md` | `warden` | OIDC / OAuth 2.0                       |
-| `fabric-design.md` | `fabric` | BeamWeaver-style agent stack (partial) |
+| Design doc                                 | Package               | Main reference or oracle                                                                  |
+| ------------------------------------------ | --------------------- | ----------------------------------------------------------------------------------------- |
+| [blueprint-design.md](blueprint-design.md) | `blueprint`           | JSON Schema Draft 2020-12; `jsonschema` 4.26.0; `json_blueprint` 1.1.0/1.7.1 comparators  |
+| [llm-design.md](llm-design.md)             | Standalone LLM client | OpenAI Responses and Anthropic Messages; Google remains a baseline target                 |
+| [fabric-design.md](fabric-design.md)       | `fabric`              | BeamWeaver partial behavioral oracle                                                      |
+| [grind-design.md](grind-design.md)         | `grind`               | Oban 2.24.1 open-source behavior; Pro features need separate contracts or licensed oracle |
+| [relay-design.md](relay-design.md)         | `relay`               | MCP 2026-07-28 frozen schema/requirements; 2025-11-25 compatibility separately            |
+| [saga-design.md](saga-design.md)           | `saga`                | Reactor v1.0.6 behavioral oracle                                                          |
+| [sinal-design.md](sinal-design.md)         | `sinal`               | `:telemetry` 1.4.2 native behavior                                                        |
+| [warden-design.md](warden-design.md)       | `warden`              | `oidcc` 3.9.0 with OIDC/OAuth requirements and security oracles                           |
 
 This repo also hosts throwaway prototypes, evals, and tests written against
 these designs before a design is promoted to its own `gleam-dream/<name>`
