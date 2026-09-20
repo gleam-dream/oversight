@@ -36,200 +36,108 @@ compatibility of its persisted boundaries; laboratory Blueprint imports are
 prototype convenience, not a production dependency requirement. A caller-supplied
 structural signature is an assertion, not a computed compatibility proof.
 
-The original conceptual types are:
+### Current authoring example
+
+Examples labeled current quote laboratory symbols, not a released package API.
+Proposed sketches below retain unimplemented capabilities and are not compilable
+modules. The laboratory's `Codec` is Blueprint-backed for convenience; ordinary
+workflow serialization remains schema-independent in production intent.
+
+Current laboratory signature/type excerpt from [`saga.gleam`](playground/interface_lab/src/lab/saga.gleam) (`ActivityContract`, `Compensation`, `activity`, `define`, `and_then`); consumer: [`unified_workflow`](playground/interface_lab/src/consumers/unified_workflow.gleam). Function bodies and imports are omitted; this is not a standalone module.
 
 ```gleam
-pub opaque type Reactor(input, output, error, undo_error)
+pub type VersionedCodec(a) {
+  VersionedCodec(version: Version, codec: Codec(a))
+}
 
-pub opaque type Plan(value, error, undo_error)
-
-pub opaque type Runtime
-```
-
-A `Plan(value, error, undo_error)` means:
-
-> An executable graph fragment that will eventually produce `value`, may fail
-> with `error`, and may fail during rollback with `undo_error`.
-
-The retained combinator semantics are illustrated by these provisional signatures:
-
-```gleam
-pub fn new(
-  build: fn(Plan(input, error, undo_error)) ->
-    Plan(output, error, undo_error),
-) -> Reactor(input, output, error, undo_error)
-
-pub fn effect(
-  label: String,
-  dependency: Plan(input, error, undo_error),
-  run: fn(input) -> Result(output, error),
-  undo: fn(output, input) -> Result(Nil, undo_error),
-) -> Plan(output, error, undo_error)
-
-pub fn query(
-  label: String,
-  dependency: Plan(input, error, undo_error),
-  run: fn(input) -> Result(output, error),
-) -> Plan(output, error, undo_error)
-
-pub fn map(
-  plan: Plan(a, error, undo_error),
-  transform: fn(a) -> b,
-) -> Plan(b, error, undo_error)
-
-pub fn zip(
-  left: Plan(a, error, undo_error),
-  right: Plan(b, error, undo_error),
-) -> Plan(#(a, b), error, undo_error)
-
-pub fn and_then(
-  plan: Plan(a, error, undo_error),
-  next: fn(a) -> Plan(b, error, undo_error),
-) -> Plan(b, error, undo_error)
-
-pub fn run(
-  reactor: Reactor(input, output, error, undo_error),
-  input: input,
-) -> Result(
-  output,
-  Failure(error, undo_error),
-)
-```
-
-`Plan` should be opaque so that users can only construct valid graphs using the
-library’s combinators. Gleam explicitly supports opaque types and smart
-constructors for enforcing this kind of invariant.
-[Gleam opaque types](https://tour.gleam.run/advanced-features/opaque-types/)
-
-## What a workflow would look like
-
-Suppose we have:
-
-```gleam
-pub type CheckoutInput {
-  CheckoutInput(
-    customer_id: CustomerId,
-    items: List(Item),
-    payment_method: PaymentMethod,
+pub type ActivityContract(i, o, e, u) {
+  ActivityContract(
+    input: VersionedCodec(i),
+    output: VersionedCodec(o),
+    error: VersionedCodec(e),
+    undo_error: VersionedCodec(u),
   )
 }
 
-pub type CheckoutError {
-  OrderCreationFailed(OrderError)
-  InventoryReservationFailed(InventoryError)
-  FraudCheckFailed(FraudError)
-  PaymentFailed(PaymentError)
+pub type Compensation(i, o, u) {
+  Uncompensated
+  Compensate(fn(i, o) -> Result(Nil, u))
 }
 
-pub type UndoError {
-  OrderCancellationFailed(OrderError)
-  InventoryReleaseFailed(InventoryError)
-  RefundFailed(PaymentError)
-}
+pub fn activity(
+  id: StepId,
+  step_version: Version,
+  contract: ActivityContract(i, o, e, u),
+  execute: fn(i) -> Result(o, e),
+  compensation: Compensation(i, o, u),
+) -> Activity(i, o, e, u)
+
+pub fn define(
+  id: DefinitionId,
+  definition_version: Version,
+  structural_signature: String,
+  activity: Activity(i, o, e, u),
+) -> Definition(i, o, e, u)
+
+pub fn and_then(
+  structural_signature: String,
+  first: Definition(i, m, e, u),
+  second: Definition(m, o, e, u),
+) -> Definition(i, o, e, u)
 ```
 
-The reactor definition might look like this:
-
-```gleam
-pub fn checkout()
-  -> saga.Reactor(
-    CheckoutInput,
-    Receipt,
-    CheckoutError,
-    UndoError,
-  ) {
-  saga.new(fn(input) {
-    let order =
-      input
-      |> saga.effect(
-        label: "create order",
-        run: create_order,
-        undo: cancel_order,
-      )
-
-    let reservation =
-      order
-      |> saga.effect(
-        label: "reserve inventory",
-        run: reserve_inventory,
-        undo: release_inventory,
-      )
-
-    let fraud_check =
-      order
-      |> saga.query(
-        label: "check fraud",
-        run: check_fraud,
-      )
-
-    let payment_input =
-      saga.zip(reservation, fraud_check)
-      |> saga.map(fn(results) {
-        let #(reservation, fraud_result) = results
-
-        ChargePayment(
-          reservation: reservation,
-          fraud_result: fraud_result,
-        )
-      })
-
-    payment_input
-    |> saga.effect(
-      label: "charge payment",
-      run: charge_payment,
-      undo: refund_payment,
-    )
-    |> saga.map(receipt_from_payment)
-  })
-}
-```
-
-The strings here are only diagnostic labels. They do not identify dependencies
-or transport values.
-
-The actual dependency is:
-
-```gleam
-Plan(Reservation, CheckoutError, UndoError)
-```
-
-If `charge_payment` accidentally expects a `Customer` instead of
-`ChargePayment`, the program does not compile.
+`step_id`, `definition_id`, and `version` are checked constructors; invalid empty
+identities or nonpositive versions return errors. `Uncompensated` records absent
+compensation rather than a successful no-op. `and_then` above composes two
+existing definitions; it is not the original value-dependent callback API.
+The [contract-output negative](playground/interface_lab/negative/contract_output.gleam)
+rejects disagreement between handler output and its contract codec.
 
 ## Typed DAG construction
 
-`zip` communicates both dependency and concurrency:
+Current laboratory signature/type excerpt from [`saga.gleam`](playground/interface_lab/src/lab/saga.gleam) (`begin`, `add_activity`, `pair`, `finish`); consumer: [`shared_graph`](playground/interface_lab/src/consumers/shared_graph.gleam). Function bodies and imports are omitted; this is not a standalone module.
 
 ```gleam
-let fraud_and_inventory =
-  saga.zip(fraud_check, reservation)
+pub fn begin(
+  input: Codec(i),
+  error: Codec(e),
+  undo_error: Codec(u),
+) -> #(Builder(i, e, u), Port(i))
+
+pub fn add_activity(
+  builder: Builder(i, e, u),
+  input: Port(a),
+  id: NodeId,
+  activity: Activity(a, b, e, u),
+) -> Result(#(Builder(i, e, u), Port(b)), BuildError)
+
+pub fn pair(
+  builder: Builder(i, e, u),
+  left: Port(a),
+  right: Port(b),
+) -> Result(#(Builder(i, e, u), Port(#(a, b))), BuildError)
+
+pub fn finish(
+  builder: Builder(i, e, u),
+  output: Port(o),
+  id: DefinitionId,
+  definition_version: Version,
+  structural_signature: String,
+) -> Result(Definition(i, o, e, u), BuildError)
 ```
 
-Semantically:
+A `Port(a)` retains the native value relationship without exposing its constructor.
+The updated builder returned by each operation must be passed onward. `finish`
+rejects a foreign output or unreachable node; construction does not execute work.
+The [shared graph consumer](playground/interface_lab/src/consumers/shared_graph.gleam)
+constructs shared fan-out and joins. Production scheduling must execute a shared
+producer once and run independent branches within the concurrency budget.
+Diagnostic labels do not transport values or replace typed port connections.
 
-```mermaid
-flowchart TD
-    O["Create order"]
-    F["Fraud check"]
-    I["Reserve inventory"]
-    P["Charge payment"]
-
-    O --> F
-    O --> I
-    F --> P
-    I --> P
-```
-
-Because the two branches consume the same upstream `order` but do not depend on
-each other, the runtime can execute them concurrently.
-
-This gives you Reactor-like dependency resolution without:
-
-```elixir
-argument :order, result(:create_order)
-```
-
-There is no string/atom lookup, no argument map, and no runtime cast.
+The checkout requirement remains create-order → independent fraud/inventory →
+charge-payment → receipt, with typed workflow errors and refund/release/cancel
+compensators. Parallel execution and value-dependent construction remain retained
+requirements rather than demonstrated by these signatures.
 
 ### Fabric graph requirements accepted by Saga
 
@@ -260,6 +168,10 @@ and therefore requires compatibility handling for persisted state.
 
 If the same plan is used twice:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 let order = create_order(input)
 
@@ -279,6 +191,10 @@ Internally, each plan node can own:
 
 The scheduler must not use a central native-value structure like:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 Dict(NodeId, Dynamic)
 ```
@@ -287,6 +203,10 @@ Instead, the node closure or node actor owns its concrete result type. Consumers
 receive that result through a typed interface.
 
 The central scheduler only sees events such as:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 pub type NodeEvent {
@@ -308,6 +228,38 @@ to its enclosing workflow journal. An independent child owns its own execution
 and journal; registering a child never silently flattens it into an activity.
 Approval is suspension with retained input and an explicit answer boundary,
 not a business failure or a blocked worker.
+
+Current laboratory signature/type excerpt from [`saga.gleam`](playground/interface_lab/src/lab/saga.gleam) (`start_local`, `advance_local`, `perform_local`, `LocalTransition`); consumer: [`local_execution`](playground/interface_lab/src/consumers/local_execution.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub fn start_local(
+  definition: Definition(i, o, e, u),
+  input: i,
+) -> Result(LocalExecution(o, e, u), LocalAdmissionError)
+
+pub fn advance_local(
+  execution: LocalExecution(o, e, u),
+  control: LocalControl(o, e, u),
+) -> LocalTransition(o, e, u)
+
+pub fn perform_local(work: LocalWork(o, e, u)) -> LocalCompletion(o, e, u)
+
+pub type LocalTransition(o, e, u) {
+  LocalWorkIssued(LocalExecution(o, e, u), LocalWork(o, e, u))
+  LocalExecutionPaused(LocalExecution(o, e, u))
+  LocalExecutionFinished(LocalExecution(o, e, u), LocalReport(o, e, u))
+  LocalControlRejected(LocalExecution(o, e, u), LocalControlError)
+  LocalRetryScheduled(LocalExecution(o, e, u), LocalWake, RetryDelay)
+  LocalRetryBlocked(LocalExecution(o, e, u))
+  LocalExecutionUnresolved(LocalExecution(o, e, u), LocalUnresolvedReason(e, u))
+}
+```
+
+The host interprets issued work with `perform_local`, then returns the resulting
+completion through `CompleteLocal`; it supplies `WakeLocal` only after its timer.
+`LocalExecutionFinished` carries a typed report, while unresolved and retry-blocked
+states retain the execution. These are serial laboratory transitions, not durable
+or concurrent scheduling.
 
 The [local execution experiment](playground/interface_lab/LOCAL-EXECUTION.md)
 executes direct activities, shared dependencies, pair adapters, and sequence
@@ -335,6 +287,10 @@ A saga journal normally contains successful results of different types:
 A naïve implementation would need `List(Dynamic)`. But closures remove that
 requirement:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 type UndoAction(undo_error) {
   UndoAction(fn() -> Result(Nil, undo_error))
@@ -350,6 +306,10 @@ type Execution(value, undo_error) {
 
 After an effect succeeds, the local runtime retains a closure before encoding its output:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 let undo_action =
   UndoAction(fn() {
@@ -359,6 +319,10 @@ let undo_action =
 
 The closure privately captures the correctly typed `input` and `output`. The
 journal only stores homogeneous functions:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 List(UndoAction(UndoError))
@@ -390,42 +354,40 @@ Reactor distinguishes:
 - Retrying.
 - Continuing with a replacement value.
 
-The original typed recovery sketch is:
+Current laboratory signature/type excerpt from [`saga.gleam`](playground/interface_lab/src/lab/saga.gleam) (`RecoveryDecision`, `RetryCancellation`, `RecoveryPolicy`, `recover_activity`); consumer: [`activity_recovery`](playground/interface_lab/src/consumers/activity_recovery.gleam). Function bodies and imports are omitted; this is not a standalone module.
 
 ```gleam
-pub type Compensation(value, error) {
-  Retry
-  RetryAfter(Int)
-  Continue(value)
-  Fail(error)
+pub type RecoveryDecision(o, e, u) {
+  RetryAfter(RetryDelay, RetryCancellation(e, u))
+  UseOutput(o, Compensation(Nil, o, u))
+  AbortAndCompensate(cause: e, cleanup_failures: List(u))
+  SuspendUnresolved(evidence: e, cleanup_failures: List(u))
 }
 
-pub fn recover(
-  plan: Plan(value, error, undo_error),
-  handler: fn(error, Int) -> Compensation(value, error),
-) -> Plan(value, error, undo_error)
-```
-
-Because `Continue` contains `value`, the replacement must have exactly the
-step’s output type.
-
-```gleam
-fn recover_exchange_rate(
-  error: RateError,
-  attempt: Int,
-) -> saga.Compensation(ExchangeRate, RateError) {
-  case error, attempt {
-    NetworkError, attempt if attempt < 3 ->
-      saga.RetryAfter(500 * attempt)
-
-    _, _ ->
-      saga.Continue(cached_exchange_rate())
-  }
+pub type RetryCancellation(e, u) {
+  CompensateOnCancel
+  HoldOnCancel(evidence: e, cleanup_failures: List(u))
 }
+
+pub type RecoveryPolicy(i, o, e, u) {
+  RecoveryPolicy(
+    limit: AttemptLimit,
+    recover: fn(i, e, RetryBudget) -> RecoveryDecision(o, e, u),
+  )
+}
+
+pub fn recover_activity(
+  activity: Activity(i, o, e, u),
+  limit: AttemptLimit,
+  recover: fn(i, e, RetryBudget) -> RecoveryDecision(o, e, u),
+) -> Activity(i, o, e, u)
 ```
 
-It is impossible to accidentally compensate an `ExchangeRate` step with an
-`Order`.
+`attempt_limit` validates a positive total-attempt budget and `retry_delay`
+validates a nonnegative relative millisecond delay. `UseOutput` needs the same
+native output type and its own compensation; an absolute queue timestamp cannot
+stand in for `RetryDelay`. The [recovery-output negative](playground/interface_lab/negative/recovery_output_type.gleam)
+checks replacement typing.
 
 The [activity recovery contract](playground/interface_lab/ACTIVITY-RECOVERY.md)
 refines that sketch: recovery receives native input, business cause, and the
@@ -452,6 +414,10 @@ Strong typing does not mean the entire graph must be statically fixed.
 
 `and_then` can choose the next typed plan based on a result:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 order
 |> saga.and_then(fn(order) {
@@ -464,11 +430,19 @@ order
 
 Both branches must ultimately produce the same output and error types:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 Plan(Approval, CheckoutError, UndoError)
 ```
 
 Dynamic homogeneous fan-out is also straightforward:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 pub fn traverse_parallel(
@@ -616,6 +590,10 @@ type, GADT-like encoding, `Dynamic`, or a closed application-specific ADT.
 
 The typed replacement is:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 and_then(current_plan, fn(value) {
   build_more_typed_plans(value)
@@ -630,12 +608,20 @@ compile time.
 Different steps naturally have different error types. Before they can
 participate in one reactor, map them into a workflow error ADT:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 create_order_plan
 |> saga.map_error(OrderCreationFailed)
 ```
 
 Likewise:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 reserve_plan
@@ -684,8 +670,10 @@ separate from the serial laboratory evidence.
 
 The best implementation would use:
 
-1. `Plan(value, error, undo_error)` as an opaque typed graph fragment.
-2. Typed combinators such as `map`, `zip`, `and_then`, and `traverse_parallel`.
+1. Canonical `Definition(i, o, e, u)` authoring with typed ports; unrestricted
+   local fragments remain a retained capability whose admission is unresolved.
+2. Typed composition through current `and_then` and `pair`; value-dependent
+   branching and bounded traversal remain proposed capabilities.
 3. Memoized nodes so shared dependencies execute once.
 4. Node-owned typed results instead of a central heterogeneous result map.
 5. Closure-packed undo actions for a homogeneous rollback journal.
@@ -704,9 +692,9 @@ Runtime-authored graphs remain a distinct retained Saga capability. The initial
 static facade does not represent types introduced after compilation. Blueprint
 owns finite runtime data contracts, schema validation, and codecs; Saga owns
 node registration, graph type checking, publication, and execution. The schema
-and codec semantics below remain Saga requirements, but the concrete types and
-error signatures in the following snippets are historical pseudocode, superseded
-by Blueprint's checked `Value`, runtime contract, and codec APIs. They are not a
+and codec semantics below remain Saga requirements. Current schema examples use
+Blueprint’s checked contracts; proposed graph-only sketches retain placeholders
+where no runtime graph implementation exists. They are not a
 second Saga-owned data-contract library. LLM execution composes the standalone
 LLM client; Fabric is optional agent policy, not Saga's provider transport.
 
@@ -723,95 +711,49 @@ Assuming “no recursion” means no cyclic `$ref`: arrays and nested objects ar
 still finite schema trees. If you mean strictly flat JSON objects, the same
 model becomes even simpler.
 
-## Runtime type model
+## Runtime type model and validated values
 
-Historical pseudocode (schema AST shape; concrete schema types belong to Blueprint):
-
-Use a restricted, explicit subset of JSON Schema:
-
-```gleam
-pub type Schema {
-  NullSchema
-  BoolSchema
-  NumberSchema(NumberConstraints)
-  StringSchema(StringConstraints)
-  ArraySchema(items: Schema, constraints: ArrayConstraints)
-  ObjectSchema(
-    fields: List(Field),
-    additional_properties: Bool,
-  )
-  OneOfSchema(variants: List(Schema))
-}
-
-pub type Field {
-  Field(
-    name: String,
-    schema: Schema,
-    required: Bool,
-  )
-}
-```
-
-This is structurally recursive because JSON itself is nested, but every schema
-value is a finite tree. There are no schema references or cycles.
-
-Historical pseudocode (JSON representation; use Blueprint's `Value` in the current
-design):
+Current laboratory signature excerpt from
+[`blueprint_runtime.gleam`](playground/interface_lab/src/lab/blueprint_runtime.gleam)
+(`from_schema`, `validate`, `encoded`); exercised by the
+[runtime-schema consumer](playground/interface_lab/src/consumers/runtime_schemas.gleam).
+Bodies/imports are omitted; `blueprint.Schema` and `Value` refer to the existing
+laboratory modules, not new Saga-owned types.
 
 ```gleam
-pub type JsonValue {
-  Null
-  BoolValue(Bool)
-  NumberValue(Number)
-  StringValue(String)
-  ArrayValue(List(JsonValue))
-  ObjectValue(Dict(String, JsonValue))
-}
+pub fn from_schema(
+  schema: blueprint.Schema,
+) -> Result(RuntimeContract, ContractError)
+
+pub fn validate(
+  contract: RuntimeContract,
+  value: Value,
+) -> Result(ValidatedValue, ValidationError)
+
+pub fn encoded(value: ValidatedValue) -> Value
 ```
 
-No `Dynamic` is necessary. `Number` is Blueprint's canonical exact JSON number;
-native `Int` and `Float` require checked projections. The integer-only laboratory
-representation has a deferred migration and is not the final numeric contract.
+The opaque runtime contract and validated value replace the original Saga-local
+`Schema`, `JsonValue`, and `TypedValue` constructors. The implemented finite
+language covers the documented Blueprint subset. General `OneOf`, arbitrary
+number constraints, nested runtime graph accessors, and broader schema families
+remain requirements beyond that subset; declarations must reject unsupported
+forms explicitly. The exact-number leaf is still not integrated into laboratory
+`Value.Int`.
 
-## Schema-validated values
-
-Historical pseudocode (validated wrapper; Blueprint owns the concrete validated
-value and associated error types):
-
-```gleam
-pub opaque type TypedValue {
-  TypedValue(
-    schema: Schema,
-    value: JsonValue,
-  )
-}
-
-pub fn validate_value(
-  schema: Schema,
-  value: JsonValue,
-) -> Result(TypedValue, List(ValidationError))
-```
-
-Because the constructor is private, a `TypedValue` can only exist if it conforms
-to its schema.
-
-Historical pseudocode (accessor signatures; Blueprint owns checked accessors):
-
-```gleam
-pub fn schema(value: TypedValue) -> Schema
-
-pub fn raw(value: TypedValue) -> JsonValue
-
-pub fn get_field(
-  value: TypedValue,
-  field: String,
-) -> Result(TypedValue, AccessError)
-```
-
-`get_field` derives the returned schema from the parent object schema. It does
-not merely retrieve an arbitrary JSON field.
+Runtime graphs must pass validated values between nodes. Checked field access
+must derive the field contract and return a located access failure; the original
+`get_field` sketch is not an implemented Blueprint export. Static domain values
+still require their retained native codec after schema validation.
 
 ## Parametric node definitions
+
+The following graph-only sketches are proposed and unimplemented. `Schema`
+means Blueprint’s `RuntimeContract`, `JsonValue` means its wire `Value`, and
+`TypedValue` means its opaque `ValidatedValue`; these are explanatory aliases,
+not Saga exports. Node/port IDs, registry errors, and runtime context still need
+concrete ownership and checked constructors. The examples describe type
+relationships without asserting a compilable adapter.
 
 Predefined node kinds can have type parameters:
 
@@ -828,7 +770,7 @@ LLM<Input, Output>: Input → Output
 
 Represent their signatures with a small type-expression language:
 
-Historical pseudocode (the schema leaf in this expression language is a Blueprint runtime contract):
+Proposed, unimplemented sketch (the schema leaf in this expression language is a Blueprint runtime contract):
 
 ```gleam
 pub opaque type TypeVariable {
@@ -844,7 +786,7 @@ pub type TypeExpression {
 }
 ```
 
-Historical pseudocode (the stored contract references below are owned by Blueprint):
+Proposed, unimplemented sketch (the stored contract references below are owned by Blueprint):
 
 A node definition could be:
 
@@ -869,7 +811,7 @@ pub type PortDefinition {
 
 For `Identity<T>`:
 
-Historical pseudocode:
+Proposed, unimplemented sketch:
 
 ```gleam
 NodeDefinition(
@@ -912,7 +854,9 @@ Its output schema is now automatically `OrderSchema`.
 If another consumer expects `CustomerSchema`, the connection is rejected before
 execution.
 
-Historical pseudocode (Blueprint runtime contracts replace `TypedValue` here):
+Proposed, unimplemented sketch. `TypedValue` is explanatory shorthand for
+Blueprint’s opaque `ValidatedValue`; it is not a Saga export. `Schema` and
+`JsonValue` retain the `RuntimeContract` and `Value` aliases defined above:
 
 ```gleam
 pub fn instantiate_node(
@@ -922,7 +866,7 @@ pub fn instantiate_node(
 ) -> Result(InstantiatedNode, List(TypeError))
 ```
 
-Historical pseudocode (schema bindings are references to Blueprint contracts):
+Proposed, unimplemented sketch (schema bindings are references to Blueprint contracts):
 
 Internally:
 
@@ -948,7 +892,9 @@ bounded by the finite schema trees.
 
 Once instantiated, every node has concrete input and output schemas:
 
-Historical pseudocode (the `TypedValue` and contract representation is superseded by Blueprint):
+Proposed, unimplemented sketch. `TypedValue` is explanatory shorthand for
+Blueprint’s opaque `ValidatedValue`; it is not a Saga export. `Schema` and
+`JsonValue` retain the `RuntimeContract` and `Value` aliases defined above:
 
 ```gleam
 pub opaque type InstantiatedNode {
@@ -963,7 +909,9 @@ pub opaque type InstantiatedNode {
 }
 ```
 
-Historical pseudocode (the value wrappers are superseded by Blueprint runtime values):
+Proposed, unimplemented sketch. `TypedValue` is explanatory shorthand for
+Blueprint’s opaque `ValidatedValue`; it is not a Saga export. `Schema` and
+`JsonValue` retain the `RuntimeContract` and `Value` aliases defined above:
 
 The execution interface can be homogeneous:
 
@@ -987,7 +935,7 @@ Although this uses dictionaries, it is not stringly typed:
 
 A node cannot successfully emit an invalid value:
 
-Historical pseudocode (validation and codec errors use Blueprint's checked APIs):
+Proposed, unimplemented sketch (validation and codec errors use Blueprint's checked APIs):
 
 ```gleam
 pub fn output(
@@ -1005,41 +953,15 @@ Many parametric nodes do not need to understand the concrete type.
 
 ### Identity
 
-Historical pseudocode (uses the superseded Saga-local runtime value wrapper):
-
-```gleam
-fn run_identity(
-  node: InstantiatedNode,
-  inputs: NodeInputs,
-) -> Result(NodeOutputs, NodeError) {
-  use value <- inputs.get(node.input_port)
-
-  // Input and output schemas were unified during instantiation.
-  Ok(outputs.single(node.output_port, value))
-}
-```
+The proposed node must use the checked runtime contract, preserve located errors,
+and return validated output. No executable runtime-node adapter exists for this
+operation; its native implementation and publication checks remain required.
 
 ### Choose
 
-Historical pseudocode (uses the superseded Saga-local runtime value wrapper):
-
-```gleam
-fn run_choose(
-  node: InstantiatedNode,
-  inputs: NodeInputs,
-) -> Result(NodeOutputs, NodeError) {
-  use condition <- inputs.get_bool(node.condition_port)
-  use when_true <- inputs.get(node.true_port)
-  use when_false <- inputs.get(node.false_port)
-
-  let selected = case condition {
-    True -> when_true
-    False -> when_false
-  }
-
-  Ok(outputs.single(node.output_port, selected))
-}
-```
+The proposed node must use the checked runtime contract, preserve located errors,
+and return validated output. No executable runtime-node adapter exists for this
+operation; its native implementation and publication checks remain required.
 
 The node has signature:
 
@@ -1094,98 +1016,37 @@ Its configuration supplies:
 - Prompt template.
 - Model configuration.
 
-The model response is not trusted. This earlier adapter used the superseded local
-value wrapper; Saga now composes Blueprint's checked runtime contract:
+The model response is not trusted. The proposed adapter must compose Blueprint’s
+checked runtime contract and the standalone LLM boundary:
 
-Historical pseudocode:
+Proposed, unimplemented sketch:
 
-```gleam
-fn run_llm(
-  node: LlmNode,
-  input: TypedValue,
-) -> Result(TypedValue, NodeError) {
-  use response <- llm.call(
-    prompt: render_prompt(node, input),
-    output_schema: node.output_schema,
-  )
-
-  use json <- parse_json(response)
-
-  validate_value(node.output_schema, json)
-  |> result.map_error(InvalidStructuredOutput)
-}
-```
+The proposed node must use the checked runtime contract, preserve located errors,
+and return validated output. No executable runtime-node adapter exists for this
+operation; its native implementation and publication checks remain required.
 
 ## Domain-specific nodes remain statically typed
 
-Historical pseudocode (codec shape; Blueprint's codec encode path is fallible):
+The current schema-aware boundary uses the existing opaque Blueprint codec,
+not the original public record with an infallible encoder. Its concrete operations
+are documented in [Blueprint](blueprint-design.md#native-codecs-and-composition)
+and implemented by [`blueprint.gleam`](playground/interface_lab/src/lab/blueprint.gleam)
+(`encode`, `decode`, `schema`). Encoding returns `Result(Value, EncodeError)`;
+schema discovery returns an explicit unavailable outcome for custom codecs.
 
-```gleam
-pub type Codec(a) {
-  Codec(
-    schema: Schema,
-    decode: fn(JsonValue) -> Result(a, DecodeError),
-    encode: fn(a) -> JsonValue,
-  )
-}
-```
-
-Historical pseudocode example:
-
-```gleam
-pub fn order_codec() -> Codec(Order) {
-  Codec(
-    schema: order_schema(),
-    decode: decode_order,
-    encode: encode_order,
-  )
-}
-```
-
-A statically typed implementation:
-
-```gleam
-fn reserve_inventory(
-  order: Order,
-) -> Result(Reservation, InventoryError)
-```
-
-The earlier `typed_node` sketch adapted it into a runtime node as follows. This is
-historical pseudocode; Saga will integrate through Blueprint's checked contracts
-and codecs:
-
-```gleam
-pub fn typed_node(
-  input_codec: Codec(input),
-  output_codec: Codec(output),
-  run: fn(input) -> Result(output, error),
-  map_error: fn(error) -> NodeError,
-) -> NodeImplementation
-```
-
-Historical pseudocode (runtime bridge):
-
-Conceptually:
-
-```gleam
-fn runtime_run(value: TypedValue) {
-  use input <- input_codec.decode(value.raw)
-  use output <- run(input)
-  let raw_output = output_codec.encode(output)
-
-  validate_value(output_codec.schema, raw_output)
-}
-```
-
-This creates a useful boundary:
-
-- Inside the implementation: ordinary strongly typed Gleam.
-- At graph edges: schema-typed `TypedValue`.
-- At the UI/database boundary: untrusted JSON that must be validated.
+A native `fn(Order) -> Result(Reservation, InventoryError)` remains the target
+node implementation. The proposed runtime-node adapter must retain the actual
+input/output codecs, validate schema compatibility, decode before invocation,
+check encoding failure, and validate the encoded output. No `typed_node` runtime
+graph adapter exists yet; static Saga activities are different evidence.
 
 ## Graph publication
 
 I would distinguish drafts from executable graph versions:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 pub type GraphStatus {
@@ -1197,6 +1058,10 @@ pub type GraphStatus {
 
 A draft may temporarily contain incomplete or invalid wiring. Publishing
 performs the full compilation:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 pub fn publish(
@@ -1266,6 +1131,10 @@ explicit transformation nodes. Subtyping can be added later.
 
 A schema-typed runtime value is not the same as a native type parameter:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 Plan(Order)
 ```
@@ -1273,11 +1142,19 @@ Plan(Order)
 A schema loaded from the database cannot cause Gleam to manufacture a new static
 type such as:
 
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
+
 ```gleam
 Plan(UserCreatedAtRuntime)
 ```
 
 Instead, it becomes:
+
+Proposed semantic sketch, not a current laboratory API. Helper types and
+functions are placeholders; scheduling, persistence eligibility, and checked
+boundaries must be specified before implementation.
 
 ```gleam
 Plan(TypedValue)

@@ -51,6 +51,32 @@
 - Tool output-schema declarations, annotations, text/image/audio content, resource links, and embedded resources remain required server scope. The modern prototype's general JSON structured-content boundary does not establish those complete capabilities.
 - Modern complete results include `resultType: "complete"`, including tool failures with `isError: true`. The `2025-11-25` result codec omits `resultType`; shared native values must not collapse those wire contracts.
 
+### Current contextual tool declarations
+
+- Code below is a current prototype declaration excerpt: constructor definitions and function signatures retain the linked source module’s names and aliases; function bodies and unrelated declarations are omitted. These excerpts are not standalone modules or published package signatures, and no new compilation or runtime claim follows from this documentation pass.
+- [The registry module](playground/interface_lab/src/lab/relay.gleam) imports `Codec` from `lab/blueprint` for schema-derived declarations. [The shared-registry consumer](playground/interface_lab/src/consumers/shared_registry.gleam) preserves contextual business handlers through registration; broader content and output-schema contracts above remain backlog.
+
+```gleam
+pub fn context_tool(
+  name: String,
+  input: Codec(i),
+  output: Codec(o),
+  error: Codec(e),
+  handler: fn(context, i) -> Result(o, e),
+) -> ContextTool(context)
+
+pub fn registry(
+  tools: List(ContextTool(c)),
+) -> Result(Registry(c), RegistryError)
+
+pub fn dispatch(
+  registry: Registry(c),
+  context: c,
+  name: String,
+  input: Value,
+) -> Result(Value, DispatchError)
+```
+
 ### 2.4 Sans-I/O core and exchange ownership
 
 - Pure transitions classify requests, notifications, responses, and errors; they return response, invocation, cancellation, and cleanup effects. The interpreter performs application work outside the reducer.
@@ -61,6 +87,37 @@
 - Closing an exchange before admission leaves a terminal record; later admission cannot revive it. Closing an active exchange emits cancellation intent and suppresses subsequent wire output.
 - Copyable reducer state and invocation values cannot enforce authoritative execution or exactly-once side effects. The eventual owner must serialize effect interpretation and prevent stale callbacks from aliasing a replacement exchange.
 - Tombstone retention, resource bounds, concurrent commands, and runtime cleanup remain implementation obligations. Pure terminal suppression does not establish that an external effect stopped or was undone.
+
+### Current modern exchange declarations
+
+- The [modern server module](playground/interface_lab/src/lab/relay_server_2026.gleam) imports `authorization`, `exchange`, and `Value` from their laboratory modules. [The modern consumer](playground/interface_lab/src/consumers/modern_relay.gleam) supplies parsed values, explicit context, and an admitted grant; this does not parse bytes or admit HTTP headers.
+- The prototype uses `lab/value.Value` as a shared laboratory convenience. The production ordinary JSON boundary remains schema-independent; no replacement signature is settled here. `perform` interprets one retained invocation outside `step`, and copied invocations still require a runtime owner to prevent duplicate execution.
+
+```gleam
+pub type Input(context, principal) {
+  RequestReceived(
+    exchange: exchange.ExchangeId,
+    application_context: context,
+    grant: authorization.GrantedRequest(principal),
+    message: Value,
+  )
+  ToolFinished(
+    invocation: exchange.InvocationId,
+    outcome: Result(Value, relay.DispatchError),
+  )
+  ToolProgress(invocation: exchange.InvocationId, value: Int)
+  ResponseStreamClosed(exchange: exchange.ExchangeId)
+}
+
+pub fn step(
+  server: Server(context, principal),
+  input: Input(context, principal),
+) -> #(Server(context, principal), List(Effect(context, principal)))
+
+pub fn perform(
+  invocation: Invocation(context, principal),
+) -> Input(context, principal)
+```
 
 ### 2.5 Revision admission and lifecycle
 
@@ -98,6 +155,27 @@
 - Relay owns bearer extraction, RFC 9728 metadata, challenges, resource/audience binding, scopes, and HTTP/MCP mapping. Local JWT/JWKS and RFC 7662 introspection remain verifier targets; key rotation, issuer/expiry/signature checks, and exception mapping require runtime evidence.
 - Wrong or absent authorization must map to the applicable challenge; insufficient scope must preserve required-scope information. Tokens must not pass through to upstream APIs or leak through errors, observations, or generic principals.
 - Anonymous access, authorization-sensitive pagination, and a broader audience policy remain deferred capabilities. Policy callback evaluation does not make application data reads and handler effects atomic.
+
+### Current protected registry entry points
+
+- [Resource authorization](playground/interface_lab/src/lab/relay_authorization.gleam) keeps the grant's principal type separate from application context. [The constructive consumer](playground/interface_lab/src/consumers/resource_authorization.gleam) checks resource/scopes and early denial; [the negative identity consumer](playground/interface_lab/negative/web_identity_as_grant.gleam) rejects a Warden identity in place of a Relay grant.
+- These prototype signatures describe configured assertions and pure policy. Bearer verification, HTTP challenges, and production trust-origin policy remain requirements rather than demonstrated behavior.
+
+```gleam
+pub fn admit(
+  verifier: Verifier(principal),
+  token: BearerToken,
+  protection: ProtectionConfig,
+) -> Result(GrantedRequest(principal), AdmissionError)
+
+pub fn dispatch_granted(
+  registry: ProtectedRegistry(context, principal),
+  context: context,
+  grant: GrantedRequest(principal),
+  name: String,
+  input: value.Value,
+) -> Result(value.Value, ProtectedDispatchError)
+```
 
 ### 2.8 Client authorization
 

@@ -29,6 +29,40 @@
 - Capability metadata cannot guarantee remote acceptance. A remote capability rejection remains an explicit call failure even when local admission succeeded.
 - Production provider schema profiles and streamed structured output remain backlog. Scripted profile acceptance establishes no commercial provider capability.
 
+### Current configured-turn declarations
+
+- Code below is a current prototype declaration excerpt: constructor definitions and function signatures retain the linked source module’s names and aliases; function bodies and unrelated declarations are omitted. These excerpts are not standalone modules or published package signatures, and no new compilation or runtime claim follows from this documentation pass.
+- The [structured-turn module](playground/interface_lab/src/lab/llm_structured.gleam) retains output type `o`, continuation `c`, and admission reason separately. [The constructive consumer](playground/interface_lab/src/consumers/provider_structured.gleam) exercises preparation and multiple tool rounds; [the negative consumer](playground/interface_lab/negative/structured_provider_output.gleam) rejects replacing a prepared string output with an integer output.
+- Blueprint is relevant here because this operation admits tool and output schemas. The laboratory's JSON values elsewhere do not impose Blueprint on ordinary provider-envelope serialization.
+
+```gleam
+pub type SchemaLocation {
+  StructuredOutput
+  ToolInput(llm_turn.ToolName)
+}
+
+pub fn prepare(
+  provider: Provider(c, reason),
+  request: llm.Request,
+  catalog: llm_catalog.Catalog,
+  output: blueprint.Codec(o),
+) -> Result(PreparedTurn(o, c, reason), PrepareError(reason))
+
+pub type StartedTurn(output, continuation, reason) {
+  Finished(output)
+  NeedsTools(PendingTurn(output, continuation, reason))
+}
+
+pub fn start(
+  prepared: PreparedTurn(o, c, reason),
+) -> Result(StartedTurn(o, c, reason), TurnError)
+
+pub fn resume(
+  pending: PendingTurn(o, c, reason),
+  results: List(llm_turn.ToolResult),
+) -> Result(StartedTurn(o, c, reason), TurnError)
+```
+
 ## Tool identity and continuation
 
 - Application call identity is separate from provider decoder routing identity. OpenAI item IDs and output indices route deltas to `call_id`; Anthropic block indices route deltas to `tool_use.id`.
@@ -50,6 +84,28 @@
 - A protocol error must terminate the owned stream and request cleanup. Returning the old immutable reducer state is insufficient runtime behavior.
 - Terminal precedence prevents late progress, completion, or failure from replacing a closed or completed outcome. Local close is idempotent and preserves an existing terminal outcome.
 - Rich content-block transcripts, provider routing fixtures, actual JSON decoding, and bounded assembly remain obligations beyond the current concatenated-text scripted grammar.
+
+### Current deferred stream continuation
+
+- These declarations come from the [pure stream-owner experiment](playground/interface_lab/src/lab/llm_stream_owner.gleam), where `turn` aliases `lab/llm_turn`. [The stream-ownership consumer](playground/interface_lab/src/consumers/stream_ownership.gleam) prepares and opens a second scripted source through the retained provider.
+- `prepare_continue` validates result identity without invoking the provider, while `open` invokes the retained callback. `source` is an adapter-owned generic value, not proof of a socket owner; live shared ownership, deadlines, usage, and cleanup remain unimplemented requirements.
+
+```gleam
+pub type ContinueError {
+  UnknownToolResult(turn.CallId)
+  DuplicateToolResult(turn.CallId)
+  MissingToolResult(turn.CallId)
+}
+
+pub fn prepare_continue(
+  pending: Pending(c, source),
+  results: List(turn.ToolResult),
+) -> Result(PreparedContinuation(source), ContinueError)
+
+pub fn open(
+  prepared: PreparedContinuation(source),
+) -> Result(source, llm.CallError)
+```
 
 ## Resource ownership and transport
 

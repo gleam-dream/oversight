@@ -88,6 +88,13 @@ processes may invoke the same handler concurrently. Buffering changes these
 semantics and belongs in a forwarding adapter with explicit capacity, overload,
 loss, and shutdown policy.
 
+## Reading the examples
+
+Current excerpts quote exact laboratory symbols with bodies/imports omitted.
+They are signature references, not standalone modules or a released package API.
+The injected backend and field representation are laboratory evidence; native
+telemetry conversion and `run_span` remain proposed runtime work.
+
 ## How a consumer attaches a handler
 
 The typed callback receives the selected `Event(m, d)`, decoded `m`, and decoded
@@ -114,6 +121,38 @@ registry. Attachments remain copyable. Repeated detach returns the backend's
 absence outcome, and a stale attachment has no generation-safe removal guarantee
 when an application reuses a public identifier. Native `detach/1` removes by
 identifier, not by compare-and-delete ownership token.
+
+Current laboratory signature/type excerpt from [`sinal.gleam`](playground/interface_lab/src/lab/sinal.gleam) (`handler`, `attach_many`, `detach`); consumer: [`injected_observation`](playground/interface_lab/src/consumers/injected_observation.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub fn handler(
+  run: fn(Event(m, d), m, d) -> Result(Nil, e),
+) -> Handler(m, d, e)
+
+pub fn attach_many(
+  backend: Backend,
+  id: HandlerId,
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+) -> Result(Attachment, AttachError)
+
+pub fn detach(attachment: Attachment) -> Result(Nil, DetachError)
+
+pub type AttachError {
+  AlreadyExists
+  DuplicateEventName(List(String))
+  BackendNotAvailable
+}
+```
+
+`handler_id` returns `Result(HandlerId, IdentityError)`; empty public IDs fail.
+`event` takes a logical name and two typed `Fields` values. A scalar Blueprint
+codec cannot replace those field sets, as checked by the
+[scalar-event negative](playground/interface_lab/negative/scalar_event_codec.gleam).
+The source's `backend` constructor accepts emit/attach callbacks; the accepted
+backend attachment supplies the detach callback retained by `Attachment`.
 
 ## Callback errors and removal
 
@@ -173,6 +212,37 @@ Captured resources must remain valid until independently running callback work
 finishes or concurrent emission is excluded. An untrappable kill, process loss,
 or VM loss can skip cleanup. No opaque type guarantees linear ownership,
 exactly-once cleanup, or cleanup under every termination mode.
+
+Current laboratory signature/type excerpt from [`sinal.gleam`](playground/interface_lab/src/lab/sinal.gleam) (`with_attachments`, `ScopedCompletion`, `ScopeCleanupFailure`); consumer: [`scoped_lifetime`](playground/interface_lab/src/consumers/scoped_lifetime.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub type ScopeCleanupFailure {
+  DetachReturnedError(DetachError)
+  DetachRaisedException(exception.BeamException)
+}
+
+pub type ScopedCompletion(a) {
+  ScopedCompletion(
+    work_result: a,
+    cleanup_result: Result(Nil, ScopeCleanupFailure),
+  )
+}
+
+pub fn with_attachments(
+  backend: Backend,
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  on_exception_cleanup_failure: fn(ScopeCleanupFailure) -> Nil,
+  run: fn() -> a,
+) -> Result(ScopedCompletion(a), AttachError)
+```
+
+`exception.BeamException` refers to the opaque value in
+[`sinal_exception.gleam`](playground/interface_lab/src/lab/sinal_exception.gleam).
+The result distinguishes attach failure from completed work plus cleanup failure;
+catchable work exceptions are re-raised instead of returned in this sum.
 
 ## Typed spans
 

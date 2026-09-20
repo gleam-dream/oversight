@@ -24,6 +24,13 @@ Refining the existing JSON Blueprint package remains preferred for evaluation;
 the final package name and release/migration strategy are not settled by this
 document.
 
+## Reading the examples
+
+Current excerpts quote exact laboratory symbols with bodies/imports omitted.
+They document the schema-aware prototype, not a production dependency for
+ordinary JSON. Proposed numeric integration and generation remain explicitly
+separate from the implemented symbols; no new compile run is claimed here.
+
 ## Values and exact numbers
 
 `Value` is a closed immutable JSON algebra containing null, boolean, string,
@@ -104,6 +111,31 @@ collection constraints, and broader unions remain requirements beyond this
 subset. Arbitrary business predicates belong after decoding unless an equivalent
 schema constraint can be supplied and independently verified.
 
+Current laboratory signature/type excerpt from [`blueprint.gleam`](playground/interface_lab/src/lab/blueprint.gleam) (`new`, `encode`, `decode`, `imap`, `schema`); consumer: [`config_codec`](playground/interface_lab/src/consumers/config_codec.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub fn new(
+  encode: fn(a) -> Result(Value, EncodeError),
+  decode: fn(Value) -> Result(a, DecodeError),
+) -> Codec(a)
+
+pub fn encode(codec: Codec(a), item: a) -> Result(Value, EncodeError)
+
+pub fn decode(codec: Codec(a), item: Value) -> Result(a, DecodeError)
+
+pub fn imap(codec: Codec(a), from: fn(a) -> b, to: fn(b) -> a) -> Codec(b)
+
+pub fn schema(codec: Codec(a)) -> Result(Schema, SchemaError)
+```
+
+Here `Value` is the laboratory algebra in
+[`value.gleam`](playground/interface_lab/src/lab/value.gleam), still integer-only.
+`new` returns an opaque codec whose `schema` query returns `Error(UnknownSchema)`;
+it does not infer a schema from functions. `EncodeError` and `DecodeError` preserve field/index
+locations. The [optional/null negative](playground/interface_lab/negative/missing_is_not_null.gleam)
+checks distinct native wrappers; the source's `optional`, `nullable`, and
+`integer_between` constructors carry their corresponding acceptance rules.
+
 ## Errors and schema laws
 
 Construction errors, encoding errors, decoding errors, schema unavailability,
@@ -162,6 +194,39 @@ JSON Schema syntax, hostile-input limits, performance, and schema evolution
 remain future families. Arbitrary unmodelled schema data from Relay's original
 escape hatch may be retained as raw metadata, but it must not acquire a validated
 contract or claimed codec agreement without an explicit supported interpretation.
+
+Current laboratory signature/type excerpt from [`blueprint_runtime.gleam`](playground/interface_lab/src/lab/blueprint_runtime.gleam) (`from_schema`, `from_codec`, `validate`, `ContractError`); consumer: [`runtime_schemas`](playground/interface_lab/src/consumers/runtime_schemas.gleam). Function bodies and imports are omitted; this is not a standalone module.
+
+```gleam
+pub type ContractError {
+  UnknownSchema
+  ReversedIntegerRange(minimum: Int, maximum: Int)
+  DuplicateSchemaProperty(String)
+  DuplicateSchemaTag(String)
+  EmptyStringEnum
+  DuplicateSchemaEnumLabel(String)
+}
+
+pub fn from_schema(
+  schema: blueprint.Schema,
+) -> Result(RuntimeContract, ContractError)
+
+pub fn from_codec(
+  codec: blueprint.Codec(a),
+) -> Result(RuntimeContract, ContractError)
+
+pub fn validate(
+  contract: RuntimeContract,
+  value: Value,
+) -> Result(ValidatedValue, ValidationError)
+```
+
+The [`blueprint_document.load`](playground/interface_lab/src/lab/blueprint_document.gleam)
+entry point converts a parsed value into this runtime contract with located
+`DocumentError`; it does not parse bytes. See the
+[schema-document consumer](playground/interface_lab/src/consumers/schema_documents.gleam)
+and [runtime-contract negative](playground/interface_lab/negative/runtime_contract_as_codec.gleam).
+Only the matching retained codec can decode native values after validation.
 
 ## Consumer schema admission
 
