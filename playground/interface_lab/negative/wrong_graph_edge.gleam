@@ -1,15 +1,11 @@
 // THROWAWAY: Reject a Saga node whose input differs from the source port.
 import lab/saga
-import lab/saga_graph as graph
 
 pub fn invalid(
-  builder: graph.Builder(String, Nil, Nil),
-  source: graph.Port(String),
-  id: graph.NodeId,
+  builder: saga.Builder(String, Nil, Nil),
+  source: saga.Port(String),
+  id: saga.NodeId,
   definition: saga.Definition(Int, Int, Nil, Nil),
-) -> Result(
-  #(graph.Builder(String, Nil, Nil), graph.Port(Int)),
-  graph.BuildError,
-) {
-  graph.add_child(builder, source, id, definition)
+) -> Result(#(saga.Builder(String, Nil, Nil), saga.Port(Int)), saga.BuildError) {
+  saga.add_child(builder, source, id, definition)
 }

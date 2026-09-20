@@ -1,11 +1,10 @@
 import lab/saga
-import lab/saga_graph as graph
 
 pub fn invalid(
-  builder: graph.Builder(Int, Nil, Nil),
-  input: graph.Port(Int),
-  id: graph.NodeId,
+  builder: saga.Builder(Int, Nil, Nil),
+  input: saga.Port(Int),
+  id: saga.NodeId,
   child: saga.Child(Int, Int, Nil, Nil),
 ) {
-  graph.add_activity(builder, input, id, child)
+  saga.add_activity(builder, input, id, child)
 }

@@ -1,7 +1,9 @@
 // THROWAWAY: Direct callbacks are scripted; no scheduler or child runtime runs.
 import lab/blueprint
+import lab/grind.{type Queue}
 import lab/saga
-import lab/saga_graph as graph
+import lab/saga_checkpoint as checkpoint
+import lab/saga_grind
 import lab/value
 
 pub type Failure {
@@ -12,13 +14,18 @@ pub type UndoFailure {
   UnexpectedReceipt
 }
 
-pub fn probe() -> Nil {
+pub fn direct_definition() -> saga.Definition(
+  Int,
+  saga.ApprovalResult(Int, Bool),
+  Failure,
+  UndoFailure,
+) {
   let error_codec = unavailable_error_codec()
   let undo_codec = unavailable_undo_codec()
   let operation = operation()
-  let #(builder, input) = graph.begin(blueprint.int(), error_codec, undo_codec)
+  let #(builder, input) = saga.begin(blueprint.int(), error_codec, undo_codec)
   let assert Ok(#(builder, output)) =
-    graph.add_activity(builder, input, id("direct"), operation)
+    saga.add_activity(builder, input, id("direct"), operation)
   let approval =
     saga.approval(
       step("approval"),
@@ -33,44 +40,63 @@ pub fn probe() -> Nil {
       undo_codec,
     )
   let assert Ok(#(builder, approved)) =
-    graph.add_approval(builder, output, id("approval"), approval)
-  let assert Ok(flow) = graph.finish(builder, approved)
-  let assert Ok(graph.NodeSucceeded(value.Int(4))) =
-    graph.probe_direct(flow, id("direct"), value.Int(3))
+    saga.add_approval(builder, output, id("approval"), approval)
+  let assert Ok(flow) =
+    saga.finish(builder, approved, definition_id(), version(), "direct:v1")
+  flow
+}
+
+pub fn start_direct(
+  input: Int,
+) -> Result(
+  checkpoint.Execution(saga.ApprovalResult(Int, Bool), Failure, UndoFailure),
+  checkpoint.StartError,
+) {
+  checkpoint.start(direct_definition(), input)
+}
+
+pub fn submit_direct(
+  queue: Queue,
+  input: Int,
+) -> Result(
+  saga_grind.RunHandle(saga.ApprovalResult(Int, Bool), Failure, UndoFailure),
+  saga_grind.SubmitError,
+) {
+  saga_grind.submit(queue, direct_definition(), input)
+}
+
+pub fn probe() -> Nil {
+  let error_codec = unavailable_error_codec()
+  let undo_codec = unavailable_undo_codec()
+  let operation = operation()
+  let flow = direct_definition()
+  let assert Ok(saga.NodeSucceeded(value.Int(4))) =
+    saga.probe_direct(flow, id("direct"), value.Int(3))
   // These codecs intentionally cannot encode errors. In-process callbacks
   // preserve native errors rather than passing through a wire roundtrip.
-  let assert Ok(graph.NodeFailed(Offline, [])) =
-    graph.probe_direct(flow, id("direct"), value.Int(-1))
+  let assert Ok(saga.NodeFailed(Offline, [])) =
+    saga.probe_direct(flow, id("direct"), value.Int(-1))
   let assert Ok(Nil) =
-    graph.probe_compensation(flow, id("direct"), value.Int(3), value.Int(4))
-  let assert Error(graph.CompensationFailed(UnexpectedReceipt)) =
-    graph.probe_compensation(flow, id("direct"), value.Int(3), value.Int(5))
-  let assert Error(graph.CompensationOutputRejected(_)) =
-    graph.probe_compensation(
-      flow,
-      id("direct"),
-      value.Int(3),
-      value.Text("bad"),
-    )
-  let assert Ok(graph.NodeAwaitingApproval) =
-    graph.probe_direct(flow, id("approval"), value.Int(4))
-  let assert Ok(graph.NodeBoundaryFailed(_)) =
-    graph.probe_direct(flow, id("approval"), value.Text("bad"))
+    saga.probe_compensation(flow, id("direct"), value.Int(3), value.Int(4))
+  let assert Error(saga.CompensationFailed(UnexpectedReceipt)) =
+    saga.probe_compensation(flow, id("direct"), value.Int(3), value.Int(5))
+  let assert Error(saga.CompensationOutputRejected(_)) =
+    saga.probe_compensation(flow, id("direct"), value.Int(3), value.Text("bad"))
+  let assert Ok(saga.NodeAwaitingApproval) =
+    saga.probe_direct(flow, id("approval"), value.Int(4))
+  let assert Ok(saga.NodeBoundaryFailed(_)) =
+    saga.probe_direct(flow, id("approval"), value.Text("bad"))
   let assert Ok(def_id) = saga.definition_id("child")
   let child_definition = saga.define(def_id, version(), "child:v1", operation)
-  let #(builder, input) = graph.begin(blueprint.int(), error_codec, undo_codec)
+  let #(builder, input) = saga.begin(blueprint.int(), error_codec, undo_codec)
   let assert Ok(#(builder, output)) =
-    graph.add_child(builder, input, id("child"), child_definition)
-  let assert Ok(child_flow) = graph.finish(builder, output)
-  let assert Error(graph.NotDirectActivity(_)) =
-    graph.probe_direct(child_flow, id("child"), value.Int(3))
-  let assert Error(graph.CompensationNotDeclared) =
-    graph.probe_compensation(
-      child_flow,
-      id("child"),
-      value.Int(3),
-      value.Int(4),
-    )
+    saga.add_child(builder, input, id("child"), child_definition)
+  let assert Ok(child_flow) =
+    saga.finish(builder, output, definition_id(), version(), "child-flow:v1")
+  let assert Error(saga.NotDirectActivity(_)) =
+    saga.probe_direct(child_flow, id("child"), value.Int(3))
+  let assert Error(saga.CompensationNotDeclared) =
+    saga.probe_compensation(child_flow, id("child"), value.Int(3), value.Int(4))
   Nil
 }
 
@@ -120,8 +146,13 @@ fn version() -> saga.Version {
   version
 }
 
-fn id(name: String) -> graph.NodeId {
-  let assert Ok(id) = graph.node_id(name)
+fn id(name: String) -> saga.NodeId {
+  let assert Ok(id) = saga.node_id(name)
+  id
+}
+
+fn definition_id() -> saga.DefinitionId {
+  let assert Ok(id) = saga.definition_id("execution-ownership")
   id
 }
 

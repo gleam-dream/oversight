@@ -17,6 +17,7 @@ import consumers/standalone_jobs
 import consumers/stream_progress
 import consumers/tagged_codec
 import consumers/tool_turns
+import consumers/unified_workflow
 
 pub fn main() -> Nil {
   activity_contract.probe()
@@ -37,4 +38,5 @@ pub fn main() -> Nil {
   stream_progress.probe()
   tagged_codec.probe()
   tool_turns.probe()
+  unified_workflow.probe()
 }
