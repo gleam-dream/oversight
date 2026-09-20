@@ -5,15 +5,13 @@
 - Program design baseline: oversight
   `bd0b83743533313eb9b4eee2bf7f99ed68a26750`.
 - Approved targets:
-  - Sinal: `/code/gleam-dream/sinal`, accepted Wave 1 commit and Wave 2 baseline
-    `35c83e11e1d58f1ee9e3185112842e7ab75c666e` on `master`; no configured
-    remote at planning time. The original clean-template baseline was
-    `225f38c391170fabb8795b9cdf41362540350d3f`.
-  - JSON Blueprint: `/code/gleam-dream/json_blueprint`, accepted Wave 1 commit
-    and Wave 2 baseline `25d554b0bdde421bd2037f68253315ebc0ab3090`
-    on `implementation/schema-aware-core`, origin `lostbean/json_blueprint`.
-    The original 1.7.1 baseline was
-    `0e379c6491d34aca49795f716e87b9003df0130e`.
+  - Sinal: `/code/gleam-dream/sinal`, retained Wave 2 checkpoint and Wave 3
+    baseline `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` on `master`; no configured
+    remote. Wave 2 review requires evidence fixes before acceptance.
+  - JSON Blueprint: `/code/gleam-dream/json_blueprint`, accepted Wave 2 number
+    checkpoint and Wave 3 baseline
+    `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` on
+    `implementation/schema-aware-core`, origin `lostbean/json_blueprint`.
 - User-approved execution mechanism: external `agy` code agents using
   `--sandbox --dangerously-skip-permissions`, the repo dev shell, Gleam LSP,
   progressive implementation, Gleam, and TDD skills. Main Codex orchestrates;
@@ -167,7 +165,7 @@ at the hashes above; neither package was pushed or published.
   legacy JavaScript tests still pass. The broader exact-number oracle, schema,
   parser, compatibility, and generation work remains open.
 
-## Wave 2: launched
+## Wave 2: checkpointed and reviewed
 
 - Shared handoff: [`wave-2-work-order.md`](wave-2-work-order.md).
 - Launched with the requested sandbox flags and no model override. Sinal logs:
@@ -179,23 +177,54 @@ at the hashes above; neither package was pushed or published.
 - JSON Blueprint milestone: exercise the complete 62-case exact-number oracle
   through the package, then add only a coherent tested Value/primitive-codec
   slice if it fits without a schema-engine detour.
-- Both runs must record oversight, LSP, web-search, and URL-fetch/HTTP capability
-  probes in `test/oracle/wave-2-capabilities.md`, report friction and concrete
-  improvements, remain uncommitted, and stop for Sol Medium review.
+- Both checkpoints include `test/oracle/wave-2-capabilities.md` and were committed
+  locally without push or publication. See the independent
+  [`review-2.md`](review-2.md).
 
-| Package        | Wave 2 baseline                            | External session/log | Capability record | Delivery | Review              |
-| -------------- | ------------------------------------------ | -------------------- | ----------------- | -------- | ------------------- |
-| Sinal          | `35c83e11e1d58f1ee9e3185112842e7ab75c666e` | session `90715`      | pending           | running  | Sol Medium required |
-| JSON Blueprint | `25d554b0bdde421bd2037f68253315ebc0ab3090` | session `55928`      | pending           | running  | Sol Medium required |
+| Package        | Wave 2 baseline                            | External session | Checkpoint commit                          | Review                                                                        |
+| -------------- | ------------------------------------------ | ---------------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| Sinal          | `35c83e11e1d58f1ee9e3185112842e7ab75c666e` | `90715`          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | changes required: three P1 evidence gaps and one P2 capability correction     |
+| JSON Blueprint | `25d554b0bdde421bd2037f68253315ebc0ab3090` | `55928`          | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | accepted Erlang exact-number vertical; JavaScript numbers explicitly deferred |
+
+Sinal's retained adapter has no demonstrated implementation defect, and its
+focused gates pass. Wave 3 must first prove error/exit/throw fidelity, the full
+native failure-event payload, and attach-many removal across every registered
+event, then correct the absolute-path LSP probe. Blueprint independently passes
+30 Erlang tests, 21 legacy JavaScript tests, and the 62-case number oracle.
+
+## Wave 3: ready to launch
+
+- Shared handoff: [`wave-3-work-order.md`](wave-3-work-order.md).
+- Sinal target: close the Wave 2 review gaps, then complete scoped lifetime,
+  native spans, boundary/error/concurrency evidence, and documentation as a
+  feature-complete initial-facade candidate.
+- JSON Blueprint target: complete the current Value/codec/schema/runtime/document
+  facade with package-level law and differential evidence while preserving
+  legacy Erlang/JavaScript behavior.
+- Both runs use the absolute LSP bridge, verify `search_web` and
+  `read_url_content`, record `wave-3-capabilities.md`, remain uncommitted, and
+  stop for Sol Medium review.
+
+| Package        | Wave 3 baseline                            | External session/log | Delivery    | Review              |
+| -------------- | ------------------------------------------ | -------------------- | ----------- | ------------------- |
+| Sinal          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | pending launch       | not started | Sol Medium required |
+| JSON Blueprint | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | pending launch       | not started | Sol Medium required |
 
 ## Subsequent roadmap
 
-- Sinal: native fields/emission → attachment/failure forwarding → scoped
-  lifetime/races → native spans → package observations → concurrency/fault/stress
-  → release hardening.
-- JSON Blueprint: exact Number/Value → parser/resource policy → codec composition
-  → schema agreement → runtime contracts/document loading → compatibility and
-  migration → recursion/hostile input/performance → experimental generation.
+- **Wave 3 — core behavior:** complete each initial production facade and its
+  direct native/differential evidence.
+- **Wave 4 — integration and compatibility:** Sinal upstream/raw-BEAM and
+  package-observation compatibility; Blueprint advertised JavaScript parity,
+  byte-parser/reuse policy, legacy migration, and selected Relay/Fabric/LLM
+  schema-consumer profiles.
+- **Wave 5 — hardening and release:** fault, stress, hostile-input, benchmark,
+  documentation, packaging, upgrade, and release gates. Compress Waves 4 and 5
+  when evidence is already green; extend beyond Wave 5 only for a concrete
+  blocker.
+- Blueprint source generation, recursive references, and broader schema families
+  remain explicit design-deferred post-release capabilities. Their exclusion
+  from the initial release does not cancel them.
 
 Each later wave must name a public behavior, real boundary, source oracle, focused
 red, green gate, and evidence limitation. Reopen the frozen API only when actual
