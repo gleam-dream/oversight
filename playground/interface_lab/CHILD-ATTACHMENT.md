@@ -9,7 +9,7 @@
 
 - Saga retains the definition and its actual input, output, error, and undo-error codecs in `ChildContract(i, o, e, u)`.
 - The contract records all four boundary versions. Definition identity, definition version, and the caller-supplied structural signature remain separate compatibility assertions.
-- `DurableOwner` supplies a namespace and a read operation. A configured owner is a trusted adapter; matching its namespace is not authentication or proof that two adapters share a database.
+- `DurableOwner` supplies a namespace and an explicit read, submit, and cancellation port. This attachment probe uses only the read callback. A configured owner is a trusted adapter; matching its namespace is not authentication or proof that two adapters share a database.
 - `attach_child` binds a stored run to a contract only after checking the requested run, owner, definition, signature, and all boundary versions.
 - `DurableChild(o, e, u)` retains the actual codecs needed for later observations. Callers do not supply replacement decoders to `observe_child`.
 - `ChildLink` contains routing and compatibility data without native type parameters or closures. Encoding a link does not grant access to the run.
@@ -27,7 +27,7 @@
 
 ## Remaining experiments
 
-- Submit a child idempotently and recover the command-to-run association after an ambiguous response.
+- [Child admission](CHILD-ADMISSION.md) adds scripted submission receipts and origin-bound retry after an ambiguous response. Actual durable command deduplication remains open.
 - Claim compensation ownership, persist a receipt reference, and rebind its undo-error codec after recovery.
 - Separate compensation request acceptance from eventual completion and reconciliation.
 - Connect a parent checkpoint to a child link without making child recovery stand in for parent recovery.

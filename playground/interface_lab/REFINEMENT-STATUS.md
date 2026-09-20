@@ -16,7 +16,7 @@
 | Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric action policy and approvals                           |
 | Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, budgets, provider profiles, and persisted continuation compatibility |
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                           |
-| Saga → durable runner       | Unified definition signatures; constructive child links, reattachment, compatibility checks, and typed observation                  | Child submission/cancellation, compensation receipts, snapshot codecs, and journal admission       |
+| Saga → durable runner       | Unified definition signatures; child links, typed observation, exact submission receipts, and cancellation intent                   | Compensation receipts, persisted unfinished commands, snapshot codecs, and journal admission       |
 | Grind alone                 | Typed admission, response resolution, claim identity, renewal, and current-record acknowledgement arbitration                       | Queue configuration, uniqueness, worker lifecycle, persisted history, and broader job families     |
 | Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                          |
 | Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping  |
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-two consumers compile with only their transitive source imports.
-- Fifty-five negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-three consumers compile with only their transitive source imports.
+- Fifty-eight negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-four interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -41,7 +41,7 @@
 ## Next integration priorities
 
 - **Fabric:** Define mandatory action policy, bounded turns, approval suspension, and stale or duplicate answers while retaining the originating provider continuation.
-- **Saga:** Extend child attachment and observation with submission, cancellation, and compensation-receipt issuance and redemption. Exercise local runner outcomes over the canonical definition separately.
+- **Saga:** Extend child admission and cancellation intent with compensation-receipt issuance, redemption, and persisted unfinished commands. Exercise local runner outcomes over the canonical definition separately.
 - **Grind:** Add queue configuration and typed uniqueness admission with explicit conflict, replacement, and unknown-commit outcomes.
 - **Remaining scope:** Keep every unfinished family in [API coverage](../../API-COVERAGE.md), including provider profiles, protocol clients and servers, OAuth operations, dynamic graphs, and advanced job families.
 - **Runtime evidence:** Run pinned native telemetry, oidcc, concurrent storage, and queue/workflow recovery oracles after the relevant interface contracts are constructible. These obligations remain distinct from interface completion.
@@ -99,7 +99,7 @@
 - The consumer rebuilds a compatible contract and observes the same historical output after compensation changes. Stored metadata is checked before the retained decoder executes.
 - Strict link decoding rejects duplicate and unknown fields. Missing runs, pruned results, unavailable owners, and corrupt output remain distinct.
 - Native output and undo-error mismatches are compiler failures. Definition and codec versions are runtime compatibility checks.
-- Submission, cancellation, compensation receipts, durable journaling, and actual restart recovery remain open.
+- [Child admission](CHILD-ADMISSION.md) adds scripted submission and cancellation intent. Compensation receipts, durable journaling, and actual restart recovery remain open.
 
 ## Relay exchange ownership
 
@@ -184,3 +184,10 @@
 - [Descriptor-aware observation](SCOPED-OBSERVATION.md) delivers the selected event through one configured handler and preserves typed decoding failures. Nonempty attachment signatures require shared measurement and metadata types.
 - Duplicate logical names fail before either global or scoped registration reaches its runtime boundary. The invalid scoped case cannot invoke its work callback.
 - Valid attachment and scoped calls compile only. Private identifier allocation, native failure reporting, cleanup, and callback lifetime remain subject to the [pinned native oracle](../../research/sinal-lifetime-contract.md). Scope exit does not imply callback quiescence.
+
+## Child admission and cancellation
+
+- [Child admission](CHILD-ADMISSION.md) retains encoded input and native codecs through new admission, command replay, and ambiguous replies. Exact accepted-request and stored-metadata checks precede handle construction.
+- Uncertain submission retains its original owner route. Invalid successful replies remain recoverable because admission may already have committed.
+- Cancellation records intent separately from eventual outcome and preserves historical child completion.
+- Immutable consumer receipts exercise replay and conflict without claiming shared storage, transaction isolation, or process recovery. Compensation ownership remains separate work.

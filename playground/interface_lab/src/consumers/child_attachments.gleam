@@ -271,8 +271,7 @@ pub fn probe() -> Nil {
     saga_grind.observe_child(pruned_owner, pruned_handle)
 
   let other_owner = must_owner("other-owner")
-  let other_reader =
-    saga_grind.durable_owner(other_owner, fn(_) { Ok(completed) })
+  let other_reader = owner_with_read(other_owner, fn(_, _) { Ok(completed) })
   let assert Error(saga_grind.ChildIncompatible(saga_grind.ChildOwnerMismatch)) =
     saga_grind.reattach_child(other_reader, current_contract, link)
 
@@ -315,13 +314,13 @@ pub fn probe() -> Nil {
     saga_grind.attach_child(wrong_owner_record_reader, current_contract, run_id)
 
   let missing_owner =
-    saga_grind.durable_owner(must_owner("checkout-owner"), fn(_) {
+    owner_with_read(must_owner("checkout-owner"), fn(_, _) {
       Error(saga_grind.StoredRunMissing)
     })
   let assert Error(saga_grind.ChildRunMissing) =
     saga_grind.attach_child(missing_owner, current_contract, run_id)
   let unavailable_owner =
-    saga_grind.durable_owner(must_owner("checkout-owner"), fn(_) {
+    owner_with_read(must_owner("checkout-owner"), fn(_, _) {
       Error(saga_grind.OwnerUnavailable)
     })
   let assert Error(saga_grind.ChildOwnerUnavailable) =
@@ -424,12 +423,27 @@ fn owner_with(
   run_id: identity.RunId,
   stored: saga_grind.StoredRun,
 ) -> saga_grind.DurableOwner {
-  saga_grind.durable_owner(must_owner(owner_name), fn(requested) {
+  owner_with_read(must_owner(owner_name), fn(_, requested) {
     case requested == run_id {
       True -> Ok(stored)
       False -> Error(saga_grind.StoredRunMissing)
     }
   })
+}
+
+fn owner_with_read(
+  owner_id: saga_grind.OwnerId,
+  read: fn(saga_grind.OwnerId, identity.RunId) ->
+    Result(saga_grind.StoredRun, saga_grind.OwnerReadError),
+) -> saga_grind.DurableOwner {
+  saga_grind.durable_owner(
+    owner_id,
+    saga_grind.owner_port(
+      read,
+      saga_grind.unsupported_submission,
+      saga_grind.unsupported_cancellation,
+    ),
+  )
 }
 
 fn stored(

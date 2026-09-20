@@ -133,25 +133,85 @@ pub fn owner_id(value: String) -> Result(OwnerId, OwnerIdError) {
   }
 }
 
-// A scripted read boundary stands in for an independently owned run store.
-// It makes no transaction, retention, or concurrency claim.
-pub opaque type DurableOwner {
-  DurableOwner(
-    id: OwnerId,
-    read: fn(identity.RunId) -> Result(StoredRun, OwnerReadError),
+pub fn owner_id_value(id: OwnerId) -> String {
+  let OwnerId(value) = id
+  value
+}
+
+// A read port supports attachment and observation. Admission and cancellation
+// are separate named callbacks so unsupported operations stay explicit.
+pub opaque type OwnerPort {
+  OwnerPort(
+    read: fn(OwnerId, identity.RunId) -> Result(StoredRun, OwnerReadError),
+    submit: fn(OwnerId, ChildSubmission) ->
+      Result(ChildSubmissionReply, OwnerSubmissionError),
+    cancel: fn(OwnerId, ChildCancellation) ->
+      Result(ChildCancellationReply, OwnerCancellationPortError),
   )
 }
 
-pub fn durable_owner(
-  id: OwnerId,
-  read: fn(identity.RunId) -> Result(StoredRun, OwnerReadError),
-) -> DurableOwner {
-  DurableOwner(id, read)
+pub fn owner_port(
+  read: fn(OwnerId, identity.RunId) -> Result(StoredRun, OwnerReadError),
+  submit: fn(OwnerId, ChildSubmission) ->
+    Result(ChildSubmissionReply, OwnerSubmissionError),
+  cancel: fn(OwnerId, ChildCancellation) ->
+    Result(ChildCancellationReply, OwnerCancellationPortError),
+) -> OwnerPort {
+  OwnerPort(read, submit, cancel)
+}
+
+pub opaque type DurableOwner {
+  DurableOwner(id: OwnerId, port: OwnerPort)
+}
+
+pub fn durable_owner(id: OwnerId, port: OwnerPort) -> DurableOwner {
+  DurableOwner(id, port)
+}
+
+pub fn unsupported_submission(
+  _owner: OwnerId,
+  _request: ChildSubmission,
+) -> Result(ChildSubmissionReply, OwnerSubmissionError) {
+  Error(SubmissionUnsupportedOperation)
+}
+
+pub fn unsupported_cancellation(
+  _owner: OwnerId,
+  _request: ChildCancellation,
+) -> Result(ChildCancellationReply, OwnerCancellationPortError) {
+  Error(CancellationUnsupportedOperation)
 }
 
 pub type OwnerReadError {
   StoredRunMissing
   OwnerUnavailable
+}
+
+pub type OwnerSubmissionError {
+  SubmissionUnsupportedOperation
+  SubmissionCommandConflict
+  SubmissionRejected
+  SubmissionUnavailable
+  SubmissionCommitUnknown
+}
+
+pub type ChildSubmissionReply {
+  ChildCreated(accepted_request: ChildSubmission, stored: StoredRun)
+  ChildAlreadyExists(accepted_request: ChildSubmission, stored: StoredRun)
+}
+
+pub type OwnerCancellationPortError {
+  CancellationUnsupportedOperation
+  CancellationIncompatible(CompatibilityError)
+  CancellationUnavailable
+  CancellationCommitUnknown
+}
+
+pub type ChildCancellationReply {
+  CancellationIntentRecorded(new_revision: Int)
+  CancellationIntentAlreadyRecorded
+  CancellationAlreadyTerminal
+  CancellationTargetMissing
 }
 
 // This is the concrete information an adapter can load from its store.
@@ -194,6 +254,32 @@ pub type StoredCompensation {
   StoredCompensationNeedsReconciliation(evidence: List(Value))
 }
 
+// This retention applies to the child compensation journal. Terminal result
+// retention remains a separate owner policy.
+pub type Retention {
+  Discard
+  RetainUntil(grind.AvailableAt)
+}
+
+pub type ChildSubmission {
+  ChildSubmission(
+    command_id: identity.CommandId,
+    definition_identity: String,
+    definition_version: Int,
+    signature: String,
+    input_version: Int,
+    output_version: Int,
+    error_version: Int,
+    undo_error_version: Int,
+    encoded_input: Value,
+    retention: Retention,
+  )
+}
+
+pub type ChildCancellation {
+  ChildCancellation(link: child_link.ChildLink, command_id: identity.CommandId)
+}
+
 pub opaque type DurableChild(o, e, u) {
   DurableChild(
     link: child_link.ChildLink,
@@ -201,6 +287,77 @@ pub opaque type DurableChild(o, e, u) {
     error_codec: Codec(e),
     undo_error_codec: Codec(u),
   )
+}
+
+pub opaque type PreparedChild(o, e, u) {
+  PreparedChild(
+    request: ChildSubmission,
+    output_codec: Codec(o),
+    error_codec: Codec(e),
+    undo_error_codec: Codec(u),
+  )
+}
+
+// The request is bound to the owner route after a commit-unknown response.
+// It is a retry token, not evidence that the store committed or can be reached.
+// OwnerId equality is only the configured route check; it does not authenticate
+// or prove that two callback sets share the same backing store.
+pub opaque type UncertainSubmission(o, e, u) {
+  UncertainSubmission(owner_id: OwnerId, prepared: PreparedChild(o, e, u))
+}
+
+pub fn prepared_submission(
+  prepared: PreparedChild(o, e, u),
+) -> ChildSubmission {
+  prepared.request
+}
+
+pub fn prepared_command_id(
+  prepared: PreparedChild(o, e, u),
+) -> identity.CommandId {
+  prepared.request.command_id
+}
+
+pub type PrepareChildError {
+  StableCommandMustNotBeEmpty
+  ChildInputCouldNotEncode(blueprint.EncodeError)
+}
+
+pub fn prepare_child(
+  contract: ChildContract(i, o, e, u),
+  input: i,
+  retention: Retention,
+  command_id: identity.CommandId,
+) -> Result(PreparedChild(o, e, u), PrepareChildError) {
+  case identity.command_id_value(command_id) {
+    "" -> Error(StableCommandMustNotBeEmpty)
+    _ ->
+      case blueprint.encode(saga.child_contract_input_codec(contract), input) {
+        Error(error) -> Error(ChildInputCouldNotEncode(error))
+        Ok(encoded_input) -> {
+          let versions = saga.child_contract_boundary_versions(contract)
+          let request =
+            ChildSubmission(
+              command_id,
+              saga.child_contract_identity(contract),
+              saga.child_contract_version(contract),
+              saga.child_contract_signature(contract),
+              versions.0,
+              versions.1,
+              versions.2,
+              versions.3,
+              encoded_input,
+              retention,
+            )
+          Ok(PreparedChild(
+            request,
+            saga.child_contract_output_codec(contract),
+            saga.child_contract_error_codec(contract),
+            saga.child_contract_undo_error_codec(contract),
+          ))
+        }
+      }
+  }
 }
 
 pub fn child_link(child: DurableChild(o, e, u)) -> child_link.ChildLink {
@@ -228,13 +385,208 @@ pub type AttachError {
   ChildLinkInvalid
 }
 
+pub type ChildSubmitError(o, e, u) {
+  ChildSubmissionUnsupported
+  ChildSubmissionConflict
+  ChildSubmissionRejected
+  ChildSubmissionUnavailable
+  ChildSubmissionCommitUnknown(UncertainSubmission(o, e, u))
+  ChildSubmissionRouteMismatch(UncertainSubmission(o, e, u))
+  ChildSubmissionReplyInvalid(
+    reason: SubmissionReplyError,
+    uncertain: UncertainSubmission(o, e, u),
+  )
+}
+
+pub type SubmissionReplyError {
+  AcceptedRequestMismatch
+  AcceptedRunIncompatible(CompatibilityError)
+  AcceptedRunLinkInvalid
+}
+
+pub type ChildAdmission(o, e, u) {
+  NewlyAdmitted(DurableChild(o, e, u))
+  AlreadyAdmitted(DurableChild(o, e, u))
+}
+
+// Preparation is separate so callers can keep the exact encoded request when
+// a store reports an ambiguous commit and retry with its stable command.
+pub fn submit_child(
+  owner: DurableOwner,
+  prepared: PreparedChild(o, e, u),
+) -> Result(ChildAdmission(o, e, u), ChildSubmitError(o, e, u)) {
+  submit_prepared(owner, prepared)
+}
+
+pub fn retry_submission(
+  owner: DurableOwner,
+  uncertain: UncertainSubmission(o, e, u),
+) -> Result(ChildAdmission(o, e, u), ChildSubmitError(o, e, u)) {
+  // A retry outcome never erases the caller's original uncertainty. Keep the
+  // token so an unavailable retry or another lost acknowledgement can retry.
+  let UncertainSubmission(original_owner_id, prepared) = uncertain
+  let DurableOwner(owner_id, _) = owner
+  case owner_id == original_owner_id {
+    False -> Error(ChildSubmissionRouteMismatch(uncertain))
+    True -> submit_prepared(owner, prepared)
+  }
+}
+
+fn submit_prepared(
+  owner: DurableOwner,
+  prepared: PreparedChild(o, e, u),
+) -> Result(ChildAdmission(o, e, u), ChildSubmitError(o, e, u)) {
+  let DurableOwner(owner_id, port) = owner
+  let OwnerPort(_, submit, _) = port
+  let OwnerId(owner_name) = owner_id
+  case submit(owner_id, prepared.request) {
+    Error(SubmissionUnsupportedOperation) -> Error(ChildSubmissionUnsupported)
+    Error(SubmissionCommandConflict) -> Error(ChildSubmissionConflict)
+    Error(SubmissionRejected) -> Error(ChildSubmissionRejected)
+    Error(SubmissionUnavailable) -> Error(ChildSubmissionUnavailable)
+    Error(SubmissionCommitUnknown) ->
+      Error(
+        ChildSubmissionCommitUnknown(UncertainSubmission(owner_id, prepared)),
+      )
+    Ok(reply) ->
+      case child_from_submission(owner_name, prepared, reply) {
+        Ok(admission) -> Ok(admission)
+        Error(reason) ->
+          Error(ChildSubmissionReplyInvalid(
+            reason,
+            UncertainSubmission(owner_id, prepared),
+          ))
+      }
+  }
+}
+
+fn child_from_submission(
+  owner_name: String,
+  prepared: PreparedChild(o, e, u),
+  reply: ChildSubmissionReply,
+) -> Result(ChildAdmission(o, e, u), SubmissionReplyError) {
+  case reply {
+    ChildCreated(accepted_request, stored) ->
+      case accepted_request == prepared.request {
+        False -> Error(AcceptedRequestMismatch)
+        True ->
+          case durable_child_from_submission(owner_name, prepared, stored) {
+            Error(error) -> Error(error)
+            Ok(child) -> Ok(NewlyAdmitted(child))
+          }
+      }
+    ChildAlreadyExists(accepted_request, stored) ->
+      case accepted_request == prepared.request {
+        False -> Error(AcceptedRequestMismatch)
+        True ->
+          case durable_child_from_submission(owner_name, prepared, stored) {
+            Error(error) -> Error(error)
+            Ok(child) -> Ok(AlreadyAdmitted(child))
+          }
+      }
+  }
+}
+
+fn durable_child_from_submission(
+  owner_name: String,
+  prepared: PreparedChild(o, e, u),
+  stored: StoredRun,
+) -> Result(DurableChild(o, e, u), SubmissionReplyError) {
+  let request = prepared.request
+  case
+    child_link.new(
+      owner_name,
+      stored.run_id,
+      request.definition_identity,
+      request.definition_version,
+      request.signature,
+      request.input_version,
+      request.output_version,
+      request.error_version,
+      request.undo_error_version,
+    )
+  {
+    Error(_) -> Error(AcceptedRunLinkInvalid)
+    Ok(link) ->
+      case run_matches_link(stored, owner_name, link) {
+        Error(mismatch) -> Error(AcceptedRunIncompatible(mismatch))
+        Ok(Nil) ->
+          Ok(DurableChild(
+            link,
+            prepared.output_codec,
+            prepared.error_codec,
+            prepared.undo_error_codec,
+          ))
+      }
+  }
+}
+
+pub type ChildCancellationOutcome {
+  ChildCancellationRecorded(new_revision: Int)
+  ChildCancellationAlreadyRecorded
+  ChildCancellationAlreadyTerminal
+  ChildCancellationMissing
+}
+
+pub type ChildCancellationError(o, e, u) {
+  ChildCancellationCommandMustNotBeEmpty
+  ChildCancellationUnsupported
+  ChildCancellationIncompatible(CompatibilityError)
+  ChildCancellationUnavailable
+  ChildCancellationCommitUnknown(
+    child: DurableChild(o, e, u),
+    command_id: identity.CommandId,
+  )
+}
+
+// Cancellation is an owner command against the immutable child link. It
+// records intent; the owner decides the eventual child outcome.
+pub fn request_child_cancellation(
+  owner: DurableOwner,
+  child: DurableChild(o, e, u),
+  command_id: identity.CommandId,
+) -> Result(ChildCancellationOutcome, ChildCancellationError(o, e, u)) {
+  case identity.command_id_value(command_id) {
+    "" -> Error(ChildCancellationCommandMustNotBeEmpty)
+    _ -> {
+      let DurableOwner(owner_id, port) = owner
+      let OwnerPort(_, _, cancel) = port
+      let OwnerId(owner_name) = owner_id
+      case child_link.owner(child.link) == owner_name {
+        False -> Error(ChildCancellationIncompatible(ChildOwnerMismatch))
+        True -> {
+          let request = ChildCancellation(child.link, command_id)
+          case cancel(owner_id, request) {
+            Ok(CancellationIntentRecorded(revision)) ->
+              Ok(ChildCancellationRecorded(revision))
+            Ok(CancellationIntentAlreadyRecorded) ->
+              Ok(ChildCancellationAlreadyRecorded)
+            Ok(CancellationAlreadyTerminal) ->
+              Ok(ChildCancellationAlreadyTerminal)
+            Ok(CancellationTargetMissing) -> Ok(ChildCancellationMissing)
+            Error(CancellationUnsupportedOperation) ->
+              Error(ChildCancellationUnsupported)
+            Error(CancellationIncompatible(reason)) ->
+              Error(ChildCancellationIncompatible(reason))
+            Error(CancellationUnavailable) ->
+              Error(ChildCancellationUnavailable)
+            Error(CancellationCommitUnknown) ->
+              Error(ChildCancellationCommitUnknown(child, command_id))
+          }
+        }
+      }
+    }
+  }
+}
+
 pub fn attach_child(
   owner: DurableOwner,
   contract: ChildContract(i, o, e, u),
   run_id: identity.RunId,
 ) -> Result(DurableChild(o, e, u), AttachError) {
-  let DurableOwner(owner_id, read) = owner
-  case read(run_id) {
+  let DurableOwner(owner_id, port) = owner
+  let OwnerPort(read, _, _) = port
+  case read(owner_id, run_id) {
     Error(StoredRunMissing) -> Error(ChildRunMissing)
     Error(OwnerUnavailable) -> Error(ChildOwnerUnavailable)
     Ok(stored) -> {
@@ -270,12 +622,13 @@ pub fn reattach_child(
   contract: ChildContract(i, o, e, u),
   link: child_link.ChildLink,
 ) -> Result(DurableChild(o, e, u), AttachError) {
-  let DurableOwner(owner_id, read) = owner
+  let DurableOwner(owner_id, port) = owner
+  let OwnerPort(read, _, _) = port
   let OwnerId(owner_name) = owner_id
   case check_link_owner_and_contract(link, owner_name, contract) {
     Error(mismatch) -> Error(ChildIncompatible(mismatch))
     Ok(Nil) ->
-      case read(child_link.run(link)) {
+      case read(owner_id, child_link.run(link)) {
         Error(StoredRunMissing) -> Error(ChildRunMissing)
         Error(OwnerUnavailable) -> Error(ChildOwnerUnavailable)
         Ok(stored) ->
@@ -349,12 +702,13 @@ pub fn observe_child(
   owner: DurableOwner,
   child: DurableChild(o, e, u),
 ) -> Result(DurableChildState(o, e, u), ObserveError) {
-  let DurableOwner(owner_id, read) = owner
+  let DurableOwner(owner_id, port) = owner
+  let OwnerPort(read, _, _) = port
   let OwnerId(owner_name) = owner_id
   case child_link.owner(child.link) == owner_name {
     False -> Error(ObservedIncompatible(ChildOwnerMismatch))
     True ->
-      case read(child_link.run(child.link)) {
+      case read(owner_id, child_link.run(child.link)) {
         Error(StoredRunMissing) -> Error(ObservedRunMissing)
         Error(OwnerUnavailable) -> Error(ObservedOwnerUnavailable)
         Ok(stored) ->
