@@ -10,24 +10,25 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                   | Next decisive question                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed records, optional fields, lists, nulls, and registry consistency | Provider feature admission, numbers, and broader schema corpus               |
-| Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                             | Protocol name rules, visibility policy, transport conformance                |
-| Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                                | Explicit provider schema subsets and streaming resource ownership            |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and explicit operation ownership       | Child lifecycle, local execution, and definition migration                   |
-| Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                                | Restart behavior and usable compensation receipt issuance                    |
-| Grind alone                 | Typed immediate/scheduled admission, handles, and cancellation transitions                                         | Transactional storage, leases, running cancellation observation, and retries |
-| Sinal alone                 | Map-shaped fields and foreign callback error classification                                                        | Native atom/map bridge and pinned telemetry behavior tests                   |
-| Warden alone                | Configured transactions, callback checks, and checked versus verified identities                                   | Atomic consumption and oidcc token-verification integration                  |
+| Boundary                    | Current evidence                                                                                                                    | Remaining interface work                                                                           |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and 1.x compatibility          |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric action policy and approvals                           |
+| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, budgets, provider profiles, and persisted continuation compatibility |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                           |
+| Saga → durable runner       | Unified definition signatures; constructive child links, reattachment, compatibility checks, and typed observation                  | Child submission/cancellation, compensation receipts, snapshot codecs, and journal admission       |
+| Grind alone                 | Typed admission, response resolution, claim identity, renewal, and current-record acknowledgement arbitration                       | Queue configuration, uniqueness, worker lifecycle, persisted history, and broader job families     |
+| Sinal alone                 | Map-shaped fields, foreign callback classification, and symbolic typed span events                                                  | Proposed descriptor-aware attachment; native name/map and lifetime contracts                       |
+| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping  |
 
+- This map reflects committed evidence through `227a844`. The scoped Sinal attachment proposal is not counted as implemented evidence.
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
 - The shared laboratory `Value` algebra is a prototype convenience, not a settled production dependency graph. Native telemetry terms and transport-specific data still need their actual boundary adapters.
 
 ## Registration ergonomics
 
-- Activity registration uses one typed factory and a reusable contract that keeps each codec with its version. Approval and child boundary metadata still need their corresponding refinement.
+- Activity registration uses one typed factory and a reusable contract that keeps each codec with its version. Child contracts now retain definition and boundary codec versions. Approval registration and the remaining constructor ergonomics still need refinement.
 
 ## Verified checkpoint
 
@@ -40,10 +41,11 @@
 
 ## Next integration priorities
 
-1. Exercise the local runner contract over the canonical Saga definition.
-2. Complete child attachment, reattachment, cancellation, typed completion, and compensation-receipt issuance. Completion alone is not parent compensation authority.
-3. Connect the schema vocabulary to each protocol/provider capability check, then establish streaming resource ownership through the [proposed owner experiment](../../research/llm-stream-ownership-contract.md).
-4. Test actual boundaries against pinned oracles: native telemetry, oidcc with atomic transaction consumption, and transactional queue/workflow recovery.
+- **Fabric:** Define mandatory action policy, bounded turns, approval suspension, and stale or duplicate answers while retaining the originating provider continuation.
+- **Saga:** Extend child attachment and observation with submission, cancellation, and compensation-receipt issuance and redemption. Exercise local runner outcomes over the canonical definition separately.
+- **Grind:** Add queue configuration and typed uniqueness admission with explicit conflict, replacement, and unknown-commit outcomes.
+- **Remaining scope:** Keep every unfinished family in [API coverage](../../API-COVERAGE.md), including provider profiles, protocol clients and servers, OAuth operations, dynamic graphs, and advanced job families.
+- **Runtime evidence:** Run pinned native telemetry, oidcc, concurrent storage, and queue/workflow recovery oracles after the relevant interface contracts are constructible. These obligations remain distinct from interface completion.
 
 - The laboratory module names identify responsibilities, not new permanent packages. No package interface is promoted by these checks alone.
 - `REFINEMENT-STATUS.md` and its linked refinements supersede the historical stress matrix where a later experiment changed the result.
@@ -57,9 +59,16 @@
 - Do not count a typed placeholder as runtime evidence, or keep adding public types without a consumer that needs them.
 - Move to operational prototypes only after the relevant lifecycle and composition contracts fit together. Do not promote the current playground as production packages.
 
+## Exploration completion
+
+- [API coverage](../../API-COVERAGE.md) retains the complete intended capability inventory. An open or partial in-scope family prevents a claim that full API exploration is complete.
+- Each accepted family needs a constructive consumer using public contracts and a relevant compiler-negative fixture where the distinction is statically enforceable. A proposed signature or an unfinished runtime body alone does not establish the represented path.
+- Each integration must name the owners of admission, execution, cancellation, suspension, persistence, and compensation where those responsibilities apply. Consumers must compose without private representation access or a universal operation type.
+- A family may be split into bounded subfamilies without removing its unfinished capabilities. Runtime conformance, concurrency, recovery, performance, and independent package distribution remain separate acceptance obligations.
+
 ## Collection refinement
 
-- [Collection and null codecs](COLLECTION-CODECS.md) retain indexed failures and explicit null representation. Optional properties and independent schema validation remain pending.
+- [Collection and null codecs](COLLECTION-CODECS.md) retain indexed failures and explicit null representation. Object properties and independent schema validation are covered by the subsequent refinements below.
 
 ## Object refinement
 
@@ -67,7 +76,7 @@
 
 ## Alternative and constraint refinement
 
-- [Tagged alternatives and integer constraints](TAGGED-CODECS.md) retain branch payload types and reject out-of-range encoding. Provider feature admission remains separate.
+- [Tagged alternatives and integer constraints](TAGGED-CODECS.md) retain branch payload types and reject out-of-range encoding. Located schema requirements and scripted provider admission are covered separately; actual provider profiles remain open.
 
 ## Independent schema evidence
 
@@ -75,7 +84,7 @@
 
 ## Streaming grammar refinement
 
-- [Stream progress and tool completion](STREAM-PROGRESS.md) preserves interleaved call identities and separates completed tools from partial arguments. Live ownership and provider adaptation remain open.
+- [Stream progress and tool completion](STREAM-PROGRESS.md) preserves interleaved call identities and separates completed tools from partial arguments. The stream-owner refinement below adds pure terminal ownership; shared live ownership and actual provider adaptation remain open.
 
 ## Unified workflow refinement
 
@@ -83,7 +92,7 @@
 
 ## Schema admission refinement
 
-- [Tool schema admission](SCHEMA-ADMISSION.md) retains exact structured schemas through typed policy rejection and admitted rendering. Real provider profiles and resource ownership remain open.
+- [Tool schema admission](SCHEMA-ADMISSION.md) retains exact structured schemas through typed policy rejection and admitted rendering. Real provider profiles and live transport resource ownership remain open.
 
 ## Child attachment and observation
 
@@ -98,7 +107,7 @@
 - [Relay exchanges](RELAY-EXCHANGES.md) reuse the existing registry through an opaque invocation that retains each request context.
 - Server-owned exchange and invocation identities prevent repeated wire request identifiers and progress tokens from merging calls.
 - The pure consumer checks close-before-admission, cancellation, duplicate completion, late callbacks, tokenless progress, and monotonic integer progress.
-- Protocol codecs, HTTP admission, pagination, authorization, transport cleanup, and bounded owner retention remain open.
+- Protected registry authorization is exercised separately below. Protocol codecs, HTTP admission, pagination, protected exchange integration, transport cleanup, and bounded owner retention remain open.
 
 ## Runtime schema values
 
@@ -106,14 +115,14 @@
 - The consumer checks reordered property/tag equivalence, preserved tuple and nullable structure, invalid-schema rejection, exact validation paths, and missing/null distinctions.
 - Static codecs supply contracts only when their schemas are available. Runtime contracts and witnesses cannot substitute for native codecs or application records.
 - The independent schema oracle compares all four acceptance paths on its existing corpus.
-- Document loading, source generation, dynamic graph publication, numeric normalization, limits, and schema migration remain open.
+- Finite document loading and source generation are covered by subsequent refinements. Dynamic graph publication, numeric normalization, limits, and schema migration remain open.
 
 ## Finite schema document loading
 
 - [Finite schema documents](SCHEMA-DOCUMENTS.md) enter the existing runtime-contract boundary through a strict parser for Blueprint's rendered forms.
 - Unsupported constraints are rejected explicitly. Duplicate keys, malformed supported forms, dialect failures, and schema invariants remain located failures.
 - The independent corpus reloads every emitted document and checks normalized contract equality before comparing value acceptance.
-- JSON byte parsing, general schema syntax, source generation, resource limits, and recursive references remain open.
+- Finite native source generation is covered below. JSON byte parsing, general schema syntax, resource limits, and recursive references remain open.
 
 ## Typed span events
 
@@ -131,7 +140,7 @@
 
 - [Worker outcomes](WORKER-OUTCOMES.md) keep ordinary typed functions reusable while resolving scheduling responses with explicit accounting, clock, and retry policy.
 - Unknown effects request reconciliation without invoking retry policy. Worker cancellation and proposed completion do not arbitrate an external cancellation race.
-- Claim identity, leases, atomic acknowledgement, committed history, and runtime scheduling remain open.
+- Current-attempt ownership below adds claim identity, renewal, and a scripted atomic acknowledgement port. Actual atomic storage, committed history, and runtime scheduling remain open.
 
 ## Stream terminal ownership
 
@@ -155,7 +164,7 @@
 
 ## Protected tool authorization contract
 
-- The [Relay resource authorization contract](../../research/relay-resource-authorization-contract.md) proposes protected registry configuration, grant reuse checks, visibility filtering, and authorization on each named dispatch.
+- The [Relay resource authorization contract](../../research/relay-resource-authorization-contract.md) defines the protected registry configuration, grant reuse checks, visibility filtering, and authorization exercised below.
 - Application context remains explicit and application-owned. Warden identity and independently verified bearer grants cannot substitute for one another.
 - The [resource authorization experiment](RESOURCE-AUTHORIZATION.md) now exercises the protected registry and grant checks. Protected transport integration, protocol responses, token verification, anonymous access, and pagination remain open.
 
