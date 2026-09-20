@@ -51,19 +51,29 @@ Integer projection has its own output-digit limit. Invalid syntax, resource
 rejection, schema rejection, and unsupported native representation are distinct
 outcomes. NaN and infinity are not JSON numbers.
 
-Native `Int` and `Float` remain useful through checked projections. Exact means
-mathematical equality: decimal `0.5` can project exactly to binary64, while
-exact decimal `0.1` cannot. Constructing a number from a finite binary64 value
-preserves that value's exact rational meaning rather than its shortest printed
-spelling. Float projection distinguishes overflow, underflow, and inexact
-rounding; rounded conversion requires a separately named opt-in contract.
+Native `Int` and `Float` remain useful through checked construction and
+projection. `from_int` returns `Result(Number, IntegerConstructionError)` because
+a Gleam `Int` reaches different host representations: JavaScript accepts only
+finite, integral safe integers and reports `NonFiniteInteger`, `NonIntegerValue`,
+or `UnsafeNativeInteger` for invalid host inputs before conversion. Erlang accepts
+exact arbitrary-precision integers. Integer projection applies the caller's
+output-digit limit on both targets and additionally rejects values outside
+JavaScript's safe-integer range; Erlang retains exact bignums.
+
+Exact float conversion means mathematical equality: decimal `0.5` can project
+exactly to binary64, while exact decimal `0.1` cannot. Constructing a number from
+a finite binary64 value preserves that value's exact rational meaning rather than
+its shortest printed spelling. Float projection distinguishes overflow,
+underflow, and inexact rounding; rounded conversion requires a separately named
+opt-in contract.
 
 The [exact-number kernel](playground/interface_lab/EXACT-NUMBERS.md) has 62
-independently checked cases and Erlang float-bit evidence. The shared laboratory
-still uses `Value.Int`; migration into values, codecs, schema bounds, transports,
-and generation is deferred. The kernel is not evidence that those boundaries
-already preserve numbers. JavaScript acceptance and integers rounded before
-native construction require separate tests.
+independently checked cases and Erlang float-bit evidence. It remains prototype
+evidence: the shared laboratory still uses `Value.Int`, and migration into its
+values, codecs, schema bounds, transports, and generation is deferred. The
+accepted Blueprint implementation separately tests checked construction and
+projection on Erlang and JavaScript, including integers rounded before
+construction on JavaScript.
 
 ## Native codecs and composition
 
@@ -138,11 +148,11 @@ checks distinct native wrappers; the source's `optional`, `nullable`, and
 
 ## Errors and schema laws
 
-Construction errors, encoding errors, decoding errors, schema unavailability,
-invalid schema documents, validation failures, and native projection failures
-remain separate. Value failures retain typed root-to-leaf locations (property,
-index, tagged branch) and structured reasons. Applications must not parse error
-prose to locate a failed field.
+Number-construction errors, encoding errors, decoding errors, schema
+unavailability, invalid schema documents, validation failures, and native
+projection failures remain separate. Value failures retain typed root-to-leaf
+locations (property, index, tagged branch) and structured reasons. Applications
+must not parse error prose to locate a failed field.
 
 For accepted native values, successful encoding must decode back to the same
 value and satisfy the declared schema. Invalid native values return encoding

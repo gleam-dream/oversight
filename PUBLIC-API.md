@@ -12,11 +12,14 @@ bodies are evidence for later implementation, not accepted public API.
 - **Blueprint:** `Value`, `Codec`, schema derivation, finite runtime contracts,
   validation, and checked encode/decode combinators. One canonical exact
   `Number` represents every numeric value within Blueprint’s schema/value model.
-  Native `Int` and `Float` are explicit checked projections to or from that
-  value, not parallel JSON `Value` cases. The current integer-only `Value.Int`
-  migration is deferred. Native source generation, including positional enums
-  and planned application naming, remains experimental tooling outside this
-  facade.
+  Native `Int` and `Float` use explicit checked construction and projection, not
+  parallel JSON `Value` cases. In particular, `from_int` returns
+  `Result(Number, IntegerConstructionError)`: JavaScript rejects nonfinite,
+  noninteger, and unsafe native inputs, while Erlang retains exact bignums.
+  Integer projection also observes a caller-supplied digit limit and the target's
+  native range. The current integer-only `Value.Int` migration is deferred.
+  Native source generation, including positional enums and planned application
+  naming, remains experimental tooling outside this facade.
 - **Standalone LLM:** provider-neutral requests and outcomes, tool declarations,
   calls and results, exact call-result correlation, configured capability
   admission, streamed progress and terminal events, and provider-origin
@@ -73,8 +76,9 @@ context, lifecycle event, retry policy, or persistence protocol is introduced.
 ## Resolved decisions and stop rule
 
 The three decisions are settled: exact numbers within Blueprint’s schema/value model
-with checked native projections; source generation excluded from the initial
-facade; and durable Saga, Grind, and Warden protocol machinery kept internal.
+with checked native construction and projection; source generation excluded from
+the initial facade; and durable Saga, Grind, and Warden protocol machinery kept
+internal.
 Lab constructors for those runtime protocols may remain visible where prototype
 consumers need them to compile; this freeze requires no source visibility
 change and does not promote them to package API.

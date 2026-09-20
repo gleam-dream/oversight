@@ -221,12 +221,22 @@ reports are `/private/tmp/gleam-dream-sinal-wave3.log` and
 `/private/tmp/gleam-dream-blueprint-wave3.log`. Reported success is not the Sol
 Medium verdict. Final [`review-3.md`](review-3.md) retains both snapshots with changes required; all listed findings must close first in Wave 4.
 
-## Wave 4: launched
+## Wave 4: complete and accepted
+
+- Final accepted commits: Sinal `dd09933e5466628f7d46fa896c389f31ba7d4cb6`;
+  JSON Blueprint `8f2d46c5a4174a3700e0f214e37e612b0c65316a`.
+  Both external agents finished; no push or publication occurred. The verdict
+  covers the approved initial facades, not explicitly deferred future families.
 
 - External runs use the requested sandbox flags with no model override.
   Output logs: `/private/tmp/gleam-dream-sinal-wave4.log` and
   `/private/tmp/gleam-dream-blueprint-wave4.log`, with sibling `.stderr` files.
-  Review remains pending; a running process is not a completed delivery.
+  These initial logs precede the quota recovery and accepted corrections below.
+
+- Both initial Wave 4 processes exited with code 3 after a quota 429, leaving
+  partial changes. The reported reset elapsed before the 2026-09-20 16:32 UTC
+  status check. Resumed the same conversations with all partial work preserved;
+  logs now use `wave4-resume.log` and `wave4-resume.stderr` under the same paths.
 
 - Shared handoff: [`wave-4-work-order.md`](wave-4-work-order.md).
 - Sinal target: close review evidence gaps and finish native race/fault quality,
@@ -239,10 +249,20 @@ Medium verdict. Final [`review-3.md`](review-3.md) retains both snapshots with c
 - This wave aims to finish both approved initial releases. Wave 5 is created only
   for a concrete blocker returned by implementation or review.
 
-| Package        | Wave 4 baseline                            | External session/log | Delivery | Review              |
-| -------------- | ------------------------------------------ | -------------------- | -------- | ------------------- |
-| Sinal          | `13105a1777d01d6e1904ae624409ff2f25c739aa` | session `5958`       | running  | Sol Medium required |
-| JSON Blueprint | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | session `8390`       | running  | Sol Medium required |
+| Package        | Wave 4 baseline                            | External session/log     | Delivery            | Review                             |
+| -------------- | ------------------------------------------ | ------------------------ | ------------------- | ---------------------------------- |
+| Sinal          | `13105a1777d01d6e1904ae624409ff2f25c739aa` | final correction `18487` | committed `dd09933` | [Sol Medium accepted](review-4.md) |
+| JSON Blueprint | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | final correction `14432` | committed `8f2d46c` | [Sol Medium accepted](review-4.md) |
+
+- Sinal: 47 tests, native fault/race evidence, stress, documentation examples,
+  docs build and package dry run independently verified; release claims narrowed
+  to tested scope. Final logs: `/private/tmp/gleam-dream-sinal-wave4-docfix.log`.
+- Blueprint: all numeric construction, parser, corpus identity, resource and
+  evidence defects were corrected and accepted. Independently verified 99 tests
+  on each target, 61 semantic schema fixtures with mutation proofs, benchmarks,
+  docs and package dry run. The new `from_int` constructor returns a typed
+  Result; the design and API inventory record that safety correction.
+  Final log: `/private/tmp/gleam-dream-blueprint-wave4-unitfix.log`.
 
 ## Subsequent roadmap
 

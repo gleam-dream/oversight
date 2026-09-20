@@ -41,15 +41,16 @@ pub fn parse_number(NumberLimits, String) -> Result(JsonNumber, NumberError)
 pub fn number_text(JsonNumber) -> String
 pub fn compare(JsonNumber, JsonNumber) -> NumberOrder
 pub fn is_integer(JsonNumber) -> Bool
-pub fn from_int(Int) -> JsonNumber
+pub fn from_int(Int) -> Result(JsonNumber, IntegerConstructionError)
 pub fn to_int_exact(JsonNumber, IntegerProjectionLimit) -> Result(Int, IntegerProjectionError)
 pub fn from_float_exact(Float) -> Result(JsonNumber, FloatConstructionError)
 pub fn to_float_exact(JsonNumber) -> Result(Float, FloatProjectionError)
 ```
 
-- The kernel consumer now exercises separate parse and integer-projection limits, positive canonical zero, compact scientific rendering, and distinct projection errors. These signatures summarize that prototype; they do not establish a promoted package API.
+- The kernel consumer exercises separate parse and integer-projection limits, positive canonical zero, compact scientific rendering, and distinct projection errors. The standalone kernel remains prototype evidence, including its historical infallible `from_int`; the signature above records the accepted Blueprint safety correction rather than claiming that the prototype was promoted unchanged.
 - Exact conversion of decimal `0.1` to binary64 fails; `0.5` succeeds. Converting an existing binary64 `0.1` to an exact decimal must preserve its full binary rational value, not emit the shortest roundtrip spelling.
-- `from_int` preserves the native input it receives. It cannot reconstruct an integer already rounded before the call; JavaScript input policy remains explicit work.
+- On JavaScript, `from_int` reports `NonFiniteInteger`, `NonIntegerValue`, or `UnsafeNativeInteger` before conversion. It therefore rejects an integer already rounded to an unsafe native value, although it cannot reconstruct the original source integer. On Erlang, it accepts and preserves exact arbitrary-precision integers.
+- `to_int_exact` first applies the caller's output-digit limit. JavaScript then rejects results outside its safe-integer range; Erlang projects exact arbitrary-precision integers.
 
 ## Integration obligations
 
