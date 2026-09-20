@@ -8,6 +8,16 @@ material mismatch before changing an owning signature or behavior.
 
 ## Common cold start and operating rules
 
+The installed LSP bridge is `/etc/profiles/per-user/edgar/bin/agent-lsp`.
+Its executable and help command were verified after the initial capability
+reports. A failed `which agent-lsp` probe means PATH discovery failed, not that
+the bridge is absent. On the next agent continuation, launch it from the package
+directory with
+`nix develop --command /etc/profiles/per-user/edgar/bin/agent-lsp gleam:gleam,lsp`,
+probe a real source file through its MCP tools, and correct the capability
+report. Do not reinstall the bridge or interrupt an active implementation merely
+to refresh PATH.
+
 1. Confirm the named repository, branch, clean status, and exact baseline below.
    Preserve user changes if the tree is unexpectedly dirty. Do not commit, push,
    publish, read secrets, or print environment/configuration dumps.
