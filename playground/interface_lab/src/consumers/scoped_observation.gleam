@@ -186,10 +186,12 @@ pub fn probe() -> Nil {
   let assert ["service", "duplicate"] = duplicate_again
   let assert Error(sinal.DuplicateEventName(scoped_duplicate)) =
     sinal.with_attachments(
+      admission_backend,
       duplicate_first,
       [duplicate_second],
       duplicate_handler,
       empty_failure,
+      fn(_) { Nil },
       fn() { panic as "invalid admission must not execute scoped work" },
     )
   let assert ["service", "duplicate"] = scoped_duplicate
@@ -213,6 +215,7 @@ pub fn attach_many_shape(
 }
 
 pub fn with_attachments_shape(
+  backend: sinal.Backend,
   first: sinal.Event(Int, RunMetadata),
   rest: List(sinal.Event(Int, RunMetadata)),
   handler: sinal.Handler(Int, RunMetadata, HandlerProblem),
@@ -220,9 +223,21 @@ pub fn with_attachments_shape(
     sinal.Event(Int, RunMetadata),
     sinal.HandlerFailure(HandlerProblem),
   ) -> Nil,
+  on_exception_cleanup_failure: fn(sinal.ScopeCleanupFailure) -> Nil,
   run: fn() -> Result(String, AppFailure),
-) -> Result(Result(String, AppFailure), sinal.AttachError) {
-  sinal.with_attachments(first, rest, handler, on_failure, run)
+) -> Result(
+  sinal.ScopedCompletion(Result(String, AppFailure)),
+  sinal.AttachError,
+) {
+  sinal.with_attachments(
+    backend,
+    first,
+    rest,
+    handler,
+    on_failure,
+    on_exception_cleanup_failure,
+    run,
+  )
 }
 
 fn descriptor(

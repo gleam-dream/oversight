@@ -3,9 +3,9 @@
 ## Question and status
 
 - The experiment asks how Sinal can expose typed spans and bounded handler lifetimes while preserving native `telemetry` behavior.
-- The current laboratory constructs typed events, classifies foreign callback failures, and constructs symbolic typed span events in [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam). [Injected observation](../playground/interface_lab/INJECTED-OBSERVATION.md) now constructs `emit`, `attach`, and `detach` through configured callbacks and exercises a process-local test registry. The native telemetry adapter and scoped cleanup remain unfinished; [descriptor-aware observation](../playground/interface_lab/SCOPED-OBSERVATION.md) supplies event-set admission and the scoped signature.
+- The current laboratory constructs typed events, classifies foreign callback failures, and constructs symbolic typed span events in [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam). [Injected observation](../playground/interface_lab/INJECTED-OBSERVATION.md) constructs `emit`, `attach`, and `detach` through configured callbacks and exercises a process-local test registry. [Scoped observation lifetime](../playground/interface_lab/SCOPED-LIFETIME.md) separately exercises cleanup control and catchable BEAM re-raising through a scripted attachment backend. The native telemetry adapter remains unfinished.
 - The original Sinal draft routes events through one actor per event and converts an ordinary returned error into a span exception. Both choices conflict with the selected native-facade direction.
-- The laboratory now contains constructive span and descriptor-aware callback probes. This note specifies their remaining native FFI oracle. It does not claim that `run_span`, attachment cleanup, timing, process identity, or crash propagation works before the native oracle passes.
+- The laboratory now contains constructive span and descriptor-aware callback probes plus a scoped-cleanup control probe. This note specifies the remaining pinned native telemetry oracle. The scope probe checks one scripted detach attempt and catchable exception fidelity; it does not establish cleanup against the native telemetry registry, `run_span`, timing, process identity, or crash propagation through a production adapter.
 
 ## Pinned native contract
 
@@ -181,10 +181,10 @@ pub fn with_attachments(
 ) -> Result(a, AttachError)
 ```
 
-- The future `with_attachments` runtime must allocate a fresh private native identifier for one attachment generation. It returns neither the identifier nor an `Attachment`, so a Sinal caller cannot replace that scoped registration under the same key.
-- The proposed runtime implementation must detach after an ordinary return and after a catchable error, exit, or throw. Its signature cannot establish private-identifier freshness, cleanup execution, or re-raise fidelity, so no executable `try` or `after` behavior is claimed before the native oracle passes.
+- The prototype `with_attachments` implementation allocates a private scoped identity for one attachment generation. It returns neither the identity nor an `Attachment`, so a Sinal caller cannot replace that scoped registration under the same key. A native adapter must preserve this identity unchanged.
+- The prototype's Erlang control shim performs one cleanup attempt after ordinary or catchable exceptional work and re-raises the original exception triple. Its attachment backend is scripted, so this does not establish cleanup against the pinned native telemetry registry or replace the native oracle.
 - An untrappable kill, VM loss, or process loss before `after` runs may skip cleanup. The scoped API cannot promise a terminal span event or handler detachment for those terminations.
-- A cleanup `not_found` means the registration is already absent, usually because the handler failed and native telemetry removed it. It satisfies the scoped registration goal without proving that the handler remained installed for the whole scope.
+- A cleanup `not_found` means the registration is already absent, usually because the handler failed and native telemetry removed it. Absence satisfies the scoped registration-removal ownership goal, but the refined API keeps `NotAttached` visible as a `DetachReturnedError` cleanup outcome; it does not prove that the handler remained installed for the whole scope.
 - A bracket that accepts a reusable public identifier is unsafe. If the original handler fails, another process can attach a replacement under the same identifier before cleanup, and the stale cleanup detaches the replacement.
 - The private-generation rule prevents that race among Sinal callers. Raw Erlang or Elixir code can inspect native handlers and deliberately reuse the private term, so safe cleanup assumes foreign code does not replace Sinal-owned scoped identifiers.
 - Upstream exposes no conditional detach operation. A list-then-detach check cannot close the race, and Sinal must not claim ownership-safe cleanup against arbitrary raw registry mutation.
@@ -196,7 +196,7 @@ pub fn with_attachments(
 - [`scoped_observation.gleam`](../playground/interface_lab/src/consumers/scoped_observation.gleam) delivers two differently named, same-shaped descriptors through one handler and verifies descriptor-specific field decoding.
 - Application metadata and closure-captured configuration remain ordinary typed values. Extra fields are tolerated; malformed measurements, malformed metadata, and declared handler errors retain distinct classifications.
 - Panic sentinels establish that invalid decoding never invokes the handler and duplicate-name scoped admission never invokes work. Duplicate names in the first/rest and rest/rest positions both fail.
-- Valid `attach_many` and `with_attachments` examples compile without executing registration. The scoped work result remains nested inside the separate attachment result.
+- Valid `attach_many` and descriptor-admission examples in `scoped_observation.gleam` compile without executing registration. The separate [scoped-lifetime consumer](../playground/interface_lab/src/consumers/scoped_lifetime.gleam) executes work and cleanup over a scripted backend and retains the work result separately from cleanup.
 - The failure callback accepts the descriptor and classified failure. The probe calls that closure directly; native failure dispatch remains unimplemented.
 
 ## Migration and negative probes
@@ -215,7 +215,7 @@ pub fn with_attachments(
 - Inspect the handler configuration carried by the upstream failure event when the adapter configuration retains Gleam closures. The public contract must disclose any observable captured application configuration or replace it with a non-secret indirection before claiming that closure-captured values remain private.
 - Nest a successful span and a crashing span. Require outer start, inner start, inner terminal, and outer terminal order; require distinct default contexts; and avoid a parent-child trace claim.
 - Attach a raw Erlang handler to a Sinal span and attach a Sinal handler to raw `telemetry:span/3`. Both directions must observe the same event names and maps.
-- Exercise normal scoped return, scoped crash, handler self-removal, and the public-ID replacement race. The first three establish intended cleanup; the last demonstrates why a caller-owned identifier is excluded from `with_attachments`.
+- Repeat normal scoped return, scoped crash, handler self-removal, and the public-ID replacement race against the pinned native telemetry adapter. The scripted probe establishes control-flow behavior; native integration must establish registry behavior.
 - Attach two same-shaped descriptors under one identifier and require the handler and failure callback to receive the descriptor selected by each native event name. Repeat with two overlapping identifiers whose handlers capture distinct application configurations, then detach one and require the other to remain registered.
 - Run a concurrent emitter across scope cleanup and record whether a previously selected callback finishes afterward. The result constrains documentation and resource-lifetime examples rather than creating a quiescence promise.
 
@@ -224,5 +224,5 @@ pub fn with_attachments(
 - The implemented symbolic span slice proves that one span definition supplies three distinct typed event shapes and that an ordinary `Completion(Result.Error(...))` stays on the normal completion path.
 - The descriptor-aware callback probe proves event-specific pure delivery, application metadata decoding, closure-captured configuration, duplicate-name rejection, and static agreement across a nonempty event set.
 - Injected symbolic observations prove pure layout and composition only. They do not prove native-term retention, native clocks, caller-process execution, crash capture, re-raise fidelity, registration cleanup, concurrency, or raw telemetry interoperability.
-- Successful `attach_many` and `with_attachments` registration remains type-only until the pinned native oracle passes. Duplicate-name admission is exercised as pure behavior. The native slice is required before `run_span` or scoped cleanup counts as exercised behavior.
+- Successful `attach_many` registration remains type-only, while scoped work and cleanup control execute over a scripted backend. Duplicate-name admission is exercised as pure behavior. Native telemetry registration, cleanup, and `run_span` remain unverified until the pinned adapter oracle passes.
 - Sinal remains an independently usable telemetry facade. Span export, trace parent propagation, asynchronous forwarding, metrics aggregation, handler supervision, and ecosystem workflow control remain outside this contract.

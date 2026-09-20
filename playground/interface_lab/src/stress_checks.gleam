@@ -31,6 +31,7 @@ import consumers/scheduled_jobs
 import consumers/schema_admission
 import consumers/schema_documents
 import consumers/schema_generation
+import consumers/scoped_lifetime
 import consumers/scoped_observation
 import consumers/session_custody
 import consumers/shared_graph
@@ -82,6 +83,7 @@ pub fn main() -> Nil {
   schema_documents.probe()
   schema_generation.probe()
   scheduled_jobs.probe()
+  scoped_lifetime.probe()
   scoped_observation.probe()
   session_custody.probe()
   shared_graph.probe()
