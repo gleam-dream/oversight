@@ -23,11 +23,11 @@
 
 ## Generation boundary
 
-- Source generation returns an explicit unsupported-schema result for enums in this wave. It must not replace the finite native type with an unrestricted `String`.
-- Generated constructor names, name collisions, stable naming across schema changes, and native enum field references require a separate generation experiment.
+- The [finite enum field generator](ENUM-GENERATION.md) emits a distinct native enum type for each supported root-object field and keeps required, optional, and nullable wrappers. It must not replace the finite native type with an unrestricted `String`.
+- Generated names are positional and deterministic for an unchanged normalized schema. Stable application-selected names, shared named definitions, recursive and nested schemas, collections, aliases, and numeric enums remain outside this profile.
 
 ## Evidence boundary
 
-- Native roundtrips, configuration failures, nested error locations, tool composition, and runtime normalization belong to the consumer probe.
+- Native roundtrips, configuration failures, nested error locations, tool composition, runtime normalization, and generated enum fields have dedicated consumer and generation probes.
 - The independent schema corpus compares actual native decoding, runtime validation, loaded documents, and Draft 2020-12 validation on identical wire values.
-- Number policy, recursive schemas, aliases, legacy enum envelopes, and generated native enum types remain open families in [API coverage](../../API-COVERAGE.md).
+- Number policy, recursive schemas, aliases, legacy enum envelopes, and broader generation remain open families in [API coverage](../../API-COVERAGE.md).

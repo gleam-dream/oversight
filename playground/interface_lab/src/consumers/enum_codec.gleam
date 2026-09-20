@@ -277,10 +277,8 @@ pub fn probe() -> Nil {
   ] = requirements.requirements(must_schema(request_codec))
 
   let assert Ok(request_contract) = runtime.from_codec(request_codec)
-  let assert Error(codegen.UnsupportedGeneration(
-    [codegen.Property("priority")],
-    codegen.StringEnumSchema,
-  )) = codegen.generate(request_contract)
+  let assert Ok(generated) = codegen.generate(request_contract)
+  let assert False = codegen.source(generated) == ""
 
   let service =
     relay.context_tool(
