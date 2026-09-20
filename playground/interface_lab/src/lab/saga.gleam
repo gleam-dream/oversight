@@ -128,40 +128,12 @@ pub type Compensation(i, o, u) {
   Compensate(fn(i, o) -> Result(Nil, u))
 }
 
-pub type NodeFailure {
-  InputDidNotDecode(DecodeError)
-  OutputDidNotEncode(EncodeError)
-  BusinessFailure(Value)
-  BusinessFailureDidNotEncode(EncodeError)
-  NestedBusinessFailure(cause: Value, undo_failures: List(Value))
-}
-
-// Suspension and cancellation are control outcomes, never retryable failures.
-pub type NodeWait {
-  ApprovalPending
-  ChildPending(child_run_id: String)
-}
-
-pub type NodeEvaluation {
-  OperationFinished(Result(Value, NodeFailure))
-  OperationWaiting(NodeWait)
-  OperationCancelled(undo_failures: List(Value))
-  OperationReconciliation(evidence: Value)
-}
-
 pub type ChildOutcome(o, e, u) {
   ChildSucceeded(o)
   ChildFailed(cause: e, undo_failures: List(u))
   ChildCancelled(undo_failures: List(u))
   ChildWaiting(child_run_id: String)
   ChildNeedsReconciliation(evidence: Value)
-}
-
-pub type NodeUndoFailure {
-  UndoInputDidNotDecode(DecodeError)
-  UndoOutputDidNotDecode(DecodeError)
-  UndoBusinessFailure(Value)
-  UndoFailureDidNotEncode(EncodeError)
 }
 
 type Maybe(a) {
@@ -188,9 +160,6 @@ pub type NodeBoundaryError {
   InputValueDidNotDecode(DecodeError)
   InputValueDidNotEncode(EncodeError)
   OutputValueDidNotEncode(EncodeError)
-  BusinessErrorDidNotEncode(EncodeError)
-  BusinessErrorDidNotDecode(DecodeError)
-  UndoErrorDidNotDecode(DecodeError)
 }
 
 pub type NodeOutcome(e, u) {
@@ -271,30 +240,10 @@ pub opaque type Builder(i, e, u) {
   )
 }
 
-type ErasedNode(e, u) {
-  ErasedNode(
-    descriptor: StepDescriptor,
-    invoke: fn(Value) -> NodeEvaluation,
-    compensate: Maybe(fn(Value, Value) -> Result(Nil, NodeUndoFailure)),
-    validate_input: fn(Value) -> Result(Nil, DecodeError),
-    validate_output: fn(Value) -> Result(Nil, DecodeError),
-    error_codec: Codec(e),
-    undo_error_codec: Codec(u),
-  )
-}
-
 // A typed operation keeps executable code and codecs in the deployed factory.
-// Its erased node captures a Value adapter; persisted state records stable ids
-// and encoded outcomes, never these closures.
+// It is lowered once into the canonical Saga Node when attached to a Builder.
 pub opaque type Activity(i, o, e, u) {
-  Activity(
-    node: ErasedNode(e, u),
-    input_codec: Codec(i),
-    output_codec: Codec(o),
-    error_codec: Codec(e),
-    undo_error_codec: Codec(u),
-    adapter: ActivityAdapter(i, o, e, u),
-  )
+  Activity(adapter: ActivityAdapter(i, o, e, u))
 }
 
 // Versions belong to durable boundaries, not to general Blueprint codecs.
@@ -322,10 +271,6 @@ pub fn activity(
   let output_codec_version = contract.output.version
   let error_codec_version = contract.error.version
   let undo_error_codec_version = contract.undo_error.version
-  let input = contract.input.codec
-  let output = contract.output.codec
-  let error = contract.error.codec
-  let undo_error = contract.undo_error.codec
   let descriptor =
     StepDescriptor(id, step_version, ActivityStep, [
       input_codec_version,
@@ -333,65 +278,7 @@ pub fn activity(
       error_codec_version,
       undo_error_codec_version,
     ])
-  let invoke = fn(raw_input) {
-    case blueprint.decode(input, raw_input) {
-      Error(decode_error) -> Error(InputDidNotDecode(decode_error))
-      Ok(typed_input) ->
-        case execute(typed_input) {
-          Ok(typed_output) ->
-            case blueprint.encode(output, typed_output) {
-              Ok(encoded_output) -> Ok(encoded_output)
-              Error(encode_error) -> Error(OutputDidNotEncode(encode_error))
-            }
-          Error(business_error) ->
-            case blueprint.encode(error, business_error) {
-              Ok(encoded_error) -> Error(BusinessFailure(encoded_error))
-              Error(encode_error) ->
-                Error(BusinessFailureDidNotEncode(encode_error))
-            }
-        }
-    }
-  }
-  let undo = case compensation {
-    Uncompensated -> Missing
-    Compensate(compensate) ->
-      Present(fn(raw_input, raw_output) {
-        case blueprint.decode(input, raw_input) {
-          Error(decode_error) -> Error(UndoInputDidNotDecode(decode_error))
-          Ok(typed_input) ->
-            case blueprint.decode(output, raw_output) {
-              Error(decode_error) -> Error(UndoOutputDidNotDecode(decode_error))
-              Ok(typed_output) ->
-                case compensate(typed_input, typed_output) {
-                  Ok(Nil) -> Ok(Nil)
-                  Error(undo_failure) ->
-                    case blueprint.encode(undo_error, undo_failure) {
-                      Ok(encoded_error) ->
-                        Error(UndoBusinessFailure(encoded_error))
-                      Error(encode_error) ->
-                        Error(UndoFailureDidNotEncode(encode_error))
-                    }
-                }
-            }
-        }
-      })
-  }
-  Activity(
-    ErasedNode(
-      descriptor,
-      fn(raw) { OperationFinished(invoke(raw)) },
-      undo,
-      validator(input),
-      validator(output),
-      error,
-      undo_error,
-    ),
-    input,
-    output,
-    error,
-    undo_error,
-    ActivityAdapter(descriptor, contract, execute, compensation),
-  )
+  Activity(ActivityAdapter(descriptor, contract, execute, compensation))
 }
 
 pub type ApprovalDecision(a) {
@@ -419,7 +306,7 @@ pub fn approval_result_codec(
 // is accepted by saga_checkpoint; the node does not turn waiting into failure.
 pub opaque type Approval(i, a, e, u) {
   Approval(
-    node: ErasedNode(e, u),
+    descriptor: StepDescriptor,
     input_codec: Codec(i),
     answer_codec: Codec(a),
     error_codec: Codec(e),
@@ -446,21 +333,7 @@ pub fn approval(
       error_codec_version,
       undo_error_codec_version,
     ])
-  Approval(
-    ErasedNode(
-      descriptor,
-      fn(_input) { OperationWaiting(ApprovalPending) },
-      Missing,
-      validator(input),
-      validator(approval_result_codec(input, answer)),
-      error,
-      undo_error,
-    ),
-    input,
-    answer,
-    error,
-    undo_error,
-  )
+  Approval(descriptor, input, answer, error, undo_error)
 }
 
 // A plain child result cannot be used where a compensation receipt is required.
@@ -505,11 +378,11 @@ pub fn define(
   structural_signature: String,
   activity: Activity(i, o, e, u),
 ) -> Definition(i, o, e, u) {
-  let descriptor = activity.node.descriptor
+  let ActivityAdapter(descriptor, contract, _, _) = activity.adapter
   let StepId(activity_id) = descriptor.id
   let assert Ok(activity_node_id) = node_id(activity_id)
   let #(builder, input) =
-    begin(activity.input_codec, activity.error_codec, activity.undo_error_codec)
+    begin(contract.input.codec, contract.error.codec, contract.undo_error.codec)
   let assert Ok(#(builder, output)) =
     add_activity(builder, input, activity_node_id, activity)
   let assert Ok(definition) =
@@ -523,11 +396,11 @@ pub fn define_approval(
   structural_signature: String,
   approval: Approval(i, a, e, u),
 ) -> Definition(i, ApprovalResult(i, a), e, u) {
-  let descriptor = approval.node.descriptor
+  let Approval(descriptor, approval_input, _answer, error, undo_error) =
+    approval
   let StepId(approval_id) = descriptor.id
   let assert Ok(approval_node_id) = node_id(approval_id)
-  let #(builder, input) =
-    begin(approval.input_codec, approval.error_codec, approval.undo_error_codec)
+  let #(builder, input) = begin(approval_input, error, undo_error)
   let assert Ok(#(builder, output)) =
     add_approval(builder, input, approval_node_id, approval)
   let assert Ok(definition) =
@@ -698,8 +571,8 @@ pub fn add_activity(
   id: NodeId,
   activity: Activity(a, b, e, u),
 ) -> Result(#(Builder(i, e, u), Port(b)), BuildError) {
-  let Activity(_, _, _, _, _, adapter) = activity
-  let ActivityAdapter(descriptor, contract, execute, compensation) = adapter
+  let ActivityAdapter(descriptor, contract, execute, compensation) =
+    activity.adapter
   let address = NamedAddress(id)
   let located =
     LocatedStep(ScopedStepId(address, step_identity(descriptor)), descriptor)
@@ -736,9 +609,8 @@ pub fn add_approval(
   id: NodeId,
   approval: Approval(a, b, e, u),
 ) -> Result(#(Builder(i, e, u), Port(ApprovalResult(a, b))), BuildError) {
-  let Approval(operation, approval_input, answer, error, undo_error) = approval
+  let Approval(descriptor, approval_input, answer, error, undo_error) = approval
   let address = NamedAddress(id)
-  let descriptor = operation.descriptor
   let located =
     LocatedStep(ScopedStepId(address, step_identity(descriptor)), descriptor)
   let output = approval_result_codec(approval_input, answer)
@@ -1147,7 +1019,7 @@ pub fn approval_adapter(
   approval: Approval(i, a, e, u),
 ) -> ApprovalAdapter(i, a) {
   ApprovalAdapter(
-    approval.node.descriptor,
+    approval.descriptor,
     approval.input_codec,
     approval.answer_codec,
   )
