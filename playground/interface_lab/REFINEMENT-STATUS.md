@@ -18,7 +18,7 @@
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Parallel execution, traversal, timed recovery, and definition migration                                             |
 | Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                  | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
 | Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration              | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
-| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                              | Native name/map binding, registration, scoped cleanup, and span execution                                           |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, symbolic typed span events, and scoped cleanup control      | Native name/map binding, telemetry integration, concurrent callback lifetime, and span execution                    |
 | Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                   | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                   |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-nine consumers compile with only their transitive source imports.
-- Eighty-eight negative fixtures fail with their intended single compiler diagnostic.
-- Forty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: sixty consumers compile with only their transitive source imports.
+- Ninety negative fixtures fail with their intended single compiler diagnostic.
+- Forty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
@@ -184,7 +184,14 @@
 
 - [Descriptor-aware observation](SCOPED-OBSERVATION.md) delivers the selected event through one configured handler and preserves typed decoding failures. Nonempty attachment signatures require shared measurement and metadata types.
 - Duplicate logical names fail before either global or scoped registration reaches its runtime boundary. The invalid scoped case cannot invoke its work callback.
-- Valid attachment and scoped calls compile only. Private identifier allocation, native failure reporting, cleanup, and callback lifetime remain subject to the [pinned native oracle](../../research/sinal-lifetime-contract.md). Scope exit does not imply callback quiescence.
+- Valid attachment calls compile. Private scoped identity, work and cleanup outcome separation, one cleanup attempt, and catchable BEAM exception re-raising are exercised by [scoped observation lifetime](SCOPED-LIFETIME.md).
+- The attachment backend remains scripted. Native telemetry registration, callback-failure forwarding, and name/map conversion remain subject to the [pinned native oracle](../../research/sinal-lifetime-contract.md). Scope exit does not imply callback quiescence.
+
+## Scoped observation lifetime
+
+- [Scoped observation lifetime](SCOPED-LIFETIME.md) preserves ordinary work values alongside returned or raised cleanup failures. `NotAttached` remains an explicit cleanup outcome when the backend has already removed a handler.
+- Catchable work errors, exits, and throws each trigger one cleanup attempt and are re-raised with their original BEAM class, reason, and stacktrace. Cleanup reporting is best effort on this exceptional path.
+- The consumer invokes a callback selected before detachment after the scope has returned. Native telemetry integration, process termination, and concurrent callback quiescence remain runtime obligations.
 
 ## Child admission and cancellation
 
@@ -260,7 +267,7 @@
 - [Injected observation](INJECTED-OBSERVATION.md) gives independent producers and subscribers a configured emission and attachment boundary. Attachments retain their originating detach callback.
 - A keyed process-local test registry exercises selected late callbacks, repeated detach, identifier replacement, handler failure isolation, and two independent backends. Its small Erlang storage helper is test-only.
 - Encoding failures precede backend invocation; malformed callback fields precede typed handlers. Emission failure remains separate from subscriber-specific failure.
-- Native atom/map conversion, callback exceptions, scoped cleanup, and native span execution remain open. Detachment does not imply callback quiescence or generation-safe identifier reuse.
+- Native atom/map conversion, the `:telemetry` adapter, native span execution, and concurrent callback quiescence remain open. Scoped cleanup control is exercised over a scripted backend; detachment does not imply callback quiescence or generation-safe identifier reuse.
 
 ## Verified session custody
 

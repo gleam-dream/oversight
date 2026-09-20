@@ -1,5 +1,6 @@
 // THROWAWAY: Does a shared event descriptor constrain emitted values?
 import lab/blueprint.{type EncodeError}
+import lab/sinal_exception as exception
 import lab/sinal_fields.{type FieldError, type FieldMap, type Fields}
 
 pub opaque type Event(measurements, metadata) {
@@ -89,7 +90,8 @@ pub fn deliver_foreign(
 }
 
 pub opaque type HandlerId {
-  HandlerId(String)
+  PublicHandlerId(String)
+  ScopedHandlerId(Int)
 }
 
 pub type IdentityError {
@@ -99,9 +101,12 @@ pub type IdentityError {
 pub fn handler_id(name: String) -> Result(HandlerId, IdentityError) {
   case name {
     "" -> Error(EmptyHandlerId)
-    _ -> Ok(HandlerId(name))
+    _ -> Ok(PublicHandlerId(name))
   }
 }
+
+@external(erlang, "erlang", "unique_integer")
+fn fresh_scoped_handler_number() -> Int
 
 pub type AttachError {
   AlreadyExists
@@ -164,6 +169,25 @@ pub opaque type Attachment {
   Attachment(BackendAttachment)
 }
 
+pub type ScopeCleanupFailure {
+  DetachReturnedError(DetachError)
+  DetachRaisedException(exception.BeamException)
+}
+
+pub type ScopedCompletion(a) {
+  ScopedCompletion(
+    work_result: a,
+    cleanup_result: Result(Nil, ScopeCleanupFailure),
+  )
+}
+
+@external(erlang, "sinal_scope_ffi", "with_scope")
+fn native_with_scope(
+  work: fn() -> a,
+  cleanup: fn() -> Result(Nil, DetachError),
+  on_cleanup_failure: fn(ScopeCleanupFailure) -> Nil,
+) -> ScopedCompletion(a)
+
 pub fn attach(
   backend: Backend,
   id: HandlerId,
@@ -184,39 +208,34 @@ pub fn attach_many(
 ) -> Result(Attachment, AttachError) {
   case validate_event_names(first, rest) {
     Error(error) -> Error(error)
-    Ok(Nil) -> {
-      let Backend(_, register) = backend
-      let events = [first, ..rest]
-      let names = event_names(events)
-      let callback = fn(name, measurements, metadata) {
-        dispatch_selected(
-          events,
-          handler,
-          on_failure,
-          name,
-          measurements,
-          metadata,
-        )
-      }
-      case register(id, names, callback) {
-        Error(error) -> Error(error)
-        Ok(backend_attachment) -> Ok(Attachment(backend_attachment))
-      }
-    }
+    Ok(Nil) -> attach_validated(backend, id, first, rest, handler, on_failure)
   }
 }
 
 pub fn with_attachments(
+  backend: Backend,
   first: Event(m, d),
   rest: List(Event(m, d)),
-  _handler: Handler(m, d, e),
-  _on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
-  _run: fn() -> a,
-) -> Result(a, AttachError) {
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  on_exception_cleanup_failure: fn(ScopeCleanupFailure) -> Nil,
+  run: fn() -> a,
+) -> Result(ScopedCompletion(a), AttachError) {
   case validate_event_names(first, rest) {
     Error(error) -> Error(error)
-    Ok(Nil) ->
-      todo as "attach with a fresh private generation and detach on ordinary or caught completion"
+    Ok(Nil) -> {
+      let id = ScopedHandlerId(fresh_scoped_handler_number())
+      case attach_validated(backend, id, first, rest, handler, on_failure) {
+        Error(error) -> Error(error)
+        Ok(attachment) -> {
+          Ok(native_with_scope(
+            run,
+            fn() { detach(attachment) },
+            on_exception_cleanup_failure,
+          ))
+        }
+      }
+    }
   }
 }
 
@@ -292,5 +311,25 @@ fn find_event(
         True -> Ok(event)
         False -> find_event(rest, name)
       }
+  }
+}
+
+fn attach_validated(
+  backend: Backend,
+  id: HandlerId,
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+) -> Result(Attachment, AttachError) {
+  let Backend(_, register) = backend
+  let events = [first, ..rest]
+  let names = event_names(events)
+  let callback = fn(name, measurements, metadata) {
+    dispatch_selected(events, handler, on_failure, name, measurements, metadata)
+  }
+  case register(id, names, callback) {
+    Error(error) -> Error(error)
+    Ok(backend_attachment) -> Ok(Attachment(backend_attachment))
   }
 }
