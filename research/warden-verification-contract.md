@@ -8,6 +8,14 @@
 - This note specifies the remaining atomic-storage and verification work, including explicit backend trust.
 - No shared atomic storage, token exchange, or cryptographic verification is implemented here.
 
+## Constructive interface experiment
+
+- [Verified login](../playground/interface_lab/VERIFIED-LOGIN.md) joins consumption to an explicitly configured scripted backend and privately issued identity.
+- The transaction module owns all identity constructors; `warden` exposes the same identity through a facade.
+- Its attestation contains issuer, audiences, optional authorized party, and subject. Token custody and the broader claims model below remain future interfaces.
+- The initial `Session` is a verified login result without session-lifetime behavior.
+- Scripted failures establish call ordering and returned-error boundaries. They do not establish cryptographic verification, foreign exception containment, or concurrent storage behavior.
+
 ## Pinned evidence
 
 - Warden's reference backend remains [`oidcc` 3.9.0](https://github.com/erlef/oidcc/tree/v3.9.0), under Apache-2.0. The signed `v3.9.0` tag resolves to source commit [`aa212d52d0140addf057c34917b734647401b34e`](https://github.com/erlef/oidcc/commit/aa212d52d0140addf057c34917b734647401b34e).
@@ -85,6 +93,7 @@ pub opaque type Session
 pub fn oidcc_backend(config: OidccConfig) -> VerificationBackend
 
 pub fn trust_adapter(
+  client: Client,
   declaration: AdapterDeclaration,
   exchange: fn(ExchangeRequest) ->
     Result(BackendAttestation, BackendError),

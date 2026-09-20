@@ -34,5 +34,5 @@
 - Client configuration is trusted fixture input. HTTP parsing and callback normalization remain outside this module.
 - Issuer-less callback profiles require an explicit provider policy.
 - No URL construction, network operation, token exchange, signature check, nonce claim validation, browser-session binding, or identity issuance runs here.
-- The existing `warden` module remains a separate minimal identity-boundary experiment. Its next refinement must become a facade over the canonical transaction and issuance owner.
+- The `warden` facade now shares the canonical transaction owner through the [verified login boundary](VERIFIED-LOGIN.md). The transaction checks alone still cannot issue an identity.
 - The [verification contract](../../research/warden-verification-contract.md) records the pinned backend responsibilities and remaining oracle work.

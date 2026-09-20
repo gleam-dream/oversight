@@ -1,8 +1,9 @@
 // THROWAWAY: Can callback checks feed one revision-bound atomic consumption boundary?
-// This type experiment supplies neither entropy nor token verification. The
-// store callback owns the record and must sample its injected clock only after
-// entering its atomic critical section. Gleam values are copyable; the pure
-// reducer does not prove concurrency behavior or erase copies held elsewhere.
+// This type experiment supplies neither entropy nor token verification. A
+// configured adapter is an explicit trust boundary, not cryptographic proof;
+// callback exceptions and retained request copies are not managed here. The
+// store callback owns the record and samples its clock after entering its
+// atomic section. Gleam values are copyable; this reducer proves no concurrency.
 
 pub type InputError {
   ValueMustNotBeEmpty
@@ -49,6 +50,77 @@ pub type ConsumeError {
 pub type PublicConsumption {
   CodeConsumed
   DenialConsumed(DenialClass)
+}
+
+pub type AdapterPurpose {
+  TrustedAdapter
+  TestOnlyAdapter
+}
+
+pub type AdapterDeclaration {
+  AdapterDeclaration(name: String, version: String, purpose: AdapterPurpose)
+}
+
+pub type AuthorizedParty {
+  NoAuthorizedParty
+  AuthorizedParty(ClientId)
+}
+
+pub type AudiencePolicy {
+  ExactSingletonClient
+}
+
+pub type VerificationProfile {
+  VerificationProfile(
+    require_nonce: Bool,
+    require_pkce: Bool,
+    audience_policy: AudiencePolicy,
+    require_id_token: Bool,
+  )
+}
+
+// A custom adapter attests only the claims this experiment consumes. Its
+// constructor is public by design; it remains an adapter assertion, not proof.
+pub type BackendAttestation {
+  BackendAttestation(
+    issuer: Issuer,
+    audiences: List(ClientId),
+    authorized_party: AuthorizedParty,
+    subject: String,
+  )
+}
+
+pub type BackendError {
+  ExchangeRejected
+  ExchangeOutcomeUnknown
+  MissingIdToken
+  InvalidSignature
+  InvalidNonce
+  InvalidTokenTime
+  BackendUnmapped
+}
+
+pub type CompleteLoginError {
+  ConsumptionFailed(ConsumeError)
+  BackendConfigurationMismatch
+  ProviderRejection(DenialClass)
+  BackendFailed(BackendError)
+  AttestedIssuerMismatch
+  AttestedAudienceMismatch
+  AuthorizedPartyMismatch
+  SubjectMissing
+}
+
+pub type ExchangeParameters {
+  ExchangeParameters(
+    issuer: String,
+    client_id: String,
+    redirect_uri: String,
+    authorization_code: String,
+    nonce: String,
+    pkce_verifier: String,
+    profile: VerificationProfile,
+  )
 }
 
 pub type ConsumeDecision {
@@ -375,6 +447,7 @@ pub opaque type CheckedDenial {
   CheckedDenial(
     id: TransactionId,
     revision: StoredRevision,
+    client: Client,
     classification: DenialClass,
   )
 }
@@ -394,14 +467,14 @@ pub fn checked_outcome_id(outcome: CheckedOutcome) -> TransactionId {
       let Transaction(id, _, _, _, _, _) = transaction
       id
     }
-    ProviderDenied(CheckedDenial(id, _, _)) -> id
+    ProviderDenied(CheckedDenial(id, _, _, _)) -> id
   }
 }
 
 pub fn checked_outcome_revision(outcome: CheckedOutcome) -> StoredRevision {
   case outcome {
     CodeReady(CheckedCallback(_, revision, _)) -> revision
-    ProviderDenied(CheckedDenial(_, revision, _)) -> revision
+    ProviderDenied(CheckedDenial(_, revision, _, _)) -> revision
   }
 }
 
@@ -454,8 +527,12 @@ fn checked_code(
         )),
       )
     CallbackWithoutCode -> Error(AuthorizationCodeMissing)
-    CallbackRejected(reason) ->
-      Ok(ProviderDenied(CheckedDenial(id, revision, denial_class(reason))))
+    CallbackRejected(reason) -> {
+      let Transaction(_, client, _, _, _, _) = transaction
+      Ok(
+        ProviderDenied(CheckedDenial(id, revision, client, denial_class(reason))),
+      )
+    }
   }
 }
 
@@ -489,7 +566,7 @@ pub fn consume_command(outcome: CheckedOutcome) -> ConsumeCommand {
       let Transaction(id, _, _, _, _, _) = transaction
       ConsumeCommand(id, revision)
     }
-    ProviderDenied(CheckedDenial(id, revision, _)) ->
+    ProviderDenied(CheckedDenial(id, revision, _, _)) ->
       ConsumeCommand(id, revision)
   }
 }
@@ -569,11 +646,20 @@ pub fn consume_callback(
   store: TransactionStore,
   checked: CheckedOutcome,
 ) -> Result(PublicConsumption, ConsumeError) {
+  case consume_checked(store, checked) {
+    Error(error) -> Error(error)
+    Ok(Nil) -> Ok(public_success(checked))
+  }
+}
+
+fn consume_checked(
+  store: TransactionStore,
+  checked: CheckedOutcome,
+) -> Result(Nil, ConsumeError) {
   let command = consume_command(checked)
-  let public_success = public_success(checked)
   let TransactionStore(clock, atomic_consume) = store
   case atomic_consume(command, clock) {
-    Decided(WasConsumed) -> Ok(public_success)
+    Decided(WasConsumed) -> Ok(Nil)
     Decided(ExpiredDuringConsume) -> Error(TransactionExpired)
     Decided(AlreadyConsumed) -> Error(CallbackAlreadyConsumed)
     Decided(ChangedSinceCheck) -> Error(TransactionChanged)
@@ -594,5 +680,180 @@ fn checked_text(value: String, wrap: fn(String) -> a) -> Result(a, InputError) {
   case value {
     "" -> Error(ValueMustNotBeEmpty)
     _ -> Ok(wrap(value))
+  }
+}
+
+pub opaque type ExchangeRequest {
+  ExchangeRequest(
+    client: Client,
+    code: AuthorizationCode,
+    nonce: Nonce,
+    verifier: PkceVerifier,
+  )
+}
+
+pub opaque type VerificationBackend {
+  VerificationBackend(
+    client: Client,
+    declaration: AdapterDeclaration,
+    exchange: fn(ExchangeRequest) -> Result(BackendAttestation, BackendError),
+  )
+}
+
+pub fn trust_adapter(
+  client: Client,
+  declaration: AdapterDeclaration,
+  exchange: fn(ExchangeRequest) -> Result(BackendAttestation, BackendError),
+) -> VerificationBackend {
+  // The caller explicitly records whether this adapter is trusted in ordinary
+  // use or is a test-only fixture. Neither label verifies its implementation.
+  VerificationBackend(client, declaration, exchange)
+}
+
+// Only a configured backend receives this capability. It intentionally omits
+// browser state and exposes the retained code, nonce, verifier, and redirect.
+// The requested PKCE policy is explicit; this fixture does not prove how the
+// authorization challenge was generated or that an adapter enforces the flag.
+pub fn exchange_parameters(request: ExchangeRequest) -> ExchangeParameters {
+  let ExchangeRequest(
+    Client(issuer, client_id, redirect_uri),
+    AuthorizationCode(code),
+    Nonce(nonce),
+    PkceVerifier(verifier),
+  ) = request
+  let Issuer(issuer_value) = issuer
+  let ClientId(client_value) = client_id
+  let RedirectUri(redirect_value) = redirect_uri
+  ExchangeParameters(
+    issuer_value,
+    client_value,
+    redirect_value,
+    code,
+    nonce,
+    verifier,
+    VerificationProfile(True, True, ExactSingletonClient, True),
+  )
+}
+
+pub opaque type VerifiedIdentity {
+  VerifiedIdentity(issuer: Issuer, subject: Subject)
+}
+
+type Subject {
+  Subject(String)
+}
+
+pub opaque type Session {
+  Session(VerifiedIdentity)
+}
+
+pub fn session_identity(session: Session) -> VerifiedIdentity {
+  let Session(identity) = session
+  identity
+}
+
+pub fn verified_subject(identity: VerifiedIdentity) -> String {
+  let VerifiedIdentity(_, Subject(value)) = identity
+  value
+}
+
+pub fn verified_issuer(identity: VerifiedIdentity) -> Issuer {
+  let VerifiedIdentity(issuer, _) = identity
+  issuer
+}
+
+pub fn complete_login(
+  store: TransactionStore,
+  backend: VerificationBackend,
+  checked: CheckedOutcome,
+) -> Result(Session, CompleteLoginError) {
+  let VerificationBackend(backend_client, _, _) = backend
+  case checked_client(checked) == backend_client {
+    False -> Error(BackendConfigurationMismatch)
+    True ->
+      case checked {
+        CodeReady(callback) -> complete_code(store, backend, callback)
+        ProviderDenied(denial) -> complete_denial(store, denial)
+      }
+  }
+}
+
+fn checked_client(checked: CheckedOutcome) -> Client {
+  case checked {
+    CodeReady(CheckedCallback(transaction, _, _)) -> {
+      let Transaction(_, client, _, _, _, _) = transaction
+      client
+    }
+    ProviderDenied(CheckedDenial(_, _, client, _)) -> client
+  }
+}
+
+fn complete_code(
+  store: TransactionStore,
+  backend: VerificationBackend,
+  checked: CheckedCallback,
+) -> Result(Session, CompleteLoginError) {
+  case consume_checked(store, CodeReady(checked)) {
+    Error(error) -> Error(ConsumptionFailed(error))
+    Ok(Nil) -> exchange_consumed_code(backend, checked)
+  }
+}
+
+fn complete_denial(
+  store: TransactionStore,
+  denial: CheckedDenial,
+) -> Result(Session, CompleteLoginError) {
+  case consume_checked(store, ProviderDenied(denial)) {
+    Error(error) -> Error(ConsumptionFailed(error))
+    Ok(Nil) -> Error(ProviderRejection(denial.classification))
+  }
+}
+
+fn exchange_consumed_code(
+  backend: VerificationBackend,
+  checked: CheckedCallback,
+) -> Result(Session, CompleteLoginError) {
+  let CheckedCallback(transaction, _, code) = checked
+  let Transaction(_, client, _, nonce, verifier, _) = transaction
+  let VerificationBackend(_, _, exchange) = backend
+  let request = ExchangeRequest(client, code, nonce, verifier)
+  case exchange(request) {
+    Error(error) -> Error(BackendFailed(error))
+    Ok(attestation) -> validate_attestation(client, attestation)
+  }
+}
+
+fn validate_attestation(
+  client: Client,
+  attestation: BackendAttestation,
+) -> Result(Session, CompleteLoginError) {
+  let Client(expected_issuer, expected_client, _) = client
+  let BackendAttestation(issuer, audiences, authorized_party, subject) =
+    attestation
+  case issuer == expected_issuer {
+    False -> Error(AttestedIssuerMismatch)
+    True ->
+      case audiences == [expected_client] {
+        False -> Error(AttestedAudienceMismatch)
+        True ->
+          case authorized_party_matches(authorized_party, expected_client) {
+            False -> Error(AuthorizedPartyMismatch)
+            True ->
+              case subject {
+                "" -> Error(SubjectMissing)
+                _ -> Ok(Session(VerifiedIdentity(issuer, Subject(subject))))
+              }
+          }
+      }
+  }
+}
+
+fn authorized_party_matches(
+  authorized_party: AuthorizedParty,
+  expected_client: ClientId,
+) -> Bool {
+  case authorized_party {
+    NoAuthorizedParty -> True
+    AuthorizedParty(actual_client) -> actual_client == expected_client
   }
 }

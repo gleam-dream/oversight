@@ -31,9 +31,9 @@
 
 - Public consumption reports code consumption or normalized denial consumption without returning a secret-bearing capability.
 - Standalone consumption ends the login transaction without issuing an identity.
-- The eventual high-level login operation must configure its backend before consumption and exchange internally after confirmed consumption.
+- The [verified login operation](VERIFIED-LOGIN.md) configures its backend before consumption and exchanges internally after confirmed consumption.
 - An already-consumed result must never resume exchange as if the current attempt had won.
-- The canonical owner must construct the verified identity privately after backend verification and binding checks.
+- The canonical owner constructs the verified identity privately after a configured backend attestation and binding checks. The adapter remains responsible for actual token verification.
 
 ## Evidence and limits
 
