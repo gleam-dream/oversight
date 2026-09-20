@@ -8,6 +8,7 @@
 pub type InputError {
   ValueMustNotBeEmpty
   TimestampMustNotBeNegative
+  ScopeTokenInvalid
 }
 
 pub type PlanError {
@@ -90,6 +91,17 @@ pub type BackendAttestation {
   )
 }
 
+// A successful exchange carries the identity assertion, exact token material,
+// and authentication evidence as one adapter result. Its public constructor
+// remains an adapter assertion, not cryptographic proof.
+pub type LoginAttestation {
+  LoginAttestation(
+    identity: BackendAttestation,
+    tokens: TokenMaterial,
+    authentication: AuthenticationEvidence,
+  )
+}
+
 pub type BackendError {
   ExchangeRejected
   ExchangeOutcomeUnknown
@@ -109,6 +121,8 @@ pub type CompleteLoginError {
   AttestedAudienceMismatch
   AuthorizedPartyMismatch
   SubjectMissing
+  AuthenticationNonceMismatch
+  CustodyInstallRejected(CustodyFailure)
 }
 
 pub type ExchangeParameters {
@@ -177,6 +191,84 @@ pub opaque type Timestamp {
   Timestamp(Int)
 }
 
+// These wrappers distinguish token kinds at API boundaries. They do not
+// encrypt values or prevent VM inspection by trusted code.
+pub opaque type AccessToken {
+  AccessToken(String)
+}
+
+pub opaque type RefreshToken {
+  RefreshToken(String)
+}
+
+pub opaque type LogoutIdToken {
+  LogoutIdToken(String)
+}
+
+pub opaque type TokenExpiry {
+  TokenExpiry(unix_seconds: Int)
+}
+
+pub opaque type Scope {
+  Scope(String)
+}
+
+pub type RefreshTokenChoice {
+  NoRefreshToken
+  RefreshTokenPresent(RefreshToken)
+}
+
+pub type LogoutIdTokenChoice {
+  NoLogoutIdToken
+  LogoutIdTokenPresent(LogoutIdToken)
+}
+
+pub opaque type TokenMaterial {
+  TokenMaterial(
+    access_token: AccessToken,
+    refresh_token: RefreshTokenChoice,
+    logout_id_token: LogoutIdTokenChoice,
+    expires_at: TokenExpiry,
+    scopes: List(Scope),
+  )
+}
+
+pub type TokenMaterialMetadata {
+  TokenMaterialMetadata(
+    has_refresh_token: Bool,
+    has_logout_id_token: Bool,
+    expires_at_unix_seconds: Int,
+    scopes: List(String),
+  )
+}
+
+pub type TrustedTokenChoice {
+  NoTrustedToken
+  TrustedTokenValue(String)
+}
+
+pub type TrustedTokenMaterialView {
+  TrustedTokenMaterialView(
+    access_token: String,
+    refresh_token: TrustedTokenChoice,
+    logout_id_token: TrustedTokenChoice,
+    expires_at_unix_seconds: Int,
+    scopes: List(String),
+  )
+}
+
+pub type AuthenticationTime {
+  NoAuthenticationTime
+  AuthenticationTimePresent(Timestamp)
+}
+
+pub type AuthenticationEvidence {
+  AuthenticationEvidence(
+    original_nonce: Nonce,
+    authentication_time: AuthenticationTime,
+  )
+}
+
 pub opaque type StoredRevision {
   StoredRevision(String)
 }
@@ -236,6 +328,206 @@ pub fn timestamp(value: Int) -> Result(Timestamp, InputError) {
   case value {
     seconds if seconds >= 0 -> Ok(Timestamp(seconds))
     _ -> Error(TimestampMustNotBeNegative)
+  }
+}
+
+pub fn access_token(value: String) -> Result(AccessToken, InputError) {
+  checked_text(value, AccessToken)
+}
+
+pub fn refresh_token(value: String) -> Result(RefreshToken, InputError) {
+  checked_text(value, RefreshToken)
+}
+
+pub fn logout_id_token(value: String) -> Result(LogoutIdToken, InputError) {
+  checked_text(value, LogoutIdToken)
+}
+
+pub fn token_expiry_unix_seconds(
+  unix_seconds: Int,
+) -> Result(TokenExpiry, InputError) {
+  case unix_seconds >= 0 {
+    True -> Ok(TokenExpiry(unix_seconds))
+    False -> Error(TimestampMustNotBeNegative)
+  }
+}
+
+pub fn scope(value: String) -> Result(Scope, InputError) {
+  case valid_scope_token(scope_bytes(value)) {
+    True -> Ok(Scope(value))
+    False -> Error(ScopeTokenInvalid)
+  }
+}
+
+pub fn token_material(
+  access_token: AccessToken,
+  refresh_token: RefreshTokenChoice,
+  logout_id_token: LogoutIdTokenChoice,
+  expires_at: TokenExpiry,
+  scopes: List(Scope),
+) -> TokenMaterial {
+  TokenMaterial(
+    access_token,
+    refresh_token,
+    logout_id_token,
+    expires_at,
+    normalize_scopes(scopes),
+  )
+}
+
+pub fn token_material_metadata(
+  material: TokenMaterial,
+) -> TokenMaterialMetadata {
+  let TokenMaterial(
+    _,
+    refresh_token,
+    logout_id_token,
+    TokenExpiry(expires),
+    scopes,
+  ) = material
+  TokenMaterialMetadata(
+    has_refresh_token: has_refresh_token(refresh_token),
+    has_logout_id_token: has_logout_id_token(logout_id_token),
+    expires_at_unix_seconds: expires,
+    scopes: scope_values(scopes),
+  )
+}
+
+// These accessors are for trusted adapters that must serialize a token or
+// attach it to an authenticated request. They expose secrets to the caller.
+pub fn trusted_token_material_view(
+  material: TokenMaterial,
+) -> TrustedTokenMaterialView {
+  let TokenMaterial(access, refresh, logout, TokenExpiry(expires), scopes) =
+    material
+  TrustedTokenMaterialView(
+    trusted_access_token_value(access),
+    trusted_refresh_token_choice(refresh),
+    trusted_logout_id_token_choice(logout),
+    expires,
+    scope_values(scopes),
+  )
+}
+
+pub fn trusted_access_token_value(token: AccessToken) -> String {
+  let AccessToken(value) = token
+  value
+}
+
+pub fn trusted_refresh_token_value(token: RefreshToken) -> String {
+  let RefreshToken(value) = token
+  value
+}
+
+pub fn trusted_logout_id_token_value(token: LogoutIdToken) -> String {
+  let LogoutIdToken(value) = token
+  value
+}
+
+pub fn authentication_evidence(
+  original_nonce: Nonce,
+  authentication_time: AuthenticationTime,
+) -> AuthenticationEvidence {
+  AuthenticationEvidence(original_nonce, authentication_time)
+}
+
+// Erlang strings are UTF-8 binaries. This boundary bridge exposes raw bytes so
+// the pure Gleam validator can reject every non-RFC-6749 scope byte.
+@external(erlang, "erlang", "binary_to_list")
+fn scope_bytes(value: String) -> List(Int)
+
+fn valid_scope_token(bytes: List(Int)) -> Bool {
+  case bytes {
+    [] -> False
+    [first, ..rest] -> valid_scope_byte(first) && valid_scope_bytes(rest)
+  }
+}
+
+fn valid_scope_bytes(remaining: List(Int)) -> Bool {
+  case remaining {
+    [] -> True
+    [byte, ..rest] -> valid_scope_byte(byte) && valid_scope_bytes(rest)
+  }
+}
+
+fn valid_scope_byte(byte: Int) -> Bool {
+  byte == 33 || byte >= 35 && byte <= 91 || byte >= 93 && byte <= 126
+}
+
+fn normalize_scopes(scopes: List(Scope)) -> List(Scope) {
+  normalize_scopes_from(scopes, [], [])
+}
+
+fn normalize_scopes_from(
+  remaining: List(Scope),
+  seen: List(Scope),
+  reversed: List(Scope),
+) -> List(Scope) {
+  case remaining {
+    [] -> reverse_scopes(reversed, [])
+    [next, ..rest] ->
+      case contains_scope(next, seen) {
+        True -> normalize_scopes_from(rest, seen, reversed)
+        False -> normalize_scopes_from(rest, [next, ..seen], [next, ..reversed])
+      }
+  }
+}
+
+fn contains_scope(scope: Scope, scopes: List(Scope)) -> Bool {
+  case scopes {
+    [] -> False
+    [next, ..rest] -> scope == next || contains_scope(scope, rest)
+  }
+}
+
+fn reverse_scopes(
+  remaining: List(Scope),
+  reversed: List(Scope),
+) -> List(Scope) {
+  case remaining {
+    [] -> reversed
+    [next, ..rest] -> reverse_scopes(rest, [next, ..reversed])
+  }
+}
+
+fn scope_values(scopes: List(Scope)) -> List(String) {
+  case scopes {
+    [] -> []
+    [Scope(value), ..rest] -> [value, ..scope_values(rest)]
+  }
+}
+
+fn has_refresh_token(choice: RefreshTokenChoice) -> Bool {
+  case choice {
+    NoRefreshToken -> False
+    RefreshTokenPresent(_) -> True
+  }
+}
+
+fn has_logout_id_token(choice: LogoutIdTokenChoice) -> Bool {
+  case choice {
+    NoLogoutIdToken -> False
+    LogoutIdTokenPresent(_) -> True
+  }
+}
+
+fn trusted_refresh_token_choice(
+  choice: RefreshTokenChoice,
+) -> TrustedTokenChoice {
+  case choice {
+    NoRefreshToken -> NoTrustedToken
+    RefreshTokenPresent(token) ->
+      TrustedTokenValue(trusted_refresh_token_value(token))
+  }
+}
+
+fn trusted_logout_id_token_choice(
+  choice: LogoutIdTokenChoice,
+) -> TrustedTokenChoice {
+  case choice {
+    NoLogoutIdToken -> NoTrustedToken
+    LogoutIdTokenPresent(token) ->
+      TrustedTokenValue(trusted_logout_id_token_value(token))
   }
 }
 
@@ -696,14 +988,14 @@ pub opaque type VerificationBackend {
   VerificationBackend(
     client: Client,
     declaration: AdapterDeclaration,
-    exchange: fn(ExchangeRequest) -> Result(BackendAttestation, BackendError),
+    exchange: fn(ExchangeRequest) -> Result(LoginAttestation, BackendError),
   )
 }
 
 pub fn trust_adapter(
   client: Client,
   declaration: AdapterDeclaration,
-  exchange: fn(ExchangeRequest) -> Result(BackendAttestation, BackendError),
+  exchange: fn(ExchangeRequest) -> Result(LoginAttestation, BackendError),
 ) -> VerificationBackend {
   // The caller explicitly records whether this adapter is trusted in ordinary
   // use or is a test-only fixture. Neither label verifies its implementation.
@@ -743,13 +1035,274 @@ type Subject {
   Subject(String)
 }
 
+pub opaque type CustodyOwnerId {
+  CustodyOwnerId(String)
+}
+
+pub opaque type CustodyReference {
+  CustodyReference(String)
+}
+
+pub opaque type CustodyRevision {
+  CustodyRevision(String)
+}
+
+pub opaque type ProviderBinding {
+  ProviderBinding(client: Client, adapter: AdapterDeclaration)
+}
+
+// This typed composite is a stable idempotency key, not a generated secret or
+// a proof of durable installation.
+pub opaque type CustodyInstallationId {
+  CustodyInstallationId(
+    owner: CustodyOwnerId,
+    provider: ProviderBinding,
+    transaction: TransactionId,
+  )
+}
+
+pub opaque type CustodyCommand {
+  CustodyCommand(
+    owner: CustodyOwnerId,
+    installation_id: CustodyInstallationId,
+    provider: ProviderBinding,
+    transaction: TransactionId,
+    identity: VerifiedIdentity,
+    original_nonce: Nonce,
+    authentication: AuthenticationEvidence,
+    tokens: TokenMaterial,
+  )
+}
+
+pub opaque type CustodyRecoveryCommand {
+  CustodyRecoveryCommand(owner: CustodyOwnerId, command: CustodyCommand)
+}
+
+pub type CustodyCommandMetadata {
+  CustodyCommandMetadata(
+    owner: CustodyOwnerId,
+    installation_id: CustodyInstallationId,
+    provider: ProviderBinding,
+    transaction: TransactionId,
+    identity: VerifiedIdentity,
+  )
+}
+
+// This view is for the explicitly trusted custody adapter. Token values stay
+// typed, but Gleam opacity is not a VM secrecy boundary.
+pub type CustodyCommandContents {
+  CustodyCommandContents(
+    owner: CustodyOwnerId,
+    installation_id: CustodyInstallationId,
+    provider: ProviderBinding,
+    transaction: TransactionId,
+    identity: VerifiedIdentity,
+    original_nonce: Nonce,
+    authentication: AuthenticationEvidence,
+    tokens: TokenMaterial,
+  )
+}
+
+pub type CustodyFailure {
+  // The trusted adapter confirms that this command was not installed.
+  CustodyPortRejected
+}
+
+pub opaque type CustodyReceipt {
+  CustodyReceipt(
+    accepted_command: CustodyCommand,
+    reference: CustodyReference,
+    revision: CustodyRevision,
+  )
+}
+
+// A successful receipt must identify the exact command received by the port.
+// The custody adapter remains responsible for returning the same session
+// reference and revision when it replays a previously installed command id.
+// Warden cannot prove those values came from a durable ledger.
+pub type CustodyReply {
+  CustodyInstalled(CustodyReceipt)
+  CustodyRejected(CustodyFailure)
+  CustodyOutcomeUnknown
+  CustodyPortUnavailable
+}
+
+pub opaque type CustodyOwner {
+  CustodyOwner(
+    id: CustodyOwnerId,
+    install: fn(CustodyCommand) -> CustodyReply,
+    recover: fn(CustodyRecoveryCommand) -> CustodyReply,
+  )
+}
+
 pub opaque type Session {
-  Session(VerifiedIdentity)
+  Session(
+    identity: VerifiedIdentity,
+    custody_reference: CustodyReference,
+    custody_revision: CustodyRevision,
+    provider: ProviderBinding,
+    installation_id: CustodyInstallationId,
+  )
+}
+
+pub type LoginCompletion {
+  LoginCompleted(Session)
+  LoginRecoveryRequired(CustodyRecoveryCommand)
+}
+
+pub type CustodyRecoveryResult {
+  CustodyRecovered(Session)
+  CustodyStillUncertain(CustodyRecoveryCommand)
+  CustodyRecoveryRejected(CustodyFailure)
+}
+
+pub type CustodyRecoveryError {
+  RecoveryOwnerMismatch
+}
+
+pub fn custody_owner_id(value: String) -> Result(CustodyOwnerId, InputError) {
+  checked_text(value, CustodyOwnerId)
+}
+
+pub fn custody_reference(
+  value: String,
+) -> Result(CustodyReference, InputError) {
+  checked_text(value, CustodyReference)
+}
+
+pub fn custody_revision(value: String) -> Result(CustodyRevision, InputError) {
+  checked_text(value, CustodyRevision)
+}
+
+pub fn provider_binding(
+  client: Client,
+  adapter: AdapterDeclaration,
+) -> ProviderBinding {
+  ProviderBinding(client, adapter)
+}
+
+pub fn custody_installation_id(
+  owner: CustodyOwnerId,
+  provider: ProviderBinding,
+  transaction: TransactionId,
+) -> CustodyInstallationId {
+  CustodyInstallationId(owner, provider, transaction)
+}
+
+pub fn custody_owner(
+  id: CustodyOwnerId,
+  install: fn(CustodyCommand) -> CustodyReply,
+  recover: fn(CustodyRecoveryCommand) -> CustodyReply,
+) -> CustodyOwner {
+  CustodyOwner(id, install, recover)
+}
+
+pub fn custody_installed(
+  accepted_command: CustodyCommand,
+  reference: CustodyReference,
+  revision: CustodyRevision,
+) -> CustodyReply {
+  CustodyInstalled(CustodyReceipt(accepted_command, reference, revision))
+}
+
+pub fn custody_rejected(failure: CustodyFailure) -> CustodyReply {
+  CustodyRejected(failure)
+}
+
+pub fn custody_outcome_unknown() -> CustodyReply {
+  CustodyOutcomeUnknown
+}
+
+pub fn custody_port_unavailable() -> CustodyReply {
+  CustodyPortUnavailable
+}
+
+pub fn custody_command_metadata(
+  command: CustodyCommand,
+) -> CustodyCommandMetadata {
+  let CustodyCommand(
+    owner,
+    installation_id,
+    provider,
+    transaction,
+    identity,
+    _,
+    _,
+    _,
+  ) = command
+  CustodyCommandMetadata(
+    owner,
+    installation_id,
+    provider,
+    transaction,
+    identity,
+  )
+}
+
+pub fn custody_command_contents(
+  command: CustodyCommand,
+) -> CustodyCommandContents {
+  let CustodyCommand(
+    owner,
+    installation_id,
+    provider,
+    transaction,
+    identity,
+    original_nonce,
+    authentication,
+    tokens,
+  ) = command
+  CustodyCommandContents(
+    owner,
+    installation_id,
+    provider,
+    transaction,
+    identity,
+    original_nonce,
+    authentication,
+    tokens,
+  )
+}
+
+pub fn recovery_command_metadata(
+  recovery: CustodyRecoveryCommand,
+) -> CustodyCommandMetadata {
+  let CustodyRecoveryCommand(_, command) = recovery
+  custody_command_metadata(command)
+}
+
+// The port receives the original opaque command for idempotent replay. It
+// cannot obtain a new login request or authorization code through this value.
+pub fn recovery_custody_command(
+  recovery: CustodyRecoveryCommand,
+) -> CustodyCommand {
+  let CustodyRecoveryCommand(_, command) = recovery
+  command
 }
 
 pub fn session_identity(session: Session) -> VerifiedIdentity {
-  let Session(identity) = session
+  let Session(identity, _, _, _, _) = session
   identity
+}
+
+pub fn session_custody_reference(session: Session) -> CustodyReference {
+  let Session(_, reference, _, _, _) = session
+  reference
+}
+
+pub fn session_custody_revision(session: Session) -> CustodyRevision {
+  let Session(_, _, revision, _, _) = session
+  revision
+}
+
+pub fn session_provider_binding(session: Session) -> ProviderBinding {
+  let Session(_, _, _, provider, _) = session
+  provider
+}
+
+pub fn session_installation_id(session: Session) -> CustodyInstallationId {
+  let Session(_, _, _, _, installation_id) = session
+  installation_id
 }
 
 pub fn verified_subject(identity: VerifiedIdentity) -> String {
@@ -765,16 +1318,30 @@ pub fn verified_issuer(identity: VerifiedIdentity) -> Issuer {
 pub fn complete_login(
   store: TransactionStore,
   backend: VerificationBackend,
+  custody_owner: CustodyOwner,
   checked: CheckedOutcome,
-) -> Result(Session, CompleteLoginError) {
+) -> Result(LoginCompletion, CompleteLoginError) {
   let VerificationBackend(backend_client, _, _) = backend
   case checked_client(checked) == backend_client {
     False -> Error(BackendConfigurationMismatch)
     True ->
       case checked {
-        CodeReady(callback) -> complete_code(store, backend, callback)
+        CodeReady(callback) ->
+          complete_code(store, backend, custody_owner, callback)
         ProviderDenied(denial) -> complete_denial(store, denial)
       }
+  }
+}
+
+pub fn recover_custody(
+  owner: CustodyOwner,
+  recovery: CustodyRecoveryCommand,
+) -> Result(CustodyRecoveryResult, CustodyRecoveryError) {
+  let CustodyOwner(owner_id, _, recover) = owner
+  let CustodyRecoveryCommand(recovery_owner, command) = recovery
+  case owner_id == recovery_owner {
+    False -> Error(RecoveryOwnerMismatch)
+    True -> resolve_recovery(recovery, command, recover(recovery))
   }
 }
 
@@ -791,18 +1358,19 @@ fn checked_client(checked: CheckedOutcome) -> Client {
 fn complete_code(
   store: TransactionStore,
   backend: VerificationBackend,
+  custody_owner: CustodyOwner,
   checked: CheckedCallback,
-) -> Result(Session, CompleteLoginError) {
+) -> Result(LoginCompletion, CompleteLoginError) {
   case consume_checked(store, CodeReady(checked)) {
     Error(error) -> Error(ConsumptionFailed(error))
-    Ok(Nil) -> exchange_consumed_code(backend, checked)
+    Ok(Nil) -> exchange_consumed_code(backend, custody_owner, checked)
   }
 }
 
 fn complete_denial(
   store: TransactionStore,
   denial: CheckedDenial,
-) -> Result(Session, CompleteLoginError) {
+) -> Result(LoginCompletion, CompleteLoginError) {
   case consume_checked(store, ProviderDenied(denial)) {
     Error(error) -> Error(ConsumptionFailed(error))
     Ok(Nil) -> Error(ProviderRejection(denial.classification))
@@ -811,22 +1379,67 @@ fn complete_denial(
 
 fn exchange_consumed_code(
   backend: VerificationBackend,
+  custody_owner: CustodyOwner,
   checked: CheckedCallback,
-) -> Result(Session, CompleteLoginError) {
+) -> Result(LoginCompletion, CompleteLoginError) {
   let CheckedCallback(transaction, _, code) = checked
-  let Transaction(_, client, _, nonce, verifier, _) = transaction
-  let VerificationBackend(_, _, exchange) = backend
+  let Transaction(transaction_id, client, _, nonce, verifier, _) = transaction
+  let VerificationBackend(_, declaration, exchange) = backend
   let request = ExchangeRequest(client, code, nonce, verifier)
   case exchange(request) {
     Error(error) -> Error(BackendFailed(error))
-    Ok(attestation) -> validate_attestation(client, attestation)
+    Ok(attestation) ->
+      case validate_attestation(client, nonce, attestation) {
+        Error(error) -> Error(error)
+        Ok(#(identity, tokens, authentication)) -> {
+          let CustodyOwner(owner_id, install, _) = custody_owner
+          let provider = ProviderBinding(client, declaration)
+          let installation_id =
+            CustodyInstallationId(owner_id, provider, transaction_id)
+          let command =
+            CustodyCommand(
+              owner_id,
+              installation_id,
+              provider,
+              transaction_id,
+              identity,
+              nonce,
+              authentication,
+              tokens,
+            )
+          resolve_installation(custody_owner, command, install(command))
+        }
+      }
   }
 }
 
 fn validate_attestation(
   client: Client,
+  expected_nonce: Nonce,
+  attestation: LoginAttestation,
+) -> Result(
+  #(VerifiedIdentity, TokenMaterial, AuthenticationEvidence),
+  CompleteLoginError,
+) {
+  let LoginAttestation(identity_attestation, tokens, authentication) =
+    attestation
+  case validate_identity(client, identity_attestation) {
+    Error(error) -> Error(error)
+    Ok(identity) ->
+      case authentication {
+        AuthenticationEvidence(original_nonce, _) ->
+          case original_nonce == expected_nonce {
+            True -> Ok(#(identity, tokens, authentication))
+            False -> Error(AuthenticationNonceMismatch)
+          }
+      }
+  }
+}
+
+fn validate_identity(
+  client: Client,
   attestation: BackendAttestation,
-) -> Result(Session, CompleteLoginError) {
+) -> Result(VerifiedIdentity, CompleteLoginError) {
   let Client(expected_issuer, expected_client, _) = client
   let BackendAttestation(issuer, audiences, authorized_party, subject) =
     attestation
@@ -841,11 +1454,70 @@ fn validate_attestation(
             True ->
               case subject {
                 "" -> Error(SubjectMissing)
-                _ -> Ok(Session(VerifiedIdentity(issuer, Subject(subject))))
+                _ -> Ok(VerifiedIdentity(issuer, Subject(subject)))
               }
           }
       }
   }
+}
+
+fn resolve_installation(
+  owner: CustodyOwner,
+  command: CustodyCommand,
+  reply: CustodyReply,
+) -> Result(LoginCompletion, CompleteLoginError) {
+  case reply {
+    CustodyInstalled(receipt) ->
+      case confirmed_session(command, receipt) {
+        Ok(session) -> Ok(LoginCompleted(session))
+        Error(Nil) -> Ok(LoginRecoveryRequired(make_recovery(owner, command)))
+      }
+    CustodyRejected(failure) -> Error(CustodyInstallRejected(failure))
+    CustodyOutcomeUnknown ->
+      Ok(LoginRecoveryRequired(make_recovery(owner, command)))
+    CustodyPortUnavailable ->
+      Ok(LoginRecoveryRequired(make_recovery(owner, command)))
+  }
+}
+
+fn resolve_recovery(
+  recovery: CustodyRecoveryCommand,
+  command: CustodyCommand,
+  reply: CustodyReply,
+) -> Result(CustodyRecoveryResult, CustodyRecoveryError) {
+  case reply {
+    CustodyInstalled(receipt) ->
+      case confirmed_session(command, receipt) {
+        Ok(session) -> Ok(CustodyRecovered(session))
+        Error(Nil) -> Ok(CustodyStillUncertain(recovery))
+      }
+    CustodyRejected(failure) -> Ok(CustodyRecoveryRejected(failure))
+    CustodyOutcomeUnknown -> Ok(CustodyStillUncertain(recovery))
+    CustodyPortUnavailable -> Ok(CustodyStillUncertain(recovery))
+  }
+}
+
+fn confirmed_session(
+  command: CustodyCommand,
+  receipt: CustodyReceipt,
+) -> Result(Session, Nil) {
+  let CustodyReceipt(accepted_command, reference, revision) = receipt
+  case accepted_command == command {
+    False -> Error(Nil)
+    True -> {
+      let CustodyCommand(_, installation_id, provider, _, identity, _, _, _) =
+        command
+      Ok(Session(identity, reference, revision, provider, installation_id))
+    }
+  }
+}
+
+fn make_recovery(
+  owner: CustodyOwner,
+  command: CustodyCommand,
+) -> CustodyRecoveryCommand {
+  let CustodyOwner(owner_id, _, _) = owner
+  CustodyRecoveryCommand(owner_id, command)
 }
 
 fn authorized_party_matches(
