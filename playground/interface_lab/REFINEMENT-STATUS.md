@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-four consumers compile with only their transitive source imports.
-- Seventy-eight negative fixtures fail with their intended single compiler diagnostic.
-- Forty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-five consumers compile with only their transitive source imports.
+- Eighty negative fixtures fail with their intended single compiler diagnostic.
+- Forty-four interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -260,3 +260,10 @@
 - A keyed process-local test registry exercises selected late callbacks, repeated detach, identifier replacement, handler failure isolation, and two independent backends. Its small Erlang storage helper is test-only.
 - Encoding failures precede backend invocation; malformed callback fields precede typed handlers. Emission failure remains separate from subscriber-specific failure.
 - Native atom/map conversion, callback exceptions, scoped cleanup, and native span execution remain open. Detachment does not imply callback quiescence or generation-safe identifier reuse.
+
+## Verified session custody
+
+- [Session custody](SESSION-CUSTODY.md) confirms an exact installation command before returning a session. Commands retain verified identity, provider binding, authentication evidence, token material, and a stable owner-bound installation identifier.
+- Distinct token kinds, scope parsing, explicit expiry units, and trusted adapter views provide a usable custody boundary. The public session exposes identity and custody references.
+- An immutable ledger probe retains installation evidence through lost acknowledgement, replay, conflicting material, and unavailable recovery. Recovery cannot invoke authorization-code exchange.
+- Reference stability, concurrent storage, secret redaction, cryptographic verification, persisted restoration, and refresh ownership remain runtime or subsequent interface work.

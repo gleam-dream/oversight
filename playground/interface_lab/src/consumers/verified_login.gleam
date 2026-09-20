@@ -61,12 +61,14 @@ pub fn probe() -> Nil {
             True,
           ),
         ) = login.exchange_parameters(request)
-        Ok(login.BackendAttestation(
-          expected_issuer,
-          [expected_client_id],
-          login.NoAuthorizedParty,
-          "subject-sentinel",
-        ))
+        Ok(
+          successful_attestation(login.BackendAttestation(
+            expected_issuer,
+            [expected_client_id],
+            login.NoAuthorizedParty,
+            "subject-sentinel",
+          )),
+        )
       },
     )
   let success_store =
@@ -76,8 +78,8 @@ pub fn probe() -> Nil {
       initial_revision,
       timestamp(99),
     )
-  let assert Ok(session) =
-    warden.complete_login(success_store, backend, checked)
+  let assert Ok(login.LoginCompleted(session)) =
+    warden.complete_login(success_store, backend, fixture_owner(), checked)
   let verified = warden.identity(session)
   let assert "subject-sentinel" = warden.subject(verified)
   let assert #(actual_issuer, "subject-sentinel") =
@@ -121,7 +123,7 @@ pub fn probe() -> Nil {
       panic_exchange,
     )
   let assert Error(login.BackendConfigurationMismatch) =
-    login.complete_login(panic_store(), wrong_backend, checked)
+    complete_session(panic_store(), wrong_backend, checked)
   let wrong_client_id_config =
     login.client(
       expected_issuer,
@@ -135,7 +137,7 @@ pub fn probe() -> Nil {
       panic_exchange,
     )
   let assert Error(login.BackendConfigurationMismatch) =
-    login.complete_login(panic_store(), wrong_client_id_backend, checked)
+    complete_session(panic_store(), wrong_client_id_backend, checked)
 
   // Correctly bound denial is terminal and never invokes the backend.
   let denied_outcome =
@@ -154,7 +156,7 @@ pub fn probe() -> Nil {
       panic_exchange,
     )
   let assert Error(login.ProviderRejection(login.AccessDenied)) =
-    login.complete_login(
+    complete_session(
       consuming_store(
         transaction,
         transaction_id,
@@ -165,7 +167,7 @@ pub fn probe() -> Nil {
       denied_outcome,
     )
   let assert Error(login.BackendConfigurationMismatch) =
-    login.complete_login(panic_store(), wrong_client_id_backend, denied_outcome)
+    complete_session(panic_store(), wrong_client_id_backend, denied_outcome)
 
   // Storage failures and callback preflight errors also prevent exchange.
   expect_store_failure(
@@ -298,16 +300,18 @@ pub fn probe() -> Nil {
       configured_client,
       test_declaration("matching-azp"),
       fn(_request) {
-        Ok(login.BackendAttestation(
-          expected_issuer,
-          [expected_client_id],
-          login.AuthorizedParty(expected_client_id),
-          "subject-with-azp",
-        ))
+        Ok(
+          successful_attestation(login.BackendAttestation(
+            expected_issuer,
+            [expected_client_id],
+            login.AuthorizedParty(expected_client_id),
+            "subject-with-azp",
+          )),
+        )
       },
     )
   let assert Ok(matching_azp_session) =
-    login.complete_login(
+    complete_session(
       consuming_store(
         transaction,
         transaction_id,
@@ -384,7 +388,7 @@ pub fn probe() -> Nil {
   let assert login.ConsumedStatus = login.stored_status(terminal_after_consume)
   let terminal_store = replay_store(terminal_after_consume)
   let assert Error(login.ConsumptionFailed(login.CallbackAlreadyConsumed)) =
-    login.complete_login(terminal_store, denial_backend, checked)
+    complete_session(terminal_store, denial_backend, checked)
   Nil
 }
 
@@ -394,6 +398,68 @@ fn checked_outcome(
 ) -> login.CheckedOutcome {
   let assert Ok(checked) = login.check_callback(pending, callback)
   checked
+}
+
+fn complete_session(
+  store: login.TransactionStore,
+  backend: login.VerificationBackend,
+  checked: login.CheckedOutcome,
+) -> Result(login.Session, login.CompleteLoginError) {
+  case login.complete_login(store, backend, fixture_owner(), checked) {
+    Ok(login.LoginCompleted(session)) -> Ok(session)
+    Ok(login.LoginRecoveryRequired(_)) ->
+      panic as "the scripted custody port must confirm installation"
+    Error(error) -> Error(error)
+  }
+}
+
+fn fixture_owner() -> login.CustodyOwner {
+  login.custody_owner(
+    must(login.custody_owner_id("custody-owner-sentinel")),
+    fn(command) {
+      login.custody_installed(
+        command,
+        must(login.custody_reference("session-reference-sentinel")),
+        must(login.custody_revision("session-revision-sentinel")),
+      )
+    },
+    fn(recovery) {
+      login.custody_installed(
+        login.recovery_custody_command(recovery),
+        must(login.custody_reference("session-reference-sentinel")),
+        must(login.custody_revision("session-revision-sentinel")),
+      )
+    },
+  )
+}
+
+fn successful_attestation(
+  identity: login.BackendAttestation,
+) -> login.LoginAttestation {
+  let tokens =
+    login.token_material(
+      must(login.access_token("access-token-sentinel")),
+      login.RefreshTokenPresent(
+        must(login.refresh_token("refresh-token-sentinel")),
+      ),
+      login.LogoutIdTokenPresent(
+        must(login.logout_id_token("logout-id-token-sentinel")),
+      ),
+      must(login.token_expiry_unix_seconds(200)),
+      [
+        must(login.scope("openid")),
+        must(login.scope("profile")),
+        must(login.scope("openid")),
+      ],
+    )
+  login.LoginAttestation(
+    identity,
+    tokens,
+    login.authentication_evidence(
+      must(login.nonce("nonce-sentinel")),
+      login.NoAuthenticationTime,
+    ),
+  )
 }
 
 fn consuming_store(
@@ -451,7 +517,7 @@ fn expect_store_failure(
     )
   let store = reply_store(reply)
   let assert Error(login.ConsumptionFailed(actual)) =
-    login.complete_login(store, backend, checked)
+    complete_session(store, backend, checked)
   let assert True = actual == expected
   Nil
 }
@@ -469,10 +535,10 @@ fn expect_attestation_error(
     login.trust_adapter(
       client,
       test_declaration("invalid-attestation"),
-      fn(_request) { Ok(attestation) },
+      fn(_request) { Ok(successful_attestation(attestation)) },
     )
   let actual =
-    login.complete_login(
+    complete_session(
       consuming_store(transaction, transaction_id, revision, timestamp(99)),
       backend,
       checked,
@@ -497,7 +563,7 @@ fn expect_backend_failure(
       fn(_request) { Error(expected) },
     )
   let actual =
-    login.complete_login(
+    complete_session(
       consuming_store(transaction, transaction_id, revision, timestamp(99)),
       backend,
       checked,
@@ -523,7 +589,7 @@ fn panic_store() -> login.TransactionStore {
 
 fn panic_exchange(
   _request: login.ExchangeRequest,
-) -> Result(login.BackendAttestation, login.BackendError) {
+) -> Result(login.LoginAttestation, login.BackendError) {
   panic as "this branch must not invoke the token exchange callback"
 }
 

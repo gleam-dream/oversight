@@ -26,7 +26,7 @@
 - The attested audience list must contain exactly the configured client identifier. Empty, duplicate, and additional audiences fail this first profile.
 - A present authorized party must equal the configured client identifier. Its absence is accepted for the singleton audience profile.
 - The subject must be nonempty.
-- Only the canonical owner constructs the opaque identity and login result after these checks.
+- Only the canonical owner constructs the opaque identity after these checks. The [custody boundary](SESSION-CUSTODY.md) additionally checks original nonce evidence and confirms token installation before issuing a session.
 - Identity uses the issuer and subject together as its stable key. Email is not an identity key.
 
 ## Failure and result
@@ -35,7 +35,7 @@
 - Exchange rejection, unknown exchange outcome, and rejected identity assertions leave the transaction consumed.
 - The operation never retries exchange or restores pending state after consumption.
 - An unknown exchange outcome may mean that the provider consumed the authorization code. Starting another login is separate from retrying the consumed code.
-- `Session` names this experiment's verified login result. Token custody, cookies, expiry, refresh, logout, and session persistence remain separate requirements.
+- `Session` now retains verified identity and confirmed custody references. An uncertain installation returns a distinct custody recovery command; cookies, expiry policy, refresh, logout, and durable session persistence remain separate requirements.
 
 ## Composition evidence
 
