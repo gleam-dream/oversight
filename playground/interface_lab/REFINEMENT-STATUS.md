@@ -10,16 +10,16 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                                                               | Remaining interface work                                                                                            |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Composed codecs, finite string enums and generated enum fields, located schema requirements, runtime contracts, document loading, and finite native generation | Numeric vocabulary integration, actual provider profiles, broader generation, and complete 1.x migration            |
-| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                                              | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence              |
-| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                                             | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility       |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                                                  | Parallel execution, traversal, timed recovery, and definition migration                                             |
-| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                                            | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
-| Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration                                        | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
-| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, symbolic typed span events, and scoped cleanup control                                | Native name/map binding, telemetry integration, concurrent callback lifetime, and span execution                    |
-| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                                             | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                   |
+| Boundary                    | Current evidence                                                                                                                                                       | Remaining interface work                                                                                            |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Composed codecs, finite string enums and generated enum fields, located schema requirements, runtime contracts, document loading, and finite native generation         | Numeric vocabulary integration, actual provider profiles, broader generation, and complete 1.x migration            |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                                                      | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence              |
+| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                                                     | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility       |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                                                          | Parallel execution, traversal, timed recovery, and definition migration                                             |
+| Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                                                    | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission                 |
+| Grind alone                 | Typed admission, scoped uniqueness, local capacity planning, response resolution, and claim acknowledgement arbitration                                                | Processor lifecycle, broader uniqueness policies, worker registration, persisted history, and advanced job families |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, symbolic typed span events, scoped cleanup control, and package-owned Fabric/Saga/Grind facts | Native name/map binding, telemetry integration, concurrent callback lifetime, and span execution                    |
+| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                                                     | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                   |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: sixty consumers compile with only their transitive source imports.
-- Ninety negative fixtures fail with their intended single compiler diagnostic.
-- Forty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: sixty-one consumers compile with only their transitive source imports.
+- Ninety-one negative fixtures fail with their intended single compiler diagnostic.
+- Fifty interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Sixteen generated modules compile and run independent native consumers; four compiler-negative cases reject invalid native type and codec boundaries.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
@@ -304,3 +304,9 @@
 - Unknown provider effects quarantine the generation. Lost publication acknowledgements retain the original recovery command; recovery cannot invoke the provider.
 - Scripted ledger probes cover competing callers, replay, stale revisions, identity continuity, and contradictory receipts. Distinct recovery types prevent crossing reservation and publication phases.
 - Concurrent durable storage, safe uncertain-dispatch resumption, provider error detail, reconciliation, secret custody, and pinned adapter conformance remain open.
+
+## Package-owned observations
+
+- [Package observations](PACKAGE-OBSERVATIONS.md) maps accepted Fabric action reports, terminal Saga local reports, and Grind cancellation decisions to separate Sinal event descriptors and package-specific fact types.
+- Fabric observation follows successful report acceptance. Saga observation includes succeeded, failed, and cancelled reports with uncompensated and undo-failure counts. Grind observation retains the computed next state and transition even when emission fails.
+- The probes use an injected Sinal backend and execute no native telemetry bridge, runtime event queue, persistence, or state-changing observer.
