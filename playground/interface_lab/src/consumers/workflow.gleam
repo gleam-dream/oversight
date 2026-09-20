@@ -91,14 +91,12 @@ pub fn workflow_definition() -> Definition(
     saga.activity(
       required_step_id("agent.propose-checkout"),
       required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      blueprint.text(),
-      proposal,
-      flow_error,
-      undo_error,
+      saga.ActivityContract(
+        saga.VersionedCodec(required_version(1), blueprint.text()),
+        saga.VersionedCodec(required_version(1), proposal),
+        saga.VersionedCodec(required_version(1), flow_error),
+        saga.VersionedCodec(required_version(1), undo_error),
+      ),
       fn(request) { fabric.invoke_agent(proposal_agent, request) },
       saga.Uncompensated,
     )
@@ -135,14 +133,12 @@ pub fn workflow_definition() -> Definition(
     saga.activity(
       required_step_id("checkout.forward"),
       required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      approval_input,
-      receipt,
-      flow_error,
-      undo_error,
+      saga.ActivityContract(
+        saga.VersionedCodec(required_version(1), approval_input),
+        saga.VersionedCodec(required_version(1), receipt),
+        saga.VersionedCodec(required_version(1), flow_error),
+        saga.VersionedCodec(required_version(1), undo_error),
+      ),
       execute_checkout,
       saga.Compensate(undo_checkout),
     )
@@ -175,14 +171,12 @@ pub fn workflow_definition() -> Definition(
     saga.activity(
       required_step_id("confirmation.draft"),
       required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      required_version(1),
-      receipt,
-      confirmation,
-      flow_error,
-      undo_error,
+      saga.ActivityContract(
+        saga.VersionedCodec(required_version(1), receipt),
+        saga.VersionedCodec(required_version(1), confirmation),
+        saga.VersionedCodec(required_version(1), flow_error),
+        saga.VersionedCodec(required_version(1), undo_error),
+      ),
       draft_confirmation,
       saga.Uncompensated,
     )

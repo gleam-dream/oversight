@@ -141,20 +141,35 @@ pub opaque type Activity(i, o, e, u) {
   )
 }
 
+// Versions belong to durable boundaries, not to general Blueprint codecs.
+pub type VersionedCodec(a) {
+  VersionedCodec(version: Version, codec: Codec(a))
+}
+
+pub type ActivityContract(i, o, e, u) {
+  ActivityContract(
+    input: VersionedCodec(i),
+    output: VersionedCodec(o),
+    error: VersionedCodec(e),
+    undo_error: VersionedCodec(u),
+  )
+}
+
 pub fn activity(
   id: StepId,
   step_version: Version,
-  input_codec_version: Version,
-  output_codec_version: Version,
-  error_codec_version: Version,
-  undo_error_codec_version: Version,
-  input: Codec(i),
-  output: Codec(o),
-  error: Codec(e),
-  undo_error: Codec(u),
+  contract: ActivityContract(i, o, e, u),
   execute: fn(i) -> Result(o, e),
   compensation: Compensation(i, o, u),
 ) -> Activity(i, o, e, u) {
+  let input_codec_version = contract.input.version
+  let output_codec_version = contract.output.version
+  let error_codec_version = contract.error.version
+  let undo_error_codec_version = contract.undo_error.version
+  let input = contract.input.codec
+  let output = contract.output.codec
+  let error = contract.error.codec
+  let undo_error = contract.undo_error.codec
   let descriptor =
     StepDescriptor(id, step_version, ActivityStep, [
       input_codec_version,

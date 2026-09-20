@@ -215,14 +215,12 @@ fn definition(
     saga.activity(
       required_step_id(step),
       version,
-      version,
-      version,
-      version,
-      version,
-      input,
-      output,
-      nil_codec(),
-      nil_codec(),
+      saga.ActivityContract(
+        saga.VersionedCodec(version, input),
+        saga.VersionedCodec(version, output),
+        saga.VersionedCodec(version, nil_codec()),
+        saga.VersionedCodec(version, nil_codec()),
+      ),
       execute,
       saga.Uncompensated,
     )
