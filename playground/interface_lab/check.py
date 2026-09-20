@@ -91,7 +91,7 @@ def main():
     if probes.returncode:
         report_failure(probes.stdout)
         raise SystemExit("FAIL: pure interface probes")
-    print("PASS: pure interface probe groups")
+    print("PASS: interface probe groups")
     print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
 
 

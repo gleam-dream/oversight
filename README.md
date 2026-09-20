@@ -5,4 +5,5 @@
 - The [exploration inventory](EXPLORATION.md) records the original intent and questions. The [research directory](research/) records source-backed findings and the limits of the inspection.
 - The package documents (`grind-design.md`, `sinal-design.md`, `saga-design.md`, `relay-design.md`, `warden-design.md`, `fabric-design.md`) are rough design inputs. Their claims and pseudocode need refinement against the creation plan before implementation.
 - The [interface stress exploration](playground/interface_lab/STRESS-TESTS.md) maps independent and combined use cases to compiler probes, small API corrections, and remaining design gaps.
+- The [refinement status](playground/interface_lab/REFINEMENT-STATUS.md) tracks subsequent graph, schema/catalog, and observation experiments and the remaining acceptance questions.
 - Use the [repository instructions](AGENTS.md) for the Nix toolchain. The retained [interface playground](playground/interface_lab/README.md) explores the proposed contracts with positive and negative compiler examples; it does not implement the production libraries.
