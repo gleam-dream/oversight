@@ -99,6 +99,8 @@ def main():
     generation_check.main()
     import relay_schema_check
     relay_schema_check.main()
+    import number_check
+    number_check.main()
     print("No scheduler, durable storage, protocol transport, or unfinished runtime boundary is executed.")
 
 
