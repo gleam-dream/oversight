@@ -15,7 +15,7 @@
 | Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed records, optional fields, lists, nulls, and registry consistency | Provider feature admission, numbers, and broader schema corpus               |
 | Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                             | Protocol name rules, visibility policy, transport conformance                |
 | Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                                | Explicit provider schema subsets and streaming resource ownership            |
-| Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing  | One lowered definition model preserving explicit activity/child ownership    |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and explicit operation ownership       | Child lifecycle, local execution, and definition migration                   |
 | Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                                | Restart behavior and usable compensation receipt issuance                    |
 | Grind alone                 | Typed immediate/scheduled admission, handles, and cancellation transitions                                         | Transactional storage, leases, running cancellation observation, and retries |
 | Sinal alone                 | Map-shaped fields and foreign callback error classification                                                        | Native atom/map bridge and pinned telemetry behavior tests                   |
@@ -31,15 +31,15 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-six consumers compile with only their transitive source imports.
-- Twenty-six negative fixtures fail with their intended single compiler diagnostic.
-- Eighteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: twenty-seven consumers compile with only their transitive source imports.
+- Twenty-seven negative fixtures fail with their intended single compiler diagnostic.
+- Nineteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
-1. Lower sequential composition, shared references, and closed choices into one Saga definition model while retaining activity, approval, and child ownership and versioned boundaries.
+1. Remove unused legacy registration adapters, then exercise the local runner contract over the canonical Saga definition.
 2. Complete child attachment, reattachment, cancellation, typed completion, and compensation-receipt issuance. Completion alone is not parent compensation authority.
 3. Connect the schema vocabulary to each protocol/provider capability check, then establish streaming resource ownership.
 4. Test actual boundaries against pinned oracles: native telemetry, oidcc with atomic transaction consumption, and transactional queue/workflow recovery.
@@ -75,3 +75,7 @@
 ## Streaming grammar refinement
 
 - [Stream progress and tool completion](STREAM-PROGRESS.md) preserves interleaved call identities and separates completed tools from partial arguments. Live ownership and provider adaptation remain open.
+
+## Unified workflow refinement
+
+- [One workflow definition](UNIFIED-WORKFLOWS.md) joins sequential, shared, and conditional authoring at the checkpoint and queue interfaces. Structured addresses retain repeated occurrences and nested choices.

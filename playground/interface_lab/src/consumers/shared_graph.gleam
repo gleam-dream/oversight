@@ -1,7 +1,6 @@
 // THROWAWAY: Can one retained Saga producer feed independent checks and a join?
 import lab/blueprint
 import lab/saga
-import lab/saga_graph as graph
 
 pub type OrderId {
   OrderId(String)
@@ -27,14 +26,14 @@ pub type UndoError {
   UndoFailed
 }
 
-pub fn order_review_graph() -> graph.Graph(
+pub fn order_review_graph() -> saga.Definition(
   String,
   ReviewResult,
   WorkflowError,
   UndoError,
 ) {
   let #(builder, request) =
-    graph.begin(blueprint.text(), workflow_error_codec(), undo_error_codec())
+    saga.begin(blueprint.text(), workflow_error_codec(), undo_error_codec())
   let #(builder, order) =
     require_add(
       builder,
@@ -74,46 +73,43 @@ pub fn order_review_graph() -> graph.Graph(
 // and every retained node contributes to the selected result.
 pub fn probe() -> Nil {
   let review = order_review_graph()
-  let assert 5 = graph.node_count(review)
-  let assert Ok(actual_dependencies) = graph.dependencies(review)
+  let assert 5 = saga.node_count(review)
+  let assert Ok(actual_dependencies) = saga.dependencies(review)
   let expected_dependencies = [
-    graph.Dependency(
-      graph.InputPort,
-      graph.ChildNode(required_node_id("create-order")),
+    saga.Dependency(saga.WorkflowInput, named_reference("create-order")),
+    saga.Dependency(
+      named_reference("create-order"),
+      named_reference("review-credit"),
     ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("create-order")),
-      graph.ChildNode(required_node_id("review-credit")),
+    saga.Dependency(
+      named_reference("create-order"),
+      named_reference("review-stock"),
     ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("create-order")),
-      graph.ChildNode(required_node_id("review-stock")),
+    saga.Dependency(
+      named_reference("review-credit"),
+      saga.NodeAt(saga.PairAddress(0)),
     ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("review-credit")),
-      graph.PairNode(0),
+    saga.Dependency(
+      named_reference("review-stock"),
+      saga.NodeAt(saga.PairAddress(0)),
     ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("review-stock")),
-      graph.PairNode(0),
-    ),
-    graph.Dependency(
-      graph.PairNode(0),
-      graph.ChildNode(required_node_id("summarize-review")),
+    saga.Dependency(
+      saga.NodeAt(saga.PairAddress(0)),
+      named_reference("summarize-review"),
     ),
   ]
   let assert True =
     dependencies_match(actual_dependencies, expected_dependencies)
 
   let #(fork, source) =
-    graph.begin(blueprint.text(), workflow_error_codec(), undo_error_codec())
+    saga.begin(blueprint.text(), workflow_error_codec(), undo_error_codec())
   let same_node_id = required_node_id("forked-id")
   let #(left_builder, _order_port) =
     require_add(fork, source, same_node_id, order_definition())
   let #(_, foreign_text_port) =
     require_add(fork, source, same_node_id, echo_definition())
-  let assert Error(graph.ForeignPort) =
-    graph.finish(left_builder, foreign_text_port)
+  let assert Error(saga.ForeignPort) =
+    finish_as(left_builder, foreign_text_port, "foreign-port")
 
   let #(builder, first_port) =
     require_add(
@@ -130,7 +126,7 @@ pub fn probe() -> Nil {
       order_definition(),
     )
   let #(builder, both_orders) = require_pair(builder, first_port, second_port)
-  let assert Ok(_reused) = graph.finish(builder, both_orders)
+  let assert Ok(_reused) = finish_as(builder, both_orders, "reused-output")
 
   let #(with_first, first_output) =
     require_add(fork, source, required_node_id("kept"), order_definition())
@@ -141,37 +137,37 @@ pub fn probe() -> Nil {
       required_node_id("orphan"),
       echo_definition(),
     )
-  let assert Error(graph.UnreachableNode(_)) =
-    graph.finish(with_orphan, first_output)
+  let assert Error(saga.UnreachableNode(_)) =
+    finish_as(with_orphan, first_output, "orphan-output")
 
-  let assert Error(graph.DuplicateNodeId(duplicate)) =
+  let assert Error(saga.DuplicateNodeId(duplicate)) =
     duplicate_id_result(fork, source, same_node_id)
   let assert True = node_ids_match(same_node_id, duplicate)
   Nil
 }
 
-fn node_ids_match(left: graph.NodeId, right: graph.NodeId) -> Bool {
+fn node_ids_match(left: saga.NodeId, right: saga.NodeId) -> Bool {
   left == right
 }
 
 fn dependencies_match(
-  actual: List(graph.Dependency),
-  expected: List(graph.Dependency),
+  actual: List(saga.Dependency),
+  expected: List(saga.Dependency),
 ) -> Bool {
   actual == expected
 }
 
 fn duplicate_id_result(
-  builder: graph.Builder(String, WorkflowError, UndoError),
-  source: graph.Port(String),
-  id: graph.NodeId,
+  builder: saga.Builder(String, WorkflowError, UndoError),
+  source: saga.Port(String),
+  id: saga.NodeId,
 ) -> Result(
-  #(graph.Builder(String, WorkflowError, UndoError), graph.Port(OrderId)),
-  graph.BuildError,
+  #(saga.Builder(String, WorkflowError, UndoError), saga.Port(OrderId)),
+  saga.BuildError,
 ) {
   let assert Ok(#(after_first, _)) =
-    graph.add_child(builder, source, id, order_definition())
-  graph.add_child(after_first, source, id, order_definition())
+    saga.add_child(builder, source, id, order_definition())
+  saga.add_child(after_first, source, id, order_definition())
 }
 
 fn order_definition() -> saga.Definition(
@@ -338,34 +334,52 @@ fn undo_error_codec() -> blueprint.Codec(UndoError) {
 }
 
 fn require_add(
-  builder: graph.Builder(i, WorkflowError, UndoError),
-  input: graph.Port(a),
-  id: graph.NodeId,
+  builder: saga.Builder(i, WorkflowError, UndoError),
+  input: saga.Port(a),
+  id: saga.NodeId,
   definition: saga.Definition(a, b, WorkflowError, UndoError),
-) -> #(graph.Builder(i, WorkflowError, UndoError), graph.Port(b)) {
-  let assert Ok(result) = graph.add_child(builder, input, id, definition)
+) -> #(saga.Builder(i, WorkflowError, UndoError), saga.Port(b)) {
+  let assert Ok(result) = saga.add_child(builder, input, id, definition)
   result
 }
 
 fn require_pair(
-  builder: graph.Builder(i, WorkflowError, UndoError),
-  left: graph.Port(a),
-  right: graph.Port(b),
-) -> #(graph.Builder(i, WorkflowError, UndoError), graph.Port(#(a, b))) {
-  let assert Ok(result) = graph.pair(builder, left, right)
+  builder: saga.Builder(i, WorkflowError, UndoError),
+  left: saga.Port(a),
+  right: saga.Port(b),
+) -> #(saga.Builder(i, WorkflowError, UndoError), saga.Port(#(a, b))) {
+  let assert Ok(result) = saga.pair(builder, left, right)
   result
 }
 
 fn require_finish(
-  builder: graph.Builder(i, WorkflowError, UndoError),
-  output: graph.Port(o),
-) -> graph.Graph(i, o, WorkflowError, UndoError) {
-  let assert Ok(result) = graph.finish(builder, output)
+  builder: saga.Builder(i, WorkflowError, UndoError),
+  output: saga.Port(o),
+) -> saga.Definition(i, o, WorkflowError, UndoError) {
+  let assert Ok(result) = finish_as(builder, output, "orders.review-graph")
   result
 }
 
-fn required_node_id(value: String) -> graph.NodeId {
-  let assert Ok(id) = graph.node_id(value)
+fn finish_as(
+  builder: saga.Builder(i, WorkflowError, UndoError),
+  output: saga.Port(o),
+  identity: String,
+) -> Result(saga.Definition(i, o, WorkflowError, UndoError), saga.BuildError) {
+  saga.finish(
+    builder,
+    output,
+    required_definition_id(identity),
+    required_version(1),
+    identity <> ":v1",
+  )
+}
+
+fn named_reference(name: String) -> saga.NodeReference {
+  saga.NodeAt(saga.NamedAddress(required_node_id(name)))
+}
+
+fn required_node_id(value: String) -> saga.NodeId {
+  let assert Ok(id) = saga.node_id(value)
   id
 }
 

@@ -1,7 +1,7 @@
 // THROWAWAY: Can approval select one typed Saga branch without leaking branch ports?
 import lab/blueprint
 import lab/saga
-import lab/saga_graph as graph
+import lab/saga_checkpoint as checkpoint
 import lab/value
 
 pub type Order {
@@ -13,8 +13,8 @@ pub type Fulfilment {
   Declined(Order)
 }
 
-pub fn approval_graph() -> graph.Graph(Order, Fulfilment, Nil, Nil) {
-  let #(builder, request) = graph.begin(order_codec(), nil_codec(), nil_codec())
+pub fn approval_graph() -> saga.Definition(Order, Fulfilment, Nil, Nil) {
+  let #(builder, request) = saga.begin(order_codec(), nil_codec(), nil_codec())
   let #(builder, approval) =
     require_add(
       builder,
@@ -45,20 +45,14 @@ pub fn approval_graph() -> graph.Graph(Order, Fulfilment, Nil, Nil) {
 // never runs an approval node or a branch definition.
 pub fn probe() -> Nil {
   let workflow = approval_graph()
-  let assert 3 = graph.node_count(workflow)
-  let assert Ok(actual_edges) = graph.dependencies(workflow)
+  let assert 3 = saga.node_count(workflow)
+  let assert Ok(actual_edges) = saga.dependencies(workflow)
   let expected_edges = [
-    graph.Dependency(
-      graph.InputPort,
-      graph.ChildNode(required_node_id("approval")),
-    ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("approval")),
-      graph.ChildNode(required_node_id("selector")),
-    ),
-    graph.Dependency(
-      graph.ChildNode(required_node_id("selector")),
-      graph.ChoiceNode(required_node_id("checkout-choice")),
+    saga.Dependency(saga.WorkflowInput, named_reference("approval")),
+    saga.Dependency(named_reference("approval"), named_reference("selector")),
+    saga.Dependency(
+      named_reference("selector"),
+      named_reference("checkout-choice"),
     ),
   ]
   let exact_edges = actual_edges == expected_edges
@@ -67,12 +61,8 @@ pub fn probe() -> Nil {
   let original = Order("original-sku", 3)
   let left_raw =
     choice_input(saga.ApprovalResult(original, saga.Approved(True)))
-  let assert Ok(graph.SelectedBranch(graph.LeftBranch, left_payload)) =
-    graph.inspect_choice(
-      workflow,
-      required_node_id("checkout-choice"),
-      left_raw,
-    )
+  let assert Ok(saga.SelectedBranch(saga.LeftBranch, left_payload)) =
+    saga.inspect_choice(workflow, required_node_id("checkout-choice"), left_raw)
   let assert Ok(expected_left_payload) =
     blueprint.encode(reversed_order_codec(), original)
   let left_uses_branch_wire = left_payload == expected_left_payload
@@ -83,8 +73,8 @@ pub fn probe() -> Nil {
 
   let right_raw =
     choice_input(saga.ApprovalResult(original, saga.Approved(False)))
-  let assert Ok(graph.SelectedBranch(graph.RightBranch, right_payload)) =
-    graph.inspect_choice(
+  let assert Ok(saga.SelectedBranch(saga.RightBranch, right_payload)) =
+    saga.inspect_choice(
       workflow,
       required_node_id("checkout-choice"),
       right_raw,
@@ -94,37 +84,105 @@ pub fn probe() -> Nil {
   let right_uses_branch_wire = right_payload == expected_right_payload
   let assert True = right_uses_branch_wire
 
+  let assert Ok(left_output) =
+    blueprint.encode(fulfilment_codec(), Placed(original))
+  let left_step_identity =
+    saga.BranchStepId(
+      saga.BranchAddress(
+        saga.NamedAddress(required_node_id("checkout-choice")),
+        saga.LeftBranch,
+        saga.NamedAddress(required_node_id("checkout.place")),
+      ),
+      saga.LeftBranch,
+      "checkout.place",
+    )
+  let branch_snapshot =
+    checkpoint.StepSnapshot(
+      identity: left_step_identity,
+      input: left_payload,
+      operation_version: 1,
+      codec_versions: [1, 1, 1, 1],
+      result: checkpoint.StepSucceeded(left_output),
+      selected_branches: [
+        checkpoint.BranchSelection(
+          saga.NamedAddress(required_node_id("checkout-choice")),
+          saga.LeftBranch,
+        ),
+      ],
+      compensation: checkpoint.NotCompensable,
+    )
+  let assert [
+    checkpoint.BranchSelection(
+      saga.NamedAddress(checkpointed_choice),
+      checkpointed_side,
+    ),
+  ] = branch_snapshot.selected_branches
+  let assert True = checkpointed_choice == required_node_id("checkout-choice")
+  let assert saga.LeftBranch = checkpointed_side
+
   let denied_raw = choice_input(saga.ApprovalResult(original, saga.Denied))
-  let assert Ok(graph.SelectedBranch(graph.RightBranch, _)) =
-    graph.inspect_choice(
+  let assert Ok(saga.SelectedBranch(saga.RightBranch, _)) =
+    saga.inspect_choice(
       workflow,
       required_node_id("checkout-choice"),
       denied_raw,
     )
 
   let malformed = value.Array([value.Text("neither"), value.Text("payload")])
-  let assert Error(graph.ChoiceInputRejected(_)) =
-    graph.inspect_choice(
+  let assert Error(saga.ChoiceInputRejected(_)) =
+    saga.inspect_choice(
       workflow,
       required_node_id("checkout-choice"),
       malformed,
     )
 
   let expected_steps = [
-    graph.ScopedStepId(required_node_id("approval"), "approval.collect"),
-    graph.ScopedStepId(required_node_id("selector"), "approval.select-branch"),
-    graph.BranchStepId(
-      required_node_id("checkout-choice"),
-      graph.LeftBranch,
+    saga.ScopedStepId(
+      saga.NamedAddress(required_node_id("approval")),
+      "approval",
+    ),
+    saga.ScopedStepId(
+      saga.ChildAddress(
+        saga.NamedAddress(required_node_id("approval")),
+        saga.NamedAddress(required_node_id("approval.collect")),
+      ),
+      "approval.collect",
+    ),
+    saga.ScopedStepId(
+      saga.NamedAddress(required_node_id("selector")),
+      "selector",
+    ),
+    saga.ScopedStepId(
+      saga.ChildAddress(
+        saga.NamedAddress(required_node_id("selector")),
+        saga.NamedAddress(required_node_id("approval.select-branch")),
+      ),
+      "approval.select-branch",
+    ),
+    saga.ScopedStepId(
+      saga.NamedAddress(required_node_id("checkout-choice")),
+      "checkout-choice",
+    ),
+    saga.BranchStepId(
+      saga.BranchAddress(
+        saga.NamedAddress(required_node_id("checkout-choice")),
+        saga.LeftBranch,
+        saga.NamedAddress(required_node_id("checkout.place")),
+      ),
+      saga.LeftBranch,
       "checkout.place",
     ),
-    graph.BranchStepId(
-      required_node_id("checkout-choice"),
-      graph.RightBranch,
+    saga.BranchStepId(
+      saga.BranchAddress(
+        saga.NamedAddress(required_node_id("checkout-choice")),
+        saga.RightBranch,
+        saga.NamedAddress(required_node_id("checkout.decline")),
+      ),
+      saga.RightBranch,
       "checkout.decline",
     ),
   ]
-  let actual_steps = graph.step_identities(workflow)
+  let actual_steps = saga.step_identities(workflow)
   let exact_step_scopes = actual_steps == expected_steps
   let assert True = exact_step_scopes
   Nil
@@ -160,7 +218,7 @@ fn approval_definition() -> saga.Definition(
 
 fn selector_definition() -> saga.Definition(
   saga.ApprovalResult(Order, Bool),
-  graph.Choice(Order, Order),
+  saga.Choice(Order, Order),
   Nil,
   Nil,
 ) {
@@ -168,18 +226,18 @@ fn selector_definition() -> saga.Definition(
     "checkout.selector",
     "approval.select-branch",
     saga.approval_result_codec(order_codec(), blueprint.bool()),
-    graph.choice_codec(order_codec(), order_codec()),
+    saga.choice_codec(order_codec(), order_codec()),
     fn(approval) { Ok(select_branch(approval)) },
   )
 }
 
 fn select_branch(
   approval: saga.ApprovalResult(Order, Bool),
-) -> graph.Choice(Order, Order) {
+) -> saga.Choice(Order, Order) {
   case approval.decision {
-    saga.Approved(True) -> graph.Left(approval.input)
-    saga.Approved(False) -> graph.Right(approval.input)
-    saga.Denied -> graph.Right(approval.input)
+    saga.Approved(True) -> saga.Left(approval.input)
+    saga.Approved(False) -> saga.Right(approval.input)
+    saga.Denied -> saga.Right(approval.input)
   }
 }
 
@@ -292,17 +350,17 @@ fn declined_codec() -> blueprint.Codec(Fulfilment) {
 
 fn fulfilment_codec() -> blueprint.Codec(Fulfilment) {
   blueprint.imap(
-    graph.choice_codec(order_codec(), order_codec()),
+    saga.choice_codec(order_codec(), order_codec()),
     fn(choice) {
       case choice {
-        graph.Left(order) -> Placed(order)
-        graph.Right(order) -> Declined(order)
+        saga.Left(order) -> Placed(order)
+        saga.Right(order) -> Declined(order)
       }
     },
     fn(outcome) {
       case outcome {
-        Placed(order) -> graph.Left(order)
-        Declined(order) -> graph.Right(order)
+        Placed(order) -> saga.Left(order)
+        Declined(order) -> saga.Right(order)
       }
     },
   )
@@ -320,45 +378,56 @@ fn nil_codec() -> blueprint.Codec(Nil) {
 fn choice_input(approval: saga.ApprovalResult(Order, Bool)) -> value.Value {
   let assert Ok(raw) =
     blueprint.encode(
-      graph.choice_codec(order_codec(), order_codec()),
+      saga.choice_codec(order_codec(), order_codec()),
       select_branch(approval),
     )
   raw
 }
 
 fn require_add(
-  builder: graph.Builder(Order, Nil, Nil),
-  input: graph.Port(a),
-  id: graph.NodeId,
+  builder: saga.Builder(Order, Nil, Nil),
+  input: saga.Port(a),
+  id: saga.NodeId,
   definition: saga.Definition(a, b, Nil, Nil),
-) -> #(graph.Builder(Order, Nil, Nil), graph.Port(b)) {
-  let assert Ok(result) = graph.add_child(builder, input, id, definition)
+) -> #(saga.Builder(Order, Nil, Nil), saga.Port(b)) {
+  let assert Ok(result) = saga.add_child(builder, input, id, definition)
   result
 }
 
 fn require_choice(
-  builder: graph.Builder(Order, Nil, Nil),
-  input: graph.Port(graph.Choice(Order, Order)),
-  id: graph.NodeId,
+  builder: saga.Builder(Order, Nil, Nil),
+  input: saga.Port(saga.Choice(Order, Order)),
+  id: saga.NodeId,
   left: saga.Definition(Order, Fulfilment, Nil, Nil),
   right: saga.Definition(Order, Fulfilment, Nil, Nil),
   output: blueprint.Codec(Fulfilment),
-) -> #(graph.Builder(Order, Nil, Nil), graph.Port(Fulfilment)) {
+) -> #(saga.Builder(Order, Nil, Nil), saga.Port(Fulfilment)) {
   let assert Ok(result) =
-    graph.choose_children(builder, input, id, left, right, output)
+    saga.choose_children(builder, input, id, left, right, output)
   result
 }
 
 fn require_finish(
-  builder: graph.Builder(Order, Nil, Nil),
-  output: graph.Port(Fulfilment),
-) -> graph.Graph(Order, Fulfilment, Nil, Nil) {
-  let assert Ok(result) = graph.finish(builder, output)
+  builder: saga.Builder(Order, Nil, Nil),
+  output: saga.Port(Fulfilment),
+) -> saga.Definition(Order, Fulfilment, Nil, Nil) {
+  let assert Ok(result) =
+    saga.finish(
+      builder,
+      output,
+      required_definition_id("checkout.approval-workflow"),
+      required_version(1),
+      "checkout.approval-workflow:v1",
+    )
   result
 }
 
-fn required_node_id(value: String) -> graph.NodeId {
-  let assert Ok(id) = graph.node_id(value)
+fn named_reference(name: String) -> saga.NodeReference {
+  saga.NodeAt(saga.NamedAddress(required_node_id(name)))
+}
+
+fn required_node_id(value: String) -> saga.NodeId {
+  let assert Ok(id) = saga.node_id(value)
   id
 }
 

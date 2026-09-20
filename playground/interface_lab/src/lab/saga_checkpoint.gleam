@@ -1,6 +1,8 @@
 // THROWAWAY: Can an opaque continuation become a versioned non-generic snapshot?
 import lab/blueprint.{type Codec}
-import lab/saga.{type Definition}
+import lab/saga.{
+  type BranchSide, type Definition, type NodeAddress, type ScopedStepId,
+}
 import lab/value.{type Value}
 
 pub opaque type RunId {
@@ -35,14 +37,18 @@ pub type StepResult {
 
 pub type StepSnapshot {
   StepSnapshot(
-    identity: String,
+    identity: ScopedStepId,
     input: Value,
     operation_version: Int,
     codec_versions: List(Int),
     result: StepResult,
-    selected_branches: List(String),
+    selected_branches: List(BranchSelection),
     compensation: CompensationState,
   )
+}
+
+pub type BranchSelection {
+  BranchSelection(choice: NodeAddress, side: BranchSide)
 }
 
 pub type CompensationState {
@@ -54,12 +60,16 @@ pub type CompensationState {
 }
 
 pub type WaitReference {
-  ApprovalWait(step_id: String, approval_id: String, answer_codec_version: Int)
-  ChildWait(step_id: String, child_run_id: String, child_revision: Int)
+  ApprovalWait(
+    step_id: ScopedStepId,
+    approval_id: String,
+    answer_codec_version: Int,
+  )
+  ChildWait(step_id: ScopedStepId, child_run_id: String, child_revision: Int)
 }
 
 pub type AmbiguousEffect {
-  AmbiguousEffect(step_id: String, evidence: Value)
+  AmbiguousEffect(step_id: ScopedStepId, evidence: Value)
 }
 
 // Persisted data is deliberately concrete and non-generic. It carries no
@@ -74,7 +84,7 @@ pub type Snapshot {
     run_input: Value,
     cancellation: CancellationIntent,
     steps: List(StepSnapshot),
-    completion_order: List(String),
+    completion_order: List(ScopedStepId),
     waiting_on: List(WaitReference),
     ambiguous_effects: List(AmbiguousEffect),
   )
@@ -89,8 +99,8 @@ pub type RestoreError {
   DefinitionIdentityMismatch
   DefinitionVersionMismatch
   StructuralSignatureMismatch
-  UnknownStep(String)
-  CodecVersionMismatch(String)
+  UnknownStep(ScopedStepId)
+  CodecVersionMismatch(ScopedStepId)
   SnapshotCorrupt(String)
 }
 
