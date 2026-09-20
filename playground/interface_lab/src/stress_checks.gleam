@@ -9,6 +9,7 @@ import consumers/config_codec
 import consumers/derived_catalog
 import consumers/execution_ownership
 import consumers/foreign_observation
+import consumers/login_consumption
 import consumers/login_transactions
 import consumers/object_codec
 import consumers/offline_pipeline
@@ -40,6 +41,7 @@ pub fn main() -> Nil {
   conditional_graph.probe()
   config_codec.probe()
   collection_codec.probe()
+  login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
   object_codec.probe()

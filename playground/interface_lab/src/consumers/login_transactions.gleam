@@ -40,6 +40,10 @@ pub fn probe() -> Nil {
       now,
       expiry,
     )
+  let stored_a =
+    login.trusted_rehydrate_pending(transaction_a, revision("revision-a"))
+  let stored_b =
+    login.trusted_rehydrate_pending(transaction_b, revision("revision-b"))
 
   let login.AuthorizationRequest(
     request_issuer,
@@ -61,6 +65,8 @@ pub fn probe() -> Nil {
 
   let login.AuthorizationRequest(request_issuer_b, _, _, request_state_b, _, _) =
     request_b
+  let assert True = request_issuer_b == issuer_b
+  let assert True = request_state_b == state_b
   let callback_b =
     login.Callback(
       request_issuer_b,
@@ -68,22 +74,20 @@ pub fn probe() -> Nil {
       login.AuthorizationCodeReceived("code-b"),
     )
   let assert Error(login.StateMismatch) =
-    login.check_callback(transaction_a, callback_b, now)
+    login.check_callback(stored_a, callback_b)
   let callback_wrong_issuer =
     login.Callback(issuer_b, state_a, login.AuthorizationCodeReceived("code-a"))
   let assert Error(login.IssuerMismatch) =
-    login.check_callback(transaction_a, callback_wrong_issuer, now)
+    login.check_callback(stored_a, callback_wrong_issuer)
 
   let callback_a =
     login.Callback(issuer_a, state_a, login.AuthorizationCodeReceived("code-a"))
   let assert Error(login.StateMismatch) =
-    login.check_callback(transaction_b, callback_a, now)
-  let assert Error(login.TransactionExpired) =
-    login.check_callback(transaction_a, callback_a, timestamp(150))
+    login.check_callback(stored_b, callback_a)
   let missing_code =
     login.Callback(issuer_a, state_a, login.CallbackWithoutCode)
   let assert Error(login.AuthorizationCodeMissing) =
-    login.check_callback(transaction_a, missing_code, now)
+    login.check_callback(stored_a, missing_code)
   let assert Error(login.ExpirationMustBeInTheFuture) =
     login.plan_login(
       client_a,
@@ -93,35 +97,39 @@ pub fn probe() -> Nil {
       now,
     )
 
-  let assert Ok(_) = login.check_callback(transaction_b, callback_b, now)
+  let assert Ok(login.CodeReady(_)) = login.check_callback(stored_b, callback_b)
   let assert Error(login.AuthorizationCodeEmpty) =
     login.check_callback(
-      transaction_a,
+      stored_a,
       login.Callback(issuer_a, state_a, login.AuthorizationCodeReceived("")),
-      now,
     )
-  let assert Error(login.ProviderRejected("access_denied")) =
+  let assert Ok(login.ProviderDenied(denial)) =
     login.check_callback(
-      transaction_a,
+      stored_a,
       login.Callback(issuer_a, state_a, login.CallbackRejected("access_denied")),
-      now,
     )
-  // A checked transaction is copyable: atomic consumption is a separate gate.
-  let assert Ok(_) = login.check_callback(transaction_a, callback_a, now)
-  let assert Ok(_) = login.check_callback(transaction_a, callback_a, now)
+  let assert login.AccessDenied = login.denial_classification(denial)
 
-  // This is only the checked input to a future token-exchange boundary.
-  let assert Ok(_checked) =
-    checked_exchange_input(transaction_a, callback_a, now)
+  // Callback checking is pure and copyable; atomic consumption is a separate
+  // store operation. No caller-supplied time decides expiry here.
+  let assert Ok(login.CodeReady(_)) = login.check_callback(stored_a, callback_a)
+  let assert Ok(login.CodeReady(_)) = login.check_callback(stored_a, callback_a)
+
+  // This is only the checked input to a future atomic consumption boundary.
+  let assert Ok(_checked) = checked_exchange_input(stored_a, callback_a)
   Nil
 }
 
 pub fn checked_exchange_input(
-  transaction: login.Transaction,
+  stored: login.StoredTransaction,
   callback: login.Callback,
-  now: login.Timestamp,
-) -> Result(login.CheckedCallback, login.CallbackCheckError) {
-  login.check_callback(transaction, callback, now)
+) -> Result(login.CheckedOutcome, login.CallbackCheckError) {
+  login.check_callback(stored, callback)
+}
+
+fn revision(value: String) -> login.StoredRevision {
+  let assert Ok(checked) = login.stored_revision(value)
+  checked
 }
 
 fn material(
