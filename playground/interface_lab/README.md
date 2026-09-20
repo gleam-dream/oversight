@@ -6,23 +6,18 @@ This is a retained, disposable type experiment. It is not an implementation of t
 
 The primary question is whether one typed workflow model can express a bounded agent call, approval suspension, a compensating child workflow, and a restorable continuation while keeping execution capabilities explicit. Smaller consumer examples check whether the supporting interfaces remain useful independently.
 
-Read the [findings](FINDINGS.md) for the verified results and the representation corrections discovered during review. Start with the [workflow consumer](src/consumers/workflow.gleam) and the [freeze/thaw consumer](src/consumers/checkpoint.gleam) to inspect the proposed caller experience.
+Start with the [current refinement status](REFINEMENT-STATUS.md) for the evidence map and remaining integration questions. The [first findings](FINDINGS.md) and [initial stress exploration](STRESS-TESTS.md) are historical checkpoints.
 
-The subsequent [public-interface stress exploration](STRESS-TESTS.md) covers 22 individual-library and cross-library scenarios. It records the expanded checks, small API corrections, and the contracts that are still missing.
-
-The [codec-derived catalog refinement](SCHEMA-CATALOG.md) connects supported codec schemas to package-specific tool discovery and dispatch.
-
-The [observation contract refinement](OBSERVATION-CONTRACT.md) separates map-shaped event fields from arbitrary codecs and checks foreign-data failure classification.
-
-The [shared graph refinement](SHARED-GRAPH.md) tests typed references, shared producers, joins, reusable children, and copied-builder membership. See the [current refinement status](REFINEMENT-STATUS.md) for the cross-package evidence map.
-
-The [closed-choice refinement](CLOSED-CHOICE.md) adds typed approval/decline routing with explicit output encoding and private branch internals.
-
-The [activity-contract refinement](ACTIVITY-CONTRACT.md) replaces the positional version cluster with reusable typed boundaries.
-
-The [execution-ownership refinement](EXECUTION-OWNERSHIP.md) distinguishes direct activities and approvals from independently managed children.
-
-The [login-transaction refinement](LOGIN-TRANSACTIONS.md) checks concurrent callback binding without issuing verified identities.
+| Refinement                                       | Main question tested                                                    |
+| ------------------------------------------------ | ----------------------------------------------------------------------- |
+| [Codec-derived catalogs](SCHEMA-CATALOG.md)      | Can registration supply both declaration and invocation?                |
+| [Observation contracts](OBSERVATION-CONTRACT.md) | Can typed map fields classify foreign callback data?                    |
+| [Shared graphs](SHARED-GRAPH.md)                 | Can one producer feed typed checks and a join?                          |
+| [Closed choices](CLOSED-CHOICE.md)               | Can approval decline be a normal branch with private internals?         |
+| [Activity contracts](ACTIVITY-CONTRACT.md)       | Can codecs and their revisions form reusable typed boundaries?          |
+| [Execution ownership](EXECUTION-OWNERSHIP.md)    | Can direct activities remain distinct from independent children?        |
+| [Login transactions](LOGIN-TRANSACTIONS.md)      | Can concurrent callbacks be checked without issuing an identity?        |
+| [Scheduled jobs](SCHEDULED-JOBS.md)              | Can scheduled admission and cancellation intent preserve typed handles? |
 
 ## Run the experiment
 

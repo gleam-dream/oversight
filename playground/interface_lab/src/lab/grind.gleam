@@ -112,15 +112,50 @@ pub type AdmissionError {
   AdmissionRejected(Value)
 }
 
-// Queue admission is a typed seam. A real queue supplies the implementation;
-// this playground does not claim leasing, retries, or durable delivery.
-pub opaque type Queue {
-  Queue(admit: fn(String, Int, Value) -> Result(JobId, AdmissionError))
+pub opaque type AvailableAt {
+  AvailableAt(unix_milliseconds: Int)
 }
 
-pub fn queue(
-  admit: fn(String, Int, Value) -> Result(JobId, AdmissionError),
-) -> Queue {
+pub type ScheduleError {
+  AvailableAtMustNotBeNegative
+}
+
+// Absolute Unix milliseconds are explicit; this value is not a relative delay.
+pub fn available_at(
+  unix_milliseconds: Int,
+) -> Result(AvailableAt, ScheduleError) {
+  case unix_milliseconds >= 0 {
+    True -> Ok(AvailableAt(unix_milliseconds))
+    False -> Error(AvailableAtMustNotBeNegative)
+  }
+}
+
+pub fn available_at_milliseconds(available_at: AvailableAt) -> Int {
+  let AvailableAt(unix_milliseconds) = available_at
+  unix_milliseconds
+}
+
+pub type Availability {
+  Immediate
+  At(AvailableAt)
+}
+
+// Queue admission receives the same worker identity and encoded payload for
+// immediate and scheduled jobs. A real queue owns timing and durability.
+pub type Admission {
+  Admission(
+    worker_id: String,
+    worker_version: Int,
+    payload: Value,
+    availability: Availability,
+  )
+}
+
+pub opaque type Queue {
+  Queue(admit: fn(Admission) -> Result(JobId, AdmissionError))
+}
+
+pub fn queue(admit: fn(Admission) -> Result(JobId, AdmissionError)) -> Queue {
   Queue(admit)
 }
 
@@ -130,8 +165,34 @@ pub fn admit(
   worker_version: Int,
   payload: Value,
 ) -> Result(JobId, AdmissionError) {
+  admit_with_availability(queue, worker_id, worker_version, payload, Immediate)
+}
+
+pub fn admit_at(
+  queue: Queue,
+  worker_id: String,
+  worker_version: Int,
+  payload: Value,
+  available_at: AvailableAt,
+) -> Result(JobId, AdmissionError) {
+  admit_with_availability(
+    queue,
+    worker_id,
+    worker_version,
+    payload,
+    At(available_at),
+  )
+}
+
+fn admit_with_availability(
+  queue: Queue,
+  worker_id: String,
+  worker_version: Int,
+  payload: Value,
+  availability: Availability,
+) -> Result(JobId, AdmissionError) {
   let Queue(admit) = queue
-  admit(worker_id, worker_version, payload)
+  admit(Admission(worker_id, worker_version, payload, availability))
 }
 
 pub opaque type JobHandle(o, e) {
@@ -149,12 +210,30 @@ pub fn submit(
   worker: Worker(i, o, e),
   input: i,
 ) -> Result(JobHandle(o, e), SubmitError) {
+  submit_with_availability(queue, worker, input, Immediate)
+}
+
+pub fn submit_at(
+  queue: Queue,
+  worker: Worker(i, o, e),
+  input: i,
+  available_at: AvailableAt,
+) -> Result(JobHandle(o, e), SubmitError) {
+  submit_with_availability(queue, worker, input, At(available_at))
+}
+
+fn submit_with_availability(
+  queue: Queue,
+  worker: Worker(i, o, e),
+  input: i,
+  availability: Availability,
+) -> Result(JobHandle(o, e), SubmitError) {
   case blueprint.encode(worker.input_codec, input) {
     Error(error) -> Error(InputCouldNotEncode(error))
     Ok(payload) -> {
       let WorkerId(id) = worker.id
       let WorkerVersion(version) = worker.version
-      case admit(queue, id, version, payload) {
+      case admit_with_availability(queue, id, version, payload, availability) {
         Error(error) -> Error(JobCouldNotBeAdmitted(error))
         Ok(job_id) ->
           Ok(JobHandle(job_id, worker.output_codec, worker.error_codec))
@@ -170,10 +249,53 @@ pub type JobOutcome(o, e) {
 }
 
 pub type JobState(o, e) {
+  JobScheduled(AvailableAt)
   JobQueued
-  JobRunning
+  JobRunning(CancelIntent)
   JobSuspended(Value)
   JobFinished(JobOutcome(o, e))
+}
+
+pub type CancelIntent {
+  NoRequest
+  Requested
+}
+
+pub type CancellationTransition(o, e) {
+  CancelledWhileInactive
+  CancellationRequested
+  AlreadyCancelled
+  AlreadyFinished(JobOutcome(o, e))
+}
+
+// This pure rule makes no claim that an inactive job has had no effects in an
+// earlier attempt. Storage adapters must load and atomically persist this step.
+pub fn cancellation_transition(
+  state: JobState(o, e),
+) -> #(JobState(o, e), CancellationTransition(o, e)) {
+  case state {
+    JobScheduled(_) -> #(JobFinished(JobCancelled), CancelledWhileInactive)
+    JobQueued -> #(JobFinished(JobCancelled), CancelledWhileInactive)
+    JobSuspended(_) -> #(JobFinished(JobCancelled), CancelledWhileInactive)
+    JobRunning(NoRequest) -> #(JobRunning(Requested), CancellationRequested)
+    JobRunning(Requested) -> #(JobRunning(Requested), CancellationRequested)
+    JobFinished(JobCancelled) -> #(JobFinished(JobCancelled), AlreadyCancelled)
+    JobFinished(outcome) -> #(JobFinished(outcome), AlreadyFinished(outcome))
+  }
+}
+
+pub type CancelError {
+  CancelJobNotFound
+  CancellationStorageUnavailable
+}
+
+// A concrete queue adapter must load the latest state and atomically persist
+// the pure transition above; this prototype does neither operation.
+pub fn cancel(
+  _queue: Queue,
+  _handle: JobHandle(o, e),
+) -> Result(CancellationTransition(o, e), CancelError) {
+  todo as "load and persist the cancellation transition through queue storage"
 }
 
 pub type PollError {
