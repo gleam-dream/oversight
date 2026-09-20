@@ -27,7 +27,7 @@
 
 ## Registration ergonomics
 
-- Activity registration now uses a reusable typed contract that keeps each codec with its version. Approval and child boundary metadata still need their corresponding refinement.
+- Activity registration uses one typed factory and a reusable contract that keeps each codec with its version. Approval and child boundary metadata still need their corresponding refinement.
 
 ## Verified checkpoint
 
@@ -39,7 +39,7 @@
 
 ## Next integration priorities
 
-1. Remove unused legacy registration adapters, then exercise the local runner contract over the canonical Saga definition.
+1. Exercise the local runner contract over the canonical Saga definition.
 2. Complete child attachment, reattachment, cancellation, typed completion, and compensation-receipt issuance. Completion alone is not parent compensation authority.
 3. Connect the schema vocabulary to each protocol/provider capability check, then establish streaming resource ownership.
 4. Test actual boundaries against pinned oracles: native telemetry, oidcc with atomic transaction consumption, and transactional queue/workflow recovery.

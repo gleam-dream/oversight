@@ -34,4 +34,8 @@
 - Sequence grouping contributes to stable addresses. Reassociating a definition is a structural change for persisted state, even when its business result is equivalent.
 - Synthetic node format versions are laboratory policy, not a production migration contract.
 - Child attachment, compensation-receipt issuance, definition migration, and operational recovery remain subsequent experiments.
-- Activity and approval registration still retain legacy erased callbacks alongside their typed factories. Removing that unused lowering path is a separate cleanup; the canonical definition does not store it.
+
+## Registration cleanup
+
+- Activities retain one typed factory. Approvals retain their descriptor and codecs. Both lower into canonical nodes when attached to a builder.
+- The unused erased registration callbacks and their obsolete public failure types are removed. Existing typed callback, compensation, approval, and codec probes remain the verification evidence.
