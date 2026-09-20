@@ -152,3 +152,9 @@
 - [Login consumption](LOGIN-CONSUMPTION.md) keeps stored revisions and terminal records in the existing transaction owner. Binding checks produce typed code or denial outcomes without deciding expiry.
 - The injected store owns current-record lookup, authoritative clock sampling, and consumption. Terminal records take precedence over stale revisions; unknown commit never grants exchange authority.
 - Public consumption returns no secret-bearing capability. Concurrent storage and private backend-to-identity orchestration remain open.
+
+## Protected tool authorization contract
+
+- The [Relay resource authorization contract](../../research/relay-resource-authorization-contract.md) proposes protected registry configuration, grant reuse checks, visibility filtering, and authorization on each named dispatch.
+- Application context remains explicit and application-owned. Warden identity and independently verified bearer grants cannot substitute for one another.
+- This contract has no implementation evidence yet. Protected transport integration, protocol responses, token verification, anonymous access, and pagination remain open.
