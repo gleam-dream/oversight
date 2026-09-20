@@ -2,6 +2,8 @@
 
 # Interface findings
 
+These findings describe the first checkpoint, `fb7d408`. The subsequent [stress exploration](STRESS-TESTS.md) records broader scenarios and the current verification results.
+
 ## Question
 
 Can one typed workflow authoring surface connect a bounded agent operation, approval, and a compensating child, while exposing local execution, durable submission, and snapshot restoration as different capabilities?

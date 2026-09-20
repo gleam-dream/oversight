@@ -59,3 +59,33 @@ pub fn bounded(
 pub fn invoke_agent(agent: Agent(i, o, e), input: i) -> Result(o, e) {
   agent.call(input)
 }
+
+// A registry can be built once while invocation supplies request-owned context.
+// Context remains adapter-specific and is not part of the encoded business input.
+pub opaque type ContextTool(context) {
+  ContextTool(bind: fn(context) -> Tool)
+}
+
+pub fn context_tool(
+  name: String,
+  input: Codec(i),
+  output: Codec(o),
+  error: Codec(e),
+  handler: fn(context, i) -> Result(o, e),
+) -> ContextTool(context) {
+  ContextTool(fn(context) {
+    tool(name, input, output, error, fn(input) { handler(context, input) })
+  })
+}
+
+pub fn bind_context(tool: ContextTool(context), context: context) -> Tool {
+  tool.bind(context)
+}
+
+pub fn invoke_context(
+  tool: ContextTool(context),
+  context: context,
+  input: Value,
+) -> Result(Value, ToolError) {
+  invoke(bind_context(tool, context), input)
+}

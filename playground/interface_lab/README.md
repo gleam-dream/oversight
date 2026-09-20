@@ -8,6 +8,8 @@ The primary question is whether one typed workflow model can express a bounded a
 
 Read the [findings](FINDINGS.md) for the verified results and the representation corrections discovered during review. Start with the [workflow consumer](src/consumers/workflow.gleam) and the [freeze/thaw consumer](src/consumers/checkpoint.gleam) to inspect the proposed caller experience.
 
+The subsequent [public-interface stress exploration](STRESS-TESTS.md) covers 22 individual-library and cross-library scenarios. It records the expanded checks, small API corrections, and the contracts that are still missing.
+
 ## Run the experiment
 
 From the repository root:
@@ -18,21 +20,23 @@ nix develop --command python3 playground/interface_lab/check.py
 
 The command compiles the positive sources, compiles each consumer with only its transitive source imports, and checks each negative example in an isolated temporary project. A negative example passes only when the compiler rejects it with the expected diagnostic. The project uses the repository's Gleam 1.18.1 toolchain and has no external package dependencies.
 
-The command does not execute the consumers. Named `todo` expressions identify unfinished runtime boundaries and produce expected compiler warnings. Running those functions would panic. The absence of production implementations is intentional; warnings-as-errors is not the acceptance gate for this experiment.
+The command also executes six pure probe groups through `stress_checks`: codec composition, retained approval input, batch results, injected job dependencies, contextual tools, and scripted provider turns. It does not execute scheduler, storage, protocol, or other unfinished runtime boundaries.
+
+Named `todo` expressions identify unfinished runtime boundaries and produce expected compiler warnings. Running those functions would panic. The absence of production implementations is intentional; warnings-as-errors is not the acceptance gate for this experiment.
 
 ## Inspect the interfaces
 
-| Surface            | Location                                          | Experiment                                                                       |
-| ------------------ | ------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Shared data        | `src/lab/value.gleam`, `src/lab/blueprint.gleam`  | Bidirectional typed codecs around an explicit data algebra                       |
-| Workflow authoring | `src/lab/saga.gleam`                              | Typed composition, local versus persistence-ready definitions, child boundaries  |
-| Freeze/thaw        | `src/lab/saga_checkpoint.gleam`                   | Execution state, checkpoint permission, untrusted snapshot, restoration outcomes |
-| Durable execution  | `src/lab/grind.gleam`, `src/lab/saga_grind.gleam` | Worker registration, submission, run handles, signals and cancellation           |
-| Agent integration  | `src/lab/fabric.gleam`                            | Typed operation and heterogeneous tool packaging                                 |
-| Model call         | `src/lab/llm.gleam`                               | One-call provider interface and typed structured output                          |
-| Protocol tools     | `src/lab/relay.gleam`                             | Heterogeneous tool packaging without a workflow dependency                       |
-| Observation        | `src/lab/sinal.gleam`                             | One descriptor constrains measurements and metadata                              |
-| Authentication     | `src/lab/warden.gleam`                            | Pending login cannot be used as verified identity                                |
+| Surface            | Location                                            | Experiment                                                                       |
+| ------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Shared data        | `src/lab/value.gleam`, `src/lab/blueprint.gleam`    | Bidirectional typed codecs around an explicit data algebra                       |
+| Workflow authoring | `src/lab/saga.gleam`                                | Typed composition, local versus persistence-ready definitions, child boundaries  |
+| Freeze/thaw        | `src/lab/saga_checkpoint.gleam`                     | Execution state, checkpoint permission, untrusted snapshot, restoration outcomes |
+| Durable execution  | `src/lab/grind.gleam`, `src/lab/saga_grind.gleam`   | Worker registration, submission, run handles, signals and cancellation           |
+| Agent integration  | `src/lab/fabric.gleam`, `src/lab/fabric_turn.gleam` | Contextual tools and explicit pending tool-result batches                        |
+| Model call         | `src/lab/llm.gleam`, `src/lab/llm_turn.gleam`       | One-call provider interface, typed output, and provider-owned continuation       |
+| Protocol tools     | `src/lab/relay.gleam`                               | Heterogeneous tool packaging without a workflow dependency                       |
+| Observation        | `src/lab/sinal.gleam`                               | One descriptor constrains measurements and metadata                              |
+| Authentication     | `src/lab/warden.gleam`                              | Pending login cannot be used as verified identity                                |
 
 The workflow consumer is the primary example. The other consumers isolate model calls, login, observation, and function reuse across adapters. They are caller examples, not production usage documentation.
 
@@ -61,7 +65,7 @@ Constructive representations retain the values needed by their interfaces. Codec
 
 Compiler checks can reject incompatible types, distinguish local plans from durable definitions, and prevent a pending identity from entering a verified-identity API. They cannot prove codec laws, graph validity, persistence safety, authorization, idempotency, or correct scheduling.
 
-The agent wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser or a JSON Schema implementation.
+The original agent wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The newer `fabric_turn` module exercises explicit tool-request/result handoff with scripted providers. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser or a JSON Schema implementation.
 
 Compiling isolated source imports tests module dependency direction. All modules still belong to one experimental package; independently distributable packages require later consumer builds against actual package boundaries.
 

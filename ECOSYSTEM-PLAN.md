@@ -7,6 +7,7 @@
 - Erlang/OTP is the first production target. Keep pure components portable where practical without making JavaScript support a condition for every release.
 - The immediate work is interface exploration in `oversight`. Production implementation follows accepted contracts and evidence from the required feasibility checks.
 - The retained [interface playground](playground/interface_lab/README.md) now makes the candidate contracts inspectable. Its [findings](playground/interface_lab/FINDINGS.md) distinguish compiler evidence from unfinished runtime guarantees, including the proposed Saga checkpoint boundary.
+- The [public-interface stress exploration](playground/interface_lab/STRESS-TESTS.md) tests broader adoption scenarios. It identifies missing public contracts; the package boundaries are not ready for promotion merely because the current examples compile.
 - Initial releases are increments toward the declared package goals. A smaller first release does not redefine a feature-complete target as delivered.
 
 ## Recommended library boundaries

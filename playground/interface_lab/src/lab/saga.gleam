@@ -227,6 +227,22 @@ pub type ApprovalDecision(a) {
   Denied
 }
 
+// The answer never replaces the trusted input that prompted approval.
+pub type ApprovalResult(input, answer) {
+  ApprovalResult(input: input, decision: ApprovalDecision(answer))
+}
+
+pub fn approval_result_codec(
+  input: Codec(i),
+  answer: Codec(a),
+) -> Codec(ApprovalResult(i, a)) {
+  blueprint.imap(
+    blueprint.pair(input, approval_decision_codec(answer)),
+    fn(pair) { ApprovalResult(pair.0, pair.1) },
+    fn(result) { #(result.input, result.decision) },
+  )
+}
+
 // Approval is a distinct node kind. Reaching it suspends until a typed signal
 // is accepted by saga_checkpoint; the node does not turn waiting into failure.
 pub opaque type Approval(i, a, e, u) {
@@ -264,7 +280,7 @@ pub fn approval(
       fn(_input) { NodeWaiting(ApprovalPending) },
       Missing,
       validator(input),
-      validator(approval_decision_codec(answer)),
+      validator(approval_result_codec(input, answer)),
       error,
       undo_error,
     ),
@@ -336,7 +352,7 @@ pub fn define_approval(
   definition_version: Version,
   structural_signature: String,
   approval: Approval(i, a, e, u),
-) -> Definition(i, ApprovalDecision(a), e, u) {
+) -> Definition(i, ApprovalResult(i, a), e, u) {
   let Approval(node, input, answer, error, undo_error) = approval
   let encoded_node =
     ErasedNode(
@@ -350,7 +366,7 @@ pub fn define_approval(
       },
       Missing,
       validator(input),
-      validator(approval_decision_codec(answer)),
+      validator(approval_result_codec(input, answer)),
       error,
       undo_error,
     )
@@ -359,7 +375,7 @@ pub fn define_approval(
     definition_version,
     structural_signature,
     input,
-    approval_decision_codec(answer),
+    approval_result_codec(input, answer),
     error,
     undo_error,
     [encoded_node],
