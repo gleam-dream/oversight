@@ -8,6 +8,7 @@ import consumers/derived_catalog
 import consumers/execution_ownership
 import consumers/foreign_observation
 import consumers/login_transactions
+import consumers/object_codec
 import consumers/offline_pipeline
 import consumers/scheduled_jobs
 import consumers/shared_graph
@@ -26,6 +27,7 @@ pub fn main() -> Nil {
   collection_codec.probe()
   login_transactions.probe()
   offline_pipeline.probe()
+  object_codec.probe()
   scheduled_jobs.probe()
   shared_graph.probe()
   shared_registry.probe()

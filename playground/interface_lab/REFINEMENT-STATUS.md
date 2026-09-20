@@ -10,16 +10,16 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                  | Next decisive question                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed input field, lists, nulls, and registry consistency             | General records, tagged unions, refinements, and independent schema validation |
-| Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                            | Protocol name rules, visibility policy, transport conformance                  |
-| Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                               | Explicit provider schema subsets and streaming resource ownership              |
-| Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing | One lowered definition model preserving explicit activity/child ownership      |
-| Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                               | Restart behavior and usable compensation receipt issuance                      |
-| Grind alone                 | Typed immediate/scheduled admission, handles, and cancellation transitions                                        | Transactional storage, leases, running cancellation observation, and retries   |
-| Sinal alone                 | Map-shaped fields and foreign callback error classification                                                       | Native atom/map bridge and pinned telemetry behavior tests                     |
-| Warden alone                | Configured transactions, callback checks, and checked versus verified identities                                  | Atomic consumption and oidcc token-verification integration                    |
+| Boundary                    | Current evidence                                                                                                   | Next decisive question                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed records, optional fields, lists, nulls, and registry consistency | Tagged unions, refinements, and independent schema validation                |
+| Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                             | Protocol name rules, visibility policy, transport conformance                |
+| Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                                | Explicit provider schema subsets and streaming resource ownership            |
+| Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing  | One lowered definition model preserving explicit activity/child ownership    |
+| Saga → durable runner       | Snapshot/restore/approval/child contract signatures                                                                | Restart behavior and usable compensation receipt issuance                    |
+| Grind alone                 | Typed immediate/scheduled admission, handles, and cancellation transitions                                         | Transactional storage, leases, running cancellation observation, and retries |
+| Sinal alone                 | Map-shaped fields and foreign callback error classification                                                        | Native atom/map bridge and pinned telemetry behavior tests                   |
+| Warden alone                | Configured transactions, callback checks, and checked versus verified identities                                   | Atomic consumption and oidcc token-verification integration                  |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-three consumers compile with only their transitive source imports.
-- Twenty-three negative fixtures fail with their intended single compiler diagnostic.
-- Fifteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: twenty-four consumers compile with only their transitive source imports.
+- Twenty-four negative fixtures fail with their intended single compiler diagnostic.
+- Sixteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -58,3 +58,7 @@
 ## Collection refinement
 
 - [Collection and null codecs](COLLECTION-CODECS.md) retain indexed failures and explicit null representation. Optional properties and independent schema validation remain pending.
+
+## Object refinement
+
+- [Composable object properties](OBJECT-CODECS.md) distinguish missing, null, and present values and feed Relay discovery and invocation from one codec.
