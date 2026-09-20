@@ -181,13 +181,19 @@ pub fn probe() -> Nil {
       after_repeated_close,
       exchange.Begin(unknown_exchange, unknown_call),
     )
+  let assert [exchange.OpenStream(_), exchange.Invoke(unknown_task)] =
+    unknown_effects
+  let #(after_unknown_finished, unknown_finished) =
+    exchange.step(after_unknown, exchange.perform(unknown_task))
   let assert [
-    exchange.OpenStream(_),
     exchange.Complete(_, _, Error(relay.UnknownTool("missing-tool"))),
     exchange.CloseStream(_),
-  ] = unknown_effects
+  ] = unknown_finished
   let #(_after_unknown_replay, no_unknown_replay) =
-    exchange.step(after_unknown, exchange.Begin(unknown_exchange, unknown_call))
+    exchange.step(
+      after_unknown_finished,
+      exchange.Begin(unknown_exchange, unknown_call),
+    )
   let assert [] = no_unknown_replay
 
   let preclosed_exchange = exchange.fresh_exchange()

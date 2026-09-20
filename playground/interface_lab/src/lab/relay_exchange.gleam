@@ -55,11 +55,25 @@ pub type ServerInput(context) {
 }
 
 pub opaque type Server(context) {
-  Server(registry: relay.Registry(context), exchanges: List(ExchangeRecord))
+  Server(
+    dispatch: fn(context, String, Value) -> Result(Value, relay.DispatchError),
+    exchanges: List(ExchangeRecord),
+  )
 }
 
 pub fn server(registry: relay.Registry(context)) -> Server(context) {
-  Server(registry, [])
+  server_with_dispatch(fn(context, name, arguments) {
+    relay.dispatch(registry, context, name, arguments)
+  })
+}
+
+// The runtime task keeps the dispatch boundary selected by its server adapter.
+// Protected adapters use this to retain the real authorization-aware callback
+// rather than checking a grant and then dispatching through a raw registry.
+pub fn server_with_dispatch(
+  dispatch: fn(context, String, Value) -> Result(Value, relay.DispatchError),
+) -> Server(context) {
+  Server(dispatch, [])
 }
 
 pub type ServerEffect(context) {
@@ -80,7 +94,7 @@ pub type ServerEffect(context) {
 pub opaque type Invocation(context) {
   Invocation(
     id: InvocationId,
-    registry: relay.Registry(context),
+    dispatch: fn(context, String, Value) -> Result(Value, relay.DispatchError),
     context: context,
     tool_name: String,
     arguments: Value,
@@ -91,9 +105,13 @@ pub fn invocation_id(invocation: Invocation(context)) -> InvocationId {
   invocation.id
 }
 
+pub fn invocation_context(invocation: Invocation(context)) -> context {
+  invocation.context
+}
+
 pub fn perform(invocation: Invocation(context)) -> ServerInput(context) {
-  let Invocation(id, registry, context, tool_name, arguments) = invocation
-  Finished(id, relay.dispatch(registry, context, tool_name, arguments))
+  let Invocation(id, dispatch, context, tool_name, arguments) = invocation
+  Finished(id, dispatch(context, tool_name, arguments))
 }
 
 type ExchangeRecord {
@@ -105,6 +123,7 @@ type ExchangeRecord {
     status: ExchangeStatus,
     latest_progress: Optional(Int),
   )
+  ImmediateExchange(ExchangeId)
   Preclosed(ExchangeId)
 }
 
@@ -126,62 +145,49 @@ pub fn step(
   }
 }
 
+// Immediate JSON-RPC responses and notifications share the same exchange
+// ownership record as tool calls. The returned boolean is an admission result,
+// not a concurrency or persistence guarantee for copied Gleam values.
+pub fn claim_exchange(
+  server: Server(context),
+  exchange: ExchangeId,
+) -> #(Server(context), Bool) {
+  let Server(dispatch, exchanges) = server
+  case find_exchange(exchanges, exchange) {
+    Present(_) -> #(server, False)
+    Absent -> #(
+      Server(dispatch, [ImmediateExchange(exchange), ..exchanges]),
+      True,
+    )
+  }
+}
+
 fn begin(
   server: Server(context),
   exchange: ExchangeId,
   call: ParsedCall(context),
 ) -> #(Server(context), List(ServerEffect(context))) {
-  let Server(registry, exchanges) = server
+  let Server(dispatch, exchanges) = server
   case find_exchange(exchanges, exchange) {
     Present(_) -> #(server, [])
-    Absent ->
-      case declares_tool(relay.declarations(registry), call.tool_name) {
-        False -> {
-          let record =
-            ActiveExchange(
-              exchange,
-              call.request_id,
-              call.progress_token,
-              Absent,
-              ExchangeTerminal,
-              Absent,
-            )
-          let next = Server(registry, [record, ..exchanges])
-          #(next, [
-            OpenStream(exchange),
-            Complete(
-              exchange,
-              call.request_id,
-              Error(relay.UnknownTool(call.tool_name)),
-            ),
-            CloseStream(exchange),
-          ])
-        }
-        True -> {
-          let id = invocation_for(exchange)
-          let record =
-            ActiveExchange(
-              exchange,
-              call.request_id,
-              call.progress_token,
-              Present(id),
-              ExchangeOpen,
-              Absent,
-            )
-          let invocation =
-            Invocation(
-              id,
-              registry,
-              call.context,
-              call.tool_name,
-              call.arguments,
-            )
-          #(Server(registry, [record, ..exchanges]), [
-            OpenStream(exchange),
-            Invoke(invocation),
-          ])
-        }
-      }
+    Absent -> {
+      let id = invocation_for(exchange)
+      let record =
+        ActiveExchange(
+          exchange,
+          call.request_id,
+          call.progress_token,
+          Present(id),
+          ExchangeOpen,
+          Absent,
+        )
+      let invocation =
+        Invocation(id, dispatch, call.context, call.tool_name, call.arguments)
+      #(Server(dispatch, [record, ..exchanges]), [
+        OpenStream(exchange),
+        Invoke(invocation),
+      ])
+    }
   }
 }
 
@@ -190,7 +196,7 @@ fn finish(
   invocation: InvocationId,
   outcome: Result(Value, relay.DispatchError),
 ) -> #(Server(context), List(ServerEffect(context))) {
-  let Server(registry, exchanges) = server
+  let Server(dispatch, exchanges) = server
   case find_invocation(exchanges, invocation) {
     Absent -> #(server, [])
     Present(ActiveExchange(exchange, request_id, _, Present(_), ExchangeOpen, _)) -> {
@@ -200,7 +206,7 @@ fn finish(
         Complete(exchange, request_id, outcome),
         CloseStream(exchange),
       ]
-      #(Server(registry, updated), effects)
+      #(Server(dispatch, updated), effects)
     }
     Present(_) -> #(server, [])
   }
@@ -211,15 +217,16 @@ fn progress(
   invocation: InvocationId,
   value: Int,
 ) -> #(Server(context), List(ServerEffect(context))) {
-  let Server(registry, exchanges) = server
+  let Server(dispatch, exchanges) = server
   case find_invocation(exchanges, invocation) {
     Absent -> #(server, [])
     Present(Preclosed(_)) -> #(server, [])
+    Present(ImmediateExchange(_)) -> #(server, [])
     Present(ActiveExchange(exchange, _, token, _, status, latest)) ->
       case status, token, valid_progress(value, latest) {
         ExchangeOpen, Present(retained_token), True -> {
           let updated = replace_progress(exchanges, invocation, value)
-          #(Server(registry, updated), [
+          #(Server(dispatch, updated), [
             SendProgress(exchange, retained_token, value),
           ])
         }
@@ -232,9 +239,9 @@ fn close(
   server: Server(context),
   exchange: ExchangeId,
 ) -> #(Server(context), List(ServerEffect(context))) {
-  let Server(registry, exchanges) = server
+  let Server(dispatch, exchanges) = server
   case find_exchange(exchanges, exchange) {
-    Absent -> #(Server(registry, [Preclosed(exchange), ..exchanges]), [])
+    Absent -> #(Server(dispatch, [Preclosed(exchange), ..exchanges]), [])
     Present(Preclosed(_)) -> #(server, [])
     Present(ActiveExchange(_, _, _, invocation, ExchangeOpen, _)) -> {
       let next = replace_exchange_status(exchanges, exchange, ExchangeClosed)
@@ -242,17 +249,9 @@ fn close(
         Present(id) -> [Cancel(id), CloseStream(exchange)]
         Absent -> [CloseStream(exchange)]
       }
-      #(Server(registry, next), effects)
+      #(Server(dispatch, next), effects)
     }
     Present(_) -> #(server, [])
-  }
-}
-
-fn declares_tool(declarations: List(relay.Declaration), name: String) -> Bool {
-  case declarations {
-    [] -> False
-    [relay.Declaration(declared, _), ..rest] ->
-      declared == name || declares_tool(rest, name)
   }
 }
 
@@ -280,6 +279,11 @@ fn find_exchange(
         False -> find_exchange(rest, exchange)
       }
     [Preclosed(id) as record, ..rest] ->
+      case id == exchange {
+        True -> Present(record)
+        False -> find_exchange(rest, exchange)
+      }
+    [ImmediateExchange(id) as record, ..rest] ->
       case id == exchange {
         True -> Present(record)
         False -> find_exchange(rest, exchange)

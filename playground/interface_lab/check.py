@@ -96,6 +96,8 @@ def main():
     schema_check.main()
     import generation_check
     generation_check.main()
+    import relay_schema_check
+    relay_schema_check.main()
     print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
 
 

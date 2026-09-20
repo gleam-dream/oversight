@@ -13,7 +13,7 @@
 | Boundary                    | Current evidence                                                                                                                     | Remaining interface work                                                                                         |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
 | Blueprint → tool catalogs   | Composed codecs, finite string enums, located schema requirements, runtime contracts, document loading, and finite native generation | Number policy, enum generation, actual provider profiles, broader generation, and complete 1.x migration         |
-| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                       | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds protected modern calls and shared exchange ownership                    | Relay transport and remaining protocol families; Fabric live policy ownership and approval persistence           |
 | Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                   | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                        | Local runner outcomes, traversal, retry policy, and definition migration                                         |
 | Saga → durable runner       | Unified definition signatures; child links, exact submission receipts, cancellation intent, and compensation claims                  | Local compensation authority, persisted unfinished commands, snapshot codecs, and journal admission              |
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-seven consumers compile with only their transitive source imports.
-- Sixty-nine negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-eight interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-eight consumers compile with only their transitive source imports.
+- Seventy-one negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-nine interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -226,3 +226,10 @@
 - A Relay consumer uses the same nested enum codec for declaration and dispatch. Runtime-validated wire values remain distinct from native enum values.
 - Independent schema checks include exact labels, empty strings, quotes, Unicode, unknown labels, and nested enum collections. The published JSON Blueprint compatibility probes remain valid after the core extension.
 - Source generation explicitly rejects enum schemas. Generated constructors, aliases, number policy, and broader legacy migration remain separate work.
+
+## Modern Relay server composition
+
+- [Modern Relay](MODERN-RELAY.md) joins parsed-value admission with the protected registry and existing exchange owner. Discovery, listing, and calls share exchange identity; immediate responses cannot bypass a previous completion or close.
+- Calls retain the actual grant, application context, and request metadata through explicit invocation effects. Domain failures, malformed requests, unsupported versions, and internal encoding failures remain distinct.
+- Five actual responses match the frozen upstream schema; fourteen malformed mutations fail validation. These checks establish response structure for this slice, not complete protocol conformance.
+- HTTP transport, byte parsing, general JSON numbers, pagination, cache ownership, remaining method families, and revision compatibility remain open.
