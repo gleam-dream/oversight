@@ -215,6 +215,7 @@ type Node(e, u) {
     inputs: List(Token),
     located_steps: List(LocatedStep),
     evaluate: fn(List(Value)) -> NodeOutcome(e, u),
+    local_activity: Maybe(fn(List(Value)) -> LocalActivityOutcome(e, u)),
     selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
     compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
     validate_inputs: List(fn(Value) -> Result(Nil, DecodeError)),
@@ -348,6 +349,164 @@ pub opaque type Definition(i, o, e, u) {
     undo_error_codec: Codec(u),
     nodes: List(Node(e, u)),
   )
+}
+
+pub type LocalAdmissionError {
+  LocalNodeKindNotSupported(NodeAddress)
+}
+
+pub type LocalBoundaryFailure {
+  LocalInputEncodingFailed(EncodeError)
+  LocalActivityInputBoundaryFailed(NodeBoundaryError)
+  LocalActivityOutputEncodingFailed(EncodeError)
+  LocalAdapterBoundaryFailed(NodeBoundaryError)
+  LocalFinalOutputDecodingFailed(DecodeError)
+  LocalDependencyValueMissing(NodeAddress)
+  LocalOutputValueMissing
+  LocalAdapterProducedUnsupportedOutcome
+}
+
+pub type LocalCause(e) {
+  LocalApplicationCause(NodeAddress, e)
+  LocalBoundaryCause(LocalFailureLocation, LocalBoundaryFailure)
+}
+
+pub type LocalFailureLocation {
+  LocalDefinitionInput
+  LocalNodeAt(NodeAddress)
+  LocalDefinitionOutput
+}
+
+pub type LocalUndoFailure(u) {
+  LocalUndoFailed(at: NodeAddress, cause: u)
+}
+
+pub type LocalReport(o, e, u) {
+  LocalExecutionSucceeded(output: o, uncompensated: List(NodeAddress))
+  LocalExecutionFailed(
+    failure: LocalFailure(LocalCause(e), LocalUndoFailure(u)),
+    uncompensated: List(NodeAddress),
+  )
+}
+
+pub type LocalControlError {
+  LocalWorkStillPending
+  LocalCompletionNotExpected
+  LocalCompletionDoesNotMatch
+  LocalCancellationUnavailable
+  LocalCompletionKindDoesNotMatch
+}
+
+pub type LocalWorkDescriptor {
+  LocalInputEncoding
+  LocalActivityAt(NodeAddress)
+  LocalAdapterAt(NodeAddress)
+  LocalOutputDecoding
+  LocalUndoAt(NodeAddress)
+}
+
+pub opaque type LocalExecution(o, e, u) {
+  LocalExecution(
+    plan: LocalKernel(o),
+    run_id: Int,
+    next_task_id: Int,
+    encoded_input: Maybe(Value),
+    values: List(#(Token, Value)),
+    remaining_nodes: List(Node(e, u)),
+    journal: List(LocalEffect(u)),
+    phase: LocalStage(o, e, u),
+  )
+}
+
+pub opaque type LocalWork(o, e, u) {
+  LocalWork(
+    correlation: LocalCorrelation,
+    descriptor: LocalWorkDescriptor,
+    perform: fn() -> LocalWorkResult(o, e, u),
+  )
+}
+
+pub opaque type LocalCompletion(o, e, u) {
+  LocalCompletion(
+    correlation: LocalCorrelation,
+    result: LocalWorkResult(o, e, u),
+  )
+}
+
+pub type LocalControl(o, e, u) {
+  ContinueLocal
+  CancelLocal
+  CompleteLocal(LocalCompletion(o, e, u))
+}
+
+pub type LocalTransition(o, e, u) {
+  LocalWorkIssued(LocalExecution(o, e, u), LocalWork(o, e, u))
+  LocalExecutionPaused(LocalExecution(o, e, u))
+  LocalExecutionFinished(LocalExecution(o, e, u), LocalReport(o, e, u))
+  LocalControlRejected(LocalExecution(o, e, u), LocalControlError)
+}
+
+type LocalKernel(o) {
+  LocalKernel(
+    input_token: Token,
+    encode_input: fn() -> Result(Value, EncodeError),
+    output_token: Token,
+    output_codec: Codec(o),
+  )
+}
+
+type LocalCorrelation {
+  LocalCorrelation(run_id: Int, task_id: Int)
+}
+
+type LocalEffect(u) {
+  LocalEffect(address: NodeAddress, undo: Maybe(fn() -> Result(Nil, u)))
+}
+
+type LocalReason(e) {
+  LocalFailedReason(LocalCause(e))
+  LocalCancelledReason
+}
+
+type LocalStage(o, e, u) {
+  LocalInputReady
+  LocalNodesReady
+  LocalOutputReady(Value)
+  LocalCompensationsReady(
+    LocalReason(e),
+    List(LocalEffect(u)),
+    List(LocalUndoFailure(u)),
+  )
+  LocalAwaiting(LocalCorrelation, LocalPending(o, e, u))
+  LocalTerminal(LocalReport(o, e, u))
+}
+
+type LocalPending(o, e, u) {
+  LocalInputPending
+  LocalActivityPending(Node(e, u), List(Node(e, u)))
+  LocalAdapterPending(Node(e, u), List(Node(e, u)))
+  LocalFinalOutputPending
+  LocalUndoPending(
+    LocalReason(e),
+    NodeAddress,
+    List(LocalEffect(u)),
+    List(LocalUndoFailure(u)),
+  )
+}
+
+type LocalWorkResult(o, e, u) {
+  LocalInputEncoded(Result(Value, EncodeError))
+  LocalActivityCompleted(LocalActivityOutcome(e, u))
+  LocalNodeEvaluated(NodeOutcome(e, u))
+  LocalOutputDecoded(Result(o, DecodeError))
+  LocalUndoCompleted(Result(Nil, u))
+}
+
+type LocalActivityOutcome(e, u) {
+  LocalActivityInputRejected(NodeBoundaryError)
+  LocalActivityFailed(e)
+  LocalActivitySucceeded(Value, Maybe(fn() -> Result(Nil, u)))
+  LocalActivityOutputRejected(EncodeError, Maybe(fn() -> Result(Nil, u)))
 }
 
 // Boundary versions describe values persisted by an independent child owner.
@@ -648,6 +807,14 @@ pub fn add_activity(
       contract.output.codec,
       execute,
     )
+  let local_activity =
+    Present(activity_local_evaluator(
+      input.codec,
+      contract.input.codec,
+      contract.output.codec,
+      execute,
+      compensation,
+    ))
   let undo =
     activity_compensator(input.codec, contract.output.codec, compensation)
   register_named_node(
@@ -658,6 +825,7 @@ pub fn add_activity(
     ActivityNode(address),
     [located],
     evaluate,
+    local_activity,
     Missing,
     undo,
     [validator(input.codec)],
@@ -688,6 +856,7 @@ pub fn add_approval(
     ApprovalNode(address),
     [located],
     evaluate,
+    Missing,
     Missing,
     Missing,
     [validator(input.codec)],
@@ -734,6 +903,7 @@ pub fn add_child(
     ),
     Missing,
     Missing,
+    Missing,
     [validator(input.codec)],
     validator(definition.output.codec),
     definition.output.codec,
@@ -764,6 +934,7 @@ pub fn pair(
           [left.token, right.token],
           [LocatedStep(ScopedStepId(address, "pair"), descriptor)],
           pair_evaluator(left.codec, right.codec, output),
+          Missing,
           Missing,
           Missing,
           [validator(left.codec), validator(right.codec)],
@@ -854,6 +1025,7 @@ pub fn choose_children(
         ChoiceNode(address),
         steps,
         evaluate,
+        Missing,
         Present(route),
         Missing,
         [validator(input.codec)],
@@ -933,44 +1105,565 @@ pub fn step_identities(
   map(located_steps(definition), fn(step) { step.identity })
 }
 
-pub opaque type LocalPlan(i, o, e, u) {
-  LocalPlan(run: fn(i) -> Result(o, e), compensate: fn(i, o) -> Result(Nil, u))
-}
-
-pub fn local_plan(
-  run: fn(i) -> Result(o, e),
-  compensate: fn(i, o) -> Result(Nil, u),
-) -> LocalPlan(i, o, e, u) {
-  LocalPlan(run, compensate)
-}
-
-pub fn local_and_then(
-  first: LocalPlan(i, m, e, u),
-  second: LocalPlan(m, o, e, u),
-) -> LocalPlan(i, o, e, u) {
-  LocalPlan(
-    fn(input) {
-      case first.run(input) {
-        Error(error) -> Error(error)
-        Ok(middle) -> second.run(middle)
-      }
-    },
-    fn(_input, _output) {
-      todo as "the local executor must retain intermediate values before compensating a composed plan"
-    },
-  )
-}
-
+// Keep the legacy failure shape importable while the local report adds cause
+// location and uncompensated effects.
 pub type LocalFailure(e, u) {
   LocalFailed(cause: e, undo_failures: List(u))
   LocalCancelled(undo_failures: List(u))
 }
 
-pub fn run_local(
-  _plan: LocalPlan(i, o, e, u),
-  _input: i,
-) -> Result(o, LocalFailure(e, u)) {
-  todo as "local execution must track successes and apply the declared compensation policy"
+pub fn start_local(
+  definition: Definition(i, o, e, u),
+  input: i,
+) -> Result(LocalExecution(o, e, u), LocalAdmissionError) {
+  case first_unsupported_local_node(definition.nodes) {
+    Present(address) -> Error(LocalNodeKindNotSupported(address))
+    Missing -> {
+      let plan =
+        LocalKernel(
+          definition.input_token,
+          fn() { blueprint.encode(definition.input_codec, input) },
+          definition.output.token,
+          definition.output.codec,
+        )
+      Ok(LocalExecution(
+        plan,
+        unique_integer(),
+        0,
+        Missing,
+        [],
+        definition.nodes,
+        [],
+        LocalInputReady,
+      ))
+    }
+  }
+}
+
+pub fn advance_local(
+  execution: LocalExecution(o, e, u),
+  control: LocalControl(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case control {
+    ContinueLocal -> continue_local(execution)
+    CancelLocal -> cancel_local(execution)
+    CompleteLocal(completion) -> accept_local_completion(execution, completion)
+  }
+}
+
+// This is the only operation that invokes a retained callback. The reducer
+// receives its correlated result in a separate call to advance_local.
+pub fn perform_local(work: LocalWork(o, e, u)) -> LocalCompletion(o, e, u) {
+  let LocalWork(correlation, _, perform) = work
+  LocalCompletion(correlation, perform())
+}
+
+pub fn local_work_descriptor(work: LocalWork(o, e, u)) -> LocalWorkDescriptor {
+  let LocalWork(_, descriptor, _) = work
+  descriptor
+}
+
+fn first_unsupported_local_node(nodes: List(Node(e, u))) -> Maybe(NodeAddress) {
+  case nodes {
+    [] -> Missing
+    [node, ..rest] ->
+      case node.label {
+        ActivityNode(_) | PairNode(_) | SequenceBoundaryNode(_) ->
+          first_unsupported_local_node(rest)
+        _ -> Present(node.address)
+      }
+  }
+}
+
+fn continue_local(
+  execution: LocalExecution(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case execution.phase {
+    LocalInputReady -> {
+      let perform = fn() { LocalInputEncoded(execution.plan.encode_input()) }
+      issue_local_work(
+        execution,
+        LocalInputEncoding,
+        LocalInputPending,
+        perform,
+      )
+    }
+    LocalNodesReady -> continue_local_nodes(execution)
+    LocalOutputReady(raw) -> {
+      let perform = fn() {
+        LocalOutputDecoded(blueprint.decode(execution.plan.output_codec, raw))
+      }
+      issue_local_work(
+        execution,
+        LocalOutputDecoding,
+        LocalFinalOutputPending,
+        perform,
+      )
+    }
+    LocalCompensationsReady(reason, pending, failures_reversed) ->
+      continue_local_compensation(execution, reason, pending, failures_reversed)
+    LocalAwaiting(_, _) ->
+      LocalControlRejected(execution, LocalWorkStillPending)
+    LocalTerminal(report) -> LocalExecutionFinished(execution, report)
+  }
+}
+
+fn issue_local_work(
+  execution: LocalExecution(o, e, u),
+  descriptor: LocalWorkDescriptor,
+  pending: LocalPending(o, e, u),
+  perform: fn() -> LocalWorkResult(o, e, u),
+) -> LocalTransition(o, e, u) {
+  let correlation = LocalCorrelation(execution.run_id, execution.next_task_id)
+  let next =
+    LocalExecution(
+      ..execution,
+      next_task_id: execution.next_task_id + 1,
+      phase: LocalAwaiting(correlation, pending),
+    )
+  LocalWorkIssued(next, LocalWork(correlation, descriptor, perform))
+}
+
+fn continue_local_nodes(
+  execution: LocalExecution(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case execution.remaining_nodes {
+    [] ->
+      case
+        local_value(
+          execution.plan.output_token,
+          execution.plan.input_token,
+          execution.encoded_input,
+          execution.values,
+        )
+      {
+        Missing ->
+          pause_local_failure(
+            execution,
+            LocalBoundaryCause(LocalDefinitionOutput, LocalOutputValueMissing),
+            execution.journal,
+            [],
+          )
+        Present(raw) ->
+          continue_local(
+            LocalExecution(..execution, phase: LocalOutputReady(raw)),
+          )
+      }
+    [node, ..following] ->
+      case
+        local_values(
+          node.inputs,
+          execution.plan.input_token,
+          execution.encoded_input,
+          execution.values,
+        )
+      {
+        Missing ->
+          pause_local_failure(
+            execution,
+            LocalBoundaryCause(
+              LocalNodeAt(node.address),
+              LocalDependencyValueMissing(node.address),
+            ),
+            execution.journal,
+            [],
+          )
+        Present(inputs) ->
+          case node.label, node.local_activity {
+            ActivityNode(_), Present(run_activity) -> {
+              let perform = fn() {
+                LocalActivityCompleted(run_activity(inputs))
+              }
+              issue_local_work(
+                execution,
+                LocalActivityAt(node.address),
+                LocalActivityPending(node, following),
+                perform,
+              )
+            }
+            PairNode(_), Missing | SequenceBoundaryNode(_), Missing -> {
+              let perform = fn() { LocalNodeEvaluated(node.evaluate(inputs)) }
+              issue_local_work(
+                execution,
+                LocalAdapterAt(node.address),
+                LocalAdapterPending(node, following),
+                perform,
+              )
+            }
+            _, _ ->
+              pause_local_failure(
+                execution,
+                LocalBoundaryCause(
+                  LocalNodeAt(node.address),
+                  LocalAdapterProducedUnsupportedOutcome,
+                ),
+                execution.journal,
+                [],
+              )
+          }
+      }
+  }
+}
+
+fn continue_local_compensation(
+  execution: LocalExecution(o, e, u),
+  reason: LocalReason(e),
+  pending: List(LocalEffect(u)),
+  failures_reversed: List(LocalUndoFailure(u)),
+) -> LocalTransition(o, e, u) {
+  case pending {
+    [] -> finish_local_failure(execution, reason, failures_reversed)
+    [LocalEffect(_, Missing), ..rest] ->
+      continue_local(
+        LocalExecution(
+          ..execution,
+          phase: LocalCompensationsReady(reason, rest, failures_reversed),
+        ),
+      )
+    [LocalEffect(address, Present(undo)), ..rest] -> {
+      let perform = fn() { LocalUndoCompleted(undo()) }
+      issue_local_work(
+        execution,
+        LocalUndoAt(address),
+        LocalUndoPending(reason, address, rest, failures_reversed),
+        perform,
+      )
+    }
+  }
+}
+
+fn cancel_local(
+  execution: LocalExecution(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case execution.phase {
+    LocalInputReady | LocalNodesReady | LocalOutputReady(_) ->
+      pause_local_cancellation(execution, execution.journal, [])
+    LocalCompensationsReady(_, _, _) ->
+      LocalControlRejected(execution, LocalCancellationUnavailable)
+    LocalAwaiting(_, _) ->
+      LocalControlRejected(execution, LocalWorkStillPending)
+    LocalTerminal(report) -> LocalExecutionFinished(execution, report)
+  }
+}
+
+fn pause_local_cancellation(
+  execution: LocalExecution(o, e, u),
+  journal: List(LocalEffect(u)),
+  failures_reversed: List(LocalUndoFailure(u)),
+) -> LocalTransition(o, e, u) {
+  LocalExecutionPaused(
+    LocalExecution(
+      ..execution,
+      journal: journal,
+      phase: LocalCompensationsReady(
+        LocalCancelledReason,
+        reverse(journal),
+        failures_reversed,
+      ),
+    ),
+  )
+}
+
+fn accept_local_completion(
+  execution: LocalExecution(o, e, u),
+  completion: LocalCompletion(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case execution.phase {
+    LocalAwaiting(expected, pending) -> {
+      let LocalCompletion(actual, result) = completion
+      case actual == expected {
+        False -> LocalControlRejected(execution, LocalCompletionDoesNotMatch)
+        True -> accept_local_result(execution, pending, result)
+      }
+    }
+    LocalTerminal(report) ->
+      LocalControlRejected(execution, LocalCompletionNotExpected)
+    _ -> LocalControlRejected(execution, LocalCompletionNotExpected)
+  }
+}
+
+fn accept_local_result(
+  execution: LocalExecution(o, e, u),
+  pending: LocalPending(o, e, u),
+  result: LocalWorkResult(o, e, u),
+) -> LocalTransition(o, e, u) {
+  case pending, result {
+    LocalInputPending, LocalInputEncoded(Ok(encoded)) ->
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          encoded_input: Present(encoded),
+          phase: LocalNodesReady,
+        ),
+      )
+    LocalInputPending, LocalInputEncoded(Error(error)) ->
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalDefinitionInput,
+          LocalInputEncodingFailed(error),
+        ),
+        execution.journal,
+        [],
+      )
+    LocalActivityPending(node, following), LocalActivityCompleted(outcome) ->
+      accept_local_activity(execution, node, following, outcome)
+    LocalAdapterPending(node, following), LocalNodeEvaluated(outcome) ->
+      accept_local_adapter(execution, node, following, outcome)
+    LocalFinalOutputPending, LocalOutputDecoded(Ok(output)) ->
+      finish_local_success(execution, output)
+    LocalFinalOutputPending, LocalOutputDecoded(Error(error)) ->
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalDefinitionOutput,
+          LocalFinalOutputDecodingFailed(error),
+        ),
+        execution.journal,
+        [],
+      )
+    LocalUndoPending(reason, address, remaining, failures_reversed),
+      LocalUndoCompleted(outcome)
+    -> {
+      let next_failures = case outcome {
+        Ok(Nil) -> failures_reversed
+        Error(error) -> [LocalUndoFailed(address, error), ..failures_reversed]
+      }
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          phase: LocalCompensationsReady(reason, remaining, next_failures),
+        ),
+      )
+    }
+    _, _ -> LocalControlRejected(execution, LocalCompletionKindDoesNotMatch)
+  }
+}
+
+fn accept_local_activity(
+  execution: LocalExecution(o, e, u),
+  node: Node(e, u),
+  following: List(Node(e, u)),
+  outcome: LocalActivityOutcome(e, u),
+) -> LocalTransition(o, e, u) {
+  case outcome {
+    LocalActivityInputRejected(error) ->
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalNodeAt(node.address),
+          LocalActivityInputBoundaryFailed(error),
+        ),
+        execution.journal,
+        [],
+      )
+    LocalActivityFailed(cause) ->
+      pause_local_failure(
+        execution,
+        LocalApplicationCause(node.address, cause),
+        execution.journal,
+        [],
+      )
+    LocalActivitySucceeded(encoded, undo) -> {
+      let journal = append(execution.journal, [LocalEffect(node.address, undo)])
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          values: append(execution.values, [#(node.token, encoded)]),
+          remaining_nodes: following,
+          journal: journal,
+          phase: LocalNodesReady,
+        ),
+      )
+    }
+    LocalActivityOutputRejected(error, undo) -> {
+      let journal = append(execution.journal, [LocalEffect(node.address, undo)])
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalNodeAt(node.address),
+          LocalActivityOutputEncodingFailed(error),
+        ),
+        journal,
+        [],
+      )
+    }
+  }
+}
+
+fn accept_local_adapter(
+  execution: LocalExecution(o, e, u),
+  node: Node(e, u),
+  following: List(Node(e, u)),
+  outcome: NodeOutcome(e, u),
+) -> LocalTransition(o, e, u) {
+  case outcome {
+    NodeSucceeded(encoded) ->
+      LocalExecutionPaused(
+        LocalExecution(
+          ..execution,
+          values: append(execution.values, [#(node.token, encoded)]),
+          remaining_nodes: following,
+          phase: LocalNodesReady,
+        ),
+      )
+    NodeBoundaryFailed(error) ->
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalNodeAt(node.address),
+          LocalAdapterBoundaryFailed(error),
+        ),
+        execution.journal,
+        [],
+      )
+    NodeFailed(cause, undo_failures) ->
+      pause_local_failure(
+        execution,
+        LocalApplicationCause(node.address, cause),
+        execution.journal,
+        reverse(located_undo_failures(node.address, undo_failures)),
+      )
+    NodeCancelled(undo_failures) ->
+      pause_local_cancellation(
+        execution,
+        execution.journal,
+        reverse(located_undo_failures(node.address, undo_failures)),
+      )
+    NodeWaiting(_) | NodeAwaitingApproval | NodeNeedsReconciliation(_) ->
+      pause_local_failure(
+        execution,
+        LocalBoundaryCause(
+          LocalNodeAt(node.address),
+          LocalAdapterProducedUnsupportedOutcome,
+        ),
+        execution.journal,
+        [],
+      )
+  }
+}
+
+fn pause_local_failure(
+  execution: LocalExecution(o, e, u),
+  cause: LocalCause(e),
+  journal: List(LocalEffect(u)),
+  failures_reversed: List(LocalUndoFailure(u)),
+) -> LocalTransition(o, e, u) {
+  LocalExecutionPaused(
+    LocalExecution(
+      ..execution,
+      journal: journal,
+      phase: LocalCompensationsReady(
+        LocalFailedReason(cause),
+        reverse(journal),
+        failures_reversed,
+      ),
+    ),
+  )
+}
+
+fn finish_local_success(
+  execution: LocalExecution(o, e, u),
+  output: o,
+) -> LocalTransition(o, e, u) {
+  let report = LocalExecutionSucceeded(output, uncompensated(execution.journal))
+  let terminal = LocalExecution(..execution, phase: LocalTerminal(report))
+  LocalExecutionFinished(terminal, report)
+}
+
+fn finish_local_failure(
+  execution: LocalExecution(o, e, u),
+  reason: LocalReason(e),
+  failures_reversed: List(LocalUndoFailure(u)),
+) -> LocalTransition(o, e, u) {
+  let undo_failures = reverse(failures_reversed)
+  let outstanding = uncompensated(execution.journal)
+  let report = case reason {
+    LocalFailedReason(cause) ->
+      LocalExecutionFailed(LocalFailed(cause, undo_failures), outstanding)
+    LocalCancelledReason ->
+      LocalExecutionFailed(LocalCancelled(undo_failures), outstanding)
+  }
+  let terminal = LocalExecution(..execution, phase: LocalTerminal(report))
+  LocalExecutionFinished(terminal, report)
+}
+
+fn located_undo_failures(
+  address: NodeAddress,
+  failures: List(u),
+) -> List(LocalUndoFailure(u)) {
+  case failures {
+    [] -> []
+    [failure, ..rest] -> [
+      LocalUndoFailed(address, failure),
+      ..located_undo_failures(address, rest)
+    ]
+  }
+}
+
+fn local_values(
+  tokens: List(Token),
+  input_token: Token,
+  encoded_input: Maybe(Value),
+  values: List(#(Token, Value)),
+) -> Maybe(List(Value)) {
+  case tokens {
+    [] -> Present([])
+    [token, ..rest] ->
+      case local_value(token, input_token, encoded_input, values) {
+        Missing -> Missing
+        Present(raw) ->
+          case local_values(rest, input_token, encoded_input, values) {
+            Missing -> Missing
+            Present(tail) -> Present([raw, ..tail])
+          }
+      }
+  }
+}
+
+fn local_value(
+  token: Token,
+  input_token: Token,
+  encoded_input: Maybe(Value),
+  values: List(#(Token, Value)),
+) -> Maybe(Value) {
+  case token == input_token {
+    True -> encoded_input
+    False -> find_local_value(token, values)
+  }
+}
+
+fn find_local_value(
+  token: Token,
+  values: List(#(Token, Value)),
+) -> Maybe(Value) {
+  case values {
+    [] -> Missing
+    [#(found, raw), ..rest] ->
+      case token == found {
+        True -> Present(raw)
+        False -> find_local_value(token, rest)
+      }
+  }
+}
+
+fn uncompensated(effects: List(LocalEffect(u))) -> List(NodeAddress) {
+  case effects {
+    [] -> []
+    [LocalEffect(address, Missing), ..rest] -> [address, ..uncompensated(rest)]
+    [LocalEffect(_, Present(_)), ..rest] -> uncompensated(rest)
+  }
+}
+
+fn reverse(items: List(a)) -> List(a) {
+  reverse_into(items, [])
+}
+
+fn reverse_into(items: List(a), reversed: List(a)) -> List(a) {
+  case items {
+    [] -> reversed
+    [head, ..tail] -> reverse_into(tail, [head, ..reversed])
+  }
 }
 
 fn approval_decision_codec(answer: Codec(a)) -> Codec(ApprovalDecision(a)) {
@@ -1048,6 +1741,7 @@ pub fn define_child(
       evaluate,
       Missing,
       Missing,
+      Missing,
       [validator(child_definition.input_codec)],
       validator(child_definition.output.codec),
       child_definition.output.codec,
@@ -1098,6 +1792,7 @@ fn register_named_node(
   label: NodeLabel,
   located: List(LocatedStep),
   evaluate: fn(List(Value)) -> NodeOutcome(e, u),
+  local_activity: Maybe(fn(List(Value)) -> LocalActivityOutcome(e, u)),
   selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
   compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
   validate_inputs: List(fn(Value) -> Result(Nil, DecodeError)),
@@ -1121,6 +1816,7 @@ fn register_named_node(
               [input.token],
               located,
               evaluate,
+              local_activity,
               selection,
               compensate,
               validate_inputs,
@@ -1163,6 +1859,41 @@ fn activity_evaluator(
             }
         }
       other -> NodeBoundaryFailed(UnexpectedInputCount(length(other)))
+    }
+  }
+}
+
+fn activity_local_evaluator(
+  source: Codec(a),
+  target: Codec(a),
+  output_codec: Codec(b),
+  execute: fn(a) -> Result(b, e),
+  compensation: Compensation(a, b, u),
+) -> fn(List(Value)) -> LocalActivityOutcome(e, u) {
+  fn(inputs) {
+    case inputs {
+      [raw] ->
+        case direct_input(source, target, raw) {
+          Error(error) -> LocalActivityInputRejected(error)
+          Ok(native_input) ->
+            case execute(native_input) {
+              Error(error) -> LocalActivityFailed(error)
+              Ok(native_output) -> {
+                // Capture the actual native values before crossing the output
+                // codec boundary. A failed encode still leaves undo authority.
+                let undo = case compensation {
+                  Uncompensated -> Missing
+                  Compensate(compensate) ->
+                    Present(fn() { compensate(native_input, native_output) })
+                }
+                case blueprint.encode(output_codec, native_output) {
+                  Ok(encoded) -> LocalActivitySucceeded(encoded, undo)
+                  Error(error) -> LocalActivityOutputRejected(error, undo)
+                }
+              }
+            }
+        }
+      other -> LocalActivityInputRejected(UnexpectedInputCount(length(other)))
     }
   }
 }
@@ -1299,7 +2030,7 @@ fn contains_token(input: Token, nodes: List(Node(e, u)), token: Token) -> Bool {
 fn token_in_nodes(nodes: List(Node(e, u)), token: Token) -> Bool {
   case nodes {
     [] -> False
-    [Node(found, _, _, _, _, _, _, _, _, _, _, _), ..rest] ->
+    [Node(found, _, _, _, _, _, _, _, _, _, _, _, _), ..rest] ->
       case found == token {
         True -> True
         False -> token_in_nodes(rest, token)
@@ -1330,7 +2061,7 @@ fn validator(codec: Codec(a)) -> fn(Value) -> Result(Nil, DecodeError) {
 fn flatten_located_steps(nodes: List(Node(e, u))) -> List(LocatedStep) {
   case nodes {
     [] -> []
-    [Node(_, _, _, _, located, _, _, _, _, _, _, _), ..rest] ->
+    [Node(_, _, _, _, located, _, _, _, _, _, _, _, _), ..rest] ->
       append(located, flatten_located_steps(rest))
   }
 }
@@ -1414,7 +2145,7 @@ fn dependencies_for(
   input: Token,
   nodes: List(Node(e, u)),
 ) -> Result(List(Dependency), InspectionError) {
-  let Node(_, address, _, sources, _, _, _, _, _, _, _, _) = node
+  let Node(_, address, _, sources, _, _, _, _, _, _, _, _, _) = node
   dependencies_for_sources(sources, input, nodes, NodeAt(address))
 }
 
@@ -1456,7 +2187,7 @@ fn reference_for(
 fn address_for(token: Token, nodes: List(Node(e, u))) -> Maybe(NodeAddress) {
   case nodes {
     [] -> Missing
-    [Node(found, address, _, _, _, _, _, _, _, _, _, _), ..rest] ->
+    [Node(found, address, _, _, _, _, _, _, _, _, _, _, _), ..rest] ->
       case token == found {
         True -> Present(address)
         False -> address_for(token, rest)
@@ -1505,7 +2236,7 @@ fn mark_sources_reachable(
 fn inputs_for(token: Token, nodes: List(Node(e, u))) -> Maybe(List(Token)) {
   case nodes {
     [] -> Missing
-    [Node(found, _, _, inputs, _, _, _, _, _, _, _, _), ..rest] ->
+    [Node(found, _, _, inputs, _, _, _, _, _, _, _, _, _), ..rest] ->
       case token == found {
         True -> Present(inputs)
         False -> inputs_for(token, rest)
@@ -1519,7 +2250,7 @@ fn first_unreachable(
 ) -> Maybe(NodeLabel) {
   case nodes {
     [] -> Missing
-    [Node(token, _, label, _, _, _, _, _, _, _, _, _), ..rest] ->
+    [Node(token, _, label, _, _, _, _, _, _, _, _, _, _), ..rest] ->
       case token_in_list(token, reachable) {
         True -> first_unreachable(rest, reachable)
         False -> Present(label)
@@ -1799,6 +2530,7 @@ fn rekey_nodes_from(
         inputs,
         steps,
         evaluate,
+        local_activity,
         selection,
         compensate,
         validate_inputs,
@@ -1815,6 +2547,7 @@ fn rekey_nodes_from(
           map(inputs, fn(input) { token_from_map(input, token_map) }),
           map(steps, fn(step) { prefix_located_step(step, side) }),
           evaluate,
+          local_activity,
           selection,
           compensate,
           validate_inputs,
@@ -1878,6 +2611,7 @@ fn sequence_boundary(
         other -> NodeBoundaryFailed(UnexpectedInputCount(length(other)))
       }
     },
+    Missing,
     Missing,
     Missing,
     [validator(input.codec)],
