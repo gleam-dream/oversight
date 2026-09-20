@@ -22,11 +22,13 @@
 - Historical counts in [first findings](playground/interface_lab/FINDINGS.md) and [stress tests](playground/interface_lab/STRESS-TESTS.md) are superseded by the latest refinement status. Their consumer scenarios still identify intended use.
 - The laboratory is one disposable Gleam package. Source-isolated consumers check import direction inside that package; they do not prove independent Hex package builds or final distribution boundaries.
 
+- Laboratory Blueprint imports used by ordinary serialization are prototype convenience, not a production dependency requirement. Prefer standard Gleam JSON encoders/decoders outside JSON Schema-aware paths; optional reusable codecs remain schema-independent. Existing evidence rows describe the laboratory as run, not a mandate to preserve its dependency graph. Blueprint’s exact-number policy applies within its schema/value model.
+
 ## Current ownership
 
 | Public boundary       | Owned capability                                                                          | Original capability now outside the boundary                                                                    |
 | --------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| JSON Blueprint        | Typed JSON encoding, decoding, and schema description                                     | Tool registration, telemetry fields, and workflow versioning remain consumer-owned.                             |
+| JSON Blueprint        | JSON Schema-aware encoding, decoding, and validation                                      | Tool registration, telemetry fields, and workflow versioning remain consumer-owned.                             |
 | Sinal                 | Typed BEAM telemetry descriptors, emission, attachment, and spans                         | Event queues, exporters, job control, and workflow progress remain outside Sinal.                               |
 | Warden                | OIDC relying-party and general OAuth client operations                                    | MCP resource-server policy and MCP-specific client authorization remain in Relay.                               |
 | Relay                 | MCP values, server and client behavior, transports, and MCP authorization                 | Business-tool implementation and general web-login sessions remain outside Relay.                               |

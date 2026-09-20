@@ -14,12 +14,12 @@
 | Queue delivery                  | [Grind](grind-design.md)                  | Deliver work naming a Fabric continuation or Saga run; never serialize live closures.         |
 | Agent loop and action policy    | Fabric                                    | Own model turns, tool reports, approval state, budgets, and agent continuation compatibility. |
 | Provider adapters and transport | [LLM](llm-design.md)                      | Retain the originating provider and consume its public buffered and streamed contracts.       |
-| Schema and codec contracts      | [Blueprint](blueprint-design.md)          | Derive tool declarations and dispatch from the same retained codecs.                          |
+| JSON Schema-aware contracts     | [Blueprint](blueprint-design.md)          | Derive tool declarations and dispatch from the same retained codecs.                          |
 | Observation delivery            | [Sinal](sinal-design.md)                  | Emit Fabric-owned facts after accepted state transitions.                                     |
 
 - Fabric's agent core must remain usable without a workflow graph or queue. An integration with Saga or Grind must reside in an optional distribution unit or application adapter; an optional module does not make package dependencies optional.
 - LLM owns its request, response, and continuation vocabulary without importing Fabric. Fabric may depend on the LLM public contract, but must not import specific provider networking to implement agent policy.
-- Blueprint owns schema and codec machinery, while each package owns its boundary errors and admission rules. Native application values remain typed until a named network or persistence boundary requires encoding.
+- Blueprint owns JSON Schema-aware contracts for tool declarations and structured output. Ordinary continuation or other JSON serialization uses standard Gleam JSON encoders/decoders and may use an optional schema-independent codec abstraction. Each package owns its boundary errors and admission rules. Native application values remain typed until a named network or persistence boundary requires encoding.
 - Sinal delivers observations without owning state transitions. Packages define distinct event descriptors and fact types; no universal lifecycle event, task type, context, retry policy, or persistence protocol is introduced.
 
 ## 0. `gate` — action policy and approval
@@ -41,7 +41,7 @@
 - The retained baseline requirement is a pure typed value-dependency graph whose mismatched connections cannot compile. Authoring and validation must be usable without processes, actors, clocks, I/O, or an OTP supervision tree.
 - Authoring validation must reject cycles, missing producers, duplicate writers without a declared reducer, and unreachable outputs. Control-only edges remain outside the baseline value-dependency contract.
 - The baseline proposed Kahn-style topological validation and associative reducers for multiple writers. Saga integration must establish equivalent validation and an explicit reducer mapping before claiming coverage; associativity is an application obligation, not a property proved by the compiler.
-- Native types govern connections, while Blueprint codecs and explicit schema compatibility govern persisted boundaries. Graph authoring errors remain distinct from execution failures.
+- Native types govern connections. Versioned encoders/decoders govern persisted boundaries without requiring Blueprint; explicit schema compatibility applies only where the boundary requires JSON Schema. Graph authoring errors remain distinct from execution failures.
 - The current shared workflow experiments establish useful typed composition, not complete equivalence to every baseline graph operation. Reducer behavior and control-edge compatibility remain explicit friction to resolve during implementation.
 
 ## 2. Durable execution, checkpoints, and review

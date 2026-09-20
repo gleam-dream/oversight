@@ -4,7 +4,7 @@
 
 - LLM provides typed buffered and streamed provider interactions for direct callers and Fabric. One interaction returns an outcome or stream; subsequent interactions remain a host decision.
 - This design receives `fabric/llm_wire` from the Fabric baseline at `9194f02`. OpenAI, Anthropic, and Google remain required provider targets; selecting a smaller first implementation does not remove the remaining targets.
-- LLM owns requests, outcomes, provider adapters, continuation, and transport resources. [Fabric](fabric-design.md) owns tool execution, action policy, approval, and agent budgets; [Blueprint](blueprint-design.md) owns data contracts and validation.
+- LLM owns requests, outcomes, provider adapters, continuation, and transport resources. [Fabric](fabric-design.md) owns tool execution, action policy, approval, and agent budgets; [Blueprint](blueprint-design.md) owns JSON Schema-aware contracts and validation for tool declarations and structured output. Ordinary provider envelopes and persisted continuations prefer standard Gleam JSON encoders/decoders; an optional reusable codec abstraction must remain schema-independent.
 - LLM must not import Fabric, Saga, or Grind. A standalone structured-extraction caller must not require an agent loop, workflow runner, or persistence backend.
 - Provider constructors return the LLM public contract. This resolves the baseline's conflicting declarations that `llm_wire` defines its own model port but exports an `agent.model.Model`; Fabric adapts the independent contract.
 - Sinal receives package-owned provider observations after transitions. Observations must not control provider interaction or substitute for authoritative state.

@@ -14,7 +14,7 @@
 
 | Library or working unit               | Recommended responsibility                                                 | Initial useful slice                                                                         | Growth after the slice                                                                                              |
 | ------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| JSON Blueprint                        | Typed JSON codecs and their schema descriptions                            | A record/union codec produces encoder, decoder, and schema through one controlled definition | Broader schema support, migration guidance, optional generation, and a distinct runtime-schema layer                |
+| JSON Blueprint                        | JSON Schema-aware codecs and validation                                    | A record/union codec produces encoder, decoder, and schema through one controlled definition | Broader schema support, migration guidance, optional generation, and a distinct runtime-schema layer                |
 | Sinal                                 | A typed façade over BEAM telemetry                                         | Typed events and spans with synchronous dispatch and explicit handler-failure behavior       | Bridges and exporters through existing telemetry infrastructure                                                     |
 | Warden                                | Typed OIDC relying-party and OAuth client operations                       | A narrow, verified authorization-code flow over an established backend                       | Additional independently tested client operations and provider compatibility                                        |
 | Relay                                 | MCP protocol behavior, typed client/server APIs, and transports            | A 2026-07-28 Streamable HTTP server slice with discovery and typed tools                     | Stdio, 2025-11-25 compatibility, client operations, and additional capabilities under explicit conformance coverage |
@@ -63,8 +63,8 @@
 ```mermaid
 flowchart TD
   Fabric --> LLM[Standalone LLM client]
-  LLM --> Blueprint[JSON Blueprint]
-  Relay --> Blueprint
+  LLM -. JSON Schema paths .-> Blueprint[JSON Blueprint]
+  Relay -. JSON Schema paths .-> Blueprint
   Warden --> oidcc
   Sinal --> Telemetry[BEAM telemetry]
   Integration[Application integration] -. optional .-> Fabric
@@ -77,7 +77,7 @@ flowchart TD
   Integration -. optional verifier .-> Relay
 ```
 
-- Solid arrows show proposed foundational dependencies; dotted arrows show application-selected composition. Instrumented OTP components also emit through Sinal; serialization-dependent modules may use JSON Blueprint without forcing a schema requirement on in-memory Saga plans.
+- Solid arrows show proposed foundational dependencies; dotted arrows show application-selected composition. Instrumented OTP components also emit through Sinal; JSON Schema-aware paths use Blueprint; ordinary protocol, persistence, job, identity, and export JSON prefer standard Gleam JSON encoders/decoders. Any optional reusable codec abstraction is independent of Blueprint and schema support.
 - Keep optional integrations in examples or separate adapters until independent adoption justifies publishing them. A module that requires Saga or Grind inside the Fabric package would still impose that package dependency on every Fabric user.
 
 ## Execution and durability ownership
@@ -101,6 +101,7 @@ flowchart TD
 
 ## Composition rules
 
+- Blueprint is required only for JSON Schema-aware paths (schema declaration, schema-derived validation, or runtime schema contracts). Ordinary JSON serialization should use standard Gleam JSON encoders and decoders. Any optional reusable codec abstraction must remain independent of Blueprint and schema support; no new codec package or API is prescribed. Schema availability is an explicit capability, not a universal serialization constraint.
 - Share serialization contracts where consumers need the same meaning. Do not require a general in-process value to have a JSON Schema merely because another package uses JSON.
 - Preserve concrete types until an external or heterogeneous registry boundary requires a uniform representation. At a tool registry, capture each typed handler together with its codecs in an opaque invocation value.
 - Keep application orchestration outside foundational libraries. JSON Blueprint does not know tools, Sinal does not know jobs, and the LLM client does not run an agent loop.
@@ -136,7 +137,7 @@ flowchart TD
 
 | Experiment                 | Required result                                                                                                                  | Evidence still needed afterward                                                                                                                          |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Shared codec               | Record and union builders require correct getters and constructors; encoders cannot be paired with unrelated typed values        | Encoding, decoding, and schema validation agree on accepted values                                                                                       |
+| Schema-aware codec         | Record and union builders require correct getters and constructors; encoders cannot be paired with unrelated typed values        | Encoding, decoding, and schema validation agree on accepted values                                                                                       |
 | Heterogeneous tools        | Two unrelated tool signatures coexist after a controlled registration boundary                                                   | Invalid wire input fails before application code; tool identity remains correct                                                                          |
 | Provider substitution      | Two protocol families and a scripted third adapter satisfy the common call contract                                              | Streaming, continuation, provider options, and unsupported features behave as declared                                                                   |
 | Telemetry interoperability | Typed event constructors and foreign-event decoders define where shape is checked                                                | Handler timing, failure isolation, and interaction with raw telemetry preserve the declared semantics                                                    |
@@ -197,7 +198,7 @@ flowchart TD
 
 ## Coordination and the next executable work
 
-- Begin with one shared codec and two heterogeneous tools used by both a Relay consumer and a scripted Fabric consumer. Build representational constructors and expected-failure fixtures before adding network, scheduler, or storage behavior.
+- Begin with one schema-aware codec and two heterogeneous tools used by both a Relay consumer and a scripted Fabric consumer. Build representational constructors and expected-failure fixtures before adding network, scheduler, or storage behavior.
 - In parallel, refine Sinal's event/span contract and Warden's ownership table. They have independent consumers and must not wait for the whole agent stack.
 - Next check the one-call provider contract and shared Saga authoring across local, durable, and nested-node consumers. Use their results to finalize the Saga/Grind journal and Fabric parent-continuation contracts before implementing graph runtimes.
 - Give each agent a bounded question, owned files, source pins, a concrete consumer, acceptance evidence, and explicit non-goals. Source research returns recommendations and counterevidence; interface work returns compiler fixtures; later implementation work returns behavior tests and operational evidence.

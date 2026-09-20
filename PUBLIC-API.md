@@ -11,7 +11,7 @@ bodies are evidence for later implementation, not accepted public API.
 
 - **Blueprint:** `Value`, `Codec`, schema derivation, finite runtime contracts,
   validation, and checked encode/decode combinators. One canonical exact
-  `Number` represents every JSON numeric value at serialization boundaries.
+  `Number` represents every numeric value within Blueprint’s schema/value model.
   Native `Int` and `Float` are explicit checked projections to or from that
   value, not parallel JSON `Value` cases. The current integer-only `Value.Int`
   migration is deferred. Native source generation, including positional enums
@@ -61,7 +61,9 @@ bodies are evidence for later implementation, not accepted public API.
 
 ## Package seams
 
-Blueprint supplies data contracts without owning transports. LLM owns provider
+Blueprint is required only for JSON Schema-aware paths (schema declaration, schema-derived validation, or runtime schema contracts). Ordinary JSON serialization should use standard Gleam JSON encoders and decoders. Any optional reusable codec abstraction must remain independent of Blueprint and schema support; no new codec package or API is prescribed. Schema availability is an explicit capability, not a universal serialization constraint.
+
+Blueprint supplies schema-aware contracts without owning transports. LLM owns provider
 interaction; Fabric owns tool policy and the agent loop. Saga owns workflow
 state and compensation; Grind owns delivery. Warden owns web identity; Relay
 owns resource grants and protocol authorization. Sinal receives package-owned
@@ -70,7 +72,7 @@ context, lifecycle event, retry policy, or persistence protocol is introduced.
 
 ## Resolved decisions and stop rule
 
-The three decisions are settled: exact numbers at serialization boundaries
+The three decisions are settled: exact numbers within Blueprint’s schema/value model
 with checked native projections; source generation excluded from the initial
 facade; and durable Saga, Grind, and Warden protocol machinery kept internal.
 Lab constructors for those runtime protocols may remain visible where prototype
