@@ -2,6 +2,7 @@
 
 ## Working direction
 
+- The [initial public API freeze](../../PUBLIC-API.md) records the intended facades and resolves the first-promotion boundary. Open and Partial coverage remains implementation backlog; it does not invite another interface-refinement wave.
 - Keep package boundaries independent. Shared codecs and ordinary typed functions provide reuse without a universal operation type or global request context.
 - Use one eventual Saga authoring model for local and durable workflows. Keep execution capabilities explicit rather than hiding persistence behind a local-looking call.
 - Keep Fabric's tool-loop policy outside LLM provider continuations. Retain the originating provider with a pending continuation.
@@ -39,7 +40,9 @@
 - Sixty-two standalone exact-number cases agree with independent Decimal/Fraction arithmetic and native float-bit inspection.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
-## Next integration priorities
+## Implementation backlog
+
+The interface surface is frozen. Continue only implementation and validation against the inventory; reopen a type only when a real caller exposes a concrete mismatch.
 
 - **Fabric:** Extend the pure policy controller with observed token/time budgets, durable approvals, streaming, and explicit child execution. Preserve provider origin and uncertain-effect handling.
 - **Saga:** Extend the durable child contract with persisted unfinished commands. Exercise local compensation authority and local runner outcomes over the canonical definition separately.
