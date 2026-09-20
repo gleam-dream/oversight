@@ -31,10 +31,10 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty consumers compile with only their transitive source imports.
-- Thirty-one negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
-- Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
+- Gleam 1.18.1: thirty-one consumers compile with only their transitive source imports.
+- Thirty-three negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -98,3 +98,11 @@
 - Server-owned exchange and invocation identities prevent repeated wire request identifiers and progress tokens from merging calls.
 - The pure consumer checks close-before-admission, cancellation, duplicate completion, late callbacks, tokenless progress, and monotonic integer progress.
 - Protocol codecs, HTTP admission, pagination, authorization, transport cleanup, and bounded owner retention remain open.
+
+## Runtime schema values
+
+- [Runtime schema values](RUNTIME-SCHEMAS.md) retain normalized structural contracts and accepted wire values without creating native Gleam types.
+- The consumer checks reordered property/tag equivalence, preserved tuple and nullable structure, invalid-schema rejection, exact validation paths, and missing/null distinctions.
+- Static codecs supply contracts only when their schemas are available. Runtime contracts and witnesses cannot substitute for native codecs or application records.
+- The independent schema oracle compares all four acceptance paths on its existing corpus.
+- Document loading, source generation, dynamic graph publication, numeric normalization, limits, and schema migration remain open.

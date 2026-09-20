@@ -23,10 +23,18 @@ def main():
         accepted = Draft202012Validator(case["schema"]).is_valid(case["instance"])
         if accepted != case["accepted"]:
             raise SystemExit(f"FAIL: schema disagreement: {case['label']}: {case}")
+        Draft202012Validator.check_schema(case["normalized_schema"])
+        normalized_accepted = Draft202012Validator(
+            case["normalized_schema"]
+        ).is_valid(case["instance"])
+        if accepted != case["runtime_accepted"] or accepted != normalized_accepted:
+            raise SystemExit(
+                f"FAIL: runtime/normalized schema disagreement: {case['label']}: {case}"
+            )
         outcomes.add(accepted)
     if outcomes != {True, False}:
         raise SystemExit("FAIL: corpus must include accepted and rejected instances")
-    print(f"PASS: {len(cases)} schema/decoder cases agree with Draft202012Validator")
+    print(f"PASS: {len(cases)} schema/decoder/runtime cases agree with Draft202012Validator")
 
 
 if __name__ == "__main__":
