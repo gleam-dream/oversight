@@ -37,6 +37,29 @@
 - Generation must be deterministic for equal normalized contracts. Environment paths, timestamps, process identifiers, and caller object-property order must not alter the source.
 - The harness writes generated source into an isolated temporary project and compiles it before running its native consumer. Loading a document in the running application still produces only `RuntimeContract` and `ValidatedValue`.
 
+## Codec-schema materialization boundary
+
+- A separate [schema materialization experiment](../docs/implementation/blueprint-schema-materialization/work-order.md)
+  starts from `Codec(a)` and emits schema accessors. It does not extend the
+  document-to-native-type experiment above.
+- `Codec(a)` already retains `Result(Schema, SchemaError)`, so extraction is an
+  O(1) field retrieval. Generated accessors can avoid codec closure construction
+  when an application needs only schema values, but each call may allocate the
+  reconstructed finite tree.
+- Heterogeneous codecs are converted to non-generic schema exports one at a
+  time. The emitter keeps the existing `Schema` representation and propagates
+  `UnknownSchema` rather than adding `Dynamic` or a second codec kind.
+- Caller-selected module and accessor names are validated before emission, and
+  all schema strings use deterministic literal escaping. Generated applications
+  import only the existing codec module and never the emitter.
+- `NumberRangeSchema` returns a located unsupported result because `Number` is
+  opaque. This experiment neither forges its representation nor converts exact
+  bounds through `Float`; broader support requires a separate checked public
+  reconstruction decision.
+- Ignored generated fixtures are regenerated, compiled, and compared with the
+  schemas retained by the source codecs. Repeat byte comparison proves
+  determinism; a git-diff check over ignored output cannot prove freshness.
+
 ## Shared fixture and acceptance
 
 - Use one closed object with required text `name`, required integer `quantity` bounded from one through ten, and optional nullable text `note`.
