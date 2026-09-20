@@ -29,6 +29,7 @@ pub type NodeLabel {
   InputPort
   DefinitionNode(NodeId)
   PairNode(Int)
+  ChoiceNode(NodeId)
 }
 
 pub type Dependency {
@@ -37,6 +38,7 @@ pub type Dependency {
 
 pub type ScopedStepId {
   ScopedStepId(node: NodeId, step_id: String)
+  BranchStepId(node: NodeId, branch: BranchSide, step_id: String)
 }
 
 pub type InspectionError {
@@ -75,6 +77,7 @@ type Node(e, u) {
     inputs: List(Token),
     step_identities: List(ScopedStepId),
     evaluate: fn(List(Value)) -> NodeOutcome(e, u),
+    selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
   )
 }
 
@@ -162,6 +165,7 @@ pub fn add(
                     output,
                     definition,
                   ),
+                  Missing,
                 )
               let next =
                 Builder(
@@ -200,6 +204,7 @@ pub fn pair(
           [left.token, right.token],
           [],
           pair_evaluator(left.codec, right.codec, output),
+          Missing,
         )
       let next =
         Builder(
@@ -337,7 +342,7 @@ fn contains_token(input: Token, nodes: List(Node(e, u)), token: Token) -> Bool {
 fn token_in_nodes(nodes: List(Node(e, u)), token: Token) -> Bool {
   case nodes {
     [] -> False
-    [Node(found, _, _, _, _), ..rest] ->
+    [Node(found, _, _, _, _, _), ..rest] ->
       case found == token {
         True -> True
         False -> token_in_nodes(rest, token)
@@ -409,7 +414,7 @@ fn scope_step_ids(
 fn flatten_all_step_identities(nodes: List(Node(e, u))) -> List(ScopedStepId) {
   case nodes {
     [] -> []
-    [Node(_, _, _, identities, _), ..rest] ->
+    [Node(_, _, _, identities, _, _), ..rest] ->
       append(identities, flatten_all_step_identities(rest))
   }
 }
@@ -474,7 +479,7 @@ fn mark_sources_reachable(
 fn inputs_for(token: Token, nodes: List(Node(e, u))) -> Maybe(List(Token)) {
   case nodes {
     [] -> Missing
-    [Node(found, _, inputs, _, _), ..rest] ->
+    [Node(found, _, inputs, _, _, _), ..rest] ->
       case token == found {
         True -> Present(inputs)
         False -> inputs_for(token, rest)
@@ -488,7 +493,7 @@ fn first_unreachable(
 ) -> Maybe(NodeLabel) {
   case nodes {
     [] -> Missing
-    [Node(token, label, _, _, _), ..rest] ->
+    [Node(token, label, _, _, _, _), ..rest] ->
       case token_in_list(token, reachable) {
         True -> first_unreachable(rest, reachable)
         False -> Present(label)
@@ -512,7 +517,7 @@ fn dependencies_for(
   input: Token,
   nodes: List(Node(e, u)),
 ) -> Result(List(Dependency), InspectionError) {
-  let Node(_, label, sources, _, _) = node
+  let Node(_, label, sources, _, _, _) = node
   labels_for_sources(sources, input, nodes, label)
 }
 
@@ -550,7 +555,7 @@ fn label_for(
 fn label_in_nodes(token: Token, nodes: List(Node(e, u))) -> Maybe(NodeLabel) {
   case nodes {
     [] -> Missing
-    [Node(found, label, _, _, _), ..rest] ->
+    [Node(found, label, _, _, _, _), ..rest] ->
       case found == token {
         True -> Present(label)
         False -> label_in_nodes(token, rest)
@@ -569,5 +574,217 @@ fn length(items: List(a)) -> Int {
   case items {
     [] -> 0
     [_, ..rest] -> 1 + length(rest)
+  }
+}
+
+pub type Choice(l, r) {
+  Left(l)
+  Right(r)
+}
+
+pub type BranchSide {
+  LeftBranch
+  RightBranch
+}
+
+pub type SelectedBranch {
+  SelectedBranch(side: BranchSide, input: Value)
+}
+
+pub type SelectionError {
+  UnknownChoice(NodeId)
+  ChoiceInputRejected(NodeBoundaryError)
+}
+
+// Local tagged representation; schema derivation for arbitrary unions is separate.
+pub fn choice_codec(left: Codec(l), right: Codec(r)) -> Codec(Choice(l, r)) {
+  blueprint.new(
+    fn(choice) {
+      case choice {
+        Left(item) -> encode_choice("left", left, item)
+        Right(item) -> encode_choice("right", right, item)
+      }
+    },
+    fn(raw) {
+      case raw {
+        value.Array([value.Text("left"), payload]) ->
+          case blueprint.decode(left, payload) {
+            Ok(item) -> Ok(Left(item))
+            Error(error) -> Error(blueprint.DecodeAtIndex(1, error))
+          }
+        value.Array([value.Text("right"), payload]) ->
+          case blueprint.decode(right, payload) {
+            Ok(item) -> Ok(Right(item))
+            Error(error) -> Error(blueprint.DecodeAtIndex(1, error))
+          }
+        _ ->
+          Error(blueprint.CannotDecode("Expected tagged left or right choice"))
+      }
+    },
+  )
+}
+
+fn encode_choice(
+  tag: String,
+  codec: Codec(a),
+  item: a,
+) -> Result(Value, blueprint.EncodeError) {
+  case blueprint.encode(codec, item) {
+    Ok(raw) -> Ok(value.Array([value.Text(tag), raw]))
+    Error(error) -> Error(blueprint.EncodeAtIndex(1, error))
+  }
+}
+
+// A closed choice exposes only its common output. No branch-local port escapes.
+// The output codec is explicit: equal native types do not imply equal wires.
+pub fn choose(
+  builder: Builder(i, e, u),
+  input: Port(Choice(l, r)),
+  id: NodeId,
+  left: saga.Definition(l, o, e, u),
+  right: saga.Definition(r, o, e, u),
+  output: Codec(o),
+) -> Result(#(Builder(i, e, u), Port(o)), BuildError) {
+  let left_steps = descriptor_step_ids(saga.steps(left))
+  let right_steps = descriptor_step_ids(saga.steps(right))
+  case contains_token(builder.input_token, builder.nodes, input.token) {
+    False -> Error(ForeignPort)
+    True ->
+      case contains_node_id(id, builder.node_ids) {
+        True -> Error(DuplicateNodeId(id))
+        False ->
+          case
+            first_duplicate(left_steps, []),
+            first_duplicate(right_steps, [])
+          {
+            Present(step), _ -> Error(DuplicateStepId(step))
+            _, Present(step) -> Error(DuplicateStepId(step))
+            Missing, Missing -> {
+              let route =
+                choice_router(
+                  input.codec,
+                  saga.input_codec(left),
+                  saga.input_codec(right),
+                )
+              let run_left =
+                definition_evaluator(
+                  saga.input_codec(left),
+                  saga.input_codec(left),
+                  output,
+                  left,
+                )
+              let run_right =
+                definition_evaluator(
+                  saga.input_codec(right),
+                  saga.input_codec(right),
+                  output,
+                  right,
+                )
+              let steps =
+                append(
+                  branch_steps(id, LeftBranch, left_steps),
+                  branch_steps(id, RightBranch, right_steps),
+                )
+              let node =
+                Node(
+                  fresh_token(),
+                  ChoiceNode(id),
+                  [input.token],
+                  steps,
+                  fn(inputs) {
+                    case inputs {
+                      [raw] ->
+                        case route(raw) {
+                          Error(error) -> NodeBoundaryFailed(error)
+                          Ok(SelectedBranch(LeftBranch, payload)) ->
+                            run_left([payload])
+                          Ok(SelectedBranch(RightBranch, payload)) ->
+                            run_right([payload])
+                        }
+                      other ->
+                        NodeBoundaryFailed(UnexpectedInputCount(length(other)))
+                    }
+                  },
+                  Present(route),
+                )
+              let next =
+                Builder(
+                  ..builder,
+                  nodes: append(builder.nodes, [node]),
+                  node_ids: append(builder.node_ids, [id]),
+                  step_identities: append(builder.step_identities, steps),
+                )
+              Ok(#(next, Port(node.token, output, node.label)))
+            }
+          }
+      }
+  }
+}
+
+fn choice_router(
+  source: Codec(Choice(l, r)),
+  left: Codec(l),
+  right: Codec(r),
+) -> fn(Value) -> Result(SelectedBranch, NodeBoundaryError) {
+  fn(raw) {
+    case blueprint.decode(source, raw) {
+      Error(error) -> Error(InputValueDidNotDecode(error))
+      Ok(Left(item)) -> encode_selected(LeftBranch, left, item)
+      Ok(Right(item)) -> encode_selected(RightBranch, right, item)
+    }
+  }
+}
+
+fn encode_selected(
+  side: BranchSide,
+  codec: Codec(a),
+  item: a,
+) -> Result(SelectedBranch, NodeBoundaryError) {
+  case blueprint.encode(codec, item) {
+    Error(error) -> Error(InputValueDidNotEncode(error))
+    Ok(raw) -> Ok(SelectedBranch(side, raw))
+  }
+}
+
+fn branch_steps(
+  node: NodeId,
+  side: BranchSide,
+  steps: List(String),
+) -> List(ScopedStepId) {
+  case steps {
+    [] -> []
+    [step, ..rest] -> [
+      BranchStepId(node, side, step),
+      ..branch_steps(node, side, rest)
+    ]
+  }
+}
+
+// Inspection exercises the exact routing closure used by the node evaluator.
+// It cannot execute a child, approve a run, or commit a durable branch selection.
+pub fn inspect_choice(
+  graph: Graph(i, o, e, u),
+  id: NodeId,
+  raw: Value,
+) -> Result(SelectedBranch, SelectionError) {
+  inspect_choices(graph.nodes, id, raw)
+}
+
+fn inspect_choices(
+  nodes: List(Node(e, u)),
+  id: NodeId,
+  raw: Value,
+) -> Result(SelectedBranch, SelectionError) {
+  case nodes {
+    [] -> Error(UnknownChoice(id))
+    [node, ..rest] ->
+      case node.label, node.selection {
+        ChoiceNode(found), Present(route) if found == id ->
+          case route(raw) {
+            Ok(selected) -> Ok(selected)
+            Error(error) -> Error(ChoiceInputRejected(error))
+          }
+        _, _ -> inspect_choices(rest, id, raw)
+      }
   }
 }

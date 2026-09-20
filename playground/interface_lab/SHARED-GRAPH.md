@@ -2,6 +2,8 @@
 
 # Shared workflow dataflow
 
+The subsequent [closed-choice experiment](CLOSED-CHOICE.md) addresses the conditional authoring question listed below.
+
 ## Decision
 
 - Fan-out is reuse of one typed `Port(a)`. It needs no separate scheduling abstraction.

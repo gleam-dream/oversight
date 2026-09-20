@@ -16,6 +16,8 @@ The [observation contract refinement](OBSERVATION-CONTRACT.md) separates map-sha
 
 The [shared graph refinement](SHARED-GRAPH.md) tests typed references, shared producers, joins, reusable children, and copied-builder membership. See the [current refinement status](REFINEMENT-STATUS.md) for the cross-package evidence map.
 
+The [closed-choice refinement](CLOSED-CHOICE.md) adds typed approval/decline routing with explicit output encoding and private branch internals.
+
 ## Run the experiment
 
 From the repository root:
