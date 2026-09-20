@@ -31,9 +31,10 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-three consumers compile with only their transitive source imports.
+- Gleam 1.18.1: thirty-four consumers compile with only their transitive source imports.
 - Thirty-six negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-five interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Twenty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `aad31c2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -119,3 +120,9 @@
 - [Typed span events](SPAN-EVENTS.md) compose domain records and empty field sets into distinct start, stop, and exception descriptors.
 - Reserved labels prevent application fields from replacing time, context, or exception fields. Ordinary `Result.Error` values remain on the stop-shaped completion path.
 - Symbolic layout probes establish logical field composition only. Native emission, timing, context identity, exception re-raising, and scoped attachment remain separate obligations.
+
+## Native source generation
+
+- [Generated codecs](GENERATED-CODECS.md) compile finite object contracts into ordinary native records and composed codecs. Runtime contracts remain distinct from native types.
+- Downstream consumers check schema equality, missing/null distinctions, bounded encoding, empty objects, nested nullable values, and exact unusual wire names without importing the generator.
+- Broader schema support, application-facing naming, committed-output tooling, compatibility adapters, and independent package distribution remain open.
