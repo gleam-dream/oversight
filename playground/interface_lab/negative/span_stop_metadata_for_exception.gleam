@@ -4,6 +4,7 @@ import lab/sinal
 import lab/sinal_span as span
 
 pub fn invalid(
+  backend: sinal.Backend,
   event: sinal.Event(
     span.ExceptionMeasurements,
     span.ExceptionMetadata(examples.RequestStartMetadata),
@@ -15,5 +16,5 @@ pub fn invalid(
   ),
 ) -> Result(sinal.Attachment, sinal.AttachError) {
   let assert Ok(id) = sinal.handler_id("span-stop-meta-for-exception")
-  sinal.attach(id, event, handler, fn(_event, _failure) { Nil })
+  sinal.attach(backend, id, event, handler, fn(_event, _failure) { Nil })
 }

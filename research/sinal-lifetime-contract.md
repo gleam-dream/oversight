@@ -3,7 +3,7 @@
 ## Question and status
 
 - The experiment asks how Sinal can expose typed spans and bounded handler lifetimes while preserving native `telemetry` behavior.
-- The current laboratory constructs typed events, classifies foreign callback failures, and constructs symbolic typed span events in [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam). Its `emit`, `attach`, and `detach` functions remain unfinished runtime boundaries, while [descriptor-aware observation](../playground/interface_lab/SCOPED-OBSERVATION.md) supplies pure name admission and type-only `attach_many` and scoped signatures.
+- The current laboratory constructs typed events, classifies foreign callback failures, and constructs symbolic typed span events in [`span_events.gleam`](../playground/interface_lab/src/consumers/span_events.gleam). [Injected observation](../playground/interface_lab/INJECTED-OBSERVATION.md) now constructs `emit`, `attach`, and `detach` through configured callbacks and exercises a process-local test registry. The native telemetry adapter and scoped cleanup remain unfinished; [descriptor-aware observation](../playground/interface_lab/SCOPED-OBSERVATION.md) supplies event-set admission and the scoped signature.
 - The original Sinal draft routes events through one actor per event and converts an ordinary returned error into a span exception. Both choices conflict with the selected native-facade direction.
 - The laboratory now contains constructive span and descriptor-aware callback probes. This note specifies their remaining native FFI oracle. It does not claim that `run_span`, attachment cleanup, timing, process identity, or crash propagation works before the native oracle passes.
 

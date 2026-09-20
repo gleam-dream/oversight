@@ -1,4 +1,4 @@
-// THROWAWAY: Execute only pure interface composition probes, never runtime stubs.
+// THROWAWAY: Execute interface probes and explicit test adapters, never unfinished runtime stubs.
 import consumers/activity_contract
 import consumers/agent_policy
 import consumers/approval_context
@@ -13,6 +13,7 @@ import consumers/derived_catalog
 import consumers/enum_codec
 import consumers/execution_ownership
 import consumers/foreign_observation
+import consumers/injected_observation
 import consumers/local_execution
 import consumers/login_consumption
 import consumers/login_transactions
@@ -58,6 +59,7 @@ pub fn main() -> Nil {
   config_codec.probe()
   collection_codec.probe()
   local_execution.probe()
+  injected_observation.probe()
   login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
