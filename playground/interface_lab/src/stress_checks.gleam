@@ -32,6 +32,7 @@ import consumers/stream_progress
 import consumers/tagged_codec
 import consumers/tool_turns
 import consumers/unified_workflow
+import consumers/unique_jobs
 import consumers/verified_login
 import consumers/worker_outcomes
 
@@ -69,6 +70,7 @@ pub fn main() -> Nil {
   tagged_codec.probe()
   tool_turns.probe()
   unified_workflow.probe()
+  unique_jobs.probe()
   verified_login.probe()
   worker_outcomes.probe()
 }
