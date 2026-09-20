@@ -4,6 +4,7 @@
 
 - This audit maps the complete capability intent in the six original package designs to the current ecosystem boundaries and interface laboratory. It also covers JSON Blueprint and the standalone LLM client because the ecosystem plan makes both independent public boundaries.
 - This audit measures public type and interface exploration. It does not measure production implementation, protocol conformance, persistence correctness, fault recovery, performance, or package maturity.
+- The [initial public API freeze](PUBLIC-API.md) selects intended package facades and resolves numeric representation, code-generation scope, and durable protocol visibility; it does not mark Open or Partial rows complete.
 - A capability remains in scope when the current plan assigns it to another owner. Reassignment prevents duplicate engines; it does not delete the capability from the ecosystem.
 - The source set is ([Fabric](fabric-design.md), [Grind](grind-design.md), [Relay](relay-design.md), [Saga](saga-design.md), [Sinal](sinal-design.md), [Warden](warden-design.md), [ecosystem plan](ECOSYSTEM-PLAN.md), [initial exploration](EXPLORATION.md), and every file under [`research/`](research/)). The current evidence source is the [interface laboratory](playground/interface_lab/README.md), with [refinement status](playground/interface_lab/REFINEMENT-STATUS.md) as the latest summary.
 
