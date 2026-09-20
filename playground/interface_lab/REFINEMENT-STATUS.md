@@ -10,16 +10,16 @@
 
 ## Evidence map
 
-| Boundary                    | Current evidence                                                                                                                    | Remaining interface work                                                                                      |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and 1.x compatibility                     |
-| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                   |
-| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility |
-| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                                      |
-| Saga → durable runner       | Unified definition signatures; child links, typed observation, exact submission receipts, and cancellation intent                   | Compensation receipts, persisted unfinished commands, snapshot codecs, and journal admission                  |
-| Grind alone                 | Typed admission, response resolution, claim identity, renewal, and current-record acknowledgement arbitration                       | Queue configuration, uniqueness, worker lifecycle, persisted history, and broader job families                |
-| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                                     |
-| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping             |
+| Boundary                    | Current evidence                                                                                                                    | Remaining interface work                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Blueprint → tool catalogs   | Composed codecs, located schema requirements, scripted admission, runtime contracts, document loading, and finite native generation | Number policy, enums, actual provider profiles, broader generation, and 1.x compatibility                        |
+| Relay / Fabric → invocation | Contextual registries and codec-derived dispatch; Relay adds resource grants, visibility, and execution policy                      | Relay protocol/transport integration; Fabric live policy ownership and approval persistence                      |
+| Fabric → LLM                | Buffered tool turns retain provider continuations; the independent LLM stream owner opens a second scripted stream                  | Fabric streaming composition, token/time budgets, provider profiles, and persisted continuation compatibility    |
+| Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                                         |
+| Saga → durable runner       | Unified definition signatures; child links, typed observation, exact submission receipts, and cancellation intent                   | Compensation receipts, persisted unfinished commands, snapshot codecs, and journal admission                     |
+| Grind alone                 | Typed admission, scoped uniqueness, exact command recovery, response resolution, and claim acknowledgement arbitration              | Queue configuration, broader uniqueness policies, worker lifecycle, persisted history, and advanced job families |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                                        |
+| Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping                |
 
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-four consumers compile with only their transitive source imports.
-- Sixty-one negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-five interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-five consumers compile with only their transitive source imports.
+- Sixty-four negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -42,7 +42,7 @@
 
 - **Fabric:** Extend the pure policy controller with observed token/time budgets, durable approvals, streaming, and explicit child execution. Preserve provider origin and uncertain-effect handling.
 - **Saga:** Extend child admission and cancellation intent with compensation-receipt issuance, redemption, and persisted unfinished commands. Exercise local runner outcomes over the canonical definition separately.
-- **Grind:** Add queue configuration and typed uniqueness admission with explicit conflict, replacement, and unknown-commit outcomes.
+- **Grind:** Extend queue configuration, worker lifecycle, and persisted history around typed uniqueness admission. Keep broader uniqueness policies and backend concurrency evidence separate.
 - **Remaining scope:** Keep every unfinished family in [API coverage](../../API-COVERAGE.md), including provider profiles, protocol clients and servers, OAuth operations, dynamic graphs, and advanced job families.
 - **Runtime evidence:** Run pinned native telemetry, oidcc, concurrent storage, and queue/workflow recovery oracles after the relevant interface contracts are constructible. These obligations remain distinct from interface completion.
 
@@ -198,3 +198,9 @@
 - Host-issued incarnations distinguish separate controller starts of the same logical run. Freshness, approval authenticity, and shared live ownership remain host or runtime obligations.
 - Model-visible business outcomes remain separate from policy or codec failures and uncertain effects. Host failures and unresolved effects block continuation.
 - Positive model-turn limits include attempted continuations and preserve terminal failure state. Token/time accounting, streamed progress, persistence, and child execution remain open.
+
+## Typed uniqueness admission
+
+- [Typed uniqueness](UNIQUE-JOBS.md) keeps versioned projected keys separate from stable submission commands. Recovery retains the original route, exact request, and actual native codecs.
+- Existing jobs retain their actual queue route. Checked worker binding precedes typed result-handle construction; scheduled replacement preserves the prior job and payload.
+- Immutable records exercise candidate matching and command replay. Database concurrency, durable ledgers, broad replacement, bulk policies, and worker execution remain open.

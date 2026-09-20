@@ -50,7 +50,7 @@
 
 - The exact interface question is whether one prepared unique submission can retain typed key construction, worker contract identity, queue scope, and reconciliation identity while returning a typed handle only after a compatible persisted contract is known.
 - The first profile always includes `WorkerId` and `WorkerVersion` in the uniqueness identity. Cross-worker uniqueness is deferred because a conflict with another worker cannot supply the submitting worker's output and error codecs safely.
-- Queue scope is explicit as `WithinQueue` or `AcrossQueues`. The current callback-only `Queue` must gain one validated queue name in `Admission`, because queue scope cannot be evidenced from an unnamed callback.
+- Queue scope is explicit as `WithinQueue` or `AcrossQueues`. The queue carries a validated storage owner and queue name in its route and in `Admission`, because queue scope cannot be evidenced from an unnamed callback.
 - Full-input uniqueness reuses the input encoded for admission. Selected-input uniqueness uses a typed projection and its own `Codec(key)`, so callers never name raw JSON keys or cast a foreign value.
 - Period origin and duration are explicit. The profile has no implicit 60-second default.
 - The first state profile exposes the four named groups (`Incomplete`, `ScheduledOnly`, `NotCancelledOrDiscarded`, and `AllRetained`). Arbitrary lists remain deferred until Grind's persisted state vocabulary is reconciled with the current typed `JobState`.
@@ -90,6 +90,7 @@ pub fn selected_input(
   scope: QueueScope,
   period: UniquePeriod,
   states: UniqueStates,
+  identity: UniqueKeyIdentity,
   select: fn(input) -> key,
   key_codec: Codec(key),
 ) -> Uniqueness(input)
@@ -103,7 +104,7 @@ pub fn selected_input(
 
 - The first conflict action is either `KeepExisting` or `RescheduleScheduled`. The latter replaces only `AvailableAt` and only when the persisted conflict is scheduled.
 - A non-scheduled conflict under `RescheduleScheduled` remains unchanged and returns `Existing`. The profile does not replace input, worker, version, or queue.
-- `Conflict` retains the persisted job identifier, worker identifier, worker version, queue name, and conflict state. It does not expose a constructor or any encoded output and error values.
+- `Conflict` retains the persisted job identifier, worker identifier, worker version, storage owner, queue name, and conflict state. It does not expose a constructor or any encoded output and error values.
 - `Conflict` is not a `JobHandle`. A separate binding function compares the persisted worker identifier and version with the supplied `Worker(input, output, error)` before using that worker's output and error codecs.
 
 ```gleam
@@ -182,3 +183,12 @@ pub fn bind_conflict(
 - Pure probes cannot establish durable exclusion, clock precision, transaction isolation, advisory-lock behavior, state-transition races, pruning, replacement commits, or reconciliation after connection loss.
 - Uniqueness prevents selected duplicate admission only. It does not establish execution serialization, exactly-once effects, downstream idempotency, or a typed result for an incompatible existing job.
 - General field replacement, cross-worker uniqueness, arbitrary state lists, unique bulk insertion, and backend-specific optimizations remain outside the first profile.
+
+## Refinements from admission and projection review
+
+- A queue name does not identify its storage owner. Reconciliation must retain both the owner route and queue name so a replacement backend with the same queue name cannot receive an uncertain command accidentally.
+- A successful reply can be unusable after its transaction committed. Invalid request receipts, incompatible worker metadata, and contradictory replacement facts must retain the original command and route for reconciliation instead of appearing to prove rejection.
+- A typed projection needs a declared key-policy identity and version. Selecting an account identifier and selecting an order identifier can produce equal encoded strings while representing different uniqueness domains. Comparing projection closures cannot establish a persistent identity.
+- Full-input keys and projected keys remain different key contracts. A changed projected-key meaning requires a changed contract identity or version.
+- The pure key comparator must state how it treats object order, duplicate fields, arrays, and scalar values. `Value.Object` stores fields as a list, so ordinary Gleam structural equality does not establish JSON object equality.
+- The typed profile must not claim to reproduce PostgreSQL containment semantics from pure value equality. Any intentional difference from Basic's full-map or selected-key containment remains an explicit profile choice and an oracle case.

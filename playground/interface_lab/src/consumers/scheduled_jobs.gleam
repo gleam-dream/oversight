@@ -6,17 +6,25 @@ import lab/value
 pub fn probe() -> Nil {
   let available = must_time(grind.available_at(1_800_000_000_000))
   let assert 1_800_000_000_000 = grind.available_at_milliseconds(available)
+  let scheduled_route = route_fixture("scheduled-jobs")
   let scheduled_queue =
-    grind.queue(fn(admission) {
+    grind.queue(scheduled_route, fn(admission) {
       case admission {
         grind.Admission(
+          actual_route,
           "rebuild-index",
           3,
           value.Int(41),
           grind.At(actual_time),
-        )
-          if actual_time == available
-        -> Ok(grind.job_id("scheduled-41"))
+        ) ->
+          case
+            actual_time == available
+            && grind.same_queue_route(actual_route, scheduled_route)
+          {
+            True -> Ok(grind.job_id("scheduled-41"))
+            False ->
+              Error(grind.AdmissionRejected(value.Text("wrong route or time")))
+          }
         _ -> Error(grind.AdmissionRejected(value.Text("unexpected admission")))
       }
     })
@@ -27,11 +35,21 @@ pub fn probe() -> Nil {
   let assert "scheduled-41" =
     grind.job_id_value(grind.job_id_of(scheduled_handle))
 
+  let immediate_route = route_fixture("immediate-jobs")
   let immediate_queue =
-    grind.queue(fn(admission) {
+    grind.queue(immediate_route, fn(admission) {
       case admission {
-        grind.Admission("rebuild-index", 3, value.Int(7), grind.Immediate) ->
-          Ok(grind.job_id("immediate-7"))
+        grind.Admission(
+          actual_route,
+          "rebuild-index",
+          3,
+          value.Int(7),
+          grind.Immediate,
+        ) ->
+          case grind.same_queue_route(actual_route, immediate_route) {
+            True -> Ok(grind.job_id("immediate-7"))
+            False -> Error(grind.AdmissionRejected(value.Text("wrong route")))
+          }
         _ -> Error(grind.AdmissionRejected(value.Text("unexpected admission")))
       }
     })
@@ -91,4 +109,10 @@ fn must_time(
 ) -> grind.AvailableAt {
   let assert Ok(available) = value
   available
+}
+
+fn route_fixture(name: String) -> grind.QueueRoute {
+  let assert Ok(owner) = grind.queue_owner("scheduled-jobs-storage")
+  let assert Ok(queue_name) = grind.queue_name(name)
+  grind.queue_route(owner, queue_name)
 }
