@@ -5,13 +5,14 @@
 - Program design baseline: oversight
   `bd0b83743533313eb9b4eee2bf7f99ed68a26750`.
 - Approved targets:
-  - Sinal: `/code/gleam-dream/sinal`, retained Wave 2 checkpoint and Wave 3
-    baseline `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` on `master`; no configured
-    remote. Wave 2 review requires evidence fixes before acceptance.
-  - JSON Blueprint: `/code/gleam-dream/json_blueprint`, accepted Wave 2 number
-    checkpoint and Wave 3 baseline
-    `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` on
-    `implementation/schema-aware-core`, origin `lostbean/json_blueprint`.
+  - Sinal: `/code/gleam-dream/sinal`, Wave 3 checkpoint and Wave 4 baseline
+    `13105a1777d01d6e1904ae624409ff2f25c739aa` on `master`; no configured remote.
+    The checkpoint is committed for review continuity, not accepted by the
+    commit itself.
+  - JSON Blueprint: `/code/gleam-dream/json_blueprint`, Wave 3 checkpoint and
+    Wave 4 baseline `cf378926647ed83dc0669f49d4bb8591b5e1381f` on
+    `implementation/schema-aware-core`, origin `lostbean/json_blueprint`. The
+    checkpoint is committed for review continuity, not accepted by the commit.
 - User-approved execution mechanism: external `agy` code agents using
   `--sandbox --dangerously-skip-permissions`, the repo dev shell, Gleam LSP,
   progressive implementation, Gleam, and TDD skills. Main Codex orchestrates;
@@ -192,7 +193,7 @@ native failure-event payload, and attach-many removal across every registered
 event, then correct the absolute-path LSP probe. Blueprint independently passes
 30 Erlang tests, 21 legacy JavaScript tests, and the 62-case number oracle.
 
-## Wave 3: launched
+## Wave 3: checkpointed; review in progress
 
 - External agents run with the requested sandbox flags and no model override.
   Sinal output: `/private/tmp/gleam-dream-sinal-wave3.log`; Blueprint output:
@@ -210,23 +211,44 @@ event, then correct the absolute-path LSP probe. Blueprint independently passes
   `read_url_content`, record `wave-3-capabilities.md`, remain uncommitted, and
   stop for Sol Medium review.
 
-| Package        | Wave 3 baseline                            | External session/log | Delivery | Review              |
-| -------------- | ------------------------------------------ | -------------------- | -------- | ------------------- |
-| Sinal          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | session `52773`      | running  | Sol Medium required |
-| JSON Blueprint | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | session `4613`       | running  | Sol Medium required |
+| Package        | Wave 3 baseline                            | Checkpoint commit                          | Reported delivery                                    | Review                                                                      |
+| -------------- | ------------------------------------------ | ------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------- |
+| Sinal          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | `13105a1777d01d6e1904ae624409ff2f25c739aa` | 39 tests; initial facade implemented                 | changes required; stack/payload/race/native-term evidence fixes lead Wave 4 |
+| JSON Blueprint | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | 65 Erlang tests; 61 schema cases; legacy 21 JS tests | changes required; error/corpus/JS-test fixes lead Wave 4                    |
+
+Both external runs exited successfully with no lingering background work. Their
+reports are `/private/tmp/gleam-dream-sinal-wave3.log` and
+`/private/tmp/gleam-dream-blueprint-wave3.log`. Reported success is not the Sol
+Medium verdict. Final [`review-3.md`](review-3.md) retains both snapshots with changes required; all listed findings must close first in Wave 4.
+
+## Wave 4: ready to launch
+
+- Shared handoff: [`wave-4-work-order.md`](wave-4-work-order.md).
+- Sinal target: close review evidence gaps and finish native race/fault quality,
+  bounded stress/benchmarks, runnable documentation, package metadata and
+  nonpublishing release checks without speculative registry APIs.
+- JSON Blueprint target: close review findings; deliver real JavaScript numeric
+  and facade parity, bounded byte admission, exact legacy migration evidence,
+  consumer admission fixtures, hostile/resource/benchmark evidence, runnable
+  documentation and nonpublishing release checks.
+- This wave aims to finish both approved initial releases. Wave 5 is created only
+  for a concrete blocker returned by implementation or review.
+
+| Package        | Wave 4 baseline                            | External session/log | Delivery    | Review              |
+| -------------- | ------------------------------------------ | -------------------- | ----------- | ------------------- |
+| Sinal          | `13105a1777d01d6e1904ae624409ff2f25c739aa` | pending launch       | not started | Sol Medium required |
+| JSON Blueprint | `cf378926647ed83dc0669f49d4bb8591b5e1381f` | pending launch       | not started | Sol Medium required |
 
 ## Subsequent roadmap
 
 - **Wave 3 — core behavior:** complete each initial production facade and its
   direct native/differential evidence.
-- **Wave 4 — integration and compatibility:** Sinal upstream/raw-BEAM and
-  package-observation compatibility; Blueprint advertised JavaScript parity,
-  byte-parser/reuse policy, legacy migration, and selected Relay/Fabric/LLM
-  schema-consumer profiles.
-- **Wave 5 — hardening and release:** fault, stress, hostile-input, benchmark,
-  documentation, packaging, upgrade, and release gates. Compress Waves 4 and 5
-  when evidence is already green; extend beyond Wave 5 only for a concrete
-  blocker.
+- **Wave 4 — release completion:** merge integration, compatibility and hardening
+  where coherent, and finish runnable docs, target matrices and nonpublishing
+  package validation. This is the expected final implementation wave.
+- **Wave 5 — concrete blockers only:** create it only for a specific failed
+  release gate or unresolved review finding; do not reserve it for generic
+  cleanup.
 - Blueprint source generation, recursive references, and broader schema families
   remain explicit design-deferred post-release capabilities. Their exclusion
   from the initial release does not cancel them.
