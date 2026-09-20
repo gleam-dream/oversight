@@ -192,7 +192,12 @@ native failure-event payload, and attach-many removal across every registered
 event, then correct the absolute-path LSP probe. Blueprint independently passes
 30 Erlang tests, 21 legacy JavaScript tests, and the 62-case number oracle.
 
-## Wave 3: ready to launch
+## Wave 3: launched
+
+- External agents run with the requested sandbox flags and no model override.
+  Sinal output: `/private/tmp/gleam-dream-sinal-wave3.log`; Blueprint output:
+  `/private/tmp/gleam-dream-blueprint-wave3.log`. Each has a sibling `.stderr`
+  file. A running session is not an accepted delivery.
 
 - Shared handoff: [`wave-3-work-order.md`](wave-3-work-order.md).
 - Sinal target: close the Wave 2 review gaps, then complete scoped lifetime,
@@ -205,10 +210,10 @@ event, then correct the absolute-path LSP probe. Blueprint independently passes
   `read_url_content`, record `wave-3-capabilities.md`, remain uncommitted, and
   stop for Sol Medium review.
 
-| Package        | Wave 3 baseline                            | External session/log | Delivery    | Review              |
-| -------------- | ------------------------------------------ | -------------------- | ----------- | ------------------- |
-| Sinal          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | pending launch       | not started | Sol Medium required |
-| JSON Blueprint | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | pending launch       | not started | Sol Medium required |
+| Package        | Wave 3 baseline                            | External session/log | Delivery | Review              |
+| -------------- | ------------------------------------------ | -------------------- | -------- | ------------------- |
+| Sinal          | `0204cc7088266e97eb76f77c1b1fb8ef96d5cdb4` | session `52773`      | running  | Sol Medium required |
+| JSON Blueprint | `fc8dae8d1c4eabf97d7ae8d4fa201cdc24f6b289` | session `4613`       | running  | Sol Medium required |
 
 ## Subsequent roadmap
 
