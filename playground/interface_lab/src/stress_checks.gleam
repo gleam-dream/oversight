@@ -1,4 +1,5 @@
 // THROWAWAY: Execute only pure interface composition probes, never runtime stubs.
+import consumers/activity_contract
 import consumers/approval_context
 import consumers/conditional_graph
 import consumers/config_codec
@@ -11,6 +12,7 @@ import consumers/standalone_jobs
 import consumers/tool_turns
 
 pub fn main() -> Nil {
+  activity_contract.probe()
   approval_context.probe()
   foreign_observation.probe()
   derived_catalog.probe()

@@ -270,14 +270,12 @@ fn definition(
     saga.activity(
       required_step_id(step),
       step_version,
-      step_version,
-      step_version,
-      step_version,
-      step_version,
-      input,
-      output,
-      workflow_error_codec(),
-      undo_error_codec(),
+      saga.ActivityContract(
+        saga.VersionedCodec(step_version, input),
+        saga.VersionedCodec(step_version, output),
+        saga.VersionedCodec(step_version, workflow_error_codec()),
+        saga.VersionedCodec(step_version, undo_error_codec()),
+      ),
       execute,
       saga.Uncompensated,
     )

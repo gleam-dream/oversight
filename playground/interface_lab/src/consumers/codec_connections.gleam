@@ -34,14 +34,12 @@ pub fn example() -> saga.Definition(String, String, Nil, Nil) {
     saga.activity(
       first_id,
       version,
-      version,
-      version,
-      version,
-      version,
-      blueprint.text(),
-      blueprint.text(),
-      nil_codec(),
-      nil_codec(),
+      saga.ActivityContract(
+        saga.VersionedCodec(version, blueprint.text()),
+        saga.VersionedCodec(version, blueprint.text()),
+        saga.VersionedCodec(version, nil_codec()),
+        saga.VersionedCodec(version, nil_codec()),
+      ),
       fn(text) { Ok(text) },
       saga.Uncompensated,
     )
@@ -49,14 +47,12 @@ pub fn example() -> saga.Definition(String, String, Nil, Nil) {
     saga.activity(
       second_id,
       version,
-      version,
-      version,
-      version,
-      version,
-      boxed_text(),
-      boxed_text(),
-      nil_codec(),
-      nil_codec(),
+      saga.ActivityContract(
+        saga.VersionedCodec(version, boxed_text()),
+        saga.VersionedCodec(version, boxed_text()),
+        saga.VersionedCodec(version, nil_codec()),
+        saga.VersionedCodec(version, nil_codec()),
+      ),
       fn(text) { Ok(text) },
       saga.Uncompensated,
     )
