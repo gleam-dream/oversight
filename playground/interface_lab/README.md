@@ -47,7 +47,7 @@ Named `todo` expressions identify unfinished runtime boundaries and produce expe
 | Model call         | `src/lab/llm.gleam`, `src/lab/llm_turn.gleam`       | One-call provider interface, typed output, and provider-owned continuation       |
 | Protocol tools     | `src/lab/relay.gleam`                               | Heterogeneous tool packaging without a workflow dependency                       |
 | Observation        | `src/lab/sinal.gleam`                               | One descriptor constrains measurements and metadata                              |
-| Authentication     | `src/lab/warden.gleam`                              | Pending login cannot be used as verified identity                                |
+| Authentication     | `src/lab/warden.gleam`                              | Canonical verified identity follows configured backend and binding checks        |
 
 The workflow consumer is the primary example. The other consumers isolate model calls, login, observation, and function reuse across adapters. They are caller examples, not production usage documentation.
 

@@ -1,32 +1,30 @@
-// THROWAWAY: Can callers distinguish pending login from verified identity?
-pub opaque type PendingLogin {
-  PendingLogin(state: String, nonce: String)
+// THROWAWAY: Can only the canonical login owner issue a verified identity?
+import lab/warden_transaction as transaction
+
+pub type VerifiedIdentity =
+  transaction.VerifiedIdentity
+
+pub type Session =
+  transaction.Session
+
+pub fn complete_login(
+  store: transaction.TransactionStore,
+  backend: transaction.VerificationBackend,
+  checked: transaction.CheckedOutcome,
+) -> Result(Session, transaction.CompleteLoginError) {
+  transaction.complete_login(store, backend, checked)
 }
 
-pub opaque type VerifiedIdentity {
-  VerifiedIdentity(issuer: String, subject: String)
-}
-
-pub type VerificationError {
-  InvalidState
-  InvalidNonce
-  InvalidIssuer
-  InvalidSignature
-  Expired
-  ProviderUnavailable
-}
-
-pub fn begin_login() -> Result(PendingLogin, VerificationError) {
-  todo as "OIDC provider and secure state generation are not implemented"
-}
-
-pub fn verify_callback(
-  _pending: PendingLogin,
-  _callback: String,
-) -> Result(VerifiedIdentity, VerificationError) {
-  todo as "oidcc verification and caller-owned replay checks are not implemented"
+pub fn identity(session: Session) -> VerifiedIdentity {
+  transaction.session_identity(session)
 }
 
 pub fn subject(identity: VerifiedIdentity) -> String {
-  identity.subject
+  transaction.verified_subject(identity)
+}
+
+pub fn identity_key(
+  identity: VerifiedIdentity,
+) -> #(transaction.Issuer, String) {
+  #(transaction.verified_issuer(identity), subject(identity))
 }
