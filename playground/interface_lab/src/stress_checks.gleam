@@ -15,6 +15,7 @@ import consumers/execution_ownership
 import consumers/foreign_observation
 import consumers/login_consumption
 import consumers/login_transactions
+import consumers/modern_relay
 import consumers/object_codec
 import consumers/offline_pipeline
 import consumers/relay_exchanges
@@ -56,6 +57,7 @@ pub fn main() -> Nil {
   login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
+  modern_relay.probe()
   object_codec.probe()
   relay_exchanges.probe()
   resource_authorization.probe()
