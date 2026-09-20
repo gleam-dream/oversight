@@ -43,10 +43,10 @@ pub fn resume(
   pending: Pending(c),
   results: List(model.ToolResult),
 ) -> Result(Next(c), TurnError) {
-  let expected = map(pending.calls, fn(call) { call.id })
-  let supplied = map(results, model.result_id)
-  case validate_results(supplied, expected, []) {
-    Error(error) -> Error(error)
+  case model.validate_results(pending.calls, results) {
+    Error(model.UnknownToolResult(id)) -> Error(UnknownToolResult(id))
+    Error(model.DuplicateToolResult(id)) -> Error(DuplicateToolResult(id))
+    Error(model.MissingToolResult(id)) -> Error(MissingToolResult(id))
     Ok(Nil) ->
       accept(
         pending.provider,
@@ -62,73 +62,11 @@ fn accept(
   case reply {
     Error(error) -> Error(ModelFailed(error))
     Ok(model.Final(output)) -> Ok(Finished(output))
-    Ok(model.RequestsTools(_, [])) -> Error(EmptyToolBatch)
     Ok(model.RequestsTools(continuation, calls)) ->
-      case unique_calls(calls, []) {
-        Error(error) -> Error(error)
+      case model.validate_calls(calls) {
+        Error(model.EmptyToolBatch) -> Error(EmptyToolBatch)
+        Error(model.DuplicateCallId(id)) -> Error(DuplicateCallId(id))
         Ok(Nil) -> Ok(NeedsTools(Pending(provider, continuation, calls)))
       }
-  }
-}
-
-fn unique_calls(
-  calls: List(model.ToolCall),
-  seen: List(model.CallId),
-) -> Result(Nil, TurnError) {
-  case calls {
-    [] -> Ok(Nil)
-    [call, ..rest] ->
-      case contains(seen, call.id) {
-        True -> Error(DuplicateCallId(call.id))
-        False -> unique_calls(rest, [call.id, ..seen])
-      }
-  }
-}
-
-fn validate_results(
-  supplied: List(model.CallId),
-  expected: List(model.CallId),
-  seen: List(model.CallId),
-) -> Result(Nil, TurnError) {
-  case supplied {
-    [] -> require_all(expected, seen)
-    [id, ..rest] ->
-      case contains(expected, id), contains(seen, id) {
-        False, _ -> Error(UnknownToolResult(id))
-        True, True -> Error(DuplicateToolResult(id))
-        True, False -> validate_results(rest, expected, [id, ..seen])
-      }
-  }
-}
-
-fn require_all(
-  expected: List(model.CallId),
-  supplied: List(model.CallId),
-) -> Result(Nil, TurnError) {
-  case expected {
-    [] -> Ok(Nil)
-    [id, ..rest] ->
-      case contains(supplied, id) {
-        True -> require_all(rest, supplied)
-        False -> Error(MissingToolResult(id))
-      }
-  }
-}
-
-fn contains(items: List(a), wanted: a) -> Bool {
-  case items {
-    [] -> False
-    [head, ..rest] ->
-      case head == wanted {
-        True -> True
-        False -> contains(rest, wanted)
-      }
-  }
-}
-
-fn map(items: List(a), f: fn(a) -> b) -> List(b) {
-  case items {
-    [] -> []
-    [head, ..rest] -> [f(head), ..map(rest, f)]
   }
 }
