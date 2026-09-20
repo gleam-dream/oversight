@@ -24,15 +24,29 @@ pub fn event_name(event: Event(m, d)) -> List(String) {
 
 pub type EmitError {
   EncodingFailed(EncodeError)
-  BackendUnavailable
+  BackendFailed(BackendError)
 }
 
 pub fn emit(
-  _event: Event(m, d),
-  _measurements: m,
-  _metadata: d,
+  backend: Backend,
+  event: Event(m, d),
+  measurements: m,
+  metadata: d,
 ) -> Result(Nil, EmitError) {
-  todo as "Synchronous telemetry bridge is outside the type experiment"
+  case sinal_fields.encode(event.measurements, measurements) {
+    Error(error) -> Error(EncodingFailed(error))
+    Ok(raw_measurements) ->
+      case sinal_fields.encode(event.metadata, metadata) {
+        Error(error) -> Error(EncodingFailed(error))
+        Ok(raw_metadata) -> {
+          let Backend(send, _) = backend
+          case send(event.name, raw_measurements, raw_metadata) {
+            Ok(Nil) -> Ok(Nil)
+            Error(error) -> Error(BackendFailed(error))
+          }
+        }
+      }
+  }
 }
 
 pub type HandlerFailure(e) {
@@ -89,10 +103,6 @@ pub fn handler_id(name: String) -> Result(HandlerId, IdentityError) {
   }
 }
 
-pub opaque type Attachment {
-  Attachment(HandlerId)
-}
-
 pub type AttachError {
   AlreadyExists
   DuplicateEventName(List(String))
@@ -104,26 +114,95 @@ pub type DetachError {
   DetachBackendNotAvailable
 }
 
+pub type BackendError {
+  BackendUnavailable
+  BackendRejected
+}
+
+pub type CallbackDisposition {
+  CallbackDelivered
+  CallbackFailed
+  CallbackUnknownEventName(List(String))
+}
+
+pub opaque type Backend {
+  Backend(
+    emit: fn(List(String), FieldMap, FieldMap) -> Result(Nil, BackendError),
+    attach: fn(
+      HandlerId,
+      List(List(String)),
+      fn(List(String), FieldMap, FieldMap) -> CallbackDisposition,
+    ) -> Result(BackendAttachment, AttachError),
+  )
+}
+
+// A configured adapter supplies these callbacks. The public constructor
+// is a trust boundary for this experiment; it does not validate backend code.
+pub fn backend(
+  emit: fn(List(String), FieldMap, FieldMap) -> Result(Nil, BackendError),
+  attach: fn(
+    HandlerId,
+    List(List(String)),
+    fn(List(String), FieldMap, FieldMap) -> CallbackDisposition,
+  ) -> Result(BackendAttachment, AttachError),
+) -> Backend {
+  Backend(emit, attach)
+}
+
+pub opaque type BackendAttachment {
+  BackendAttachment(detach: fn() -> Result(Nil, DetachError))
+}
+
+// Called by the trusted configured adapter when it creates an attachment.
+pub fn backend_attachment(
+  detach: fn() -> Result(Nil, DetachError),
+) -> BackendAttachment {
+  BackendAttachment(detach)
+}
+
+pub opaque type Attachment {
+  Attachment(BackendAttachment)
+}
+
 pub fn attach(
+  backend: Backend,
   id: HandlerId,
   event: Event(m, d),
   handler: Handler(m, d, e),
   on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
 ) -> Result(Attachment, AttachError) {
-  attach_many(id, event, [], handler, on_failure)
+  attach_many(backend, id, event, [], handler, on_failure)
 }
 
 pub fn attach_many(
-  _id: HandlerId,
+  backend: Backend,
+  id: HandlerId,
   first: Event(m, d),
   rest: List(Event(m, d)),
-  _handler: Handler(m, d, e),
-  _on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
 ) -> Result(Attachment, AttachError) {
   case validate_event_names(first, rest) {
     Error(error) -> Error(error)
-    Ok(Nil) ->
-      todo as "attach one native handler under every admitted event descriptor"
+    Ok(Nil) -> {
+      let Backend(_, register) = backend
+      let events = [first, ..rest]
+      let names = event_names(events)
+      let callback = fn(name, measurements, metadata) {
+        dispatch_selected(
+          events,
+          handler,
+          on_failure,
+          name,
+          measurements,
+          metadata,
+        )
+      }
+      case register(id, names, callback) {
+        Error(error) -> Error(error)
+        Ok(backend_attachment) -> Ok(Attachment(backend_attachment))
+      }
+    }
   }
 }
 
@@ -169,6 +248,49 @@ fn contains_name(names: List(List(String)), expected: List(String)) -> Bool {
   }
 }
 
-pub fn detach(_attachment: Attachment) -> Result(Nil, DetachError) {
-  todo as "detach by ID; copied attachment values cannot guarantee single consumption"
+pub fn detach(attachment: Attachment) -> Result(Nil, DetachError) {
+  let Attachment(BackendAttachment(detach)) = attachment
+  detach()
+}
+
+fn event_names(events: List(Event(m, d))) -> List(List(String)) {
+  case events {
+    [] -> []
+    [event, ..rest] -> [event.name, ..event_names(rest)]
+  }
+}
+
+fn dispatch_selected(
+  events: List(Event(m, d)),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  name: List(String),
+  measurements: FieldMap,
+  metadata: FieldMap,
+) -> CallbackDisposition {
+  case find_event(events, name) {
+    Error(_) -> CallbackUnknownEventName(name)
+    Ok(event) ->
+      case deliver_foreign(event, handler, measurements, metadata) {
+        Ok(Nil) -> CallbackDelivered
+        Error(failure) -> {
+          on_failure(event, failure)
+          CallbackFailed
+        }
+      }
+  }
+}
+
+fn find_event(
+  events: List(Event(m, d)),
+  name: List(String),
+) -> Result(Event(m, d), Nil) {
+  case events {
+    [] -> Error(Nil)
+    [event, ..rest] ->
+      case event.name == name {
+        True -> Ok(event)
+        False -> find_event(rest, name)
+      }
+  }
 }

@@ -170,8 +170,13 @@ pub fn probe() -> Nil {
   ) {
     Nil
   }
+  let admission_backend =
+    sinal.backend(fn(_, _, _) { Error(sinal.BackendRejected) }, fn(_, _, _) {
+      panic as "duplicate admission must not call the backend"
+    })
   let assert Error(sinal.DuplicateEventName(duplicate_again)) =
     sinal.attach_many(
+      admission_backend,
       handler_id,
       duplicate_first,
       [duplicate_second],
@@ -194,6 +199,7 @@ pub fn probe() -> Nil {
 // These wrappers prove only that the shared handler and nonempty event set
 // agree at compile time. The probe never executes their runtime TODO boundary.
 pub fn attach_many_shape(
+  backend: sinal.Backend,
   id: sinal.HandlerId,
   first: sinal.Event(Int, RunMetadata),
   rest: List(sinal.Event(Int, RunMetadata)),
@@ -203,7 +209,7 @@ pub fn attach_many_shape(
     sinal.HandlerFailure(HandlerProblem),
   ) -> Nil,
 ) -> Result(sinal.Attachment, sinal.AttachError) {
-  sinal.attach_many(id, first, rest, handler, on_failure)
+  sinal.attach_many(backend, id, first, rest, handler, on_failure)
 }
 
 pub fn with_attachments_shape(

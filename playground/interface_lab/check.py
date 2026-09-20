@@ -91,7 +91,7 @@ def main():
     )
     if probes.returncode:
         report_failure(probes.stdout)
-        raise SystemExit("FAIL: pure interface probes")
+        raise SystemExit("FAIL: interface probes")
     print("PASS: interface probe groups")
     import schema_check
     schema_check.main()
@@ -99,7 +99,7 @@ def main():
     generation_check.main()
     import relay_schema_check
     relay_schema_check.main()
-    print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
+    print("No scheduler, durable storage, protocol transport, or unfinished runtime boundary is executed.")
 
 
 if __name__ == "__main__":

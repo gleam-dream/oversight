@@ -2,6 +2,6 @@
 import consumers/observation
 import lab/sinal
 
-pub fn invalid() {
-  sinal.emit(observation.event(), 17, 42)
+pub fn invalid(backend: sinal.Backend) {
+  sinal.emit(backend, observation.event(), 17, 42)
 }

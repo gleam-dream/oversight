@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: fifty-three consumers compile with only their transitive source imports.
-- Seventy-seven negative fixtures fail with their intended single compiler diagnostic.
-- Forty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: fifty-four consumers compile with only their transitive source imports.
+- Seventy-eight negative fixtures fail with their intended single compiler diagnostic.
+- Forty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Sixty-one cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `210b7a2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -253,3 +253,10 @@
 - Two scripted adapters exercise distinct native options and located policies. Unsupported schema, invalid request, and result identity failures reject before transport or continuation.
 - Output schema validation precedes native mapping. LLM and Fabric share call/result correlation without sharing application tool policy.
 - Real provider profiles, streaming admission, persisted continuation, usage accounting, and transport ownership remain open.
+
+## Injected observation backend
+
+- [Injected observation](INJECTED-OBSERVATION.md) gives independent producers and subscribers a configured emission and attachment boundary. Attachments retain their originating detach callback.
+- A keyed process-local test registry exercises selected late callbacks, repeated detach, identifier replacement, handler failure isolation, and two independent backends. Its small Erlang storage helper is test-only.
+- Encoding failures precede backend invocation; malformed callback fields precede typed handlers. Emission failure remains separate from subscriber-specific failure.
+- Native atom/map conversion, callback exceptions, scoped cleanup, and native span execution remain open. Detachment does not imply callback quiescence or generation-safe identifier reuse.

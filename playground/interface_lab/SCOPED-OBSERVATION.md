@@ -31,7 +31,7 @@
 - The consumer delivers two same-shaped descriptors through one configured handler and checks which descriptor arrived.
 - Application metadata, extra foreign fields, malformed inputs, and a declared handler error exercise the existing field boundary.
 - Duplicate-name cases use different descriptors and codecs to test ambiguous admission.
-- Global and scoped attachment examples compile without executing their runtime paths.
+- This consumer leaves valid attachment paths unexecuted. The separate [injected observation consumer](INJECTED-OBSERVATION.md) exercises global attachment through a configured test backend; scoped execution remains unfinished.
 - Compiler-negative fixtures reject mixed measurement and metadata shapes while preserving the existing span-handler distinctions.
 
 ## Remaining obligations

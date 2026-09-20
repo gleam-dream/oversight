@@ -12,8 +12,9 @@ pub fn event() -> sinal.Event(Int, String) {
 }
 
 pub fn completed(
+  backend: sinal.Backend,
   duration: Int,
   run_label: String,
 ) -> Result(Nil, sinal.EmitError) {
-  sinal.emit(event(), duration, run_label)
+  sinal.emit(backend, event(), duration, run_label)
 }
