@@ -11,6 +11,7 @@ import consumers/foreign_observation
 import consumers/login_transactions
 import consumers/object_codec
 import consumers/offline_pipeline
+import consumers/relay_exchanges
 import consumers/scheduled_jobs
 import consumers/schema_admission
 import consumers/shared_graph
@@ -34,6 +35,7 @@ pub fn main() -> Nil {
   login_transactions.probe()
   offline_pipeline.probe()
   object_codec.probe()
+  relay_exchanges.probe()
   schema_admission.probe()
   scheduled_jobs.probe()
   shared_graph.probe()

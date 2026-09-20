@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-nine consumers compile with only their transitive source imports.
-- Thirty negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-one interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty consumers compile with only their transitive source imports.
+- Thirty-one negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -91,3 +91,10 @@
 - Strict link decoding rejects duplicate and unknown fields. Missing runs, pruned results, unavailable owners, and corrupt output remain distinct.
 - Native output and undo-error mismatches are compiler failures. Definition and codec versions are runtime compatibility checks.
 - Submission, cancellation, compensation receipts, durable journaling, and actual restart recovery remain open.
+
+## Relay exchange ownership
+
+- [Relay exchanges](RELAY-EXCHANGES.md) reuse the existing registry through an opaque invocation that retains each request context.
+- Server-owned exchange and invocation identities prevent repeated wire request identifiers and progress tokens from merging calls.
+- The pure consumer checks close-before-admission, cancellation, duplicate completion, late callbacks, tokenless progress, and monotonic integer progress.
+- Protocol codecs, HTTP admission, pagination, authorization, transport cleanup, and bounded owner retention remain open.
