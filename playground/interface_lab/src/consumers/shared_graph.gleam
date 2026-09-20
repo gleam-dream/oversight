@@ -79,27 +79,27 @@ pub fn probe() -> Nil {
   let expected_dependencies = [
     graph.Dependency(
       graph.InputPort,
-      graph.DefinitionNode(required_node_id("create-order")),
+      graph.ChildNode(required_node_id("create-order")),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("create-order")),
-      graph.DefinitionNode(required_node_id("review-credit")),
+      graph.ChildNode(required_node_id("create-order")),
+      graph.ChildNode(required_node_id("review-credit")),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("create-order")),
-      graph.DefinitionNode(required_node_id("review-stock")),
+      graph.ChildNode(required_node_id("create-order")),
+      graph.ChildNode(required_node_id("review-stock")),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("review-credit")),
+      graph.ChildNode(required_node_id("review-credit")),
       graph.PairNode(0),
     ),
     graph.Dependency(
-      graph.DefinitionNode(required_node_id("review-stock")),
+      graph.ChildNode(required_node_id("review-stock")),
       graph.PairNode(0),
     ),
     graph.Dependency(
       graph.PairNode(0),
-      graph.DefinitionNode(required_node_id("summarize-review")),
+      graph.ChildNode(required_node_id("summarize-review")),
     ),
   ]
   let assert True =
@@ -170,8 +170,8 @@ fn duplicate_id_result(
   graph.BuildError,
 ) {
   let assert Ok(#(after_first, _)) =
-    graph.add(builder, source, id, order_definition())
-  graph.add(after_first, source, id, order_definition())
+    graph.add_child(builder, source, id, order_definition())
+  graph.add_child(after_first, source, id, order_definition())
 }
 
 fn order_definition() -> saga.Definition(
@@ -343,7 +343,7 @@ fn require_add(
   id: graph.NodeId,
   definition: saga.Definition(a, b, WorkflowError, UndoError),
 ) -> #(graph.Builder(i, WorkflowError, UndoError), graph.Port(b)) {
-  let assert Ok(result) = graph.add(builder, input, id, definition)
+  let assert Ok(result) = graph.add_child(builder, input, id, definition)
   result
 }
 

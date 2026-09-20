@@ -2,11 +2,13 @@
 
 # Closed workflow choices
 
+The later [ownership refinement](EXECUTION-OWNERSHIP.md) makes independent child execution explicit in these entry-point names.
+
 ## Decision
 
 - `Choice(left, right)` carries one typed branch input.
 - A selector definition can map `ApprovalResult(input, answer)` into that choice while preserving the original input.
-- `choose` retains two existing Saga definitions and exposes only their common output port. Branch-local steps remain inside their child definition.
+- `choose_children` retains two existing Saga definitions and exposes only their common output port. Branch-local steps remain inside their child definition.
 - Both branches must have the same native output, failure, and compensation-error types. A compiler-negative consumer checks the output requirement.
 - The caller supplies the output codec explicitly. Equal native output types do not imply identical wire encodings or refinements.
 - Each branch's internal step identity includes the graph node, branch side, and step ID as separate structural values.

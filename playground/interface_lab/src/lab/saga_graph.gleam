@@ -27,9 +27,11 @@ pub type BuildError {
 
 pub type NodeLabel {
   InputPort
-  DefinitionNode(NodeId)
+  ChildNode(NodeId)
   PairNode(Int)
   ChoiceNode(NodeId)
+  ActivityNode(NodeId)
+  ApprovalNode(NodeId)
 }
 
 pub type Dependency {
@@ -43,6 +45,7 @@ pub type ScopedStepId {
 
 pub type InspectionError {
   MissingDependencyPort
+  NotDirectActivity(NodeId)
 }
 
 pub type NodeBoundaryError {
@@ -56,6 +59,7 @@ pub type NodeOutcome(e, u) {
   NodeSucceeded(Value)
   NodeFailed(cause: e, undo_failures: List(u))
   NodeWaiting(child_run_id: String)
+  NodeAwaitingApproval
   NodeCancelled(undo_failures: List(u))
   NodeNeedsReconciliation(evidence: Value)
   NodeBoundaryFailed(NodeBoundaryError)
@@ -78,6 +82,7 @@ type Node(e, u) {
     step_identities: List(ScopedStepId),
     evaluate: fn(List(Value)) -> NodeOutcome(e, u),
     selection: Maybe(fn(Value) -> Result(SelectedBranch, NodeBoundaryError)),
+    compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
   )
 }
 
@@ -135,7 +140,7 @@ pub fn begin(
 // Add one retained Saga definition after any existing typed port. The
 // definition remains captured by its evaluator closure; this module does not
 // schedule that closure or claim Saga's runtime semantics.
-pub fn add(
+pub fn add_child(
   builder: Builder(i, e, u),
   input: Port(a),
   id: NodeId,
@@ -156,7 +161,7 @@ pub fn add(
               let node =
                 Node(
                   fresh_token(),
-                  DefinitionNode(id),
+                  ChildNode(id),
                   [input.token],
                   step_ids,
                   definition_evaluator(
@@ -165,6 +170,7 @@ pub fn add(
                     output,
                     definition,
                   ),
+                  Missing,
                   Missing,
                 )
               let next =
@@ -204,6 +210,7 @@ pub fn pair(
           [left.token, right.token],
           [],
           pair_evaluator(left.codec, right.codec, output),
+          Missing,
           Missing,
         )
       let next =
@@ -342,7 +349,7 @@ fn contains_token(input: Token, nodes: List(Node(e, u)), token: Token) -> Bool {
 fn token_in_nodes(nodes: List(Node(e, u)), token: Token) -> Bool {
   case nodes {
     [] -> False
-    [Node(found, _, _, _, _, _), ..rest] ->
+    [Node(found, _, _, _, _, _, _), ..rest] ->
       case found == token {
         True -> True
         False -> token_in_nodes(rest, token)
@@ -414,7 +421,7 @@ fn scope_step_ids(
 fn flatten_all_step_identities(nodes: List(Node(e, u))) -> List(ScopedStepId) {
   case nodes {
     [] -> []
-    [Node(_, _, _, identities, _, _), ..rest] ->
+    [Node(_, _, _, identities, _, _, _), ..rest] ->
       append(identities, flatten_all_step_identities(rest))
   }
 }
@@ -479,7 +486,7 @@ fn mark_sources_reachable(
 fn inputs_for(token: Token, nodes: List(Node(e, u))) -> Maybe(List(Token)) {
   case nodes {
     [] -> Missing
-    [Node(found, _, inputs, _, _, _), ..rest] ->
+    [Node(found, _, inputs, _, _, _, _), ..rest] ->
       case token == found {
         True -> Present(inputs)
         False -> inputs_for(token, rest)
@@ -493,7 +500,7 @@ fn first_unreachable(
 ) -> Maybe(NodeLabel) {
   case nodes {
     [] -> Missing
-    [Node(token, label, _, _, _, _), ..rest] ->
+    [Node(token, label, _, _, _, _, _), ..rest] ->
       case token_in_list(token, reachable) {
         True -> first_unreachable(rest, reachable)
         False -> Present(label)
@@ -517,7 +524,7 @@ fn dependencies_for(
   input: Token,
   nodes: List(Node(e, u)),
 ) -> Result(List(Dependency), InspectionError) {
-  let Node(_, label, sources, _, _, _) = node
+  let Node(_, label, sources, _, _, _, _) = node
   labels_for_sources(sources, input, nodes, label)
 }
 
@@ -555,7 +562,7 @@ fn label_for(
 fn label_in_nodes(token: Token, nodes: List(Node(e, u))) -> Maybe(NodeLabel) {
   case nodes {
     [] -> Missing
-    [Node(found, label, _, _, _, _), ..rest] ->
+    [Node(found, label, _, _, _, _, _), ..rest] ->
       case found == token {
         True -> Present(label)
         False -> label_in_nodes(token, rest)
@@ -637,7 +644,7 @@ fn encode_choice(
 
 // A closed choice exposes only its common output. No branch-local port escapes.
 // The output codec is explicit: equal native types do not imply equal wires.
-pub fn choose(
+pub fn choose_children(
   builder: Builder(i, e, u),
   input: Port(Choice(l, r)),
   id: NodeId,
@@ -706,6 +713,7 @@ pub fn choose(
                     }
                   },
                   Present(route),
+                  Missing,
                 )
               let next =
                 Builder(
@@ -785,6 +793,195 @@ fn inspect_choices(
             Error(error) -> Error(ChoiceInputRejected(error))
           }
         _, _ -> inspect_choices(rest, id, raw)
+      }
+  }
+}
+
+pub type CompensationError(u) {
+  CompensationNotDeclared
+  CompensationInputRejected(blueprint.DecodeError)
+  CompensationOutputRejected(blueprint.DecodeError)
+  CompensationFailed(u)
+}
+
+// Direct activities retain the parent-owned compensator; they are not child runs.
+pub fn add_activity(
+  builder: Builder(i, e, u),
+  input: Port(a),
+  id: NodeId,
+  activity: saga.Activity(a, b, e, u),
+) -> Result(#(Builder(i, e, u), Port(b)), BuildError) {
+  let adapter = saga.activity_adapter(activity)
+  let contract = adapter.contract
+  let evaluate = fn(inputs) {
+    case inputs {
+      [raw] ->
+        case direct_input(input.codec, contract.input.codec, raw) {
+          Error(error) -> NodeBoundaryFailed(error)
+          Ok(typed) ->
+            case adapter.execute(typed) {
+              Error(error) -> NodeFailed(error, [])
+              Ok(output) ->
+                case blueprint.encode(contract.output.codec, output) {
+                  Ok(raw_output) -> NodeSucceeded(raw_output)
+                  Error(error) ->
+                    NodeBoundaryFailed(OutputValueDidNotEncode(error))
+                }
+            }
+        }
+      other -> NodeBoundaryFailed(UnexpectedInputCount(length(other)))
+    }
+  }
+  let compensate = case adapter.compensation {
+    saga.Uncompensated -> Missing
+    saga.Compensate(undo) ->
+      Present(fn(raw_input, raw_output) {
+        case blueprint.decode(input.codec, raw_input) {
+          Error(error) -> Error(CompensationInputRejected(error))
+          Ok(original) ->
+            case blueprint.decode(contract.output.codec, raw_output) {
+              Error(error) -> Error(CompensationOutputRejected(error))
+              Ok(output) ->
+                case undo(original, output) {
+                  Ok(Nil) -> Ok(Nil)
+                  Error(error) -> Error(CompensationFailed(error))
+                }
+            }
+        }
+      })
+  }
+  register_direct(
+    builder,
+    input,
+    id,
+    ActivityNode(id),
+    saga.step_identity(adapter.descriptor),
+    contract.output.codec,
+    evaluate,
+    compensate,
+  )
+}
+
+pub fn add_approval(
+  builder: Builder(i, e, u),
+  input: Port(a),
+  id: NodeId,
+  approval: saga.Approval(a, b, e, u),
+) -> Result(#(Builder(i, e, u), Port(saga.ApprovalResult(a, b))), BuildError) {
+  let adapter = saga.approval_adapter(approval)
+  let evaluate = fn(inputs) {
+    case inputs {
+      [raw] ->
+        case direct_input(input.codec, adapter.input, raw) {
+          Error(error) -> NodeBoundaryFailed(error)
+          Ok(_) -> NodeAwaitingApproval
+        }
+      other -> NodeBoundaryFailed(UnexpectedInputCount(length(other)))
+    }
+  }
+  register_direct(
+    builder,
+    input,
+    id,
+    ApprovalNode(id),
+    saga.step_identity(adapter.descriptor),
+    saga.approval_result_codec(adapter.input, adapter.answer),
+    evaluate,
+    Missing,
+  )
+}
+
+fn direct_input(
+  source: Codec(a),
+  target: Codec(a),
+  raw: Value,
+) -> Result(a, NodeBoundaryError) {
+  case blueprint.decode(source, raw) {
+    Error(error) -> Error(InputValueDidNotDecode(error))
+    Ok(typed) ->
+      case blueprint.encode(target, typed) {
+        Error(error) -> Error(InputValueDidNotEncode(error))
+        Ok(_) -> Ok(typed)
+      }
+  }
+}
+
+fn register_direct(
+  builder: Builder(i, e, u),
+  input: Port(a),
+  id: NodeId,
+  label: NodeLabel,
+  step: String,
+  output: Codec(b),
+  evaluate: fn(List(Value)) -> NodeOutcome(e, u),
+  compensate: Maybe(fn(Value, Value) -> Result(Nil, CompensationError(u))),
+) -> Result(#(Builder(i, e, u), Port(b)), BuildError) {
+  case contains_token(builder.input_token, builder.nodes, input.token) {
+    False -> Error(ForeignPort)
+    True ->
+      case contains_node_id(id, builder.node_ids) {
+        True -> Error(DuplicateNodeId(id))
+        False -> {
+          let steps = [ScopedStepId(id, step)]
+          let node =
+            Node(
+              fresh_token(),
+              label,
+              [input.token],
+              steps,
+              evaluate,
+              Missing,
+              compensate,
+            )
+          let next =
+            Builder(
+              ..builder,
+              nodes: append(builder.nodes, [node]),
+              node_ids: append(builder.node_ids, [id]),
+              step_identities: append(builder.step_identities, steps),
+            )
+          Ok(#(next, Port(node.token, output, label)))
+        }
+      }
+  }
+}
+
+// Laboratory probes only: execute one explicitly named direct boundary, never
+// a child or scheduler. Callers supply the exact upstream input payload.
+pub fn probe_direct(
+  graph: Graph(i, o, e, u),
+  id: NodeId,
+  raw: Value,
+) -> Result(NodeOutcome(e, u), InspectionError) {
+  case direct_node(graph.nodes, id) {
+    Missing -> Error(NotDirectActivity(id))
+    Present(node) -> Ok(node.evaluate([raw]))
+  }
+}
+
+pub fn probe_compensation(
+  graph: Graph(i, o, e, u),
+  id: NodeId,
+  raw_input: Value,
+  raw_output: Value,
+) -> Result(Nil, CompensationError(u)) {
+  case direct_node(graph.nodes, id) {
+    Missing -> Error(CompensationNotDeclared)
+    Present(node) ->
+      case node.compensate {
+        Missing -> Error(CompensationNotDeclared)
+        Present(undo) -> undo(raw_input, raw_output)
+      }
+  }
+}
+
+fn direct_node(nodes: List(Node(e, u)), id: NodeId) -> Maybe(Node(e, u)) {
+  case nodes {
+    [] -> Missing
+    [node, ..rest] ->
+      case node.label {
+        ActivityNode(found) | ApprovalNode(found) if found == id -> Present(node)
+        _ -> direct_node(rest, id)
       }
   }
 }

@@ -4,10 +4,12 @@
 
 The subsequent [closed-choice experiment](CLOSED-CHOICE.md) addresses the conditional authoring question listed below.
 
+The later [ownership refinement](EXECUTION-OWNERSHIP.md) makes independent child execution explicit in these entry-point names.
+
 ## Decision
 
 - Fan-out is reuse of one typed `Port(a)`. It needs no separate scheduling abstraction.
-- `add` retains an existing Saga definition and returns a typed output port. `pair` records two dependencies and supplies a typed tuple to the next node.
+- `add_child` retains an existing Saga definition and returns a typed output port. `pair` records two dependencies and supplies a typed tuple to the next node.
 - Each port retains its real codec. Node evaluators close over the actual child definition, rather than keeping only metadata.
 - Stable caller-provided node IDs identify the eventual persisted structure. Fresh VM-local construction tokens validate port membership, including across copied builders with conflicting node IDs and output types.
 - Construction tokens are not persisted or restored. They do not provide identity across BEAM nodes or restarts.

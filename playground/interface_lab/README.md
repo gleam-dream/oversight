@@ -20,6 +20,8 @@ The [closed-choice refinement](CLOSED-CHOICE.md) adds typed approval/decline rou
 
 The [activity-contract refinement](ACTIVITY-CONTRACT.md) replaces the positional version cluster with reusable typed boundaries.
 
+The [execution-ownership refinement](EXECUTION-OWNERSHIP.md) distinguishes direct activities and approvals from independently managed children.
+
 ## Run the experiment
 
 From the repository root:
