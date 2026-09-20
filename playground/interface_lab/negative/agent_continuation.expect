@@ -1,0 +1,3 @@
+Type mismatch
+Controller(String, Int)
+Controller(String, Bool)
