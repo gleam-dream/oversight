@@ -127,6 +127,8 @@ pub type Schema {
   BoolSchema
   PairSchema(Schema, Schema)
   FieldSchema(String, Schema)
+  ListSchema(Schema)
+  NullableSchema(Schema)
 }
 
 pub type SchemaError {
@@ -144,6 +146,21 @@ pub fn schema_value(schema: Schema) -> Value {
     TextSchema -> value.Object([#("type", value.Text("string"))])
     IntSchema -> value.Object([#("type", value.Text("integer"))])
     BoolSchema -> value.Object([#("type", value.Text("boolean"))])
+    ListSchema(inner) ->
+      value.Object([
+        #("type", value.Text("array")),
+        #("items", schema_value(inner)),
+      ])
+    NullableSchema(inner) ->
+      value.Object([
+        #(
+          "anyOf",
+          value.Array([
+            value.Object([#("type", value.Text("null"))]),
+            schema_value(inner),
+          ]),
+        ),
+      ])
     FieldSchema(name, inner) ->
       value.Object([
         #("type", value.Text("object")),
@@ -199,4 +216,103 @@ pub fn schema_document(schema: Schema) -> Value {
     #("$schema", value.Text("https://json-schema.org/draft/2020-12/schema")),
     ..fields
   ])
+}
+
+pub type Nullable(a) {
+  Null
+  NonNull(a)
+}
+
+// Null is a wire value. Missing object properties are a separate concern.
+pub fn nullable(inner: Codec(a)) -> Codec(Nullable(a)) {
+  let codec =
+    new(
+      fn(item) {
+        case item {
+          Null -> Ok(value.Null)
+          NonNull(item) ->
+            case encode(inner, item) {
+              Ok(value.Null) ->
+                Error(CannotEncode("NonNull must encode a non-null value"))
+              other -> other
+            }
+        }
+      },
+      fn(raw) {
+        case raw {
+          value.Null -> Ok(Null)
+          _ ->
+            case decode(inner, raw) {
+              Ok(item) -> Ok(NonNull(item))
+              Error(error) -> Error(error)
+            }
+        }
+      },
+    )
+  let description = case inner.schema {
+    Ok(schema) -> Ok(NullableSchema(schema))
+    Error(error) -> Error(error)
+  }
+  Codec(..codec, schema: description)
+}
+
+pub fn list(inner: Codec(a)) -> Codec(List(a)) {
+  let codec =
+    new(
+      fn(items) {
+        case encode_items(inner, items, 0) {
+          Ok(items) -> Ok(value.Array(items))
+          Error(error) -> Error(error)
+        }
+      },
+      fn(raw) {
+        case raw {
+          value.Array(items) -> decode_items(inner, items, 0)
+          _ -> Error(CannotDecode("Expected array"))
+        }
+      },
+    )
+  let description = case inner.schema {
+    Ok(schema) -> Ok(ListSchema(schema))
+    Error(error) -> Error(error)
+  }
+  Codec(..codec, schema: description)
+}
+
+fn encode_items(
+  codec: Codec(a),
+  items: List(a),
+  index: Int,
+) -> Result(List(Value), EncodeError) {
+  case items {
+    [] -> Ok([])
+    [item, ..rest] ->
+      case encode(codec, item) {
+        Error(error) -> Error(EncodeAtIndex(index, error))
+        Ok(raw) ->
+          case encode_items(codec, rest, index + 1) {
+            Ok(rest) -> Ok([raw, ..rest])
+            Error(error) -> Error(error)
+          }
+      }
+  }
+}
+
+fn decode_items(
+  codec: Codec(a),
+  items: List(Value),
+  index: Int,
+) -> Result(List(a), DecodeError) {
+  case items {
+    [] -> Ok([])
+    [item, ..rest] ->
+      case decode(codec, item) {
+        Error(error) -> Error(DecodeAtIndex(index, error))
+        Ok(decoded) ->
+          case decode_items(codec, rest, index + 1) {
+            Ok(rest) -> Ok([decoded, ..rest])
+            Error(error) -> Error(error)
+          }
+      }
+  }
 }
