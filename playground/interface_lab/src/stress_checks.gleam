@@ -1,5 +1,6 @@
 // THROWAWAY: Execute interface probes and explicit test adapters, never unfinished runtime stubs.
 import consumers/activity_contract
+import consumers/activity_recovery
 import consumers/agent_policy
 import consumers/approval_context
 import consumers/child_admission
@@ -46,6 +47,7 @@ import consumers/worker_outcomes
 
 pub fn main() -> Nil {
   activity_contract.probe()
+  activity_recovery.probe()
   agent_policy.probe()
   approval_context.probe()
   child_admission.probe()
