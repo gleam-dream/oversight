@@ -8,6 +8,7 @@ import consumers/execution_ownership
 import consumers/foreign_observation
 import consumers/login_transactions
 import consumers/offline_pipeline
+import consumers/scheduled_jobs
 import consumers/shared_graph
 import consumers/shared_registry
 import consumers/standalone_jobs
@@ -23,6 +24,7 @@ pub fn main() -> Nil {
   config_codec.probe()
   login_transactions.probe()
   offline_pipeline.probe()
+  scheduled_jobs.probe()
   shared_graph.probe()
   shared_registry.probe()
   standalone_jobs.probe()
