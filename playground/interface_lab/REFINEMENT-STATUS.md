@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-five consumers compile with only their transitive source imports.
-- Twenty-five negative fixtures fail with their intended single compiler diagnostic.
-- Seventeen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: twenty-six consumers compile with only their transitive source imports.
+- Twenty-six negative fixtures fail with their intended single compiler diagnostic.
+- Eighteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -71,3 +71,7 @@
 ## Independent schema evidence
 
 - [Schema agreement oracle](SCHEMA-ORACLE.md) compares emitted documents and actual decoder outcomes. Floating-point normalization and duplicate-key parsing remain outside the corpus.
+
+## Streaming grammar refinement
+
+- [Stream progress and tool completion](STREAM-PROGRESS.md) preserves interleaved call identities and separates completed tools from partial arguments. Live ownership and provider adaptation remain open.

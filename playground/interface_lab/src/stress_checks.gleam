@@ -14,6 +14,7 @@ import consumers/scheduled_jobs
 import consumers/shared_graph
 import consumers/shared_registry
 import consumers/standalone_jobs
+import consumers/stream_progress
 import consumers/tagged_codec
 import consumers/tool_turns
 
@@ -33,6 +34,7 @@ pub fn main() -> Nil {
   shared_graph.probe()
   shared_registry.probe()
   standalone_jobs.probe()
+  stream_progress.probe()
   tagged_codec.probe()
   tool_turns.probe()
 }
