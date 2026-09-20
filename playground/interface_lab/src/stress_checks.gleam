@@ -20,6 +20,7 @@ import consumers/scheduled_jobs
 import consumers/schema_admission
 import consumers/schema_documents
 import consumers/schema_generation
+import consumers/scoped_observation
 import consumers/shared_graph
 import consumers/shared_registry
 import consumers/span_events
@@ -54,6 +55,7 @@ pub fn main() -> Nil {
   schema_documents.probe()
   schema_generation.probe()
   scheduled_jobs.probe()
+  scoped_observation.probe()
   shared_graph.probe()
   shared_registry.probe()
   standalone_jobs.probe()

@@ -18,10 +18,9 @@
 | Saga → static graph         | One canonical definition, typed references, wire adapters, scoped metadata, and direct versus child ownership                       | Local runner outcomes, traversal, retry policy, and definition migration                           |
 | Saga → durable runner       | Unified definition signatures; constructive child links, reattachment, compatibility checks, and typed observation                  | Child submission/cancellation, compensation receipts, snapshot codecs, and journal admission       |
 | Grind alone                 | Typed admission, response resolution, claim identity, renewal, and current-record acknowledgement arbitration                       | Queue configuration, uniqueness, worker lifecycle, persisted history, and broader job families     |
-| Sinal alone                 | Map-shaped fields, foreign callback classification, and symbolic typed span events                                                  | Proposed descriptor-aware attachment; native name/map and lifetime contracts                       |
+| Sinal alone                 | Map-shaped fields, descriptor-aware callbacks, duplicate-name admission, and symbolic typed span events                             | Native name/map binding, registration, scoped cleanup, and span execution                          |
 | Warden alone                | Revision-bound consumption, configured scripted backend, strict identity binding, and one canonical identity owner                  | Raw callback/browser binding, provider configuration, token/session operations, and oidcc mapping  |
 
-- This map reflects committed evidence through `227a844`. The scoped Sinal attachment proposal is not counted as implemented evidence.
 - Graph entry points now name direct activity, approval, and independent-child ownership explicitly. Child completion still does not grant parent compensation capability.
 
 - The shared laboratory `Value` algebra is a prototype convenience, not a settled production dependency graph. Native telemetry terms and transport-specific data still need their actual boundary adapters.
@@ -32,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: forty-one consumers compile with only their transitive source imports.
-- Fifty-three negative fixtures fail with their intended single compiler diagnostic.
-- Thirty-two interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: forty-two consumers compile with only their transitive source imports.
+- Fifty-five negative fixtures fail with their intended single compiler diagnostic.
+- Thirty-three interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
 - Each committed wave passes its coherent snapshot gate and targeted formatting. The host flake check also passed at `8b2ecfd`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
@@ -180,8 +179,8 @@
 - Grants retain all accepted scopes; protected entry points reject wrong-resource and insufficient grants before policy or decoding. Hidden and denied named calls cannot invoke the tool handler.
 - The web-account policy compiles against both Warden identity and the independent API grant. Verifier provenance, protected transport routing, and runtime authorization remain explicit obligations.
 
-## Scoped observation follow-up
+## Descriptor-aware observation
 
-- The [Sinal lifetime contract](../../research/sinal-lifetime-contract.md) proposes descriptor-aware handlers and nonempty attachment sets with ordinary closure-captured configuration.
-- Duplicate logical names must fail before registration because same-shaped descriptors may retain different decoders. Scoped attachment owns a private identifier; scope exit does not imply callback quiescence.
-- This refinement is a contract only. The proposed callback migration, admission checks, attachment signatures, and pinned native oracle remain to be executed.
+- [Descriptor-aware observation](SCOPED-OBSERVATION.md) delivers the selected event through one configured handler and preserves typed decoding failures. Nonempty attachment signatures require shared measurement and metadata types.
+- Duplicate logical names fail before either global or scoped registration reaches its runtime boundary. The invalid scoped case cannot invoke its work callback.
+- Valid attachment and scoped calls compile only. Private identifier allocation, native failure reporting, cleanup, and callback lifetime remain subject to the [pinned native oracle](../../research/sinal-lifetime-contract.md). Scope exit does not imply callback quiescence.

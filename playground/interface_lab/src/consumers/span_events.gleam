@@ -73,17 +73,17 @@ pub fn request_handlers() -> #(
     span.StartMeasurements,
     span.StartMetadata(RequestStartMetadata),
     Nil,
-  ) = sinal.handler(fn(_measurements, _metadata) { Ok(Nil) })
+  ) = sinal.handler(fn(_event, _measurements, _metadata) { Ok(Nil) })
   let stop: sinal.Handler(
     span.StopMeasurements(ResponseMeasurements),
     span.StopMetadata(RequestStopMetadata),
     Nil,
-  ) = sinal.handler(fn(_measurements, _metadata) { Ok(Nil) })
+  ) = sinal.handler(fn(_event, _measurements, _metadata) { Ok(Nil) })
   let exception: sinal.Handler(
     span.ExceptionMeasurements,
     span.ExceptionMetadata(RequestStartMetadata),
     Nil,
-  ) = sinal.handler(fn(_measurements, _metadata) { Ok(Nil) })
+  ) = sinal.handler(fn(_event, _measurements, _metadata) { Ok(Nil) })
 
   #(start, stop, exception)
 }
