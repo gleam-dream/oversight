@@ -18,6 +18,7 @@ import consumers/schema_admission
 import consumers/schema_documents
 import consumers/shared_graph
 import consumers/shared_registry
+import consumers/span_events
 import consumers/standalone_jobs
 import consumers/stream_progress
 import consumers/tagged_codec
@@ -45,6 +46,7 @@ pub fn main() -> Nil {
   shared_graph.probe()
   shared_registry.probe()
   standalone_jobs.probe()
+  span_events.probe()
   stream_progress.probe()
   tagged_codec.probe()
   tool_turns.probe()
