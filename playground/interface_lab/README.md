@@ -19,6 +19,8 @@ Start with the [current refinement status](REFINEMENT-STATUS.md) for the evidenc
 | [Login transactions](LOGIN-TRANSACTIONS.md)      | Can concurrent callbacks be checked without issuing an identity?        |
 | [Scheduled jobs](SCHEDULED-JOBS.md)              | Can scheduled admission and cancellation intent preserve typed handles? |
 
+Newer refinements cover [collection codecs](COLLECTION-CODECS.md), [object codecs](OBJECT-CODECS.md), [tagged codecs](TAGGED-CODECS.md), [schema admission](SCHEMA-ADMISSION.md), [independent schema comparison](SCHEMA-ORACLE.md), and [durable child attachment](CHILD-ATTACHMENT.md). Their evidence boundaries and remaining obligations are recorded in each note.
+
 ## Run the experiment
 
 From the repository root:
@@ -38,7 +40,7 @@ Named `todo` expressions identify unfinished runtime boundaries and produce expe
 | Surface            | Location                                            | Experiment                                                                       |
 | ------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------- |
 | Shared data        | `src/lab/value.gleam`, `src/lab/blueprint.gleam`    | Bidirectional typed codecs around an explicit data algebra                       |
-| Workflow authoring | `src/lab/saga.gleam`                                | Typed composition, local versus persistence-ready definitions, child boundaries  |
+| Workflow authoring | `src/lab/saga.gleam`                                | One typed definition, explicit execution capabilities, child boundaries          |
 | Freeze/thaw        | `src/lab/saga_checkpoint.gleam`                     | Execution state, checkpoint permission, untrusted snapshot, restoration outcomes |
 | Durable execution  | `src/lab/grind.gleam`, `src/lab/saga_grind.gleam`   | Worker registration, submission, run handles, signals and cancellation           |
 | Agent integration  | `src/lab/fabric.gleam`, `src/lab/fabric_turn.gleam` | Contextual tools and explicit pending tool-result batches                        |
@@ -72,9 +74,9 @@ Approval is a suspension point rather than a blocked worker. A durable implement
 
 Constructive representations retain the values needed by their interfaces. Codecs contain encoder/decoder functions, and tool registrations capture handlers with their codecs. Heterogeneous tool lists therefore have an actual representation without `Dynamic`.
 
-Compiler checks can reject incompatible types, distinguish local plans from durable definitions, and prevent a pending identity from entering a verified-identity API. They cannot prove codec laws, graph validity, persistence safety, authorization, idempotency, or correct scheduling.
+Compiler checks can reject incompatible types, distinguish execution capabilities and native child result types, and prevent a pending identity from entering a verified-identity API. They cannot prove codec laws, graph validity, persistence safety, authorization, idempotency, or correct scheduling.
 
-The original agent wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The newer `fabric_turn` module exercises explicit tool-request/result handoff with scripted providers. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser or a JSON Schema implementation.
+The original agent wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The newer `fabric_turn` module exercises explicit tool-request/result handoff with scripted providers. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser. Blueprint emits a finite JSON Schema subset; independent validation covers the recorded corpus rather than full dialect conformance.
 
 Compiling isolated source imports tests module dependency direction. All modules still belong to one experimental package; independently distributable packages require later consumer builds against actual package boundaries.
 
