@@ -31,9 +31,9 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: twenty-seven consumers compile with only their transitive source imports.
-- Twenty-seven negative fixtures fail with their intended single compiler diagnostic.
-- Nineteen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: twenty-eight consumers compile with only their transitive source imports.
+- Twenty-eight negative fixtures fail with their intended single compiler diagnostic.
+- Twenty interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
@@ -79,3 +79,7 @@
 ## Unified workflow refinement
 
 - [One workflow definition](UNIFIED-WORKFLOWS.md) joins sequential, shared, and conditional authoring at the checkpoint and queue interfaces. Structured addresses retain repeated occurrences and nested choices.
+
+## Schema admission refinement
+
+- [Tool schema admission](SCHEMA-ADMISSION.md) retains exact structured schemas through typed policy rejection and admitted rendering. Real provider profiles and resource ownership remain open.
