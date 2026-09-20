@@ -15,12 +15,12 @@
 - `sinal_fields.pair(left, right)` combines two field sets, rejects duplicate declared labels, and supports arbitrary nesting through pairs.
 - `encode` preserves field encoding failures; `decode` distinguishes missing, duplicate, and invalid fields.
 - `sinal.Event(measurements, metadata)` retains a logical `List(String)` name plus distinct `Fields` values.
-- `Handler(measurements, metadata, error)` retains a typed callback.
+- `Handler(measurements, metadata, error)` retains a typed callback that receives the selected event descriptor. [Descriptor-aware observation](SCOPED-OBSERVATION.md) adds multi-event admission and scoped signatures.
 - The implemented pure callback boundary is:
 
   ```gleam
   pub fn handler(
-    run: fn(m, d) -> Result(Nil, e),
+    run: fn(Event(m, d), m, d) -> Result(Nil, e),
   ) -> Handler(m, d, e)
 
   pub fn deliver_foreign(
@@ -38,8 +38,8 @@
 
 ## Planned runtime interface
 
-- `emit`, `attach`, and `detach` exist as honest runtime `todo` boundaries.
-- `attach` accepts a `Handler`, an attachment identifier, and `on_failure: fn(HandlerFailure(e)) -> Nil`.
+- `emit`, attachment, scoped execution, and `detach` retain explicit runtime `todo` boundaries. Duplicate event-name admission is a pure check before attachment.
+- `attach` accepts a `Handler`, an attachment identifier, and `on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil`.
 - The planned bridge should report a declared decode or handler failure, then fail the raw callback so upstream detaches it and emits its standard handler-failure event.
 - `emit` must not return attached-handler errors because upstream catches callback failures while continuing dispatch.
 - An unexpected raise, exit, or throw cannot become the handler's typed `e`; it remains an upstream callback failure.

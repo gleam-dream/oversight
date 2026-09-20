@@ -15,5 +15,5 @@ pub fn invalid(
   ),
 ) -> Result(sinal.Attachment, sinal.AttachError) {
   let assert Ok(id) = sinal.handler_id("span-start-for-stop")
-  sinal.attach(id, event, handler, fn(_failure) { Nil })
+  sinal.attach(id, event, handler, fn(_event, _failure) { Nil })
 }

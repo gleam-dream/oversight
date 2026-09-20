@@ -18,6 +18,10 @@ pub fn event(
   Event(name, measurements, metadata)
 }
 
+pub fn event_name(event: Event(m, d)) -> List(String) {
+  event.name
+}
+
 pub type EmitError {
   EncodingFailed(EncodeError)
   BackendUnavailable
@@ -38,10 +42,12 @@ pub type HandlerFailure(e) {
 }
 
 pub opaque type Handler(m, d, e) {
-  Handler(run: fn(m, d) -> Result(Nil, e))
+  Handler(run: fn(Event(m, d), m, d) -> Result(Nil, e))
 }
 
-pub fn handler(run: fn(m, d) -> Result(Nil, e)) -> Handler(m, d, e) {
+pub fn handler(
+  run: fn(Event(m, d), m, d) -> Result(Nil, e),
+) -> Handler(m, d, e) {
   Handler(run)
 }
 
@@ -60,7 +66,7 @@ pub fn deliver_foreign(
       case sinal_fields.decode(event.metadata, metadata) {
         Error(error) -> Error(MalformedMetadata(error))
         Ok(d) ->
-          case handler.run(m, d) {
+          case handler.run(event, m, d) {
             Ok(Nil) -> Ok(Nil)
             Error(error) -> Error(HandlerReturned(error))
           }
@@ -89,6 +95,7 @@ pub opaque type Attachment {
 
 pub type AttachError {
   AlreadyExists
+  DuplicateEventName(List(String))
   BackendNotAvailable
 }
 
@@ -98,12 +105,68 @@ pub type DetachError {
 }
 
 pub fn attach(
-  _id: HandlerId,
-  _event: Event(m, d),
-  _handler: Handler(m, d, e),
-  _on_failure: fn(HandlerFailure(e)) -> Nil,
+  id: HandlerId,
+  event: Event(m, d),
+  handler: Handler(m, d, e),
+  on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
 ) -> Result(Attachment, AttachError) {
-  todo as "attach native telemetry callback; errors detach it without propagating through emit"
+  attach_many(id, event, [], handler, on_failure)
+}
+
+pub fn attach_many(
+  _id: HandlerId,
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  _handler: Handler(m, d, e),
+  _on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+) -> Result(Attachment, AttachError) {
+  case validate_event_names(first, rest) {
+    Error(error) -> Error(error)
+    Ok(Nil) ->
+      todo as "attach one native handler under every admitted event descriptor"
+  }
+}
+
+pub fn with_attachments(
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+  _handler: Handler(m, d, e),
+  _on_failure: fn(Event(m, d), HandlerFailure(e)) -> Nil,
+  _run: fn() -> a,
+) -> Result(a, AttachError) {
+  case validate_event_names(first, rest) {
+    Error(error) -> Error(error)
+    Ok(Nil) ->
+      todo as "attach with a fresh private generation and detach on ordinary or caught completion"
+  }
+}
+
+pub fn validate_event_names(
+  first: Event(m, d),
+  rest: List(Event(m, d)),
+) -> Result(Nil, AttachError) {
+  validate_rest_names(rest, [first.name])
+}
+
+fn validate_rest_names(
+  rest: List(Event(m, d)),
+  seen: List(List(String)),
+) -> Result(Nil, AttachError) {
+  case rest {
+    [] -> Ok(Nil)
+    [event, ..tail] ->
+      case contains_name(seen, event.name) {
+        True -> Error(DuplicateEventName(event.name))
+        False -> validate_rest_names(tail, [event.name, ..seen])
+      }
+  }
+}
+
+fn contains_name(names: List(List(String)), expected: List(String)) -> Bool {
+  case names {
+    [] -> False
+    [name, ..rest] -> name == expected || contains_name(rest, expected)
+  }
 }
 
 pub fn detach(_attachment: Attachment) -> Result(Nil, DetachError) {
