@@ -52,6 +52,7 @@
             beam28Packages.erlang
             rebar3
             elixirPackage
+            (python3.withPackages (pythonPackages: [ pythonPackages.jsonschema ]))
           ];
         };
 

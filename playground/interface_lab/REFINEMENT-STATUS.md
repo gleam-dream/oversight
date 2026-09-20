@@ -12,7 +12,7 @@
 
 | Boundary                    | Current evidence                                                                                                   | Next decisive question                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed records, optional fields, lists, nulls, and registry consistency | Provider feature admission and independent schema validation                 |
+| Blueprint → tool catalogs   | Supported schemas, unknown custom schemas, closed records, optional fields, lists, nulls, and registry consistency | Provider feature admission, numbers, and broader schema corpus               |
 | Relay / Fabric → invocation | Contextual registries, duplicate names, typed dispatch                                                             | Protocol name rules, visibility policy, transport conformance                |
 | Fabric → LLM                | Registry-derived declarations; provider-owned pending continuations                                                | Explicit provider schema subsets and streaming resource ownership            |
 | Saga → static graph         | Typed references, codec-backed joins, copied-builder membership, orphan rejection, and closed conditional routing  | One lowered definition model preserving explicit activity/child ownership    |
@@ -34,6 +34,7 @@
 - Gleam 1.18.1: twenty-five consumers compile with only their transitive source imports.
 - Twenty-five negative fixtures fail with their intended single compiler diagnostic.
 - Seventeen interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Thirty-eight decoder/schema cases agree with an independent Draft 2020-12 validator.
 - Repository formatting and the host flake check pass. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
@@ -66,3 +67,7 @@
 ## Alternative and constraint refinement
 
 - [Tagged alternatives and integer constraints](TAGGED-CODECS.md) retain branch payload types and reject out-of-range encoding. Provider feature admission remains separate.
+
+## Independent schema evidence
+
+- [Schema agreement oracle](SCHEMA-ORACLE.md) compares emitted documents and actual decoder outcomes. Floating-point normalization and duplicate-key parsing remain outside the corpus.
