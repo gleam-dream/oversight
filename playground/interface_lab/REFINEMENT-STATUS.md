@@ -31,12 +31,12 @@
 
 ## Verified checkpoint
 
-- Gleam 1.18.1: thirty-four consumers compile with only their transitive source imports.
-- Thirty-six negative fixtures fail with their intended single compiler diagnostic.
-- Twenty-six interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
+- Gleam 1.18.1: thirty-five consumers compile with only their transitive source imports.
+- Thirty-eight negative fixtures fail with their intended single compiler diagnostic.
+- Twenty-seven interface probe groups execute successfully; no scheduler, database, protocol transport, or unfinished runtime boundary runs.
 - Fourteen generated modules compile and run independent native consumers; two additional compiler-negative cases reject runtime values as native types.
 - Thirty-eight cases agree across static decoding, runtime validation, and independent Draft 2020-12 validation of original and normalized schemas.
-- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `aad31c2`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
+- Each committed wave passes its coherent snapshot gate and targeted formatting. The most recent host flake check passed at `634b3c7`. These results do not include upstream conformance suites, benchmarks, or restart fault tests.
 
 ## Next integration priorities
 
@@ -126,3 +126,9 @@
 - [Generated codecs](GENERATED-CODECS.md) compile finite object contracts into ordinary native records and composed codecs. Runtime contracts remain distinct from native types.
 - Downstream consumers check schema equality, missing/null distinctions, bounded encoding, empty objects, nested nullable values, and exact unusual wire names without importing the generator.
 - Broader schema support, application-facing naming, committed-output tooling, compatibility adapters, and independent package distribution remain open.
+
+## Worker response resolution
+
+- [Worker outcomes](WORKER-OUTCOMES.md) keep ordinary typed functions reusable while resolving scheduling responses with explicit accounting, clock, and retry policy.
+- Unknown effects request reconciliation without invoking retry policy. Worker cancellation and proposed completion do not arbitrate an external cancellation race.
+- Claim identity, leases, atomic acknowledgement, committed history, and runtime scheduling remain open.
