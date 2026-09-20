@@ -18,6 +18,7 @@ import consumers/login_transactions
 import consumers/modern_relay
 import consumers/object_codec
 import consumers/offline_pipeline
+import consumers/queue_configuration
 import consumers/relay_exchanges
 import consumers/resource_authorization
 import consumers/runtime_schemas
@@ -59,6 +60,7 @@ pub fn main() -> Nil {
   offline_pipeline.probe()
   modern_relay.probe()
   object_codec.probe()
+  queue_configuration.probe()
   relay_exchanges.probe()
   resource_authorization.probe()
   runtime_schemas.probe()
