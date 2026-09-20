@@ -167,9 +167,12 @@ at the hashes above; neither package was pushed or published.
   legacy JavaScript tests still pass. The broader exact-number oracle, schema,
   parser, compatibility, and generation work remains open.
 
-## Wave 2: ready to launch
+## Wave 2: launched
 
 - Shared handoff: [`wave-2-work-order.md`](wave-2-work-order.md).
+- Launched with the requested sandbox flags and no model override. Sinal logs:
+  `/private/tmp/gleam-dream-sinal-wave2.log` and `.stderr`; Blueprint logs:
+  `/private/tmp/gleam-dream-blueprint-wave2.log` and `.stderr`.
 - Sinal milestone: native emit/attach/attach-many/detach and callback/decode
   failure semantics, with coherent scoped lifetime permitted after that adapter
   is green.
@@ -180,10 +183,10 @@ at the hashes above; neither package was pushed or published.
   probes in `test/oracle/wave-2-capabilities.md`, report friction and concrete
   improvements, remain uncommitted, and stop for Sol Medium review.
 
-| Package        | Wave 2 baseline                            | External session/log | Capability record | Delivery    | Review              |
-| -------------- | ------------------------------------------ | -------------------- | ----------------- | ----------- | ------------------- |
-| Sinal          | `35c83e11e1d58f1ee9e3185112842e7ab75c666e` | pending launch       | pending           | not started | Sol Medium required |
-| JSON Blueprint | `25d554b0bdde421bd2037f68253315ebc0ab3090` | pending launch       | pending           | not started | Sol Medium required |
+| Package        | Wave 2 baseline                            | External session/log | Capability record | Delivery | Review              |
+| -------------- | ------------------------------------------ | -------------------- | ----------------- | -------- | ------------------- |
+| Sinal          | `35c83e11e1d58f1ee9e3185112842e7ab75c666e` | session `90715`      | pending           | running  | Sol Medium required |
+| JSON Blueprint | `25d554b0bdde421bd2037f68253315ebc0ab3090` | session `55928`      | pending           | running  | Sol Medium required |
 
 ## Subsequent roadmap
 
