@@ -214,5 +214,5 @@ The later compatibility consumer uses the same registry through a fresh legacy s
 
 - Pure tests can establish exhaustive message routing, era separation, pagination outcomes, error classification, and effect ordering for scripted inputs.
 - Only wire tests establish JSON parsing, HTTP framing, header semantics, SSE behavior, disconnect handling, and resource cleanup.
-- Only the official frozen requirement run establishes MCP conformance for the pinned revision.
+- The official frozen requirement run is required conformance evidence for the pinned revision. Passing it establishes only the behavior covered by that suite; uncovered protocol requirements still need review and tests.
 - The initial server may run on loopback or behind a caller-supplied verifier. A public protected deployment remains pending Relay's resource-server authorization contract.
