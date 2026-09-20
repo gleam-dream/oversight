@@ -130,6 +130,8 @@ pub type Schema {
   ListSchema(Schema)
   NullableSchema(Schema)
   ObjectSchema(List(PropertySchema))
+  TaggedSchema(String, Schema, String, Schema)
+  IntegerRangeSchema(Int, Int)
 }
 
 pub type PropertySchema {
@@ -148,6 +150,23 @@ pub fn schema(codec: Codec(a)) -> Result(Schema, SchemaError) {
 // this prototype. In particular Value has no floating-point number variant.
 pub fn schema_value(schema: Schema) -> Value {
   case schema {
+    IntegerRangeSchema(min, max) ->
+      value.Object([
+        #("type", value.Text("integer")),
+        #("minimum", value.Int(min)),
+        #("maximum", value.Int(max)),
+      ])
+    TaggedSchema(left_tag, left, right_tag, right) ->
+      value.Object([
+        #("type", value.Text("object")),
+        #(
+          "oneOf",
+          value.Array([
+            tagged_schema(left_tag, left),
+            tagged_schema(right_tag, right),
+          ]),
+        ),
+      ])
     ObjectSchema(properties) ->
       value.Object([
         #("type", value.Text("object")),
@@ -537,5 +556,134 @@ fn required_names(properties: List(PropertySchema)) -> List(Value) {
       ..required_names(rest)
     ]
     [_, ..rest] -> required_names(rest)
+  }
+}
+
+pub type Either(left, right) {
+  Left(left)
+  Right(right)
+}
+
+pub type UnionError {
+  DuplicateTag(String)
+}
+
+pub fn tagged(
+  left_tag: String,
+  left: Codec(a),
+  right_tag: String,
+  right: Codec(b),
+) -> Result(Codec(Either(a, b)), UnionError) {
+  case left_tag == right_tag {
+    True -> Error(DuplicateTag(left_tag))
+    False ->
+      Ok(
+        Codec(
+          fn(item) {
+            case item {
+              Left(item) -> encode_tagged(left_tag, left, item)
+              Right(item) -> encode_tagged(right_tag, right, item)
+            }
+          },
+          fn(raw) {
+            case tagged_parts(raw) {
+              Error(error) -> Error(error)
+              Ok(#(tag, payload)) ->
+                case tag {
+                  tag if tag == left_tag ->
+                    case decode_property("value", left, payload) {
+                      Ok(item) -> Ok(Left(item))
+                      Error(error) -> Error(error)
+                    }
+                  tag if tag == right_tag ->
+                    case decode_property("value", right, payload) {
+                      Ok(item) -> Ok(Right(item))
+                      Error(error) -> Error(error)
+                    }
+                  _ ->
+                    Error(DecodeAtField("tag", CannotDecode("Unknown variant")))
+                }
+            }
+          },
+          case left.schema, right.schema {
+            Ok(a), Ok(b) -> Ok(TaggedSchema(left_tag, a, right_tag, b))
+            Error(error), _ -> Error(error)
+            _, Error(error) -> Error(error)
+          },
+        ),
+      )
+  }
+}
+
+fn encode_tagged(
+  tag: String,
+  codec: Codec(a),
+  item: a,
+) -> Result(Value, EncodeError) {
+  case encode(codec, item) {
+    Ok(raw) -> Ok(value.Object([#("tag", value.Text(tag)), #("value", raw)]))
+    Error(error) -> Error(EncodeAtField("value", error))
+  }
+}
+
+fn tagged_parts(raw: Value) -> Result(#(String, Value), DecodeError) {
+  case raw {
+    value.Object(fields) ->
+      case check_keys(fields, ["tag", "value"], []) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case lookup(fields, "tag"), lookup(fields, "value") {
+            Present(value.Text(tag)), Present(payload) -> Ok(#(tag, payload))
+            Present(value.Text(_)), Missing ->
+              Error(DecodeAtField("value", CannotDecode("Missing payload")))
+            _, _ ->
+              Error(DecodeAtField("tag", CannotDecode("Expected variant tag")))
+          }
+      }
+    _ -> Error(CannotDecode("Expected tagged object"))
+  }
+}
+
+fn tagged_schema(tag: String, payload: Schema) -> Value {
+  value.Object([
+    #("type", value.Text("object")),
+    #(
+      "properties",
+      value.Object([
+        #("tag", value.Object([#("const", value.Text(tag))])),
+        #("value", schema_value(payload)),
+      ]),
+    ),
+    #("required", value.Array([value.Text("tag"), value.Text("value")])),
+    #("additionalProperties", value.Bool(False)),
+  ])
+}
+
+pub type ConstraintError {
+  InvalidIntegerBounds(min: Int, max: Int)
+}
+
+pub fn integer_between(
+  min: Int,
+  max: Int,
+) -> Result(Codec(Int), ConstraintError) {
+  case min > max {
+    True -> Error(InvalidIntegerBounds(min, max))
+    False ->
+      Ok(Codec(
+        fn(item) {
+          case item >= min && item <= max {
+            True -> Ok(value.Int(item))
+            False -> Error(CannotEncode("Integer outside bounds"))
+          }
+        },
+        fn(raw) {
+          case raw {
+            value.Int(item) if item >= min && item <= max -> Ok(item)
+            _ -> Error(CannotDecode("Expected integer within bounds"))
+          }
+        },
+        Ok(IntegerRangeSchema(min, max)),
+      ))
   }
 }
