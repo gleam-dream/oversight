@@ -92,6 +92,8 @@ def main():
         report_failure(probes.stdout)
         raise SystemExit("FAIL: pure interface probes")
     print("PASS: interface probe groups")
+    import schema_check
+    schema_check.main()
     print("No scheduler, storage, protocol transport, or unfinished runtime boundary is executed.")
 
 
