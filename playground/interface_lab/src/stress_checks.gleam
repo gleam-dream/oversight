@@ -47,6 +47,8 @@ import consumers/verified_login
 import consumers/worker_outcomes
 import consumers/worker_registry
 
+import consumers/session_refresh
+
 pub fn main() -> Nil {
   activity_contract.probe()
   activity_recovery.probe()
@@ -95,4 +97,5 @@ pub fn main() -> Nil {
   verified_login.probe()
   worker_outcomes.probe()
   worker_registry.probe()
+  session_refresh.probe()
 }
