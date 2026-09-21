@@ -1,7 +1,17 @@
 # Relay and LLM Wire implementation dispatch
 
+## Current checkpoint
+
+- Final focused reviews accept the delivered correction subsets, not full Wave 2 or package completion.
+- Relay committed at `20ad8af`: 88 tests and 106 pinned conformance checks pass, with one scenario emitting no checks. Final review: `relay-wave2-final-review.md`.
+- LLM Wire committed at `e643755`: 92 tests and external-package boundary verification pass. Final review: `llm-wire-wave2-final-review.md`.
+- Both package working trees are clean after commits. No push or publication occurred. No implementation agents are currently running.
+- Next implementation priority is the unfinished current scope: Relay subscription/listen and dynamic notifications, cache semantics, typed stdio client and lifecycle/TLS/interop evidence; LLM Wire connection reuse, header-bound guarantees, Google and expanded race/fragmentation/oracle coverage.
+- Broader authorization, compatibility, extensions and release hardening remain in `COMPLETION-PLAN.md`; accepted corrections do not remove those capabilities.
+- Earlier dispatch statuses below are historical.
+
 - Dispatch date: 2026-09-20.
-- Status: both first-wave reviews failed acceptance. Deliveries are committed as checkpoints; larger second-wave implementation agents are running.
+- Status: both external second-wave agents exhausted quota and stopped. User-authorized Luna XHigh replacement coders are continuing the existing trees directly. First-wave checkpoints remain unaccepted.
 - Implementer: external `agy --sandbox --dangerously-skip-permissions`, configured default model, fresh conversation per repository.
 - Planning and research: Sol XHigh. Independent implementation review: Sol Medium after delivery.
 - Sibling dependencies are read-only. No commits, remotes, pushes, publishing, credentials, or live provider calls are authorized within these implementation runs.
@@ -41,3 +51,10 @@
 - Runner: `/private/tmp/gleam-dream-wave2.sh`. Logs and completion markers use `/private/tmp/gleam-dream-relay-wave2` and `/private/tmp/gleam-dream-llm_wire-wave2`, with `.pid`, `.started`, `.log`, `.stderr`, `.exit`, `.finished` suffixes.
 - Each agent must write `WAVE-2-PROGRESS.md`, resolve review defects with regression proof, continue through the larger capability scope, and report friction and improvements applied versus proposed in `WAVE-2-REPORT.md`.
 - LLM Wire keeps a pure sans-I/O core. Relay uses a thin Mist server adapter. Both streaming HTTP clients prefer a maintained Gun dependency through a narrow typed FFI, with contract tests before acceptance. No custom HTTP parser expansion is authorized.
+
+## Quota recovery
+
+- Relay stopped at `2026-09-21 01:15:18 UTC`; LLM Wire stopped at `2026-09-21 01:14:45 UTC`. Both stderr logs explicitly report individual quota exhaustion. Both runners misleadingly returned exit `0`; neither is a completed delivery.
+- Process inspection confirmed both external agents stopped before replacement. Partial tracked and untracked changes are retained; no reset or new checkpoint was performed.
+- User explicitly requested Luna XHigh replacement coders. `/root/relay_wave2_luna` and `/root/llm_wave2_luna` now implement directly with `gpt-5.6-luna`, reasoning `xhigh`, without invoking the exhausted external service.
+- The same substantial work orders remain in force, including review fixes, full wave scope, meaningful regression tests, progress reports, and friction/improvement reporting. Independent acceptance reviews remain Sol Medium.
