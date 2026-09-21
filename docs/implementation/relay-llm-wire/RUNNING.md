@@ -1,7 +1,7 @@
 # Relay and LLM Wire implementation dispatch
 
 - Dispatch date: 2026-09-20.
-- Status: restarted implementation runs both exited successfully. Independent Sol Medium reviews are running; neither wave is accepted yet.
+- Status: both first-wave reviews failed acceptance. Deliveries are committed as checkpoints; larger second-wave implementation agents are running.
 - Implementer: external `agy --sandbox --dangerously-skip-permissions`, configured default model, fresh conversation per repository.
 - Planning and research: Sol XHigh. Independent implementation review: Sol Medium after delivery.
 - Sibling dependencies are read-only. No commits, remotes, pushes, publishing, credentials, or live provider calls are authorized within these implementation runs.
@@ -32,3 +32,12 @@
 - LLM Wire exited `0` at `2026-09-21 00:17:49 UTC`, reporting 43 passing tests plus compile and formatting checks. Delivery: `/code/gleam-dream/llm_wire/WAVE-1-REPORT.md`.
 - Counts above are implementer claims pending independent verification. Both implementation processes are confirmed stopped. Changes remain uncommitted.
 - Independent reviewers: `/root/relay_wave1_review` and `/root/llm_wave1_review`, both `gpt-5.6-sol` with medium reasoning as explicitly requested. Review reports will be `relay-review.md` and `llm-wire-review.md` in this directory.
+
+## Second-wave dispatch
+
+- Checkpoints: Relay `ce718db`, LLM Wire `e5b7b0b`. Both contain `REVIEW-STATUS.md` and are explicitly not accepted releases. Oversight handoffs and reviews committed at `dd511f8`.
+- Work orders: `relay-wave2-work-order.md` and `llm-wire-wave2-work-order.md`; retained scope and four further waves per package are recorded in `COMPLETION-PLAN.md`.
+- Both external agents launched with the configured default model and verified alive. Execution session: `47164`. Relay wrapper PID `76909`, agent PID `76914`; LLM Wire wrapper PID `76910`, agent PID `76913`.
+- Runner: `/private/tmp/gleam-dream-wave2.sh`. Logs and completion markers use `/private/tmp/gleam-dream-relay-wave2` and `/private/tmp/gleam-dream-llm_wire-wave2`, with `.pid`, `.started`, `.log`, `.stderr`, `.exit`, `.finished` suffixes.
+- Each agent must write `WAVE-2-PROGRESS.md`, resolve review defects with regression proof, continue through the larger capability scope, and report friction and improvements applied versus proposed in `WAVE-2-REPORT.md`.
+- LLM Wire keeps a pure sans-I/O core. Relay uses a thin Mist server adapter. Both streaming HTTP clients prefer a maintained Gun dependency through a narrow typed FFI, with contract tests before acceptance. No custom HTTP parser expansion is authorized.
