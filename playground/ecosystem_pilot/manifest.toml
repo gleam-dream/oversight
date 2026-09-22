@@ -36,6 +36,7 @@ gleam_json = { version = ">= 3.0.0 and < 4.0.0" }
 gleam_otp = { version = ">= 1.0.0 and < 2.0.0" }
 gleam_stdlib = { version = ">= 0.70.0 and < 1.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
+glisten = { version = ">= 9.0.0 and < 10.0.0" }
 json_blueprint = { path = "../../../json_blueprint" }
 llm_wire = { path = "../../../llm_wire" }
 relay = { path = "../../../relay" }

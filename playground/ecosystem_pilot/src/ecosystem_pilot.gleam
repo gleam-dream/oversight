@@ -1,16 +1,17 @@
 import gleam/erlang/process
 import gleam/int
 import gleam/io
+import gleam/json
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import json/blueprint/codec
-import llm_wire
-import llm_wire/api
+import llm_wire/config
+import llm_wire/session
 import llm_wire/types
-import relay
 import relay/client
 import relay/server
+import relay/tool
 import relay/transport/http
 import scripted_provider
 
@@ -35,25 +36,17 @@ pub fn lookup_codec() -> codec.Codec(Lookup) {
 }
 
 pub fn item_codec() -> codec.Codec(InventoryItem) {
-  let assert Ok(sku_and_name) =
-    codec.combine(
+  let assert Ok(item) =
+    codec.record3(
       codec.required("sku", codec.string()),
       codec.required("name", codec.string()),
+      codec.required("quantity", codec.int()),
+      InventoryItem,
+      fn(item) { item.sku },
+      fn(item) { item.name },
+      fn(item) { item.quantity },
     )
-  let assert Ok(properties) =
-    codec.combine(sku_and_name, codec.required("quantity", codec.int()))
-  codec.imap(
-    codec.object(properties),
-    fn(value) {
-      let #(#(sku, name), quantity) = value
-      InventoryItem(sku, name, quantity)
-    },
-    fn(item) { #(#(item.sku, item.name), item.quantity) },
-  )
-}
-
-pub fn lookup_error_codec() -> codec.Codec(String) {
-  codec.string()
+  item
 }
 
 pub fn find(item: Lookup) -> Result(InventoryItem, String) {
@@ -77,174 +70,241 @@ fn list_find(
   }
 }
 
-pub fn relay_tool(
-  invocations: process.Subject(String),
-  application_errors: process.Subject(String),
-) -> Result(relay.ContextTool(Nil), String) {
+/// One admitted native contract is shared by registration, calls, and the
+/// application-owned provider declaration adapter.
+pub fn inventory_definition() -> Result(
+  tool.Definition(Lookup, InventoryItem),
+  String,
+) {
   use name <- result.try(
-    relay.tool_name("inventory_lookup")
+    tool.tool_name("inventory_lookup")
     |> result.map_error(fn(_) { "tool name admission failed" }),
   )
   let annotations =
-    relay.tool_annotations(
-      Some("Inventory lookup"),
-      Some(True),
-      Some(False),
-      Some(True),
-      Some(False),
+    tool.ToolAnnotations(
+      ..tool.empty_annotations(),
+      title: Some("Inventory lookup"),
     )
-  let metadata =
-    relay.tool_metadata("Look up one synthetic inventory record by SKU")
-    |> relay.tool_metadata_with_annotations(annotations)
-  relay.context_tool(
-    name,
-    metadata,
-    lookup_codec(),
-    item_codec(),
-    lookup_error_codec(),
-    fn(_context, input) {
-      process.send(invocations, input.sku)
-      let outcome = find(input)
-      case outcome {
-        Ok(_) -> Nil
-        Error(reason) -> process.send(application_errors, reason)
-      }
-      outcome
-    },
-  )
+    |> tool.with_read_only_hint(Some(True))
+    |> tool.with_destructive_hint(Some(False))
+    |> tool.with_idempotent_hint(Some(True))
+    |> tool.with_open_world_hint(Some(False))
+  tool.definition(name, lookup_codec(), item_codec())
   |> result.map_error(fn(_) { "tool admission failed" })
+  |> result.map(fn(definition) {
+    definition
+    |> tool.with_description("Look up one synthetic inventory record by SKU")
+    |> tool.with_annotations(annotations)
+  })
 }
 
-pub fn llm_tool() -> Result(llm_wire.ToolDefinition, llm_wire.WireError) {
-  use name <- result.try(types.tool_name("inventory_lookup"))
-  types.tool_from_codec(
-    name,
-    "Look up one synthetic inventory record by SKU",
-    lookup_codec(),
-  )
-}
-
-pub fn relay_server(
+fn observed_find(
+  input: Lookup,
   invocations: process.Subject(String),
   application_errors: process.Subject(String),
-) -> Result(server.Server(Nil), String) {
-  use tool <- result.try(
-    relay_tool(invocations, application_errors)
-    |> result.map_error(fn(_) { "tool admission failed" }),
-  )
-  use registry <- result.try(
-    relay.registry([tool])
-    |> result.map_error(fn(_) { "registry admission failed" }),
-  )
-  Ok(server.server(registry))
+) -> Result(InventoryItem, String) {
+  process.send(invocations, input.sku)
+  let outcome = find(input)
+  case outcome {
+    Ok(_) -> Nil
+    Error(reason) -> process.send(application_errors, reason)
+  }
+  outcome
 }
 
-pub fn start_relay_server() -> Result(http.HttpServer(Nil), String) {
-  let invocations = process.new_subject()
-  let application_errors = process.new_subject()
-  start_relay_server_observed(invocations, application_errors)
+pub fn relay_tool(
+  definition: tool.Definition(Lookup, InventoryItem),
+  invocations: process.Subject(String),
+  application_errors: process.Subject(String),
+) -> tool.ContextTool(Nil) {
+  tool.handle(definition, fn(input) {
+    observed_find(input, invocations, application_errors)
+  })
+}
+
+pub fn rendered_relay_tool(
+  definition: tool.Definition(Lookup, InventoryItem),
+  invocations: process.Subject(String),
+  application_errors: process.Subject(String),
+) -> tool.ContextTool(Nil) {
+  tool.handle_with_error_renderer(
+    definition,
+    fn(input) { observed_find(input, invocations, application_errors) },
+    fn(reason) { reason },
+  )
+}
+
+pub fn json_text_error_relay_tool(
+  definition: tool.Definition(Lookup, InventoryItem),
+  invocations: process.Subject(String),
+  application_errors: process.Subject(String),
+) -> tool.ContextTool(Nil) {
+  tool.handle_with_error_renderer(
+    definition,
+    fn(input) { observed_find(input, invocations, application_errors) },
+    fn(reason) { json.to_string(json.string(reason)) },
+  )
+}
+
+/// Relay and LLM Wire have separate name admission. The declaration is derived
+/// from the same Relay definition without adding a package dependency.
+pub fn llm_tool(
+  definition: tool.Definition(Lookup, InventoryItem),
+) -> Result(types.ToolDefinition, types.WireError) {
+  let relay_name =
+    definition |> tool.definition_name |> tool.tool_name_to_string
+  use name <- result.try(types.tool_name(relay_name))
+  let metadata = tool.definition_metadata(definition)
+  let description = case metadata.description {
+    Some(description) -> description
+    None -> ""
+  }
+  types.tool_from_codec(
+    name,
+    description,
+    tool.definition_input_codec(definition),
+  )
+}
+
+fn serve_tool(
+  registered: tool.ContextTool(Nil),
+) -> Result(http.HttpServer(Nil), String) {
+  use registry <- result.try(
+    tool.registry([registered])
+    |> result.map_error(fn(_) { "registry admission failed" }),
+  )
+  server.server(registry)
+  |> http.listener(fn() { Nil })
+  |> http.start()
 }
 
 pub fn start_relay_server_observed(
+  definition: tool.Definition(Lookup, InventoryItem),
   invocations: process.Subject(String),
   application_errors: process.Subject(String),
 ) -> Result(http.HttpServer(Nil), String) {
-  use relay_server <- result.try(relay_server(invocations, application_errors))
-  http.start_http_server(
-    relay_server,
-    http.HttpOptions(port: 0, host: "127.0.0.1"),
-  )
+  serve_tool(relay_tool(definition, invocations, application_errors))
+}
+
+pub fn start_rendered_relay_server(
+  definition: tool.Definition(Lookup, InventoryItem),
+  invocations: process.Subject(String),
+  application_errors: process.Subject(String),
+) -> Result(http.HttpServer(Nil), String) {
+  serve_tool(rendered_relay_tool(definition, invocations, application_errors))
+}
+
+pub fn start_json_text_error_relay_server(
+  definition: tool.Definition(Lookup, InventoryItem),
+  invocations: process.Subject(String),
+  application_errors: process.Subject(String),
+) -> Result(http.HttpServer(Nil), String) {
+  serve_tool(json_text_error_relay_tool(
+    definition,
+    invocations,
+    application_errors,
+  ))
 }
 
 pub fn connect_relay(
   relay_server: http.HttpServer(Nil),
 ) -> Result(client.Client, client.ClientError) {
-  client.connect(client.ClientConfig(
-    host: "127.0.0.1",
-    port: http.http_server_port(relay_server),
-    path: "/",
-    secure: False,
-    timeout_ms: 2000,
-    max_response_bytes: 1_048_576,
-  ))
+  let url =
+    "http://127.0.0.1:"
+    <> int.to_string(http.http_server_port(relay_server))
+    <> "/"
+  use settings <- result.try(client.http_config(url))
+  settings
+  |> client.with_timeout(2000)
+  |> client.with_max_response_bytes(1_048_576)
+  |> client.connect_http()
 }
 
 pub fn execute_lookup(
   relay_client: client.Client,
+  definition: tool.Definition(Lookup, InventoryItem),
   input: Lookup,
 ) -> client.ToolCallOutcome(InventoryItem) {
-  let assert Ok(name) = relay.tool_name("inventory_lookup")
-  client.call_tool(relay_client, name, input, lookup_codec(), item_codec())
+  client.call_definition(relay_client, definition, input)
 }
 
 pub fn prepare_openai(
+  definition: tool.Definition(Lookup, InventoryItem),
   endpoint: String,
   prompt: String,
-) -> Result(api.PreparedCall, llm_wire.WireError) {
+) -> Result(session.PreparedCall, types.WireError) {
   use api_key <- result.try(types.api_key("local-scripted-provider-key"))
   use provider_endpoint <- result.try(types.endpoint(endpoint))
   use model <- result.try(types.model_id("local-scripted-model"))
-  use tool <- result.try(llm_tool())
-  let config = types.openai_config(api_key, provider_endpoint, None, None)
+  use declaration <- result.try(llm_tool(definition))
+  let settings =
+    config.openai(api_key)
+    |> config.with_endpoint(provider_endpoint)
+    |> config.with_limits(
+      types.Limits(
+        ..types.default_limits(),
+        response_body_bytes_limit: 1_048_576,
+      ),
+    )
+    |> config.with_deadlines(
+      types.Deadlines(..types.default_deadlines(), read_timeout_ms: 3000),
+    )
   let request =
     types.new_request(model, [types.UserMessage(prompt)])
-    |> types.with_tools([tool])
-  api.prepare(config, request, types.default_limits())
+    |> types.with_tools([declaration])
+  session.prepare(settings, request)
 }
 
 pub fn provider_run(
-  prepared: api.PreparedCall,
-) -> Result(llm_wire.RunResult, llm_wire.WireError) {
-  llm_wire.run(prepared, types.default_limits(), types.default_deadlines())
+  prepared: session.PreparedCall,
+) -> Result(session.RunResult, types.WireError) {
+  session.run(prepared)
 }
 
 pub fn provider_continue(
-  prepared: api.PreparedCall,
-  continuation: llm_wire.Continuation,
-  result: llm_wire.ToolResult,
-) -> Result(api.PreparedCall, llm_wire.WireError) {
-  llm_wire.prepare_continue(
-    prepared,
-    continuation,
-    [result],
-    types.default_limits(),
-  )
+  continuation: session.Continuation,
+  result: types.ToolResult,
+) -> Result(session.PreparedCall, types.WireError) {
+  session.prepare_continue(continuation, [result])
 }
 
-pub fn encode_item(item: InventoryItem) -> Result(String, codec.EncodeError) {
-  codec.encode_json(item_codec(), item)
+pub fn encode_item(
+  definition: tool.Definition(Lookup, InventoryItem),
+  item: InventoryItem,
+) -> Result(String, codec.EncodeError) {
+  codec.encode_json(tool.definition_output_codec(definition), item)
 }
 
-pub fn decode_lookup(source: String) -> Result(Lookup, codec.JsonDecodeError) {
-  codec.decode_json(lookup_codec(), source)
-}
-
-pub fn decode_lookup_error(
+pub fn decode_lookup(
+  definition: tool.Definition(Lookup, InventoryItem),
   source: String,
-) -> Result(String, codec.JsonDecodeError) {
-  codec.decode_json(lookup_error_codec(), source)
+) -> Result(Lookup, codec.JsonDecodeError) {
+  codec.decode_json(tool.definition_input_codec(definition), source)
 }
 
 pub fn decode_item(
+  definition: tool.Definition(Lookup, InventoryItem),
   source: String,
 ) -> Result(InventoryItem, codec.JsonDecodeError) {
-  codec.decode_json(item_codec(), source)
+  codec.decode_json(tool.definition_output_codec(definition), source)
 }
 
 pub fn main() -> Nil {
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
+  let assert Ok(definition) = inventory_definition()
   let assert Ok(provider) =
     scripted_provider.start(scripted_provider.Lookup("A-100"))
   let assert Ok(relay_server) =
-    start_relay_server_observed(invocations, application_errors)
+    start_relay_server_observed(definition, invocations, application_errors)
   let assert Ok(relay_client) = connect_relay(relay_server)
   let endpoint =
     "http://127.0.0.1:"
     <> int.to_string(scripted_provider.port(provider))
     <> "/v1"
-  let assert Ok(prepared) = prepare_openai(endpoint, "Find SKU A-100")
-  let answer = run_lookup_example(prepared, relay_client)
+  let assert Ok(prepared) =
+    prepare_openai(definition, endpoint, "Find SKU A-100")
+  let answer = run_lookup_example(definition, prepared, relay_client)
   client.close(relay_client)
   http.stop_http_server(relay_server)
   scripted_provider.stop(provider)
@@ -259,7 +319,8 @@ pub fn main() -> Nil {
 }
 
 fn run_lookup_example(
-  prepared: api.PreparedCall,
+  definition: tool.Definition(Lookup, InventoryItem),
+  prepared: session.PreparedCall,
   relay_client: client.Client,
 ) -> Result(String, String) {
   use run_result <- result.try(
@@ -267,23 +328,19 @@ fn run_lookup_example(
     |> result.map_error(fn(error) { string.inspect(error) }),
   )
   case run_result {
-    llm_wire.RunToolCalls([call], continuation, _) -> {
+    session.RunToolCalls([call], continuation, _) -> {
       use input <- result.try(
-        decode_lookup(call.arguments_json)
+        decode_lookup(definition, call.arguments_json)
         |> result.map_error(fn(error) { string.inspect(error) }),
       )
-      case execute_lookup(relay_client, input) {
+      case execute_lookup(relay_client, definition, input) {
         client.StructuredSuccess(item, _) -> {
           use encoded <- result.try(
-            encode_item(item)
+            encode_item(definition, item)
             |> result.map_error(fn(error) { string.inspect(error) }),
           )
           use follow_up <- result.try(
-            provider_continue(
-              prepared,
-              continuation,
-              llm_wire.ToolResult(call.id, encoded),
-            )
+            provider_continue(continuation, types.ToolResult(call.id, encoded))
             |> result.map_error(fn(error) { string.inspect(error) }),
           )
           use final_result <- result.try(
@@ -291,7 +348,7 @@ fn run_lookup_example(
             |> result.map_error(fn(error) { string.inspect(error) }),
           )
           case final_result {
-            llm_wire.RunText(text, _) -> Ok(text)
+            session.RunText(text, _) -> Ok(text)
             _ -> Error("provider did not return a final text answer")
           }
         }
@@ -304,11 +361,11 @@ fn run_lookup_example(
         client.InputEncodingFailure -> Error("Relay input could not be encoded")
       }
     }
-    llm_wire.RunToolCalls(_, _, _) ->
+    session.RunToolCalls(_, _, _) ->
       Error("provider returned multiple calls for the single-tool example")
-    llm_wire.RunText(text, _) -> Ok(text)
-    llm_wire.RunOutputLimited(_, _, _) ->
+    session.RunText(text, _) -> Ok(text)
+    session.RunOutputLimited(_, _, _) ->
       Error("provider output reached the configured limit")
-    llm_wire.RunRefusal(reason) -> Error(reason)
+    session.RunRefusal(reason, _) -> Error(reason)
   }
 }

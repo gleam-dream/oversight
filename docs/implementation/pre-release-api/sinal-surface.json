@@ -1,0 +1,644 @@
+[
+  {
+    "module": "sinal/exception",
+    "kind": "type",
+    "name": "BeamException",
+    "decision": "keep",
+    "reason": "Public BEAM exception payload and class inspection preserve scoped cleanup failure reporting and exact reraising."
+  },
+  {
+    "module": "sinal/exception",
+    "kind": "type",
+    "name": "ExceptionClass",
+    "decision": "keep",
+    "reason": "Public BEAM exception payload and class inspection preserve scoped cleanup failure reporting and exact reraising."
+  },
+  {
+    "module": "sinal/exception",
+    "kind": "fn",
+    "name": "exception_class",
+    "decision": "keep",
+    "reason": "Public BEAM exception payload and class inspection preserve scoped cleanup failure reporting and exact reraising."
+  },
+  {
+    "module": "sinal/exception",
+    "kind": "fn",
+    "name": "reraise",
+    "decision": "keep",
+    "reason": "Public BEAM exception payload and class inspection preserve scoped cleanup failure reporting and exact reraising."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "type",
+    "name": "FieldError",
+    "decision": "keep",
+    "reason": "Typed field errors and descriptor are part of public admission and native decode/encode results."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "type",
+    "name": "FieldDecodeError",
+    "decision": "keep",
+    "reason": "Typed field errors and descriptor are part of public admission and native decode/encode results."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "type",
+    "name": "FieldEncodeError",
+    "decision": "keep",
+    "reason": "Typed field errors and descriptor are part of public admission and native decode/encode results."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "opaque type",
+    "name": "Fields",
+    "decision": "keep",
+    "reason": "Typed field errors and descriptor are part of public admission and native decode/encode results."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "empty",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "field",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "string",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "int",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "bool",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "native_field",
+    "decision": "remove",
+    "reason": "Pure alias of field with the same native key and encode/decode semantics.",
+    "replacement": "sinal/fields.field"
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "pair",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "imap",
+    "decision": "keep",
+    "reason": "Typed field construction or composition supports the single canonical native field schema."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "declared_keys",
+    "decision": "keep",
+    "reason": "Field-key inspection preserves logical and native identities for interoperability."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "declared_native_keys",
+    "decision": "keep",
+    "reason": "Field-key inspection preserves logical and native identities for interoperability."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "encode",
+    "decision": "keep",
+    "reason": "Explicit native-map conversion supports direct BEAM interoperability and typed boundary checks."
+  },
+  {
+    "module": "sinal/fields",
+    "kind": "fn",
+    "name": "decode",
+    "decision": "keep",
+    "reason": "Explicit native-map conversion supports direct BEAM interoperability and typed boundary checks."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "to_dynamic",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "empty_map",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "map_from_pair",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "map_get",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "map_merge",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "is_map",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "type",
+    "name": "NativeAttachError",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "type",
+    "name": "NativeDetachError",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "telemetry_attach_many",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "telemetry_detach",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "telemetry_execute",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "raise_callback_failure",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/internal/ffi",
+    "kind": "fn",
+    "name": "telemetry_span",
+    "decision": "internal",
+    "reason": "Native BEAM telemetry and dynamic-map bridge is called only by package implementation; expose behavior through the typed public facade."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "EventPrefix",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "PrefixError",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "event_prefix",
+    "decision": "keep",
+    "reason": "Distinct span prefix, definition, event set, or scoped execution capability."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "trusted_prefix",
+    "decision": "remove",
+    "reason": "Pure alias of event_prefix with the same atom admission.",
+    "replacement": "sinal/span.event_prefix"
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "prefix_name",
+    "decision": "keep",
+    "reason": "Inspects derived logical or retained native prefix identity."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "prefix_native_name",
+    "decision": "keep",
+    "reason": "Inspects derived logical or retained native prefix identity."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "SystemTime",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "MonotonicTime",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "NativeDuration",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "SpanContext",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "ExceptionReason",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "ExceptionStacktrace",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "ExceptionKind",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "system_time_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "monotonic_time_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "duration_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "span_context_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "exception_reason_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "exception_stacktrace_to_dynamic",
+    "decision": "keep",
+    "reason": "Exposes opaque native telemetry values for native interoperability without fabricating wire values."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "StartMeasurements",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "StopMeasurements",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "ExceptionMeasurements",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "StartMetadata",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "StopMetadata",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "ExceptionMetadata",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "opaque type",
+    "name": "Span",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "SpanDefinitionError",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "define_span",
+    "decision": "keep",
+    "reason": "Distinct span prefix, definition, event set, or scoped execution capability."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "SpanEvents",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "events",
+    "decision": "keep",
+    "reason": "Distinct span prefix, definition, event set, or scoped execution capability."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "type",
+    "name": "Completion",
+    "decision": "keep",
+    "reason": "Typed span events, measurements, metadata, native values, and completion preserve telemetry span wire semantics."
+  },
+  {
+    "module": "sinal/span",
+    "kind": "fn",
+    "name": "run_span",
+    "decision": "keep",
+    "reason": "Distinct span prefix, definition, event set, or scoped execution capability."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "version",
+    "decision": "remove",
+    "reason": "A hard-coded package version offers no runtime behavior and becomes stale independently of the manifest."
+  },
+  {
+    "module": "sinal",
+    "kind": "opaque type",
+    "name": "Event",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "EventError",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "event",
+    "decision": "keep",
+    "reason": "Canonical checked descriptor or handler identity constructor."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "trusted_event",
+    "decision": "remove",
+    "reason": "Pure alias of event; both accept trusted native atom names.",
+    "replacement": "sinal.event"
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "event_name",
+    "decision": "keep",
+    "reason": "Inspects derived logical or retained native event identity."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "event_native_name",
+    "decision": "keep",
+    "reason": "Inspects derived logical or retained native event identity."
+  },
+  {
+    "module": "sinal",
+    "kind": "opaque type",
+    "name": "HandlerId",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "IdentityError",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "handler_id",
+    "decision": "keep",
+    "reason": "Canonical checked descriptor or handler identity constructor."
+  },
+  {
+    "module": "sinal",
+    "kind": "opaque type",
+    "name": "Handler",
+    "decision": "replace",
+    "reason": "The one-field opaque wrapper adds no policy or invariant to a typed callback.",
+    "replacement": "fn(Event(m, d), m, d) -> Result(Nil, e)"
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "handler",
+    "decision": "replace",
+    "reason": "The constructor only wraps a callback without validation or behavior.",
+    "replacement": "Pass the callback directly to attach, attach_many, or with_attachments."
+  },
+  {
+    "module": "sinal",
+    "kind": "opaque type",
+    "name": "Attachment",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "AttachError",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "DetachError",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "EmitError",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "HandlerFailure",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "ScopeCleanupFailure",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "type",
+    "name": "ScopedCompletion",
+    "decision": "keep",
+    "reason": "Public descriptor, attachment, error, or scoped result type carries native telemetry and cleanup outcomes."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "detach",
+    "decision": "keep",
+    "reason": "Required lifecycle or synchronous telemetry emission operation."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "validate_event_names",
+    "decision": "internal",
+    "reason": "Duplicate-name validation is only an implementation step of attach_many and with_attachments."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "emit",
+    "decision": "keep",
+    "reason": "Required lifecycle or synchronous telemetry emission operation."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "attach",
+    "decision": "keep",
+    "reason": "Distinct fallible single-event, fallible multi-event, scoped, or ordinary infallible observation workflow."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "observe",
+    "decision": "keep",
+    "reason": "Distinct fallible single-event, fallible multi-event, scoped, or ordinary infallible observation workflow."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "attach_many",
+    "decision": "keep",
+    "reason": "Distinct fallible single-event, fallible multi-event, scoped, or ordinary infallible observation workflow."
+  },
+  {
+    "module": "sinal",
+    "kind": "fn",
+    "name": "with_attachments",
+    "decision": "keep",
+    "reason": "Distinct fallible single-event, fallible multi-event, scoped, or ordinary infallible observation workflow."
+  }
+]

@@ -1,5 +1,10 @@
 # `blueprint` — typed JSON Schema contracts
 
+The current public API cleanup follows the [pre-release contract](docs/implementation/pre-release-api/contract.md#blueprint). It supersedes older facade and compatibility descriptions below.
+
+The additive application API changes are specified in the
+[API ergonomics contract](docs/implementation/api-ergonomics/contract.md#blueprint).
+
 ## Scope and ownership
 
 Blueprint owns JSON Schema descriptions, schema-aware values and bidirectional

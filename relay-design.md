@@ -1,5 +1,10 @@
 # Relay — typed MCP server and client
 
+The current public API cleanup follows the [pre-release contract](docs/implementation/pre-release-api/contract.md#relay). It supersedes older facade and compatibility descriptions below.
+
+The additive application API changes are specified in the
+[API ergonomics contract](docs/implementation/api-ergonomics/contract.md#relay-tools).
+
 ## 0. Purpose and scope
 
 - Relay targets complete typed MCP server and client behavior, stdio and Streamable HTTP transport, and MCP resource-server and client authorization. The initial three-method server facade is a delivery subset rather than the full package scope.

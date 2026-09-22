@@ -1,5 +1,10 @@
 # `sinal` — typed native telemetry
 
+The current public API cleanup follows the [pre-release contract](docs/implementation/pre-release-api/contract.md#sinal). It supersedes older facade and compatibility descriptions below.
+
+The additive application API changes are specified in the
+[API ergonomics contract](docs/implementation/api-ergonomics/contract.md#sinal).
+
 ## Scope and runtime ownership
 
 Sinal is a typed facade over BEAM `telemetry`. It preserves synchronous dispatch,
