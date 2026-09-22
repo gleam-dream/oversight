@@ -1,11 +1,25 @@
 # Relay and LLM Wire implementation dispatch
 
+## Latest accepted delivery
+
+- Both final focused reviews pass for the delivered subsets; full package scope remains incomplete.
+- Relay committed at `c293b53`: 99 tests and 109 conformance checks pass, with the documented zero-check scenario caveat.
+- LLM Wire committed at `188c70b`: 122 tests and external-package boundary verification pass. Provider wire JSON uses ordinary Gleam JSON; the separate strict parser and FFI are removed.
+- Final reviews are `relay-wave3-final-review.md` and `llm-wire-wave3-final-review.md`. Each package includes its final review in REVIEW-STATUS.md.
+- Both package working trees are clean. No push or publication occurred. No implementation or review jobs remain active.
+- Remaining scope is recorded in package WAVE-3-REPORT.md, LLM Wire DESIGN-COVERAGE.md and the completion plan. Earlier status sections below are historical.
+
 ## Current checkpoint
+
+- Next wave launched after the user restored external quota: two fresh `agy --sandbox --dangerously-skip-permissions` runs, configured default model, work order `wave3-work-order.md`.
+- Execution session `78419`; Relay wrapper/agent PIDs `44261`/`44265`; LLM Wire wrapper/agent PIDs `44262`/`44266`. Both agents verified alive with empty startup stderr.
+- Logs/status: `/private/tmp/gleam-dream-relay-wave3` and `/private/tmp/gleam-dream-llm_wire-wave3`, suffixes `.log`, `.stderr`, `.pid`, `.started`, `.exit`, `.finished`. Runner maps quota-error output to exit 75 rather than accepting a misleading exit 0.
+- Both agents must maintain package-local `WAVE-3-PROGRESS.md` and deliver `WAVE-3-REPORT.md`. Independent Sol Medium review follows; no automatic acceptance on process completion.
 
 - Final focused reviews accept the delivered correction subsets, not full Wave 2 or package completion.
 - Relay committed at `20ad8af`: 88 tests and 106 pinned conformance checks pass, with one scenario emitting no checks. Final review: `relay-wave2-final-review.md`.
 - LLM Wire committed at `e643755`: 92 tests and external-package boundary verification pass. Final review: `llm-wire-wave2-final-review.md`.
-- Both package working trees are clean after commits. No push or publication occurred. No implementation agents are currently running.
+- Both package working trees were clean at dispatch. No push or publication occurred. The third-wave external agents are now running.
 - Next implementation priority is the unfinished current scope: Relay subscription/listen and dynamic notifications, cache semantics, typed stdio client and lifecycle/TLS/interop evidence; LLM Wire connection reuse, header-bound guarantees, Google and expanded race/fragmentation/oracle coverage.
 - Broader authorization, compatibility, extensions and release hardening remain in `COMPLETION-PLAN.md`; accepted corrections do not remove those capabilities.
 - Earlier dispatch statuses below are historical.
