@@ -1,5 +1,20 @@
 # Relay and LLM Wire implementation dispatch
 
+## Fourth-wave acceptance checkpoint
+
+- Relay delivered subset accepted by independent review and committed as `6574f38`; 107 tests and 109 conformance checks passed. Full production authorization and other recorded scope remain deferred.
+- LLM Wire delivered corrections accepted and committed as `cdfb38a`. The final oracle comparison caught and corrected assistant `input_text` versus required `output_text`; the independent reviewer verified the exact upstream assertions and all 133 tests passed.
+- Both fourth-wave delivered subsets are committed. Full package scope remains incomplete as recorded in the reports. No implementation agents are running; the next recommended step is a small cross-package integration pilot.
+- Prior test count of 133 did not establish oracle fidelity. Do not treat a related passing local test as an upstream port.
+
+## Active gap-closing wave
+
+- User authorized the next gap-closing wave with an explicit simplicity constraint and executable external-oracle test reuse.
+- Work order: `wave4-work-order.md`. Baselines: Relay `c293b53`, LLM Wire `188c70b`.
+- Luna XHigh coders `/root/relay_wave3_fixes` and `/root/llm_wave3_recovery` were resumed with the new work order under the established quota fallback. Sol Medium review follows.
+- Both must produce WAVE-4-PROGRESS.md and WAVE-4-REPORT.md, including exact coverage, upstream test provenance and a concise register of capabilities requiring substantial additional machinery.
+- Standard Gleam JSON remains the wire policy. No separate HTTP client package, strict JSON layer or speculative framework is authorized.
+
 ## Latest accepted delivery
 
 - Both final focused reviews pass for the delivered subsets; full package scope remains incomplete.
