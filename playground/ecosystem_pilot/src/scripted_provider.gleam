@@ -7,7 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
-import llm_wire/tcp
+import scripted_provider/tcp
 
 pub type Mode {
   Lookup(sku: String)

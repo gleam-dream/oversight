@@ -9,6 +9,7 @@ gleam_json = ">= 3.0.0 and < 4.0.0"
 gleam_erlang = ">= 1.0.0 and < 2.0.0"
 gleam_otp = ">= 1.0.0 and < 2.0.0"
 gleam_http = ">= 4.4.0 and < 5.0.0"
+glisten = ">= 9.0.0 and < 10.0.0"
 json_blueprint = { path = "../../../json_blueprint" }
 relay = { path = "../../../relay" }
 llm_wire = { path = "../../../llm_wire" }

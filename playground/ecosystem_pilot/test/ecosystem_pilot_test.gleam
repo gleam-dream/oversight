@@ -9,12 +9,14 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import llm_wire
+import json/blueprint/codec
+import llm_wire/session
 import llm_wire/telemetry as llm_telemetry
 import llm_wire/types
 import relay/client
 import relay/content as relay_content
 import relay/telemetry as relay_telemetry
+import relay/tool
 import relay/transport/http
 import scripted_provider
 import sinal
@@ -24,12 +26,23 @@ pub fn main() -> Nil {
 }
 
 pub fn valid_typed_lookup_composes_all_four_packages_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
+  let metadata = tool.definition_metadata(definition)
+  let assert Some(annotations) = metadata.annotations
+  annotations.read_only_hint |> should.equal(Some(True))
+  annotations.destructive_hint |> should.equal(Some(False))
+  annotations.idempotent_hint |> should.equal(Some(True))
+  annotations.open_world_hint |> should.equal(Some(False))
   let assert Ok(provider) =
     scripted_provider.start(scripted_provider.Lookup("A-100"))
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
   let assert Ok(relay_server) =
-    ecosystem_pilot.start_relay_server_observed(invocations, application_errors)
+    ecosystem_pilot.start_relay_server_observed(
+      definition,
+      invocations,
+      application_errors,
+    )
   let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
   let relay_events = process.new_subject()
   let llm_events = process.new_subject()
@@ -39,19 +52,34 @@ pub fn valid_typed_lookup_composes_all_four_packages_test() {
   client.discover(relay_client) |> should.be_ok
   let assert Ok(declarations) = client.list_tools(relay_client)
   list.length(declarations) |> should.equal(1)
+  let assert Ok(declaration) = ecosystem_pilot.llm_tool(definition)
+  declaration
+  |> types.tool_name_of
+  |> types.tool_name_to_string
+  |> should.equal("inventory_lookup")
+  types.tool_description(declaration)
+  |> should.equal("Look up one synthetic inventory record by SKU")
+  let assert Ok(input_schema) =
+    codec.schema_json(tool.definition_input_codec(definition))
+  string.contains(input_schema, "https://json-schema.org/draft/2020-12/schema")
+  |> should.be_true
+  let assert Ok(item_schema) =
+    codec.schema_json(tool.definition_output_codec(definition))
+  string.contains(item_schema, "\"quantity\"") |> should.be_true
 
   let endpoint = provider_endpoint(provider)
   let assert Ok(prepared) =
-    ecosystem_pilot.prepare_openai(endpoint, "Find SKU A-100")
-  let assert Ok(llm_wire.RunToolCalls([call], continuation, _)) =
+    ecosystem_pilot.prepare_openai(definition, endpoint, "Find SKU A-100")
+  let assert Ok(session.RunToolCalls([call], continuation, _)) =
     ecosystem_pilot.provider_run(prepared)
-  llm_wire.call_id_to_string(call.id) |> should.equal("call_1")
+  types.call_id_to_string(call.id) |> should.equal("call_1")
   call.arguments_json |> should.equal("{\"sku\":\"A-100\"}")
-  let assert Ok(input) = ecosystem_pilot.decode_lookup(call.arguments_json)
+  let assert Ok(input) =
+    ecosystem_pilot.decode_lookup(definition, call.arguments_json)
   input |> should.equal(ecosystem_pilot.Lookup("A-100"))
 
   let assert client.StructuredSuccess(item, content) =
-    ecosystem_pilot.execute_lookup(relay_client, input)
+    ecosystem_pilot.execute_lookup(relay_client, definition, input)
   item
   |> should.equal(ecosystem_pilot.InventoryItem(
     "A-100",
@@ -67,16 +95,15 @@ pub fn valid_typed_lookup_composes_all_four_packages_test() {
   let assert Ok("A-100") = process.receive(invocations, 3000)
   process.receive(application_errors, 0) |> should.be_error
 
-  let assert Ok(encoded) = ecosystem_pilot.encode_item(item)
+  let assert Ok(encoded) = ecosystem_pilot.encode_item(definition, item)
   let assert Ok(next_prepared) =
     ecosystem_pilot.provider_continue(
-      prepared,
       continuation,
-      llm_wire.ToolResult(call.id, encoded),
+      types.ToolResult(call.id, encoded),
     )
   ecosystem_pilot.provider_run(next_prepared)
   |> should.equal(
-    Ok(llm_wire.RunText("A-100 has 7 Ada Lovelace notebooks.", None)),
+    Ok(session.RunText("A-100 has 7 Ada Lovelace notebooks.", None)),
   )
 
   await_provider_request(provider, fn(body) {
@@ -99,18 +126,24 @@ pub fn valid_typed_lookup_composes_all_four_packages_test() {
 }
 
 pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
   let assert Ok(provider) =
     scripted_provider.start(scripted_provider.InvalidArguments)
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
   let assert Ok(relay_server) =
-    ecosystem_pilot.start_relay_server_observed(invocations, application_errors)
+    ecosystem_pilot.start_relay_server_observed(
+      definition,
+      invocations,
+      application_errors,
+    )
   let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
   let relay_events = process.new_subject()
   let attachment = attach_relay_events(relay_events, "pilot-invalid-relay")
   let invalid_arguments = json.object([#("sku", json.int(42))])
   let assert Ok(prepared) =
     ecosystem_pilot.prepare_openai(
+      definition,
       provider_endpoint(provider),
       "Find SKU MISSING",
     )
@@ -118,7 +151,7 @@ pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
     ecosystem_pilot.provider_run(prepared)
   string.contains(reason, "Tool call arguments failed schema validation")
   |> should.be_true
-  ecosystem_pilot.decode_lookup("{\"sku\":42}") |> should.be_error
+  ecosystem_pilot.decode_lookup(definition, "{\"sku\":42}") |> should.be_error
 
   let assert Ok(response) =
     client.raw_json_call(relay_client, "tools/call", Some("inventory_lookup"), [
@@ -128,7 +161,7 @@ pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
   let assert Ok(response_text) = bit_array.to_string(response)
   json.parse(response_text, decode.at(["error", "code"], decode.int))
   |> should.equal(Ok(-32_602))
-  ecosystem_pilot.decode_lookup("{\"sku\":42}") |> should.be_error
+  ecosystem_pilot.decode_lookup(definition, "{\"sku\":42}") |> should.be_error
 
   process.receive(invocations, 0) |> should.be_error
   process.receive(application_errors, 0) |> should.be_error
@@ -145,12 +178,17 @@ pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
 }
 
 pub fn missing_record_error_continues_with_correlated_tool_result_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
   let assert Ok(provider) =
     scripted_provider.start(scripted_provider.Lookup("MISSING"))
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
   let assert Ok(relay_server) =
-    ecosystem_pilot.start_relay_server_observed(invocations, application_errors)
+    ecosystem_pilot.start_rendered_relay_server(
+      definition,
+      invocations,
+      application_errors,
+    )
   let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
   let relay_events = process.new_subject()
   let llm_events = process.new_subject()
@@ -160,35 +198,35 @@ pub fn missing_record_error_continues_with_correlated_tool_result_test() {
 
   let assert Ok(prepared) =
     ecosystem_pilot.prepare_openai(
+      definition,
       provider_endpoint(provider),
       "Find SKU MISSING",
     )
-  let assert Ok(llm_wire.RunToolCalls([call], continuation, _)) =
+  let assert Ok(session.RunToolCalls([call], continuation, _)) =
     ecosystem_pilot.provider_run(prepared)
-  llm_wire.call_id_to_string(call.id) |> should.equal("call_1")
-  let assert Ok(input) = ecosystem_pilot.decode_lookup(call.arguments_json)
+  types.call_id_to_string(call.id) |> should.equal("call_1")
+  let assert Ok(input) =
+    ecosystem_pilot.decode_lookup(definition, call.arguments_json)
   input |> should.equal(ecosystem_pilot.Lookup("MISSING"))
 
   let assert client.ToolFailure(content) =
-    ecosystem_pilot.execute_lookup(relay_client, input)
+    ecosystem_pilot.execute_lookup(relay_client, definition, input)
   content
-  |> should.equal([relay_content_text("\"inventory record not found\"")])
+  |> should.equal([relay_content_text("inventory record not found")])
   let assert Ok("MISSING") = process.receive(invocations, 3000)
   let assert Ok("inventory record not found") =
     process.receive(application_errors, 3000)
 
   let result_text = tool_failure_text(content)
-  let assert Ok(application_error) =
-    ecosystem_pilot.decode_lookup_error(result_text)
+  let application_error = result_text
   application_error |> should.equal("inventory record not found")
   let assert Ok(next_prepared) =
     ecosystem_pilot.provider_continue(
-      prepared,
       continuation,
-      llm_wire.ToolResult(call.id, application_error),
+      types.ToolResult(call.id, application_error),
     )
   ecosystem_pilot.provider_run(next_prepared)
-  |> should.equal(Ok(llm_wire.RunText("I couldn't find MISSING.", None)))
+  |> should.equal(Ok(session.RunText("I couldn't find MISSING.", None)))
 
   await_provider_request(provider, fn(body) {
     scripted_provider.is_initial_request(body, "MISSING")
@@ -209,31 +247,90 @@ pub fn missing_record_error_continues_with_correlated_tool_result_test() {
   scripted_provider.await_worker_stopped(provider, 1000) |> should.be_true
 }
 
+pub fn generic_application_failure_is_stable_over_http_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
+  let invocations = process.new_subject()
+  let application_errors = process.new_subject()
+  let assert Ok(relay_server) =
+    ecosystem_pilot.start_relay_server_observed(
+      definition,
+      invocations,
+      application_errors,
+    )
+  let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
+  let assert client.ToolFailure(content) =
+    ecosystem_pilot.execute_lookup(
+      relay_client,
+      definition,
+      ecosystem_pilot.Lookup("MISSING"),
+    )
+  content |> should.equal([relay_content_text("Tool execution failed.")])
+  process.receive(invocations, 3000) |> should.equal(Ok("MISSING"))
+  process.receive(application_errors, 3000)
+  |> should.equal(Ok("inventory record not found"))
+  client.close(relay_client)
+  http.stop_http_server(relay_server)
+}
+
+pub fn json_text_application_failure_survives_http_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
+  let invocations = process.new_subject()
+  let application_errors = process.new_subject()
+  let assert Ok(relay_server) =
+    ecosystem_pilot.start_json_text_error_relay_server(
+      definition,
+      invocations,
+      application_errors,
+    )
+  let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
+  let assert client.ToolFailure(content) =
+    ecosystem_pilot.execute_lookup(
+      relay_client,
+      definition,
+      ecosystem_pilot.Lookup("MISSING"),
+    )
+  content
+  |> should.equal([relay_content_text("\"inventory record not found\"")])
+  let assert Ok(decoded) = json.parse(tool_failure_text(content), decode.string)
+  decoded |> should.equal("inventory record not found")
+  process.receive(invocations, 3000) |> should.equal(Ok("MISSING"))
+  process.receive(application_errors, 3000)
+  |> should.equal(Ok("inventory record not found"))
+  client.close(relay_client)
+  http.stop_http_server(relay_server)
+}
+
 pub fn cancellation_closes_partial_response_before_tool_execution_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
   let assert Ok(provider) = scripted_provider.start(scripted_provider.Slow)
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
   let assert Ok(relay_server) =
-    ecosystem_pilot.start_relay_server_observed(invocations, application_errors)
+    ecosystem_pilot.start_relay_server_observed(
+      definition,
+      invocations,
+      application_errors,
+    )
   let llm_events = process.new_subject()
   let llm_attachment = attach_llm_events(llm_events, "pilot-cancel-llm")
 
   let assert Ok(prepared) =
     ecosystem_pilot.prepare_openai(
+      definition,
       provider_endpoint(provider),
       "Find SKU A-100",
     )
-  let assert Ok(stream) =
-    llm_wire.stream(prepared, types.default_limits(), types.default_deadlines())
+  let assert Ok(stream) = session.stream(prepared)
   await_provider_request(provider, fn(body) {
     scripted_provider.is_initial_request(body, "A-100")
   })
   scripted_provider.await_response_started(provider, 3000) |> should.be_ok
-  let assert Ok(types.NextProgress(types.TextDelta("msg_slow", delta))) =
-    llm_wire.next(stream, 3000)
+  let assert Ok(session.NextProgress(types.TextDelta("msg_slow", delta))) =
+    session.next(stream)
   delta |> should.equal("Searching inventory")
-  llm_wire.close(stream) |> should.equal(Ok(types.ConsumerClosed))
-  llm_wire.next(stream, 0) |> should.equal(Error(types.StreamClosed))
+  session.close(stream) |> should.equal(Ok(types.ConsumerClosed))
+  session.next(stream)
+  |> should.equal(Error(session.StreamReadError(types.StreamClosed)))
 
   scripted_provider.await_disconnect(provider, 3000)
   |> should.equal(Ok("closed"))
@@ -254,16 +351,22 @@ pub fn cancellation_closes_partial_response_before_tool_execution_test() {
 }
 
 pub fn provider_disconnect_returns_error_without_retry_or_tool_effect_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
   let assert Ok(provider) =
     scripted_provider.start(scripted_provider.Disconnect)
   let invocations = process.new_subject()
   let application_errors = process.new_subject()
   let assert Ok(relay_server) =
-    ecosystem_pilot.start_relay_server_observed(invocations, application_errors)
+    ecosystem_pilot.start_relay_server_observed(
+      definition,
+      invocations,
+      application_errors,
+    )
   let llm_events = process.new_subject()
   let llm_attachment = attach_llm_events(llm_events, "pilot-disconnect-llm")
   let assert Ok(prepared) =
     ecosystem_pilot.prepare_openai(
+      definition,
       provider_endpoint(provider),
       "Find SKU A-100",
     )
@@ -373,19 +476,17 @@ fn attach_relay_events(
 ) -> sinal.Attachment {
   let assert Ok(handler_id) = sinal.handler_id(id)
   let event = relay_telemetry.invocation_completed_event()
-  let handler =
-    sinal.handler(
+  let assert Ok(attachment) =
+    sinal.observe(
+      handler_id,
+      event,
       fn(
-        _event,
         measurements: relay_telemetry.InvocationCompletedMeasurements,
         metadata: relay_telemetry.InvocationCompletedMeta,
       ) {
         process.send(subject, #(measurements.duration_ms, metadata.status))
-        Ok(Nil)
       },
     )
-  let assert Ok(attachment) =
-    sinal.attach(handler_id, event, handler, fn(_, _) { Nil })
   attachment
 }
 
@@ -395,18 +496,17 @@ fn attach_llm_events(
 ) -> sinal.Attachment {
   let assert Ok(handler_id) = sinal.handler_id(id)
   let event = llm_telemetry.observation_event()
-  let handler =
-    sinal.handler(
-      fn(_event, _measurements: Nil, metadata: llm_telemetry.Metadata) {
+  let assert Ok(attachment) =
+    sinal.observe(
+      handler_id,
+      event,
+      fn(_measurements: Nil, metadata: llm_telemetry.Metadata) {
         process.send(subject, #(
           metadata.stage,
           metadata.provider,
           metadata.outcome,
         ))
-        Ok(Nil)
       },
     )
-  let assert Ok(attachment) =
-    sinal.attach(handler_id, event, handler, fn(_, _) { Nil })
   attachment
 }

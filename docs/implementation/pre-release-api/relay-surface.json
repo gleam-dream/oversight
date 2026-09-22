@@ -1,0 +1,4227 @@
+[
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "BearerToken",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "Resource",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "Scope",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "BoundaryValueError",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "bearer_token",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "resource",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "scope",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "ProtectionConfig",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "protection_config",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "VerifierDeclaration",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "VerifierPurpose",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "VerifierAttestation",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "VerificationError",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "AdmissionError",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "GrantUseError",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "Verifier",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "verifier",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "verifier_declaration",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "trust_verifier",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "attestation",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "GrantedRequest",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "Visibility",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "ExecutionAuthorization",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "InaccessibleCause",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "type",
+    "name": "ProtectedDispatchError",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "ToolPolicy",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "tool_policy",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "opaque type",
+    "name": "ProtectedRegistry",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "protect_registry",
+    "decision": "replace",
+    "reason": "Now requires a real registry so a protected registry cannot be empty by construction accident",
+    "replacement": "authorization.protect_registry(registry, protection, policy)"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "protect_registry_with_tools",
+    "decision": "remove",
+    "reason": "Duplicate protected-registry constructor after registry becomes required",
+    "replacement": "authorization.protect_registry"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "admit",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "granted_resource",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "granted_scopes",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "granted_principal",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "dispatch_granted",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/authorization.gleam",
+    "kind": "fn",
+    "name": "visible_declarations",
+    "decision": "keep",
+    "reason": "Typed authorization identity, grant, policy, and protected dispatch capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ClientConfig",
+    "decision": "internal",
+    "reason": "Host/port/path/TLS fields are derived from validated URL configuration",
+    "replacement": "client.http_config"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "opaque type",
+    "name": "HttpClientConfig",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "http_config",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "with_timeout",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "with_max_response_bytes",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "with_ca_cert_file",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "connect_http",
+    "decision": "keep",
+    "reason": "Composable bounded URL-derived HTTP client configuration and connection"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "StdioConfig",
+    "decision": "keep",
+    "reason": "Local stdio client with explicit executable and limits"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "opaque type",
+    "name": "Client",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ClientError",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ServerInfo",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "Discovery",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "IconTheme",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "Icon",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "Annotations",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ToolAnnotations",
+    "decision": "remove",
+    "reason": "Duplicated the native tool annotation shape",
+    "replacement": "tool.ToolAnnotations"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ToolDeclaration",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ResourceDeclaration",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ResourceTemplateDeclaration",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "PromptDeclaration",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ToolCallOutcome",
+    "decision": "keep",
+    "reason": "Typed structured tool call using admitted definition codecs"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "SubscriptionNotification",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "opaque type",
+    "name": "Subscription",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "connect",
+    "decision": "remove",
+    "reason": "Positional transport config path is superseded by URL admission",
+    "replacement": "client.http_config then client.connect_http"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "connect_with_ca",
+    "decision": "remove",
+    "reason": "CA now composes on one URL-derived config",
+    "replacement": "client.with_ca_cert_file then client.connect_http"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "connect_stdio",
+    "decision": "keep",
+    "reason": "Local stdio client with explicit executable and limits"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "close",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "cancel",
+    "decision": "remove",
+    "reason": "Same close action as client.close",
+    "replacement": "client.close"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "discover",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "raw_json_call",
+    "decision": "keep",
+    "reason": "Checked raw JSON access preserves peer representation for advanced callers"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_tools",
+    "decision": "keep",
+    "reason": "Typed, paginated remote declaration discovery"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_tools_json",
+    "decision": "keep",
+    "reason": "Checked raw JSON access preserves peer representation for advanced callers"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resources",
+    "decision": "keep",
+    "reason": "Typed, paginated remote declaration discovery"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resources_json",
+    "decision": "keep",
+    "reason": "Checked raw JSON access preserves peer representation for advanced callers"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resource_templates",
+    "decision": "keep",
+    "reason": "Typed, paginated remote declaration discovery"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resource_templates_json",
+    "decision": "keep",
+    "reason": "Checked raw JSON access preserves peer representation for advanced callers"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_prompts",
+    "decision": "keep",
+    "reason": "Typed, paginated remote declaration discovery"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_prompts_json",
+    "decision": "keep",
+    "reason": "Checked raw JSON access preserves peer representation for advanced callers"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_tool_declarations",
+    "decision": "remove",
+    "reason": "Duplicate typed listing name",
+    "replacement": "client.list_tools"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resource_declarations",
+    "decision": "remove",
+    "reason": "Duplicate typed listing name",
+    "replacement": "client.list_resources"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_resource_template_declarations",
+    "decision": "remove",
+    "reason": "Duplicate typed listing name",
+    "replacement": "client.list_resource_templates"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "list_prompt_declarations",
+    "decision": "remove",
+    "reason": "Duplicate typed listing name",
+    "replacement": "client.list_prompts"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "call_tool",
+    "decision": "internal",
+    "reason": "Codec-level call machinery is private to admitted definition calls",
+    "replacement": "client.call_definition"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "call_definition",
+    "decision": "keep",
+    "reason": "Typed structured tool call using admitted definition codecs"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "read_resource",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "get_prompt",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "complete",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "listen",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "acknowledged_notifications",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "next_notification",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "close_subscription",
+    "decision": "keep",
+    "reason": "Distinct client data, operation, outcome, or subscription lifecycle capability"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "type",
+    "name": "CompletionRef",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "type",
+    "name": "CompletionArgument",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "type",
+    "name": "CompletionValues",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "fn",
+    "name": "completion_values",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "type",
+    "name": "CompletionError",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "type",
+    "name": "ContextCompletion",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "fn",
+    "name": "completion",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "fn",
+    "name": "completion_with_context",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/completion.gleam",
+    "kind": "fn",
+    "name": "completion_values_to_json",
+    "decision": "keep",
+    "reason": "Completion reference, context-aware callback, bounded values, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "Role",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "role_to_string",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "role_from_string",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "Annotations",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "empty_annotations",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "annotations_to_json",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "ResourceContents",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "resource_contents_to_json",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "ResourceLink",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "resource_link_to_json",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "EmbeddedResource",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "embedded_resource_to_json",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "type",
+    "name": "ContentBlock",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "text_content",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "image_content",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "audio_content",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/content.gleam",
+    "kind": "fn",
+    "name": "content_block_to_json",
+    "decision": "keep",
+    "reason": "Caller-owned rich MCP content and exact content JSON conversion for raw integrations"
+  },
+  {
+    "module": "src/relay/logging.gleam",
+    "kind": "type",
+    "name": "LogLevel",
+    "decision": "keep",
+    "reason": "Distinct protocol log-level parsing and threshold semantics"
+  },
+  {
+    "module": "src/relay/logging.gleam",
+    "kind": "fn",
+    "name": "permits",
+    "decision": "keep",
+    "reason": "Distinct protocol log-level parsing and threshold semantics"
+  },
+  {
+    "module": "src/relay/logging.gleam",
+    "kind": "fn",
+    "name": "level_name",
+    "decision": "keep",
+    "reason": "Distinct protocol log-level parsing and threshold semantics"
+  },
+  {
+    "module": "src/relay/logging.gleam",
+    "kind": "fn",
+    "name": "parse_level",
+    "decision": "keep",
+    "reason": "Distinct protocol log-level parsing and threshold semantics"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "PromptArgument",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt_argument",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "Prompt",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "PromptMessage",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "PromptResult",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "PromptHandlerResult",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "PromptError",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "type",
+    "name": "ContextPrompt",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt_with_inputs",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt_argument_to_json",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt_to_json",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/prompts.gleam",
+    "kind": "fn",
+    "name": "prompt_message_to_json",
+    "decision": "keep",
+    "reason": "Prompt declarations, multi-round result, handler, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "type",
+    "name": "RequestId",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "type",
+    "name": "ProgressToken",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "type",
+    "name": "RpcError",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "parse_error_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "invalid_request_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "method_not_found_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "invalid_params_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "internal_error_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "resource_not_found_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "unsupported_protocol_version_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "const",
+    "name": "missing_required_client_capability_code",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "parse_error",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "invalid_request",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "method_not_found",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "invalid_params",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "internal_error",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "resource_not_found",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "unsupported_protocol_version",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "missing_required_client_capability",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "request_id_to_json",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "progress_token_to_json",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/jsonrpc.gleam",
+    "kind": "fn",
+    "name": "error_to_json",
+    "decision": "keep",
+    "reason": "Generic JSON-RPC identity, error, code, or checked JSON framing for custom transports"
+  },
+  {
+    "module": "src/relay/protocol/revision.gleam",
+    "kind": "type",
+    "name": "ProtocolRevision",
+    "decision": "keep",
+    "reason": "Frozen protocol revision identity and advertised versions"
+  },
+  {
+    "module": "src/relay/protocol/revision.gleam",
+    "kind": "fn",
+    "name": "to_string",
+    "decision": "keep",
+    "reason": "Frozen protocol revision identity and advertised versions"
+  },
+  {
+    "module": "src/relay/protocol/revision.gleam",
+    "kind": "fn",
+    "name": "supported_versions",
+    "decision": "keep",
+    "reason": "Frozen protocol revision identity and advertised versions"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "ClientInfo",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "RequestMetadata",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Request",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "HttpRoute",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "HttpFailure",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "UnhandledKind",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Admission",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "admit_message",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_route",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_admission_failure",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_http_routing_error",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "is_response_frame",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_response_status",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "admit_bytes",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "request_allows_log",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "client_supports_input_request",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "client_declares_capability",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "server_info",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "result_meta",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_discovery_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_discovery_response_with_capabilities",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_list_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resource_templates_list_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_read_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_list_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_get_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_completion_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_empty_result",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_response_with_cursor",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_success_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_content_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_error_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tool_input_required_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_progress_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_acknowledged_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_listen_request",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resource_updated_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_changed_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_list_changed_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_list_changed_notification",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_listen_result_response",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "value_to_json",
+    "decision": "internal",
+    "reason": "Revision-specific wire admission and encoders are implementation behind the public reducer; custom transports retain server.step and generic JSON-RPC",
+    "replacement": "relay/internal/protocol/v2026_07_28"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "opaque type",
+    "name": "ResourceUri",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource_uri",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource_uri_to_string",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "type",
+    "name": "Resource",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "type",
+    "name": "ResourceTemplate",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "type",
+    "name": "ResourceError",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "type",
+    "name": "ContextResource",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "type",
+    "name": "ContextResourceTemplate",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource_template",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource_to_json",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/resources.gleam",
+    "kind": "fn",
+    "name": "resource_template_to_json",
+    "decision": "keep",
+    "reason": "Validated resource identity, caller-owned descriptor, or exact JSON for raw integrations"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "type",
+    "name": "RuntimeConfig",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "default_config",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "type",
+    "name": "RuntimeError",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "type",
+    "name": "RuntimeMessage",
+    "decision": "internal",
+    "reason": "Actor mailbox variants are implementation plumbing; custom transports use Runtime methods",
+    "replacement": "runtime.Runtime plus start/send_frame/stop"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "opaque type",
+    "name": "Runtime",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "start",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "start_with_status_sink",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "send_frame",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "close",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "stop",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "notify_resource_updated",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "notify_tools_list_changed",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "notify_resources_list_changed",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "notify_prompts_list_changed",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "register_tool",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "unregister_tool",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/runtime.gleam",
+    "kind": "fn",
+    "name": "terminate_subscription",
+    "decision": "keep",
+    "reason": "Custom transport runtime lifecycle, bounds, notifications, or dynamic tool operation"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "type",
+    "name": "SchemaAdmissionError",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "fn",
+    "name": "validate_input_schema",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "fn",
+    "name": "validate_output_schema",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "fn",
+    "name": "is_object_schema",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "fn",
+    "name": "schema_type_name",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/schema.gleam",
+    "kind": "fn",
+    "name": "materialize_schema",
+    "decision": "internal",
+    "reason": "Schema admission/materialization belongs behind admitted tool definitions",
+    "replacement": "relay/internal/schema"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "opaque type",
+    "name": "ExchangeId",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "fresh_exchange",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "exchange_id",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "exchange_id_to_int",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "exchange_id_to_string",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "http_admission_failure",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "http_custom_headers_valid",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "exchange_is_known",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "opaque type",
+    "name": "InvocationId",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "fresh_invocation",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_id_to_int",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "type",
+    "name": "UnhandledMessage",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "type",
+    "name": "InvocationOutcome",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "type",
+    "name": "ServerInput",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "type",
+    "name": "ServerEffect",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "opaque type",
+    "name": "Invocation",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_id",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_exchange",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_request_id",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_context",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_method",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "invocation_with_progress",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "perform",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "opaque type",
+    "name": "Server",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "server",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "server_with_services",
+    "decision": "remove",
+    "reason": "Positional service family is superseded by independent immutable modifiers",
+    "replacement": "server.server piped through server.with_resources/templates/prompts/completion"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "with_resources",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "with_resource_templates",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "with_prompts",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "with_completion",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "server_with_dispatch",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "register_tool",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "unregister_tool",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "registered_tools",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/server.gleam",
+    "kind": "fn",
+    "name": "step",
+    "decision": "keep",
+    "reason": "Pure reducer, custom dispatch, service composition, or exchange lifecycle capability"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "type",
+    "name": "SubscriptionFilter",
+    "decision": "keep",
+    "reason": "Caller-owned subscription filter and capability reduction"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "empty_filter",
+    "decision": "keep",
+    "reason": "Caller-owned subscription filter and capability reduction"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "filter_supported",
+    "decision": "keep",
+    "reason": "Caller-owned subscription filter and capability reduction"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "opaque type",
+    "name": "Subscriptions",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "new",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "listen",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "close_stream",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "is_stream_active",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_resource",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_tools",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_resources",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_prompts",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "all_streams",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "streams_for_owner",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "subscribe",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "unsubscribe",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "close_owner",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "is_subscribed",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "owners_for_resource",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/subscriptions.gleam",
+    "kind": "fn",
+    "name": "count",
+    "decision": "internal",
+    "reason": "Mutable subscription state is reducer implementation, while SubscriptionFilter remains public",
+    "replacement": "relay/internal/subscriptions_state"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "FrameRejectedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "RequestAdmittedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "InvocationStartedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "InvocationCompletedMeasurements",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "InvocationCompletedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "InvocationCancelledMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "InvocationCrashedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "type",
+    "name": "ExchangeClosedMeta",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "frame_rejected_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "request_admitted_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "invocation_started_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "invocation_completed_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "invocation_cancelled_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "invocation_crashed_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "exchange_closed_event",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_frame_rejected",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_request_admitted",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_invocation_started",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_invocation_completed",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_invocation_cancelled",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_invocation_crashed",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/telemetry.gleam",
+    "kind": "fn",
+    "name": "emit_exchange_closed",
+    "decision": "keep",
+    "reason": "Typed native Sinal event descriptor or semantic emission for custom transports"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "opaque type",
+    "name": "ScriptedPeer",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "opaque type",
+    "name": "FakeClock",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "fn",
+    "name": "paired_transport",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "fn",
+    "name": "scripted_peer",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "fn",
+    "name": "fake_clock",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "fn",
+    "name": "fake_clock_ticks",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/test_kit.gleam",
+    "kind": "fn",
+    "name": "advance_fake_clock",
+    "decision": "remove",
+    "reason": "Placeholder scripted peer and unconnected fake clock did not provide a working public test capability",
+    "replacement": "real local transport tests"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "opaque type",
+    "name": "ToolName",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolNameError",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_name",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_name_from_trusted",
+    "decision": "remove",
+    "reason": "Bypassed validated tool-name admission",
+    "replacement": "tool.tool_name"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_name_to_string",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolAnnotations",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "empty_annotations",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_annotations",
+    "decision": "remove",
+    "reason": "Positional constructor duplicated the caller-owned annotation record and empty value",
+    "replacement": "tool.empty_annotations plus named updates and hint modifiers"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_read_only_hint",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_destructive_hint",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_idempotent_hint",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_open_world_hint",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_annotations_to_json",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolMetadata",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_metadata",
+    "decision": "remove",
+    "reason": "Description-only constructor duplicated the caller-owned metadata record and structured-definition modifier",
+    "replacement": "tool.ToolMetadata(..tool.empty_metadata(), description: Some(description)) or tool.with_description"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_with_title",
+    "decision": "remove",
+    "reason": "Description/title constructor duplicated independent metadata updates",
+    "replacement": "tool.ToolMetadata named update or tool.with_title"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_with_annotations",
+    "decision": "remove",
+    "reason": "Metadata annotations constructor duplicated caller-owned record update",
+    "replacement": "tool.ToolMetadata named update or tool.with_annotations"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_requiring_client_capabilities",
+    "decision": "remove",
+    "reason": "Capability constructor duplicated caller-owned metadata record update",
+    "replacement": "tool.ToolMetadata named update"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "empty_metadata",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolAdmissionError",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "opaque type",
+    "name": "Definition",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "definition",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "definition_name",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "definition_metadata",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "definition_input_codec",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "definition_output_codec",
+    "decision": "keep",
+    "reason": "Single admitted structured tool contract reused by registration and client"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_description",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_title",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_annotations",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_required_client_capabilities",
+    "decision": "keep",
+    "reason": "Independent caller-owned tool metadata or annotation composition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolDeclaration",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ToolOutput",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "InputRequest",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "InputHandlerResult",
+    "decision": "replace",
+    "reason": "Advanced result now combines structured content and input continuation",
+    "replacement": "tool.HandlerResult"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "ProgressReporter",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "opaque type",
+    "name": "ContextTool",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "RegistryError",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "DispatchError",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle",
+    "decision": "replace",
+    "reason": "Ordinary native handler is input-only; per-invocation context remains in the advanced binder",
+    "replacement": "tool.handle(definition, fn(input)) or tool.handle_advanced"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_with_error_renderer",
+    "decision": "replace",
+    "reason": "Ordinary rendered-error handler is input-only; per-invocation context remains in the advanced binder",
+    "replacement": "tool.handle_with_error_renderer(definition, fn(input), renderer) or tool.handle_advanced_with_error_renderer"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_tool",
+    "decision": "replace",
+    "reason": "Registration now reuses an admitted input-only definition",
+    "replacement": "tool.content_definition then tool.handle_content"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_tool_with_error_renderer",
+    "decision": "replace",
+    "reason": "Rendering binds to an admitted input-only definition",
+    "replacement": "tool.content_definition then tool.handle_content_with_error_renderer"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "context_tool",
+    "decision": "replace",
+    "reason": "Three-codec constructor duplicated admission and made an error codec mandatory",
+    "replacement": "tool.definition then tool.handle or tool.handle_with_error_renderer"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_content",
+    "decision": "replace",
+    "reason": "Separate rich-content constructor duplicated admission",
+    "replacement": "tool.definition then tool.handle_advanced"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_progress",
+    "decision": "replace",
+    "reason": "Separate progress constructor duplicated admission",
+    "replacement": "tool.definition then tool.handle_advanced"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_inputs",
+    "decision": "replace",
+    "reason": "Separate continuation constructor duplicated admission",
+    "replacement": "tool.definition then tool.handle_advanced"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_input_schema",
+    "decision": "replace",
+    "reason": "Schema override now composes with the admitted definition",
+    "replacement": "tool.with_input_schema_override then tool.handle"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_name_of",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "tool_declaration_of",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "opaque type",
+    "name": "Registry",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "registry",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "register",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "unregister",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "contains",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "registered_tools",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "declarations",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "required_client_capabilities",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "input_schema_document",
+    "decision": "keep",
+    "reason": "Typed tool identity, declaration, handler, registry, or error capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "dispatch",
+    "decision": "keep",
+    "reason": "Registry dispatch projection with distinct content, progress, or continuation capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "dispatch_with_content",
+    "decision": "keep",
+    "reason": "Registry dispatch projection with distinct content, progress, or continuation capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "dispatch_with_progress",
+    "decision": "keep",
+    "reason": "Registry dispatch projection with distinct content, progress, or continuation capability"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "dispatch_with_inputs",
+    "decision": "keep",
+    "reason": "Registry dispatch projection with distinct content, progress, or continuation capability"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "type",
+    "name": "HttpOptions",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "type",
+    "name": "HttpPolicy",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "opaque type",
+    "name": "HttpListener",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "listener",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "with_options",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "with_policy",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "with_tls",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "opaque type",
+    "name": "HttpServer",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "opaque type",
+    "name": "HubHandle",
+    "decision": "internal",
+    "reason": "Hub actor handle is implementation state hidden by HttpServer",
+    "replacement": "http.HttpServer"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "http_server_port",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "stop_http_server",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "notify_resource_updated",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "notify_tools_list_changed",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "notify_resources_list_changed",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "notify_prompts_list_changed",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "register_tool",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "unregister_tool",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "local_http_policy",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_http_server",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_http_server_with_policy",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_http_server_with_context",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_https_server",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_https_server_with_policy",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start_https_server_with_context",
+    "decision": "remove",
+    "reason": "Startup wrapper duplicated the single composable listener path",
+    "replacement": "http.listener plus with_options/with_policy/with_tls then http.start"
+  },
+  {
+    "module": "src/relay/transport/http.gleam",
+    "kind": "fn",
+    "name": "start",
+    "decision": "keep",
+    "reason": "Composable HTTP listener, explicit policy/TLS, or live server operation"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "type",
+    "name": "StdioError",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "type",
+    "name": "ReadOutcome",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "type",
+    "name": "FramerResult",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "opaque type",
+    "name": "Framer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "new_framer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "feed_framer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "finish_framer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "type",
+    "name": "WriterMessage",
+    "decision": "internal",
+    "reason": "Writer actor mailbox is implementation plumbing; Writer operations remain for custom stdio loops",
+    "replacement": "stdio.Writer"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "opaque type",
+    "name": "Writer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "start_writer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "write_bytes",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "stop_writer",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "type",
+    "name": "LocalUnprotectedStdioConfig",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "default_stdio_config",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "log_stderr",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "run_local_unprotected_stdio_server",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio.gleam",
+    "kind": "fn",
+    "name": "stream_read_loop",
+    "decision": "keep",
+    "reason": "Local stdio framing, serialized writing, diagnostics, or bounded runner capability"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "type",
+    "name": "Config",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "opaque type",
+    "name": "Client",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "connect",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "request",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "subscribe",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "next_notification",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "cancel_subscription",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "close",
+    "decision": "internal",
+    "reason": "Child-process protocol plumbing belongs behind the typed stdio client",
+    "replacement": "client.connect_stdio"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "version",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolName",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolNameError",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolMetadata",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolAnnotations",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ContextTool",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "Definition",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolDeclaration",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolAdmissionError",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "Registry",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "RegistryError",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "DispatchError",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ToolOutput",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "InputRequest",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "InputHandlerResult",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "input_request",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "complete_output",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "request_input",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "type",
+    "name": "ProgressReporter",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_name",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_name_to_string",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_metadata",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_with_title",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_with_annotations",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_annotations",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "empty_annotations",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "tool_metadata_requiring_client_capabilities",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "empty_metadata",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "definition",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "handle",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "handle_with_error_renderer",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "content_tool",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "content_tool_with_error_renderer",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "context_tool",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_input_schema",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_content",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_progress",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "context_tool_with_inputs",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "registry",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "register",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "unregister",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "declarations",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay.gleam",
+    "kind": "fn",
+    "name": "dispatch",
+    "decision": "remove",
+    "reason": "Root forwarding facade duplicated owning modules and hid typed seams",
+    "replacement": "relay/tool and other owning modules"
+  },
+  {
+    "module": "src/relay_conformance_server.gleam",
+    "kind": "fn",
+    "name": "main",
+    "decision": "keep",
+    "reason": "Executable entrypoint for the pinned official conformance suite"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "call_content_definition",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Calls admitted content-only tools and returns blocks without implying structured decoding"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "fn",
+    "name": "stdio_config",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Supplies bounded defaults for local child-process settings without required limit fields"
+  },
+  {
+    "module": "src/relay/client.gleam",
+    "kind": "type",
+    "name": "ContentCallError",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Content-only client errors are distinct from structured outcomes because no output codec exists"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "admit_bytes",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "admit_message",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "client_declares_capability",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "client_supports_input_request",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_content_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_error_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_call_success_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_completion_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_discovery_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_discovery_response_with_capabilities",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_empty_result",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_http_routing_error",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_progress_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_get_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_list_changed_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_prompts_list_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resource_templates_list_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resource_updated_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_list_changed_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_list_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_resources_read_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_acknowledged_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_listen_request",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_subscriptions_listen_result_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tool_input_required_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_changed_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_response",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "encode_tools_list_response_with_cursor",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_admission_failure",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_response_status",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "http_route",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "is_response_frame",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "request_allows_log",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "result_meta",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "server_info",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "fn",
+    "name": "value_to_json",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Admission",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "ClientInfo",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "HttpFailure",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "HttpRoute",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "Request",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "RequestMetadata",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/protocol/v2026_07_28.gleam",
+    "kind": "type",
+    "name": "UnhandledKind",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "fn",
+    "name": "is_object_schema",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "fn",
+    "name": "materialize_schema",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "fn",
+    "name": "schema_type_name",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "fn",
+    "name": "validate_input_schema",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "fn",
+    "name": "validate_output_schema",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/schema.gleam",
+    "kind": "type",
+    "name": "SchemaAdmissionError",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "all_streams",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "close_owner",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "close_stream",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "count",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "is_stream_active",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "is_subscribed",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "listen",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "new",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "owners_for_resource",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_prompts",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_resource",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_resources",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "stream_subscribers_for_tools",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "streams_for_owner",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "subscribe",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "fn",
+    "name": "unsubscribe",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/subscriptions_state.gleam",
+    "kind": "opaque type",
+    "name": "Subscriptions",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "cancel_subscription",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "close",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "connect",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "next_notification",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "request",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "fn",
+    "name": "subscribe",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "opaque type",
+    "name": "Client",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/internal/transport/stdio_client.gleam",
+    "kind": "type",
+    "name": "Config",
+    "introduced": true,
+    "decision": "internal",
+    "reason": "Moved or new implementation-only declaration in an internal module"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_definition",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Validates a content-only input schema before handler binding or client calls"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_definition_input_codec",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Allows the typed client and app-owned adapters to derive identity and input codec from the same opaque content definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_definition_name",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Allows the typed client and app-owned adapters to derive identity and input codec from the same opaque content definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "content_with_metadata",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Attaches caller-owned metadata to an admitted content-only definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_advanced",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Advanced binding composes rich content, progress and input continuation on one admitted structured definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_advanced_with_error_renderer",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Advanced binding composes rich content, progress and input continuation on one admitted structured definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_content",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Input-only content binding with safe generic or deliberate rendered application errors"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_content_advanced",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Context-aware content binding preserves per-invocation context and progress without an output codec"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_content_advanced_with_error_renderer",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Context-aware content binding preserves per-invocation context and progress without an output codec"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "handle_content_with_error_renderer",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Input-only content binding with safe generic or deliberate rendered application errors"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_input_schema_override",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Preserves caller-supplied object schema vocabulary while invocation decoding still uses the input codec"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "fn",
+    "name": "with_metadata",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Attaches a caller-owned metadata value to an admitted structured definition"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "opaque type",
+    "name": "ContentDefinition",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "Admitted content-only input contract without a dummy structured output codec"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "HandlerCallContext",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "One named advanced invocation/result shape preserves context, progress, rich content, and input continuation"
+  },
+  {
+    "module": "src/relay/tool.gleam",
+    "kind": "type",
+    "name": "HandlerResult",
+    "introduced": true,
+    "decision": "keep",
+    "reason": "One named advanced invocation/result shape preserves context, progress, rich content, and input continuation"
+  }
+]
