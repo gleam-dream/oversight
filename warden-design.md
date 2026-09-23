@@ -4,6 +4,9 @@
 
 - Warden provides a typed Gleam OIDC relying party and OAuth client on Erlang/OTP 27+. The default implementation must reuse pinned `oidcc` through a narrow Erlang boundary rather than implement a second protocol or cryptographic core.
 - This design consolidates the baseline at `9194f02` with transaction, verification, custody, and refresh findings. The initial [public facade](PUBLIC-API.md) does not remove broader [coverage](API-COVERAGE.md#warden); unimplemented operations remain requirements rather than completed APIs.
+- Apply the [public API guidelines](PUBLIC-API-GUIDELINES.md) to the login facade.
+  Configuration remains pure until validation and resource allocation; distinct
+  security and custody outcomes remain typed at the public boundary.
 - Required baseline operations remain discovery, authorization-code login, refresh, client credentials, userinfo, introspection, and RP-initiated logout. Later protocol families and explicit gaps retain their separate dispositions in §4.8.
 - Authorization-server implementation, implicit/hybrid/password flows, and JavaScript runtime support remain excluded from the initial package. A social-provider quirks catalog remains optional later work, with Assent as a reference rather than the default backend.
 - Historical upstream certification does not certify Warden or the selected newer backend version. Scripted attestations and storage histories establish interface behavior only.

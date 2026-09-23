@@ -18,6 +18,9 @@
   Current excerpts below identify exact laboratory symbols and consumers; omitted
   bodies are not standalone modules. Proposed sketches retain future capabilities
   and use placeholder module/type names rather than claiming current package APIs.
+- Apply the [public API guidelines](PUBLIC-API-GUIDELINES.md) to the implementation
+  facade. Worker codecs and versions serve the persisted queue boundary; pure
+  configuration and caller-owned business types remain separate from engine startup.
 
 ---
 
