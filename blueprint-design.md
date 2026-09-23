@@ -5,6 +5,20 @@ The current public API cleanup follows the [pre-release contract](docs/implement
 The additive application API changes are specified in the
 [API ergonomics contract](docs/implementation/api-ergonomics/contract.md#blueprint).
 
+The [current API control contract](docs/implementation/api-control/contract.md#blueprint)
+records the implemented post-release direction. `codec.try_imap` preserves its
+base wire schema while allowing fallible native conversion in either direction.
+Optional properties can use standard `Option(a)` while `Optional(a)` remains
+available when absence and present null need separate values.
+`codec.decode_json_with_limits` applies public parser limits; ordinary
+`decode_json` uses the strict parser across interpreted, generated, and mapped
+codecs. The defaults admit exact finite binary64 numbers, including subnormals,
+within finite byte, depth, and numeric bounds. `decode_json_native` retains the
+distinct generated-parser path. The [migration guide](docs/implementation/api-control/migration.md)
+and [pilot](playground/ecosystem_pilot/README.md)
+exercises current composition. Older laboratory excerpts below describe design
+evidence and may use superseded names.
+
 ## Scope and ownership
 
 Blueprint owns JSON Schema descriptions, schema-aware values and bidirectional

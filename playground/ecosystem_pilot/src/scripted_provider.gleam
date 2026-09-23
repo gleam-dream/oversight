@@ -14,6 +14,9 @@ pub type Mode {
   InvalidArguments
   Slow
   Disconnect
+  FourthText
+  FourthTool
+  FourthBounded
 }
 
 pub opaque type Provider {
@@ -240,6 +243,23 @@ fn serve(
             Disconnect -> {
               tcp.close(socket)
               monitor_retries(listener, requests, 0)
+            }
+            FourthText -> {
+              let _ =
+                send_plain_sse_events(socket, [
+                  #("text", "Hello fourth."),
+                  #("done", "ok"),
+                ])
+              tcp.close(socket)
+            }
+            FourthTool -> serve_fourth_tool(listener, socket, body, requests)
+            FourthBounded -> {
+              let _ =
+                send_plain_sse_events(socket, [
+                  #("text", "long-text"),
+                  #("done", "ok"),
+                ])
+              tcp.close(socket)
             }
           }
         }
@@ -549,6 +569,105 @@ fn send_sse_events(
       bit_array.from_string(
         "event: " <> name <> "\ndata: " <> json.to_string(data) <> "\n\n",
       ),
+    )
+  })
+}
+
+fn serve_fourth_tool(
+  listener: tcp.ListenSocket,
+  socket: tcp.Socket,
+  body: String,
+  requests: process.Subject(String),
+) -> Nil {
+  case is_fourth_initial_request(body) {
+    False -> {
+      let _ = send_http_error(socket, 400, "invalid fourth-provider request")
+      tcp.close(socket)
+    }
+    True -> {
+      let _ =
+        send_plain_sse_events(socket, [
+          #("text", "Checking inventory"),
+          #("tool", "call-4|inventory_lookup|{\"sku\":\"A-100\"}"),
+          #("done", "ok"),
+        ])
+      tcp.close(socket)
+      case tcp.accept(listener, 4000) {
+        Error(_) -> Nil
+        Ok(next) ->
+          case read_request(next, "") {
+            Error(_) -> tcp.close(next)
+            Ok(#(_headers, continuation)) -> {
+              process.send(requests, continuation)
+              case is_fourth_continuation_request(continuation) {
+                True -> {
+                  let _ =
+                    send_plain_sse_events(next, [
+                      #("text", "Inventory confirmed."),
+                      #("done", "ok"),
+                    ])
+                  Nil
+                }
+                False -> {
+                  let _ = send_http_error(next, 422, "invalid fourth replay")
+                  Nil
+                }
+              }
+              tcp.close(next)
+            }
+          }
+      }
+    }
+  }
+}
+
+pub fn is_fourth_initial_request(body: String) -> Bool {
+  case parse_json(body) {
+    Error(_) -> False
+    Ok(request) ->
+      case first_value(request, "tools") {
+        Error(_) -> False
+        Ok(declaration) ->
+          at_value(declaration, ["name"], decode.string)
+          == Ok("inventory_lookup")
+          && at_value(
+            declaration,
+            ["input_schema", "properties", "sku", "type"],
+            decode.string,
+          )
+          == Ok("string")
+      }
+  }
+}
+
+pub fn is_fourth_continuation_request(body: String) -> Bool {
+  case parse_json(body) {
+    Error(_) -> False
+    Ok(request) ->
+      at_value(request, ["replay_text"], decode.string)
+      == Ok("Checking inventory")
+      && at_value(request, ["replay_call_ids"], decode.list(decode.string))
+      == Ok(["call-4"])
+      && string.contains(body, "Ada Lovelace notebook")
+  }
+}
+
+fn send_plain_sse_events(
+  socket: tcp.Socket,
+  events: List(#(String, String)),
+) -> Result(Nil, String) {
+  use Nil <- result.try(tcp.send(
+    socket,
+    bit_array.from_string(
+      "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n",
+    ),
+  ))
+  list.fold(events, Ok(Nil), fn(acc, event) {
+    use Nil <- result.try(acc)
+    let #(name, data) = event
+    tcp.send(
+      socket,
+      bit_array.from_string("event: " <> name <> "\ndata: " <> data <> "\n\n"),
     )
   })
 }

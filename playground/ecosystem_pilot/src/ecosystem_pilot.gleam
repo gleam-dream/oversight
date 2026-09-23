@@ -6,7 +6,11 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import json/blueprint/codec
+import json/blueprint/json_text
+import json/blueprint/parser
+import json/blueprint/value
 import llm_wire/config
+import llm_wire/provider/openai as openai_provider
 import llm_wire/session
 import llm_wire/types
 import relay/client
@@ -166,6 +170,28 @@ pub fn llm_tool(
   )
 }
 
+/// Admits a remote declaration only when Blueprint supports its finite schema.
+pub fn llm_discovered_tool(
+  declaration: client.ToolDeclaration,
+) -> Result(types.ToolDefinition, String) {
+  use name <- result.try(
+    types.tool_name(declaration.name)
+    |> result.map_error(fn(error) { string.inspect(error) }),
+  )
+  use contract <- result.try(
+    parser.parse_schema_document_from_string(
+      parser.default_limits(),
+      json.to_string(declaration.input_schema),
+    )
+    |> result.map_error(fn(error) { string.inspect(error) }),
+  )
+  Ok(types.tool_from_contract(
+    name,
+    option.unwrap(declaration.description, ""),
+    contract,
+  ))
+}
+
 fn serve_tool(
   registered: tool.ContextTool(Nil),
 ) -> Result(http.HttpServer(Nil), String) {
@@ -238,7 +264,7 @@ pub fn prepare_openai(
   use model <- result.try(types.model_id("local-scripted-model"))
   use declaration <- result.try(llm_tool(definition))
   let settings =
-    config.openai(api_key)
+    config.openai(openai_provider.options(api_key))
     |> config.with_endpoint(provider_endpoint)
     |> config.with_limits(
       types.Limits(
@@ -255,9 +281,54 @@ pub fn prepare_openai(
   session.prepare(settings, request)
 }
 
+pub fn prepare_discovered_openai(
+  declaration: client.ToolDeclaration,
+  endpoint: String,
+) -> Result(session.PreparedCall, String) {
+  use api_key <- result.try(
+    types.api_key("local-scripted-provider-key")
+    |> result.map_error(fn(error) { string.inspect(error) }),
+  )
+  use provider_endpoint <- result.try(
+    types.endpoint(endpoint)
+    |> result.map_error(fn(error) { string.inspect(error) }),
+  )
+  use model <- result.try(
+    types.model_id("local-scripted-model")
+    |> result.map_error(fn(error) { string.inspect(error) }),
+  )
+  use tool <- result.try(llm_discovered_tool(declaration))
+  let settings =
+    config.openai(openai_provider.options(api_key))
+    |> config.with_endpoint(provider_endpoint)
+  let request =
+    types.new_request(model, [types.UserMessage("Find SKU A-100")])
+    |> types.with_tools([tool])
+  session.prepare(settings, request)
+  |> result.map_error(fn(error) { string.inspect(error) })
+}
+
+pub fn call_discovered_value(
+  relay_client: client.Client,
+  declaration: client.ToolDeclaration,
+  arguments: value.Value,
+) -> Result(String, String) {
+  case client.call_discovered(relay_client, declaration, arguments) {
+    client.StructuredSuccess(value, _) -> Ok(json_text.render_value(value))
+    client.ContentOnlySuccess(_) ->
+      Error("tool returned content without structured output")
+    client.InputRequired(_, _) -> Error("tool requested additional input")
+    client.ToolFailure(_) -> Error("tool reported an application failure")
+    client.ProtocolFailure(reason) -> Error(reason)
+    client.TransportFailure(reason) -> Error(string.inspect(reason))
+    client.InputEncodingFailure -> Error("tool arguments could not be encoded")
+    client.InvalidInputResponses -> Error("tool input responses were invalid")
+  }
+}
+
 pub fn provider_run(
   prepared: session.PreparedCall,
-) -> Result(session.RunResult, types.WireError) {
+) -> Result(session.RunResult, session.RunFailure) {
   session.run(prepared)
 }
 
@@ -328,7 +399,7 @@ fn run_lookup_example(
     |> result.map_error(fn(error) { string.inspect(error) }),
   )
   case run_result {
-    session.RunToolCalls([call], continuation, _) -> {
+    session.RunToolCalls(_, [call], continuation, _) -> {
       use input <- result.try(
         decode_lookup(definition, call.arguments_json)
         |> result.map_error(fn(error) { string.inspect(error) }),
@@ -356,12 +427,14 @@ fn run_lookup_example(
         client.ContentOnlySuccess(_) ->
           Error("inventory lookup returned no typed structured output")
         client.ProtocolFailure(reason) -> Error(reason)
-        client.TransportFailure(reason) -> Error(reason)
-        client.Cancelled -> Error("Relay lookup was cancelled")
+        client.TransportFailure(reason) -> Error(string.inspect(reason))
         client.InputEncodingFailure -> Error("Relay input could not be encoded")
+        client.InputRequired(_, _) -> Error("Relay lookup requires input")
+        client.InvalidInputResponses ->
+          Error("Relay input responses were invalid")
       }
     }
-    session.RunToolCalls(_, _, _) ->
+    session.RunToolCalls(_, _, _, _) ->
       Error("provider returned multiple calls for the single-tool example")
     session.RunText(text, _) -> Ok(text)
     session.RunOutputLimited(_, _, _) ->
