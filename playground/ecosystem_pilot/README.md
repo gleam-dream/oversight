@@ -40,7 +40,11 @@ This path requires no native type invented for the remote schema. A mixed
 `sinal.SubscriptionPlan` observes Relay and LLM events in one scope.
 
 The fourth provider uses public `provider.Spec`, `Reducer`, and `Replay` APIs.
-Its scripted server verifies the provider-authored assistant text and call ID
+This fixture demonstrates a text-and-tools protocol, not a complete provider
+implementation. Its placeholder handling of rich content is not suitable for
+forwarding application images or documents; a production adapter must encode
+or explicitly reject unsupported content. Its scripted server verifies the
+provider-authored assistant text and call ID
 on continuation. A separate scenario checks that the shared runtime rejects
 text over an admitted byte bound.
 

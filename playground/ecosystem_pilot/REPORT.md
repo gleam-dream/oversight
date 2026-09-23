@@ -11,17 +11,20 @@ behavior.
 
 ## Source state
 
-The pilot uses sibling path dependencies. Their Git heads are the authorized
-baselines below; the API changes exercised here are uncommitted worktree changes
-on top of those heads. The path dependencies do not pin the uncommitted state.
+The pilot uses sibling path dependencies. The committed API source baselines
+reviewed for release readiness on 23 September 2026 are listed below. Later
+release documentation and verification changes are recorded in the
+[release-readiness review](../../docs/implementation/api-control/release-readiness.md).
+Path dependencies use the current sibling working trees rather than pinning
+these commits.
 
-| Package                      | Baseline Git head                          | Uncommitted API used by this pilot                                                |
-| ---------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------- |
-| Blueprint (`json_blueprint`) | `d3f0708b61eddb4a4789c0476ab5384267814a51` | `codec.record3`, `codec.schema_json`                                              |
-| Sinal                        | `dd09933e5466628f7d46fa896c389f31ba7d4cb6` | typed observations, `SubscriptionPlan`, explicit native time units                |
-| Relay                        | `098417b03d7d984cbe556f21062c190ebbec08e0` | definitions, discovered dynamic calls, typed transport errors, HTTP listener      |
-| LLM Wire                     | `cdfb38af290619a6fba890141b0701990691ba87` | configured sessions, schema-only tool admission, external provider adapter/replay |
-| Oversight pilot              | `8db2b008095507ddf7499f2dcdb823b3d0c27a3f` | this uncommitted consumer, tests, and report                                      |
+| Package                      | Reviewed API source baseline |
+| ---------------------------- | ---------------------------- |
+| Blueprint (`json_blueprint`) | `f908501`                    |
+| Sinal                        | `63c7c7d`                    |
+| Relay                        | `e036033`                    |
+| LLM Wire                     | `ca88550`                    |
+| Oversight pilot              | `c535b3d`                    |
 
 ## Composition
 
