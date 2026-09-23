@@ -5,6 +5,19 @@ The current public API cleanup follows the [pre-release contract](docs/implement
 The additive application API changes are specified in the
 [API ergonomics contract](docs/implementation/api-ergonomics/contract.md#llm-configured-interaction).
 
+The [current API control contract](docs/implementation/api-control/contract.md#llm-provider-and-session-boundary)
+defines pure provider settings, application-owned HTTP/SSE adapters, and
+schema-only tool admission through the infallible `types.tool_from_contract`
+after Blueprint admits a `RuntimeContract`. Built-in settings
+start with provider options, such as `config.openai(openai.options(key))`, then
+accept common limits and deadlines. `provider.Spec`, `Reducer`, and `Replay`
+let a fourth provider own its wire format and assistant turn while the session
+runtime retains admission, bounds, cleanup, and exact continuation coverage.
+Buffered `session.run` failures carry retry evidence; absent provider usage
+remains unknown. The [pilot](playground/ecosystem_pilot/README.md) compiles an
+application-defined fourth provider and a discovered Relay tool. Older
+laboratory excerpts below are design evidence.
+
 ## Purpose and ownership
 
 - LLM provides typed buffered and streamed provider interactions for direct callers and Fabric. One interaction returns an outcome or stream; subsequent interactions remain a host decision.

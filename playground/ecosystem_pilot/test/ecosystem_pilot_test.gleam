@@ -1,4 +1,5 @@
 import ecosystem_pilot
+import fourth_provider
 import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/erlang/process
@@ -10,6 +11,8 @@ import gleam/string
 import gleeunit
 import gleeunit/should
 import json/blueprint/codec
+import json/blueprint/parser
+import llm_wire/config
 import llm_wire/session
 import llm_wire/telemetry as llm_telemetry
 import llm_wire/types
@@ -23,6 +26,148 @@ import sinal
 
 pub fn main() -> Nil {
   gleeunit.main()
+}
+
+pub fn discovered_schema_composes_with_mixed_scoped_observation_test() {
+  let assert Ok(definition) = ecosystem_pilot.inventory_definition()
+  let assert Ok(provider) =
+    scripted_provider.start(scripted_provider.Lookup("A-100"))
+  let invocations = process.new_subject()
+  let errors = process.new_subject()
+  let assert Ok(relay_server) =
+    ecosystem_pilot.start_relay_server_observed(definition, invocations, errors)
+  let assert Ok(relay_client) = ecosystem_pilot.connect_relay(relay_server)
+  let assert Ok([declaration]) = client.list_tools(relay_client)
+  let relay_events = process.new_subject()
+  let llm_events = process.new_subject()
+  let relay_observer =
+    sinal.subscription(
+      relay_telemetry.invocation_completed_event(),
+      fn(measurements, metadata) {
+        process.send(relay_events, #(measurements.duration_ms, metadata.status))
+      },
+    )
+  let llm_observer =
+    sinal.subscription(llm_telemetry.observation_event(), fn(_, metadata) {
+      process.send(llm_events, metadata.stage)
+    })
+  let assert Ok(sinal.SubscriptionCompletion(answer, [])) =
+    sinal.with_subscriptions(
+      sinal.subscriptions([relay_observer, llm_observer]),
+      fn() {
+        let assert Ok(prepared) =
+          ecosystem_pilot.prepare_discovered_openai(
+            declaration,
+            provider_endpoint(provider),
+          )
+        let assert Ok(session.RunToolCalls(_, [call], continuation, _)) =
+          ecosystem_pilot.provider_run(prepared)
+        let assert Ok(arguments) =
+          parser.parse_value_from_string(
+            parser.default_limits(),
+            call.arguments_json,
+          )
+        let assert Ok(output) =
+          ecosystem_pilot.call_discovered_value(
+            relay_client,
+            declaration,
+            arguments,
+          )
+        let assert Ok(next) =
+          ecosystem_pilot.provider_continue(
+            continuation,
+            types.ToolResult(call.id, output),
+          )
+        let assert Ok(session.RunText(answer, None)) =
+          ecosystem_pilot.provider_run(next)
+        answer
+      },
+    )
+  answer |> should.equal("A-100 has 7 Ada Lovelace notebooks.")
+  process.receive(relay_events, 3000) |> should.be_ok
+  process.receive(llm_events, 3000) |> should.be_ok
+  process.receive(invocations, 3000) |> should.equal(Ok("A-100"))
+  client.close(relay_client)
+  http.stop_http_server(relay_server)
+  scripted_provider.stop(provider)
+}
+
+fn fourth_settings(provider: scripted_provider.Provider) -> config.Config {
+  let assert Ok(endpoint) =
+    types.endpoint(
+      "http://127.0.0.1:" <> int.to_string(scripted_provider.port(provider)),
+    )
+  config.from_provider(fourth_provider.adapter(endpoint))
+}
+
+fn fourth_request(with_tool: Bool) -> types.Request {
+  let assert Ok(model) = types.model_id("fourth-model")
+  let base = types.new_request(model, [types.UserMessage("Find SKU A-100")])
+  case with_tool {
+    False -> base
+    True -> {
+      let assert Ok(definition) = ecosystem_pilot.inventory_definition()
+      let assert Ok(tool) = ecosystem_pilot.llm_tool(definition)
+      types.with_tools(base, [tool])
+    }
+  }
+}
+
+pub fn fourth_provider_text_and_replay_over_http_test() {
+  let assert Ok(text_provider) =
+    scripted_provider.start(scripted_provider.FourthText)
+  let assert Ok(prepared) =
+    session.prepare(fourth_settings(text_provider), fourth_request(False))
+  session.run(prepared)
+  |> should.equal(Ok(session.RunText("Hello fourth.", None)))
+  scripted_provider.stop(text_provider)
+
+  let assert Ok(tool_provider) =
+    scripted_provider.start(scripted_provider.FourthTool)
+  let assert Ok(tool_prepared) =
+    session.prepare(fourth_settings(tool_provider), fourth_request(True))
+  let assert Ok(session.RunToolCalls(
+    "Checking inventory",
+    [call],
+    pending,
+    None,
+  )) = session.run(tool_prepared)
+  session.prepare_continue(pending, []) |> should.be_error
+  let assert Ok(next) =
+    session.prepare_continue(pending, [
+      types.ToolResult(call.id, "Ada Lovelace notebook"),
+    ])
+  session.prepared_request_json(next)
+  |> string.contains("\"replay_text\":\"Checking inventory\"")
+  |> should.be_true
+  session.run(next)
+  |> should.equal(Ok(session.RunText("Inventory confirmed.", None)))
+  let assert Ok(initial_body) =
+    scripted_provider.next_request(tool_provider, 3000)
+  scripted_provider.is_fourth_initial_request(initial_body) |> should.be_true
+  let assert Ok(replay_body) =
+    scripted_provider.next_request(tool_provider, 3000)
+  scripted_provider.is_fourth_continuation_request(replay_body)
+  |> should.be_true
+  scripted_provider.stop(tool_provider)
+}
+
+pub fn fourth_provider_obeys_common_text_bound_test() {
+  let assert Ok(provider) =
+    scripted_provider.start(scripted_provider.FourthBounded)
+  let limits =
+    types.Limits(..types.default_limits(), text_bytes_per_block_limit: 5)
+  let assert Ok(prepared) =
+    session.prepare(
+      fourth_settings(provider) |> config.with_limits(limits),
+      fourth_request(False),
+    )
+  let assert Error(session.RunFailure(
+    types.ResourceLimitExceeded("text_bytes_per_block_limit", _, _),
+    retry,
+  )) = session.run(prepared)
+  retry.response_bytes_observed |> should.be_true
+  scripted_provider.stop(provider)
 }
 
 pub fn valid_typed_lookup_composes_all_four_packages_test() {
@@ -70,7 +215,7 @@ pub fn valid_typed_lookup_composes_all_four_packages_test() {
   let endpoint = provider_endpoint(provider)
   let assert Ok(prepared) =
     ecosystem_pilot.prepare_openai(definition, endpoint, "Find SKU A-100")
-  let assert Ok(session.RunToolCalls([call], continuation, _)) =
+  let assert Ok(session.RunToolCalls(_, [call], continuation, _)) =
     ecosystem_pilot.provider_run(prepared)
   types.call_id_to_string(call.id) |> should.equal("call_1")
   call.arguments_json |> should.equal("{\"sku\":\"A-100\"}")
@@ -147,7 +292,7 @@ pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
       provider_endpoint(provider),
       "Find SKU MISSING",
     )
-  let assert Error(types.ProtocolError(reason)) =
+  let assert Error(session.RunFailure(types.ProtocolError(reason), _)) =
     ecosystem_pilot.provider_run(prepared)
   string.contains(reason, "Tool call arguments failed schema validation")
   |> should.be_true
@@ -202,7 +347,7 @@ pub fn missing_record_error_continues_with_correlated_tool_result_test() {
       provider_endpoint(provider),
       "Find SKU MISSING",
     )
-  let assert Ok(session.RunToolCalls([call], continuation, _)) =
+  let assert Ok(session.RunToolCalls(_, [call], continuation, _)) =
     ecosystem_pilot.provider_run(prepared)
   types.call_id_to_string(call.id) |> should.equal("call_1")
   let assert Ok(input) =
@@ -371,7 +516,7 @@ pub fn provider_disconnect_returns_error_without_retry_or_tool_effect_test() {
       "Find SKU A-100",
     )
 
-  let assert Error(types.TransportError(_)) =
+  let assert Error(session.RunFailure(types.TransportError(_), _)) =
     ecosystem_pilot.provider_run(prepared)
   await_provider_request(provider, fn(body) {
     scripted_provider.is_initial_request(body, "A-100")

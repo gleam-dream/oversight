@@ -5,6 +5,18 @@ The current public API cleanup follows the [pre-release contract](docs/implement
 The additive application API changes are specified in the
 [API ergonomics contract](docs/implementation/api-ergonomics/contract.md#relay-tools).
 
+The [current API control contract](docs/implementation/api-control/contract.md#relay-client)
+covers discovered JSON tool calls, typed transport failures, bounded tool
+listing, and explicit input-required continuations. The client advertises only
+configured input methods and leaves response decisions to the application.
+Server dispatch reads the current registry after updates, content-only tools
+support advanced input rounds and schema overrides, and runtime outputs identify
+their exchange for multiplexed transports. Resource templates admit supported
+syntax before advertisement, with an explicit matcher for advanced patterns;
+HTTP keepalive is validated caller policy. The
+[pilot](playground/ecosystem_pilot/README.md) exercises discovery and dynamic
+calls over local HTTP. Older laboratory declarations below are design evidence.
+
 ## 0. Purpose and scope
 
 - Relay targets complete typed MCP server and client behavior, stdio and Streamable HTTP transport, and MCP resource-server and client authorization. The initial three-method server facade is a delivery subset rather than the full package scope.

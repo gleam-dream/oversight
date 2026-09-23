@@ -5,6 +5,19 @@ The current public API cleanup follows the [pre-release contract](docs/implement
 The additive application API changes are specified in the
 [API ergonomics contract](docs/implementation/api-ergonomics/contract.md#sinal).
 
+The [current API control contract](docs/implementation/api-control/contract.md#sinal)
+adds pure heterogeneous `Subscription` values and a `SubscriptionPlan` whose
+default exception-cleanup reporter is silent. `with_subscriptions(plan, work)`
+acquires sequentially, rolls back on failure, and returns indexed normal
+cleanup failures. A reporter can be configured for cleanup during a catchable
+work exception, which retains its original class, reason, and stacktrace.
+Native span timing fields are checked integers inside opaque wrappers; callers
+convert with `duration_in`, `system_time_in`, or `monotonic_time_in` and an
+explicit `TimeUnit`. `run_span_result` retains a completed work result when
+completion instrumentation fails. The [pilot](playground/ecosystem_pilot/README.md)
+demonstrates mixed scoped observation. Older laboratory excerpts below remain
+historical design evidence.
+
 ## Scope and runtime ownership
 
 Sinal is a typed facade over BEAM `telemetry`. It preserves synchronous dispatch,
