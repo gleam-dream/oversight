@@ -24,6 +24,11 @@ repo — the dev shell carries both Gleam's own runtime (Erlang/OTP + rebar3)
 and Elixir/mix, so an upstream library (Oban, Reactor, oidcc, ...) can run
 side by side with a Gleam prototype for direct behavioral comparison.
 
+Before proposing or changing a public facade, read the
+[public API guidelines](PUBLIC-API-GUIDELINES.md) and test the common task,
+advanced configuration, caller-owned types, and failure handling from a
+separate consumer package. Preserve each design's full capability scope.
+
 ## Tooling
 
 - `nix develop` (or direnv): dev shell with `lefthook`, `gleam`,

@@ -2,6 +2,7 @@
 
 - This repository coordinates a proposed ecosystem of production Gleam libraries. Production execution targets Erlang/OTP first.
 - Start with the [ecosystem creation plan](ECOSYSTEM-PLAN.md) for recommended responsibilities, sequencing, and acceptance evidence. It is a planning proposal, not evidence that the APIs compile or the libraries are implemented.
+- Use the [public API guidelines](PUBLIC-API-GUIDELINES.md) to review new package facades and consumer evidence. The rules apply across packages without introducing a shared runtime or mandatory dependency.
 - The [initial public API freeze](PUBLIC-API.md) records the intended package facades. The [public API coverage inventory](API-COVERAGE.md) retains the full capability scope, evidence, and runtime obligations; Open and Partial rows remain backlog.
 - The [design drift record](DESIGN-DRIFT.md) summarizes ownership changes against the original baseline, behavior refinements, and unresolved equivalence without replacing each package's capability table.
 - The [exploration inventory](EXPLORATION.md) records the original intent and questions. The [research directory](research/) records source-backed findings and the limits of the inspection.

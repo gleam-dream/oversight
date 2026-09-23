@@ -25,10 +25,15 @@ representation. The laboratory calls it `Definition`; the original `Reactor`
 and `Plan` signatures below describe retained composition semantics, not a
 second accepted public builder.
 
+The [public API guidelines](PUBLIC-API-GUIDELINES.md) govern the implementation
+facade. The codec and version arguments in the laboratory examples below
+describe durable replay requirements; local activities do not require them
+unless their values cross a persistence boundary.
+
 [Unified workflows](playground/interface_lab/UNIFIED-WORKFLOWS.md) establishes
-construction evidence. A typed activity retains its execution function,
+construction evidence. Its laboratory activity retains its execution function,
 compensation policy, operation identity/version, and four versioned codecs
-(input, output, error, undo error). Ordinary workflow persistence uses standard
+(input, output, error, undo error) for durable use. Ordinary workflow persistence uses standard
 Gleam JSON encoders/decoders or an
 optional schema-independent codec abstraction. Blueprint is needed only for the
 runtime-authored JSON Schema surface below. Saga owns the versions and

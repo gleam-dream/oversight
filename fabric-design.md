@@ -4,6 +4,9 @@
 - This remains a **partial BeamWeaver-style migration**. Retrieval/RAG, vector storage, and document loading/splitting were excluded in the baseline and remain external tool integrations.
 - The baseline at `9194f02` already separated five concerns (`dag`, `durable_run`, `agent`, `llm_wire`, `gate`). The package assignments below refine those existing boundaries; they do not establish that the original design was monolithic.
 - [PUBLIC-API.md](PUBLIC-API.md) freezes the initial facade and [API-COVERAGE.md](API-COVERAGE.md#fabric) records its evidence. An unimplemented capability remains backlog unless this design explicitly excludes it; the facade freeze does not reduce the full requirements.
+- Apply the [public API guidelines](PUBLIC-API-GUIDELINES.md) to the bounded-loop
+  facade. Typed tool registrations should retain caller-owned values and errors;
+  an optional public-error renderer belongs to the deliberate exposure path.
 
 ## Package ownership and dependency direction
 

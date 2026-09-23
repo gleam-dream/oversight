@@ -1,13 +1,14 @@
-# Initial ecosystem creation plan
+# Ecosystem creation plan
 
 ## Purpose and decision status
 
 - Build an ecosystem of independently useful Gleam libraries for production Erlang/OTP applications. Libraries compose through typed public contracts and reuse established implementations when that preserves the intended behavior.
-- This plan consolidates the rough designs and research into a proposed development direction. Recommendations are explicit; compiler experiments and behavior tests have not yet established their correctness.
+- This plan consolidates package designs and research into a proposed development direction. Each package's accepted implementation and remaining gaps are tracked separately; proposed next-package interfaces still require executable evidence.
 - Erlang/OTP is the first production target. Keep pure components portable where practical without making JavaScript support a condition for every release.
-- The immediate work is interface exploration in `oversight`. Production implementation follows accepted contracts and evidence from the required feasibility checks.
+- The [public API guidelines](PUBLIC-API-GUIDELINES.md) govern the next package interfaces. The initial interface exploration remains evidence for feasibility, not a mandate to copy every laboratory signature.
 - The retained [interface playground](playground/interface_lab/README.md) now makes the candidate contracts inspectable. Its [findings](playground/interface_lab/FINDINGS.md) distinguish compiler evidence from unfinished runtime guarantees, including the proposed Saga checkpoint boundary.
 - The [public-interface stress exploration](playground/interface_lab/STRESS-TESTS.md) tests broader adoption scenarios. It identifies missing public contracts; the package boundaries are not ready for promotion merely because the current examples compile.
+- The local Blueprint, Sinal, Relay, and LLM Wire API and consumer checkpoints are recorded in the [API control contract](docs/implementation/api-control/contract.md) and [release-readiness review](docs/implementation/api-control/release-readiness.md). Those checkpoints do not establish publication or close the remaining package scope.
 - Initial releases are increments toward the declared package goals. A smaller first release does not redefine a feature-complete target as delivered.
 
 ## Recommended library boundaries
@@ -130,6 +131,7 @@ flowchart TD
 
 ## Interface laboratory
 
+- This section records the original interface-validation method and its retained fixtures. Current package work follows the next implementation sequence below.
 - Keep experiments inside `oversight` with small Gleam projects and path dependencies. Use the configured project compiler and agent-lsp once its MCP registration is loaded.
 - Prototype only enough types and signatures to answer a named question. Named unfinished bodies may describe unimplemented runtime operations, but their successful compilation proves only that consumer signatures fit.
 - For a claimed static construction guarantee, provide a minimal representation and constructor path without unfinished bodies, panics, unsafe casts, or placeholder FFI. Constructing records and closures is type-level evidence; scheduler, storage, network, and recovery behavior remain outside this first laboratory.
@@ -150,22 +152,25 @@ flowchart TD
 - Add composition fixtures for one durable Saga definition used by local and Grind-backed runners, and for a Saga embedded as a graph node with explicit outer-failure policy. Check submission versus final output, local versus durable compensation receipts, and suspension versus failure.
 - Accept each interface slice when its constructive example compiles, negative examples fail for the intended reason, dependency direction is verified, and runtime questions have assigned tests and owners. Use the smallest downstream pair that proves composition; foundations do not wait for every later ecosystem consumer.
 
-## Production sequence after interface acceptance
+## Next implementation sequence
 
-| Work group                        | Delivery                                                                                  | Exit evidence                                                                                                                              |
-| --------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Shared foundations                | Codec slice and typed telemetry slice                                                     | Codec laws, independent schema validation, telemetry compatibility, and downstream consumer examples                                       |
-| Independent integration libraries | Warden flow and Relay tool protocol slice                                                 | Wrapper-specific tests, pinned protocol coverage, scripted peers, and interoperability checks                                              |
-| Model and agent composition       | One-call client followed by the bounded Fabric agent loop                                 | Provider fixtures, stream lifecycle tests, heterogeneous tools, explicit approvals, and bounded execution                                  |
-| Jobs and compensated workflows    | Grind queue slice and Saga execution slice                                                | Differential behavior, database/process fault scenarios, cancellation, compensation, and resource bounds                                   |
-| Durable composition               | Saga/Grind durable runner plus Fabric-owned parent continuations and child run references | Transactional admission, compensation journals, restart/replay, approval dedupe, external-effect reconciliation, and version compatibility |
-| Broader capability coverage       | Additional protocol features, providers, queue features, and advanced workflow behavior   | Incremental coverage against each package's declared full target                                                                           |
+| Work lane                 | Dependency                                                                                         | First reviewable behavior and API check                                                                                                                                                                                                                                                                  | Required evidence                                                                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Warden login              | Independent of Saga, Grind, and Fabric                                                             | Configure and validate an authorization-code login before allocating provider or transaction resources; retain distinct omission, denial, replay, and uncertain exchange outcomes.                                                                                                                       | An external web consumer using public imports, pinned backend tests, malicious-provider limits, and transaction race tests.                     |
+| Saga local execution      | Independent of Grind                                                                               | Compose typed shared dependencies and heterogeneous compensation with application records and errors. Local activities need no persistence codecs or version identifiers; require them only at a selected durable boundary.                                                                              | An external workflow consumer, Reactor comparisons for claimed parity, and scheduling, cancellation, and compensation tests.                    |
+| Grind queue execution     | Independent of Saga                                                                                | Configure queues and register typed workers separately from starting the engine. Require codecs and versions where the persisted format and replay policy need them; derive identity and other owned facts instead of requesting them again per call. Expose distinct delivery and application failures. | An external worker consumer, Postgres/process fault tests, recovery, cancellation, and resource-bound evidence.                                 |
+| Fabric bounded agent loop | Depends on the public LLM client; independent of Saga and Grind                                    | Register heterogeneous application tools behind typed operations, then run with explicit action policy and bounded execution. Keep provider state and optional workflow or queue adapters out of the ordinary caller path.                                                                               | An external agent consumer using a scripted model, failure and approval cases, cancellation, and memory/limit checks.                           |
+| Durable composition       | Depends on accepted Saga and Grind contracts; Fabric continuation also depends on its bounded loop | Admit a restricted durable Saga definition through an optional runner. Fabric retains parent continuation and approval revision while the runner owns child progress.                                                                                                                                    | Restart/replay, journal compatibility, duplicate approval, transaction/outbox, and ambiguous external-effect tests through a separate consumer. |
 
-- Work groups express dependencies, not calendar promises. Warden can progress independently; durable Fabric execution waits for its persistence contract rather than forcing all other work to wait.
-- Keep production work to a small number of independently reviewable increments. Dispatch agents on bounded deliverables whose contracts are already settled; the coordinator reconciles cross-package changes before accepting them.
+- These lanes express dependencies rather than a serial calendar. Warden and Fabric can advance while local Saga and Grind work proceeds; durable composition follows the owners it connects.
+- Keep each lane in small reviewable increments. A coordinator reconciles cross-package changes before acceptance.
+- Apply the [public API guidelines](PUBLIC-API-GUIDELINES.md) to each lane before accepting its facade. The external consumer must perform the ordinary task, a distinct advanced task, caller-owned types, and failure handling without internal imports or repeated owned facts.
+- Retain the full [coverage inventory](API-COVERAGE.md) and each package's oracle. A first slice or an ergonomic simplification does not remove deferred capabilities or weaken operational guarantees.
 - Treat a provider adapter or protocol revision as an independently testable compatibility unit. Adding one must not require unrelated consumers to adopt its options or dependencies.
 
-## Required refinement of the rough designs
+## Original design refinement record
+
+- The following table records the initial design work that established package direction. It is not a new work queue for already implemented Blueprint, Sinal, Relay, or LLM interfaces.
 
 | Draft                   | Change before implementation                                                                                                                                                  |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -196,14 +201,11 @@ flowchart TD
 
 - These are bounded validation tasks with defaults, not reasons to keep surveying the ecosystem indefinitely. Do additional external research only when a check exposes a specific missing capability or invalidates a source assumption.
 
-## Coordination and the next executable work
+## Coordination of remaining work
 
-- Begin with one schema-aware codec and two heterogeneous tools used by both a Relay consumer and a scripted Fabric consumer. Build representational constructors and expected-failure fixtures before adding network, scheduler, or storage behavior.
-- In parallel, refine Sinal's event/span contract and Warden's ownership table. They have independent consumers and must not wait for the whole agent stack.
-- Next check the one-call provider contract and shared Saga authoring across local, durable, and nested-node consumers. Use their results to finalize the Saga/Grind journal and Fabric parent-continuation contracts before implementing graph runtimes.
-- Give each agent a bounded question, owned files, source pins, a concrete consumer, acceptance evidence, and explicit non-goals. Source research returns recommendations and counterevidence; interface work returns compiler fixtures; later implementation work returns behavior tests and operational evidence.
-- The coordinator combines results, resolves incompatible assumptions, and asks an independent agent to challenge the combined plan. A side research report is an intermediate result rather than the end of the ecosystem task.
-- Complete the planning cycle with one recommended package map, dependency direction, ordered slices, and explicit evidence limits. Do not describe the plan's acceptance criteria as tests that have already passed.
+- The earlier interface-laboratory sequence established initial feasibility and is retained above as evidence. Use the next implementation sequence for current package work.
+- Give each implementation slice an owned behavior, a concrete external consumer, an oracle where applicable, and explicit runtime evidence. Resolve public API mismatches from that evidence rather than opening an unbounded interface-refinement wave.
+- Keep package-specific implementation contracts in their package repositories. Oversight retains cross-package ownership and acceptance criteria without copying complete implementation specifications.
 
 ## Acceptance and maintenance
 
