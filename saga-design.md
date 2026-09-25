@@ -194,18 +194,26 @@ Internally, each plan node can own:
 - A uniform, untyped-in-the-benign-sense lifecycle interface for the scheduler:
   start, cancel, status and metadata.
 
-The scheduler must not use a central native-value structure like:
+**Requirement, not a prescribed mechanism.** A node's output type must be
+compiler-checked from the producer that creates it to every consumer that
+reads it: no caller-visible value ever passes through `gleam/dynamic.Dynamic`,
+and no step looks up a dependency by name against a shared, heterogeneously
+typed map. If an implementation needs a type-erased value at all — for
+example to store per-run results centrally instead of in one cell per node —
+that erasure must be confined to a single internal module, never exposed to
+callers or spread through the scheduler; that module must state the
+soundness invariant that makes its one unsafe operation safe by construction
+(not by caller discipline or convention); and that invariant must be tested
+adversarially (attempting to read a stored value at the wrong type, or to
+construct a reference to it outside the module that mints one, must be
+impossible to express, or must be caught, not merely untested). Whether such
+central storage exists at all, and how, is an implementation decision for
+each execution mode to make and record — see "Decision: a central per-run
+store in the delivered local coordinator" below for the local-execution
+mode's own choice and evidence.
 
-Proposed semantic sketch, not a current laboratory API. Helper types and
-functions are placeholders; scheduling, persistence eligibility, and checked
-boundaries must be specified before implementation.
-
-```gleam
-Dict(NodeId, Dynamic)
-```
-
-Instead, the node closure or node actor owns its concrete result type. Consumers
-receive that result through a typed interface.
+Consumers receive a node's result only through a typed interface — never a
+name-keyed lookup against a heterogeneous map.
 
 The central scheduler only sees events such as:
 
@@ -224,6 +232,65 @@ pub type NodeEvent {
 ```
 
 It does not manipulate the actual `Customer`, `Order`, or `Payment` values.
+
+### Decision: a central per-run store in the delivered local coordinator
+
+The delivered `saga` package's local-execution coordinator (`saga/internal/
+coordinator`, backing `saga/execution`) uses a per-run `Dict(Int, Native)`
+in `saga/internal/store` — structurally the central `Dict(NodeId, Dynamic)`
+shape the mechanism sketch above once ruled out — rather than one mailbox
+cell per node. This is recorded here as a decision against the requirement
+above, not a silent exception to it.
+
+- **The mechanism.** `Native` is `saga/internal/store`'s own opaque,
+  type-erased carrier — never `gleam/dynamic.Dynamic`, never inspected or
+  decoded, only ever cast back to the exact type it was stored as. The store
+  is read only through `store.get`, confined to that one internal module. A
+  node id and its element type are bound together exactly once, in the same
+  `perform` call that both allocates the id and returns the typed, opaque
+  `Port` whose `fetch` closure reads that id back; no other code path can
+  construct a `Port` for one node id typed differently than the `perform`
+  call that created it. That is the invariant that makes `store.get`'s one
+  native coercion sound by construction, not by caller discipline — see
+  `saga/internal/store`'s own doc comment and `saga.gleam`'s `Port`/`perform`
+  for the full argument, and `saga`'s compiler-negative fixtures
+  (`fixtures/negative/`, run by `scripts/check_negative.sh`) for the
+  adversarial tests: a `Port` cannot be constructed outside its owning
+  module, and mismatched error types fail to compile before ever reaching
+  the store.
+- **Why.** The per-node design this replaced gave every node its own
+  single-value mailbox cell, allocated fresh each time the workflow's
+  builder ran, keeping the scheduler's own state free of any central
+  heterogeneous map. That required two costs together: every dependency
+  read was a selective receive whose cost grew with how many prior messages
+  already sat in that mailbox (O(N) per read, O(N²) total per run for a
+  workflow whose reads scale with N), and the workflow's builder had to be
+  re-evaluated, side-effect-free, on every run to reconstruct those cells —
+  a purity/determinism requirement on caller-authored code that a one-time,
+  `define`-time build does not need.
+- **The evidence.** `saga/bench/RESULTS.md` measured the per-node design
+  directly: a 2000-step chain's median run time was ~392ms before, growing
+  ~4x per doubling (quadratic). Moving to the central store (plus a
+  companion min-heap admission fix that closed a second, separate O(N)
+  scheduling cost the store change alone did not touch) took the same
+  benchmark to ~8ms median, roughly 14x–49x faster across the three
+  benchmarked shapes at N=2000 depending on shape, with growth flattening
+  from ~4x per doubling to ~2x per doubling (linear). See `bench/RESULTS.md`
+  in the `saga` package for the full before/after tables across all three
+  shapes and every measured N.
+- **What this keeps simple.** Confining the erasure to one internal module
+  with one stated invariant, rather than threading `Dynamic` through the
+  scheduler or exposing it to callers, keeps the future durable-journal
+  boundary (still deferred; see `saga/CAPABILITIES.md`) simpler to reason
+  about: a durable journal only ever needs to serialize the same typed,
+  per-node values this store already carries, through the same one
+  soundness invariant, not a caller-visible dynamic protocol.
+
+This decision applies to the delivered local-execution coordinator. A future
+durable execution mode may reach a different trade — for example, because a
+durable journal's own persisted representation has different constraints —
+and should record its own decision here rather than silently inheriting this
+one.
 
 ## Execution ownership and evidence
 

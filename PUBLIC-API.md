@@ -34,13 +34,76 @@ bodies are evidence for later implementation, not accepted public API.
   not own provider networking, workflow journals, queues, or a second child
   runtime. Durable controller storage and streamed execution remain
   implementation work.
-- **Saga:** typed static workflow authoring through definitions, activities,
-  approvals, child contracts, codecs, and implemented local transitions. The
-  intended durable facade exposes opaque run/child handles and typed status,
-  result, signal, cancellation, and compensation outcomes. `saga_checkpoint`
-  and `saga_grind` store ports, commands, receipts, snapshots, compatibility
-  records, and unfinished functions are internal design evidence until a
-  runner validates them.
+- **Saga:** the first local-execution release, delivered and tested against
+  [`saga-design.md`](saga-design.md) and recorded capability-by-capability in
+  [`saga/CAPABILITIES.md`](https://github.com/gleam-dream/saga/blob/main/CAPABILITIES.md).
+  Local, in-memory execution only — no durable journals, persistence, or
+  distributed coordination yet; see "Deferred and future Saga capabilities"
+  below for what those durable/runtime-graph capabilities looked like as
+  originally scoped, and for where they now live.
+
+  - `saga`: typed workflow authoring. `Workflow(i, o, e, u)` (opaque, built
+    once by `define` and never re-evaluated by a run); `Port(a, e, u)`
+    (opaque, a typed reference to a value produced somewhere in the graph);
+    `Step(i, o, e, u)` (opaque) via `step`, `undo`, `compensate`, `timeout`,
+    `map_step_errors`; combinators `perform`, `map`, `both`,
+    `all(first: Port(a, e, u), rest: List(Port(a, e, u))) -> Port(List(a), e, u)`
+    (no empty-list case — a caller with zero ports has no `first` to pass);
+    `embed` (sequential composition, nested scope addressing); `define`,
+    `name`, `describe`, `map_errors`. Recovery/undo vocabulary: `Recovery(o, e,
+u)` (`Retry`, `RetryAfter`, `Continue`, `Abort`, `AbortAfterCleanupFailure`,
+    `Hold`), `Undo(u)` (`NoUndo`, `UndoWith`). Definition-time types:
+    `DefinitionError` (`EmptyWorkflowName`, `EmptyStepName`,
+    `InvalidMaxAttempts`, `InvalidTimeout`, `ForeignPort`, `OrphanStep`),
+    `StepDescriptor`, `StepAddress` (with `address_to_string`), `Attempt`,
+    `AttemptFailure(e)`, `Crash`, `CrashClass`, `CrashOrTimeout`.
+  - `saga/execution`: run lifecycle. `Config` (`max_concurrency`, `deadline:
+Option(Int)`, `step_timeout: Option(Int)` — defaults to `Some(60_000)`
+    via `config()`, `settle_timeout`, `cleanup_timeout`), `config`, `validate`,
+    `ConfigError`; `run`, `start`, `await`, `cancel`, `progress`, `pid`,
+    `run_id`; `Execution(o, e, u)` (opaque); `RunError`, `AwaitError`,
+    `ProgressError`; `Outcome(o, e, u)` — `Completed`,
+    `CompletedWithUnknownEffects(output, unknown_effects)` (the case a step's
+    attempt was killed by its own timeout but a recovery decision let the run
+    reach a normal output anyway), `Failed`, `Cancelled`, `Unresolved`;
+    `Cause(e)` — `StepFailed`, `StepCrashed`, `StepTimedOut`,
+    `RetryLimitReached`, `RetrySuperseded` (a retry refused only because
+    settling had already begun, distinct from an exhausted attempt budget),
+    `OutputCrashed`, `DeadlineExceeded`; `Settlement(e, u)`, `UndoFailure(u)`,
+    `CompensationFailure(u)`, `CancelReason`, `Phase`, `StepState`,
+    `StepProgress`, `Progress`.
+  - `saga/observation`: package-owned Sinal event descriptors —
+    `run_started`, `run_stopped`, `step_started`, `step_stopped`,
+    `compensation_stopped`, `undo_stopped` — with their typed measurement and
+    metadata records (`RunStartMeasurements`, `RunMetadata`,
+    `RunStopMeasurements`, `OutcomeKind`, `RunStopMetadata`,
+    `StepStartMeasurements`, `StepMetadata`, `StepStopMeasurements`,
+    `AttemptKind`, `StepStopMetadata`, `DecisionKind`, `CompensationMetadata`,
+    `UndoKind`, `UndoMetadata`).
+  - `saga/testing`: one helper, `wait_until(execution, matching:, within:)`,
+    polling `execution.progress` until a caller predicate accepts a snapshot
+    or a deadline elapses; `WaitError` (`WaitTimedOut`, `RunEnded`). Saga
+    ships no step-blocking gate itself (generic BEAM concurrency, not
+    Saga-specific); see `saga`'s README for the recipe.
+
+  ### Deferred and future Saga capabilities
+
+  The original design's durable-execution and runtime-authored-graph surface
+  is retained scope, not cancelled, and is not part of this release's public
+  API: durable PostgreSQL journals, checkpoints, freeze/thaw, snapshot
+  codecs, restore, migration; `saga_grind` durable integration and outbox;
+  durable approvals, approval signals, and command dedup/revision checks;
+  process-loss resume; independent children and child compensation
+  authority; post-success undo; value-dependent `and_then` and bounded
+  traversal; runtime-authored schema graphs, registry/publication, and
+  parametric runtime nodes (`Identity`, `Delay`, `Choose`, `Collect`,
+  `Constant`, `Validate`, `Map`, `LLM`); visual editors and graph export.
+  Closure serialization and unrestricted heterogeneous runtime steps are
+  **excluded**, not deferred — a deliberate design decision, not backlog. See
+  [`saga/CAPABILITIES.md`](https://github.com/gleam-dream/saga/blob/main/CAPABILITIES.md)
+  for the full delivered/deferred/excluded inventory and the rationale for
+  each entry.
+
 - **Grind:** typed workers, queue routes and configuration, immediate and
   scheduled admission, opaque job handles, uniqueness policy, and implemented
   pure job/claim transitions. The intended facade keeps typed status, result,
