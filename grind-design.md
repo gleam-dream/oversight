@@ -32,7 +32,8 @@ grind
 ├── grind/job.gleam         -- Job(args), JobId, JobState, Priority, AttemptError
 ├── grind/worker.gleam      -- Worker(i, o, e); admission and failure contracts
 ├── grind/backoff.gleam     -- Backoff strategies
-├── grind/unique.gleam      -- Uniqueness(args)
+├── grind/unique.gleam      -- Uniqueness policy vocabulary (Key, Policy, States, Period, QueueScope, ConflictAction)
+├── grind/submission.gleam  -- delivered: SubmissionId, Availability, Admission/Conflict, PendingSubmission, SubmitError
 ├── grind/schedule.gleam    -- Schedule, cron AST, parse_cron
 ├── grind/queue.gleam       -- QueueConfig, GlobalLimit, RateLimit, Partition
 ├── grind/engine.gleam      -- Engine record (storage backend interface)
@@ -208,6 +209,20 @@ pub fn delay_for(b: Backoff, attempt: Int) -> Int {
 
 ## 5. Uniqueness
 
+- **Delivered**, against a real PostgreSQL concurrency oracle rather than the
+  pinned-study source reading alone: `submit_unique`/`reconcile_unique`
+  (`grind/postgres`, policy vocabulary in `grind/unique`) implement full-input
+  and selected-key typed equality, queue scope, occupancy periods, the four
+  named eligibility groups, a bounded advisory-lock wait, and compact receipts,
+  proven under a real forced-barrier concurrent-admission overlap, lock
+  contention, period-boundary timing, live rescheduling, and uncertain-commit
+  reconciliation. A caller-supplied `SubmissionId` (`grind/submission`, no
+  uniqueness policy required) gives a plain admission the same receipt,
+  fingerprint, and reconciliation machinery — `submit_with_id`. See
+  [Grind's `docs/UNIQUENESS-CONTRACT.md`](https://github.com/gleam-dream/grind/blob/main/docs/UNIQUENESS-CONTRACT.md)
+  for the full contract and its named remaining gaps (cross-worker uniqueness,
+  general field replacement, unique bulk insertion, and the untested
+  different-key/same-`SubmissionId` receipt-table race).
 - Uniqueness governs admission, not concurrent execution or exactly-once effects.
   The conservative typed profile includes worker identity and version in every
   uniqueness domain; cross-worker uniqueness remains retained backlog.
@@ -216,22 +231,33 @@ pub fn delay_for(b: Backoff, attempt: Int) -> Int {
 - Full-input uniqueness reuses encoded admission input. Projected uniqueness uses
   a typed selector and codec with explicit key-policy identity and version.
   Stored candidates need matching retained key material or an explicit backfill.
-- Typed equality compares JSON-shaped values recursively: object order is irrelevant,
-  duplicate fields reject recursively, array order and multiplicity matter, and
-  scalar constructors stay distinct. This deliberately differs from Oban Basic's
-  selected-field PostgreSQL containment behavior.
+- **Delivered key equality** is computed by PostgreSQL, not compared
+  recursively in Gleam: two keys conflict exactly when SHA-256 of PostgreSQL's
+  own `jsonb::text` rendering of each encoded key is identical. Object key
+  order is irrelevant (`jsonb` normalizes it); **duplicate object fields
+  collapse last-wins** (PostgreSQL's own `jsonb` parser behavior, not a
+  reject) rather than the recursive rejection this section originally
+  proposed; numeric exponent forms normalize (`1e2` → `100`); `1` and `1.0`
+  are distinct; array order is significant. This deliberately differs from
+  Oban Basic's selected-field PostgreSQL containment behavior. See
+  `docs/UNIQUENESS-CONTRACT.md`, Decision 1, for the full departure from this
+  section's original proposal and from the pinned study.
 - Period origin is explicit (`FromInsertion` or `FromSchedule`). Finite periods are
-  positive and include the exact cutoff; `WhileRetained` has no timestamp cutoff.
-- The first state profile exposes `Incomplete`, `ScheduledOnly`,
-  `NotCancelledOrDiscarded`, and `AllRetained`. The original four-state default
+  positive and include the exact cutoff; `WhileRetained` has no timestamp cutoff
+  — delivered as "until pruned", not "forever": see §9's delivered retention note.
+- **Delivered** as `Incomplete`, `ScheduledOnly`, `IncompleteOrSucceeded`, and
+  `AllRetained` (`grind/unique.States`) — the third name supersedes this
+  section's original `NotCancelledOrDiscarded`. The original four-state default
   (available, scheduled, executing, retryable) is not Oban 2.24.1's default, which
   also includes suspended and completed jobs; no implicit legacy default is retained.
 - Arbitrary state lists and the reconciliation of the original §2 state vocabulary
   with suspended jobs remain unresolved requirements. The first named groups do
   not delete the broader original state-policy capability.
-- Conflict actions are `KeepExisting` and `RescheduleScheduled`. Rescheduling changes
-  only an eligible scheduled job's requested availability, retaining job and worker
-  identity; other states return an unchanged existing conflict.
+- **Delivered** as `KeepExisting` and `RescheduleScheduledTo(AvailableAt)`
+  (`grind/unique.ConflictAction`) — the reschedule target lives on the action
+  itself, not a separate combination. Rescheduling changes only an eligible
+  scheduled job's requested availability, retaining job and worker identity;
+  other states return an unchanged existing conflict.
 - An existing conflict is not a typed handle. Binding checks persisted worker
   identity and version before attaching the submitting worker's result codecs.
 - Outcomes distinguish insertion, existing conflict, rescheduled conflict, known
@@ -392,6 +418,17 @@ The result is a pure demand plan, not a reservation or live processor command.
 - Unknown effect or acknowledgement outcomes require reconciliation rather than
   automatic execution. Retry permission does not prove idempotency; downstream
   deduplication, fencing, or a shared transaction must protect the actual effect.
+- **Delivered:** an expired claim is quarantined to `uncertain` and stays
+  there, retaining its claim metadata, until an operator applies an
+  **audited** resolution (`postgres.resolve_uncertain`) — this is the only
+  path to a new delivery after an unknown effect; a pending cancellation
+  request blocks that resolution until evidence supports a terminal
+  decision. The resolution ledger binds its own ID to the job route, worker
+  contract, decision, actor/details, and committed target state, so
+  repeating the same resolution command returns its original target state
+  rather than reinterpreting it against a job the resolution itself already
+  changed. No other path — no timer, no automatic retry policy, no plugin —
+  re-delivers an uncertain job.
 - Evidence: [worker outcomes](playground/interface_lab/WORKER-OUTCOMES.md) and
   [claim ownership](playground/interface_lab/CLAIM-OWNERSHIP.md) establish pure scripted
   transitions. Persisted history, job-state projection, capacity release, cancellation
@@ -451,6 +488,24 @@ are left `Executing` for the `Lifeline` plugin to rescue on the next boot.
 - PostgreSQL tests must establish locking, isolation, competing claims, unknown-commit
   recovery, notification loss with polling fallback, and codec-version rejection.
   SQLite remains optional retained scope, with backend-specific semantics unresolved.
+- **Delivered, superseding the sketch below for the parts it covers:**
+  transactional admission (plain, `submit_with_id`, and `submit_unique`),
+  current-record acknowledgement, command receipts, and uncertain-commit
+  reconciliation are built against vanilla `pog`/`pgo` from Hex — no fork.
+  Deadlines are Grind's own, not pog's: a validated, per-call checkout
+  deadline (`postgres.with_statement_deadline`) bounds every storage call
+  through Grind's own connection-pool checkout in `grind_postgres_ffi.erl`,
+  proven against a real TCP fault proxy; a separate `with_migration_deadline`
+  bounds each migration step. Versioned, advisory-locked, forward-only
+  migrations (`postgres.migrate`) and a bounded retention sweep
+  (`postgres.prune_finished`, plus a supervised `grind/pruner` running it on
+  a timer with no leader election) are both delivered. LISTEN/NOTIFY is not
+  built — the delivered consumer wakes only by polling; the sketch below
+  (`pog`'s `LISTEN/NOTIFY`) remains proposed. See
+  [Grind's README](https://github.com/gleam-dream/grind/blob/main/README.md)
+  ("Migrations", "Retention", "Guarantees and non-guarantees") and
+  [`docs/RISKS.md`](https://github.com/gleam-dream/grind/blob/main/docs/RISKS.md)
+  for the mechanism, its measured cost at scale, and its open gaps.
 
 Oban supports Postgres and SQLite3 engines; model that as a record of
 functions rather than a behaviour:
@@ -636,25 +691,42 @@ potentially a node), with behavior to establish through an original contract or 
 
 ## 15. Telemetry / events
 
-- Grind does not own a telemetry event sum or subscription API. Its current target is
-  package-owned Sinal descriptors emitted after the job state owner decides a
-  transition. Observations never control admission, retries, or cancellation.
-- [Package observations](playground/interface_lab/PACKAGE-OBSERVATIONS.md) demonstrates
-  `grind/job/cancellation/decided` from a pure queued-job cancellation decision.
-  Failed emission preserves the job ID, next state, and decision.
-- The original job, queue, attempt, plugin, node, and queue-metric event families remain
-  required as package-owned observations. Commit/event ordering, duplicate delivery,
-  backend failure, and native telemetry interoperability need runtime evidence; no
-  universal lifecycle type is added.
+- Grind does not own a telemetry event sum or subscription API. It owns
+  package-owned Sinal descriptors, emitted only after the job state owner
+  (a committed storage transition) decides an outcome — never from inside a
+  database transaction callback, and never for a rolled-back, aborted,
+  stale, or commit-unknown outcome. Observations never control admission,
+  retries, or cancellation.
+- **Delivered:** eight job-lifecycle descriptors —
+  `[grind, job, admitted]`, `claimed`, `quarantined`, `acknowledged`,
+  `resolved`, `cancellation_decided`, `released`, and
+  `contract_mismatch_recorded` — plus two prune descriptors, `[grind, prune,
+completed]` and `[grind, prune, failed]`. Every one is emitted through a
+  `Database`'s own `sinal/forwarder.Forwarder` (Sinal's bounded, supervised,
+  emitter-side forwarding — see [sinal-design.md](sinal-design.md), "Bounded
+  emitter-side forwarding"), never a plain `sinal.emit`, so a slow or
+  raising attached handler stalls only the forwarder, never the coordinator
+  proving a commit or the worker that produced it. A descriptor's
+  `confirmation` field is `Replied` (this call's own commit reply) or
+  `Reconciled` (proven by reading a durable receipt back after a lost
+  reply) — both are genuine, post-commit proof, never "assumed". Delivery
+  is best-effort: an event can repeat, be lost on forwarder-capacity
+  overflow, or never fire at all for a commit recovered later through a
+  pure reconciliation call, which by design never emits. The durable truth
+  stays in Grind's own tables and receipts, never an observation. See
+  [Grind's README](https://github.com/gleam-dream/grind/blob/main/README.md),
+  "Observations", for the full delivery semantics.
+- The original queue, plugin, node, and queue-metric event families remain
+  required as package-owned observations beyond the delivered job/prune set.
+  Native telemetry interoperability beyond Sinal's own adapter needs no
+  further work here; no universal lifecycle type is added.
 
-Current descriptor construction and prototype field mapping live in
-[`grind_observations.gleam`](playground/interface_lab/src/lab/grind_observations.gleam);
-[`package_observations.gleam`](playground/interface_lab/src/consumers/package_observations.gleam)
-uses the cancellation fact after the pure transition. Other event families remain
-proposed package-owned descriptors, not a shared event enum.
-
-The current design routes observations through Sinal after a state transition;
-the native telemetry adapter remains unimplemented.
+Current descriptor construction lived in
+[`grind_observations.gleam`](playground/interface_lab/src/lab/grind_observations.gleam)
+during prototyping; the delivered package is `grind/observation`
+(`src/grind/observation.gleam` in the `grind` repo), not this playground
+module. Queue-, plugin-, and node-level event families remain proposed
+package-owned descriptors, not a shared event enum.
 
 ---
 
@@ -787,6 +859,14 @@ pub fn start(pool_name: process.Name(pog.Message)) {
 
 ### Oracle and unresolved scope
 
+- **What remains open in the delivered package, tracked in Grind's own repo:**
+  [`docs/RISKS.md`](https://github.com/gleam-dream/grind/blob/main/docs/RISKS.md)
+  is the standing risk register (pog's private-shape coupling, renewal
+  starvation past two siblings, network-fault coverage gaps, no load/
+  multi-node/soak evidence, and more, each with its mitigation and test
+  evidence or "untested"). [`docs/RELEASE-READINESS.md`](https://github.com/gleam-dream/grind/blob/main/docs/RELEASE-READINESS.md)
+  tracks the remaining release checklist (packaging/Hex metadata, a
+  getting-started guide, CI, and the still-open items above).
 - [API-COVERAGE.md](API-COVERAGE.md#grind) tracks the full capability families.
   Open and Partial entries remain implementation backlog despite the facade freeze;
   no original capability is excluded by this consolidation.
