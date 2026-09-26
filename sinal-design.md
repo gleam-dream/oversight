@@ -30,15 +30,16 @@ would change process identity, ordering, backpressure, failure, and interoperabi
 A descriptor is immutable configuration, not a live channel requiring startup
 under a supervisor. Event definition therefore allocates no event process.
 
-| Concern                                 | Sinal contract                                                  | Runtime owner                             |
-| --------------------------------------- | --------------------------------------------------------------- | ----------------------------------------- |
-| Event name                              | Typed descriptor with a logical name and trusted native binding | Native adapter binds an atom list         |
-| Measurements and metadata               | Distinct native types described by map-shaped fields            | Descriptor encoders and callback decoders |
-| Handler configuration                   | Ordinary typed values captured by closures                      | Private adapter configuration             |
-| Registration and lookup                 | Shared native registry; identifiers are global keys             | `telemetry`                               |
-| Callback execution                      | Synchronous in the emitting process; no order guarantee         | `telemetry`                               |
-| Callback failure removal                | Report typed failure, then invoke native failure behavior       | Adapter and `telemetry`                   |
-| Export, buffering, metrics, supervision | Explicit downstream integration                                 | Separate adapter or application           |
+| Concern                              | Sinal contract                                                                              | Runtime owner                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Event name                           | Typed descriptor with a logical name and trusted native binding                             | Native adapter binds an atom list          |
+| Measurements and metadata            | Distinct native types described by map-shaped fields                                        | Descriptor encoders and callback decoders  |
+| Handler configuration                | Ordinary typed values captured by closures                                                  | Private adapter configuration              |
+| Registration and lookup              | Shared native registry; identifiers are global keys                                         | `telemetry`                                |
+| Callback execution                   | Synchronous in the emitting process; no order guarantee                                     | `telemetry`                                |
+| Callback failure removal             | Report typed failure, then invoke native failure behavior                                   | Adapter and `telemetry`                    |
+| Bounded emitter-side forwarding      | A supervised, capacity-bounded process decouples a slow or blocked handler from the emitter | `sinal/forwarder`, delivered in Sinal core |
+| Export, metrics, unbounded buffering | Explicit downstream integration                                                             | Separate adapter or application            |
 
 The [initial public API freeze](PUBLIC-API.md) includes typed descriptors,
 fields, emit, attach, attach-many, detach, scoped lifetime, and typed span
@@ -102,9 +103,18 @@ native dispatch, real concurrent registry behavior, or raw BEAM interoperability
 
 Under the required native contract, a slow handler delays the emitter and every
 selected synchronous callback finishes before that emission returns. Separate
-processes may invoke the same handler concurrently. Buffering changes these
-semantics and belongs in a forwarding adapter with explicit capacity, overload,
-loss, and shutdown policy.
+processes may invoke the same handler concurrently. `sinal/forwarder` now ships
+this decoupling in Sinal core: a bounded, emitter-side, supervised process hands
+an event off before any attached handler runs, so a slow or blocked handler
+stalls the forwarder instead of the producer. `forwarder.emit` never blocks — a
+send exceeding the configured capacity, or targeting a forwarder that is not
+currently running, is dropped and reported through `forwarder.dropped_event()`
+rather than retried; delivery stays best-effort and per-producer FIFO, and a
+supervised restart reports and clears whatever was still in flight. This is a
+narrow, bounded, in-process exception, not a substitute for a real buffering or
+export adapter: unbounded buffering, backpressure policy beyond that fixed
+capacity, and export to an external system remain a separate adapter's
+responsibility.
 
 ## Reading the examples
 
@@ -355,20 +365,20 @@ The baseline is `sinal-design.md` at commit `9194f02`. The selected native-facad
 semantics replace incompatible mechanisms while retaining typed instrumentation
 and the full native span/handler goals.
 
-| Original capability                                  | Disposition and owner                                                          | Evidence and remaining obligation                                          |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Typed measurements, metadata, and event identity     | Retained through descriptors and map-shaped fields                             | Pure field/negative probes; native atoms/maps pending                      |
-| Actor per event and live `EventDefinition`           | Mechanism replaced by shared native telemetry registry                         | Preserves intended interoperability; requires synchronous/process oracle   |
-| Library-owned descriptor and consumer attachment     | Retained with configured backend and descriptor-aware handler                  | Injected test registry; native registration pending                        |
-| Typed closure configuration                          | Retained                                                                       | Scripted consumers; native failure-event exposure unresolved               |
-| Same-shaped multi-event subscription                 | Expanded to nonempty `attach_many` with duplicate-name admission               | Pure selected-descriptor evidence; native matching and concurrency pending |
-| Typed detach handle                                  | Retained with originating callback                                             | Copyable value; no linearity or public-ID generation guarantee             |
-| Foreign telemetry decoding                           | Retained native boundary; malformed-event dropping replaced by failure/removal | Pure classification; actual native maps and forwarding pending             |
-| Automatic start/stop/exception and timing            | Retained; ordinary business errors corrected to stop                           | Symbolic shapes only; full native span oracle required                     |
-| Native context, exception terms and interoperability | Expanded explicit requirements                                                 | No JSON substitution; native reference and re-raise tests pending          |
-| Scoped handler lifetime                              | Expanded with private identity and separate cleanup result                     | Catchable current-process scripted evidence; no quiescence guarantee       |
-| Ecosystem observations                               | Expanded as package-owned facts after transitions                              | Concrete package probes; ordering/native delivery pending                  |
-| Asynchronous forwarding and export                   | Adapter-owned, outside core                                                    | Queue/overload/loss/shutdown and native interoperability must be explicit  |
+| Original capability                                  | Disposition and owner                                                               | Evidence and remaining obligation                                                                                                                                                                                                                               |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Typed measurements, metadata, and event identity     | Retained through descriptors and map-shaped fields                                  | Pure field/negative probes; native atoms/maps pending                                                                                                                                                                                                           |
+| Actor per event and live `EventDefinition`           | Mechanism replaced by shared native telemetry registry                              | Preserves intended interoperability; requires synchronous/process oracle                                                                                                                                                                                        |
+| Library-owned descriptor and consumer attachment     | Retained with configured backend and descriptor-aware handler                       | Injected test registry; native registration pending                                                                                                                                                                                                             |
+| Typed closure configuration                          | Retained                                                                            | Scripted consumers; native failure-event exposure unresolved                                                                                                                                                                                                    |
+| Same-shaped multi-event subscription                 | Expanded to nonempty `attach_many` with duplicate-name admission                    | Pure selected-descriptor evidence; native matching and concurrency pending                                                                                                                                                                                      |
+| Typed detach handle                                  | Retained with originating callback                                                  | Copyable value; no linearity or public-ID generation guarantee                                                                                                                                                                                                  |
+| Foreign telemetry decoding                           | Retained native boundary; malformed-event dropping replaced by failure/removal      | Pure classification; actual native maps and forwarding pending                                                                                                                                                                                                  |
+| Automatic start/stop/exception and timing            | Retained; ordinary business errors corrected to stop                                | Symbolic shapes only; full native span oracle required                                                                                                                                                                                                          |
+| Native context, exception terms and interoperability | Expanded explicit requirements                                                      | No JSON substitution; native reference and re-raise tests pending                                                                                                                                                                                               |
+| Scoped handler lifetime                              | Expanded with private identity and separate cleanup result                          | Catchable current-process scripted evidence; no quiescence guarantee                                                                                                                                                                                            |
+| Ecosystem observations                               | Expanded as package-owned facts after transitions                                   | Concrete package probes; ordering/native delivery pending                                                                                                                                                                                                       |
+| Bounded emitter-side forwarding                      | Delivered in Sinal core (`sinal/forwarder`); unbounded export remains adapter-owned | Supervised, capacity-bounded, best-effort, per-producer FIFO forwarding merged to Sinal `master`; consumed in production by Grind's per-`Database` observation forwarder. Export/aggregation to an external system remains a separate adapter's responsibility. |
 
 ## Sources and unresolved friction
 
