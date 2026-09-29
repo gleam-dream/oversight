@@ -208,6 +208,8 @@ pub fn valid_typed_lookup_composes_all_four_packages_test() {
     codec.schema_json(tool.definition_input_codec(definition))
   string.contains(input_schema, "https://json-schema.org/draft/2020-12/schema")
   |> should.be_true
+  string.contains(input_schema, "\"description\":\"Inventory SKU\"")
+  |> should.be_true
   let assert Ok(item_schema) =
     codec.schema_json(tool.definition_output_codec(definition))
   string.contains(item_schema, "\"quantity\"") |> should.be_true
