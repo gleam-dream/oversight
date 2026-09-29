@@ -33,10 +33,14 @@ const inventory = [
 ]
 
 pub fn lookup_codec() -> codec.Codec(Lookup) {
-  codec.imap(codec.field("sku", codec.string()), Lookup, fn(value) {
-    let Lookup(sku) = value
-    sku
-  })
+  codec.imap(
+    codec.field("sku", codec.describe(codec.string(), "Inventory SKU")),
+    Lookup,
+    fn(value) {
+      let Lookup(sku) = value
+      sku
+    },
+  )
 }
 
 pub fn item_codec() -> codec.Codec(InventoryItem) {
@@ -157,7 +161,12 @@ pub fn llm_tool(
 ) -> Result(types.ToolDefinition, types.WireError) {
   let relay_name =
     definition |> tool.definition_name |> tool.tool_name_to_string
-  use name <- result.try(types.tool_name(relay_name))
+  use name <- result.try(
+    types.tool_name(relay_name)
+    |> result.replace_error(types.PreparationError(
+      "Relay tool name is not portable to LLM providers",
+    )),
+  )
   let metadata = tool.definition_metadata(definition)
   let description = case metadata.description {
     Some(description) -> description
