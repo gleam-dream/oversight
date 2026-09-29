@@ -7,6 +7,12 @@ facades from the prototypes; it does not claim that production packages or
 versions have been published. Laboratory protocol machinery and unfinished
 bodies are evidence for later implementation, not accepted public API.
 
+## HTTP Gun addition — 29 September 2026
+
+The [HTTP Gun design](http-gun-design.md#public-interface-direction) adds an independent HTTP client, owned byte body, bounded collection, scripts and cassette record/playback. Reuse standard Gleam HTTP values; keep client/body/session handles opaque and lifecycle effects explicit. This is a candidate facade, not an addition to the frozen implemented APIs. The [facade probe](research/http-gun-interface-probe.md) records compiler-only evidence; runtime acceptance and independent consumers remain required.
+
+The current ownership decision also places conversation and durable continuation in Fabric or the caller. LLM Wire retains provider response data and per-request validation; generic transport moves to HTTP Gun when implemented. Earlier continuation laboratory excerpts remain historical evidence.
+
 ## Intended initial facades
 
 - **Blueprint:** `Value`, `Codec`, schema derivation, finite runtime contracts,
@@ -24,10 +30,10 @@ bodies are evidence for later implementation, not accepted public API.
   external JSON Schema into native domain types or codecs.
 - **Standalone LLM:** provider-neutral requests and outcomes, tool declarations,
   calls and results, exact call-result correlation, configured capability
-  admission, streamed progress and terminal events, and provider-origin
-  continuation. Provider transports, live stream ownership, persistence
-  envelopes, retries, usage, and deadline enforcement remain adapter/runtime
-  work.
+  admission, streamed progress and terminal events, and caller-owned
+  assistant response data. Provider decoding and semantic limits remain LLM
+  responsibilities; generic HTTP resources move to HTTP Gun. Fabric or another
+  caller owns conversation, persistence and subsequent requests.
 - **Fabric:** typed contextual tools and registries; the bounded action
   controller with explicit policy, approval, report acceptance, host failure,
   and uncertain-effect reconciliation. Fabric consumes LLM contracts and does

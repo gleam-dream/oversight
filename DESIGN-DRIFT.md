@@ -2,6 +2,10 @@
 
 This note compares the package designs from baseline commit `9194f02` with the folded designs. The package capability-disposition tables remain authoritative: [Blueprint](blueprint-design.md#capability-disposition), [LLM](llm-design.md#capability-disposition-and-friction), [Fabric](fabric-design.md#baseline-capability-disposition-and-oracle-validation), [Grind](grind-design.md#capability-disposition-against-9194f02), [Relay](relay-design.md#5-baseline-capability-disposition-and-friction), [Saga](saga-design.md#capability-disposition), [Sinal](sinal-design.md#capability-disposition), and [Warden](warden-design.md#48-full-capability-disposition). Full capability scope is distinct from the [initial public facade](PUBLIC-API.md). Open or deferred means implementation backlog, not removed scope. Authors report no intentional feature loss; this is not proof of behavioral parity.
 
+## HTTP ownership update — 29 September 2026
+
+The owner selected the independent [HTTP Gun package](http-gun-design.md). Generic HTTP/TLS, pooling, byte-stream ownership and cassette record/playback move to that package when implemented. LLM Wire retains provider request/response semantics and bounded semantic streaming. Fabric or another caller owns conversation and continuation persistence. This supersedes older LLM continuation/transport ownership statements in the baseline comparison below. No HTTP Gun implementation or downstream migration is claimed by this design update. The [oracle ledger](research/http-gun-oracles.md) records reusable donor behavior and unverified obligations.
+
 ## Retained scope and ownership changes
 
 - **Blueprint** owns JSON Schema-aware values, codecs, schemas, and runtime contracts moved from Relay and Fabric’s schema paths. Ordinary JSON serialization prefers standard Gleam encoders/decoders; optional reusable codecs remain independent of Blueprint. Its exact `Number` policy applies within its schema/value model; migration from integer-only `Value.Int`, parsing, broader schema vocabularies, and legacy compatibility remain unfinished. Source generation remains future tooling and is excluded from the initial facade.
