@@ -1,5 +1,13 @@
 # LLM — standalone provider interaction
 
+## Current ownership — 29 September 2026
+
+The owner assigned conversation state, pause/resume and durable continuation to Fabric or the caller. LLM Wire returns assistant response data; the caller appends it and tool results, then prepares a fresh request. No provider replay closure, checkpoint schema or retained output codec belongs in a continuation handle here. This supersedes the older continuation laboratory sections below; required signed provider data remains part of the response message.
+
+The [HTTP Gun design](http-gun-design.md) assigns generic HTTP/TLS, pooling, byte-stream ownership and cassette record/playback to an independent package. LLM Wire retains provider authentication and endpoint policy, expected status/media type, SSE reduction, tool/schema admission, usage and semantic retry assessment. Its current local Gun transport is the extraction donor; this document does not claim that HTTP Gun exists or that migration has occurred. See the [construction prompt](docs/implementation/http-gun-prompt.md) and [oracle ledger](research/http-gun-oracles.md).
+
+The historical API-control and prototype descriptions below remain evidence for their named experiments. They do not override this ownership decision.
+
 The current public API cleanup follows the [pre-release contract](docs/implementation/pre-release-api/contract.md#llm-wire). It supersedes older facade and compatibility descriptions below.
 
 The additive application API changes are specified in the
@@ -22,7 +30,7 @@ laboratory excerpts below are design evidence.
 
 - LLM provides typed buffered and streamed provider interactions for direct callers and Fabric. One interaction returns an outcome or stream; subsequent interactions remain a host decision.
 - This design receives `fabric/llm_wire` from the Fabric baseline at `9194f02`. OpenAI, Anthropic, and Google remain required provider targets; selecting a smaller first implementation does not remove the remaining targets.
-- LLM owns requests, outcomes, provider adapters, continuation, and transport resources. [Fabric](fabric-design.md) owns tool execution, action policy, approval, and agent budgets; [Blueprint](blueprint-design.md) owns JSON Schema-aware contracts and validation for tool declarations and structured output. Ordinary provider envelopes and persisted continuations prefer standard Gleam JSON encoders/decoders; an optional reusable codec abstraction must remain schema-independent.
+- LLM owns requests, outcomes, provider adapters, assistant response data, and semantic streaming. [HTTP Gun](http-gun-design.md) owns generic transport after extraction. [Fabric](fabric-design.md) owns tool execution, action policy, approval, and agent budgets; [Blueprint](blueprint-design.md) owns JSON Schema-aware contracts and validation for tool declarations and structured output. Ordinary provider envelopes and persisted continuations prefer standard Gleam JSON encoders/decoders; an optional reusable codec abstraction must remain schema-independent.
 - LLM must not import Fabric, Saga, or Grind. A standalone structured-extraction caller must not require an agent loop, workflow runner, or persistence backend.
 - Provider constructors return the LLM public contract. This resolves the baseline's conflicting declarations that `llm_wire` defines its own model port but exports an `agent.model.Model`; Fabric adapts the independent contract.
 - Sinal receives package-owned provider observations after transitions. Observations must not control provider interaction or substitute for authoritative state.
@@ -134,7 +142,7 @@ pub fn open(
 - Transport must reuse connections and bound buffering against slow or malformed peers. Streaming must use credit-based backpressure and incremental SSE reconstruction across chunk and line boundaries, without buffering the entire response before parsing.
 - TLS peer and hostname verification must remain enabled by default with no silent fallback. Tests use an explicit trusted-CA override rather than global verification bypass.
 - HTTP/TLS and foreign runtime interaction belong behind one named transport boundary. Wire JSON decoding remains at named adapter boundaries; native callers retain typed values.
-- Transport selection remains explicit: evaluate a published Erlang HTTP dependency such as the baseline's `gun` candidate against the ownership contract. Vendoring requires a recorded reason, including any necessary unpublished hardening; neither choice is accepted by this document.
+- The selected transport direction is the independent Gun-backed [HTTP Gun package](http-gun-design.md). Preserve the boundedness and cleanup requirements through its public client contract; unverified upstream parser limits remain release gates. Any patched dependency requires recorded provenance and a reproducible reason.
 - Fabric termination must reach LLM cleanup through the public contract. Fabric must not acquire independent provider networking ownership to achieve it.
 
 ## Errors, retries, usage, and deadlines

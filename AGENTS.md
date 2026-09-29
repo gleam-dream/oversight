@@ -10,6 +10,7 @@ reference evidence:
 | Design doc                                 | Package               | Main reference or oracle                                                                  |
 | ------------------------------------------ | --------------------- | ----------------------------------------------------------------------------------------- |
 | [blueprint-design.md](blueprint-design.md) | `blueprint`           | JSON Schema Draft 2020-12; `jsonschema` 4.26.0; `json_blueprint` 1.1.0/1.7.1 comparators  |
+| [http-gun-design.md](http-gun-design.md)   | `http_gun`            | Gun/Cowlib; Dream client, ReqCassette, Gleam HTTPc, Mint and Finch as scoped references   |
 | [llm-design.md](llm-design.md)             | Standalone LLM client | OpenAI Responses and Anthropic Messages; Google remains a baseline target                 |
 | [fabric-design.md](fabric-design.md)       | `fabric`              | BeamWeaver partial behavioral oracle                                                      |
 | [grind-design.md](grind-design.md)         | `grind`               | Oban 2.24.1 open-source behavior; Pro features need separate contracts or licensed oracle |

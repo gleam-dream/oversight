@@ -13,22 +13,26 @@
 
 ## Recommended library boundaries
 
-| Library or working unit               | Recommended responsibility                                                 | Initial useful slice                                                                         | Growth after the slice                                                                                              |
-| ------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| JSON Blueprint                        | JSON Schema-aware codecs and validation                                    | A record/union codec produces encoder, decoder, and schema through one controlled definition | Broader schema support, migration guidance, optional generation, and a distinct runtime-schema layer                |
-| Sinal                                 | A typed façade over BEAM telemetry                                         | Typed events and spans with synchronous dispatch and explicit handler-failure behavior       | Bridges and exporters through existing telemetry infrastructure                                                     |
-| Warden                                | Typed OIDC relying-party and OAuth client operations                       | A narrow, verified authorization-code flow over an established backend                       | Additional independently tested client operations and provider compatibility                                        |
-| Relay                                 | MCP protocol behavior, typed client/server APIs, and transports            | A 2026-07-28 Streamable HTTP server slice with discovery and typed tools                     | Stdio, 2025-11-25 compatibility, client operations, and additional capabilities under explicit conformance coverage |
-| Standalone LLM client; name undecided | One model interaction, streaming lifecycle, and provider adaptation        | A small common contract exercised by contrasting provider protocols                          | Additional providers and optional provider-specific integrations                                                    |
-| Fabric                                | Bounded agent execution, typed tools, and action policy                    | A scripted-model agent loop with explicit outcomes                                           | Provider integrations, durable suspension, and workflow composition                                                 |
-| Saga                                  | Typed workflow definitions and compensation semantics, with a local runner | A shared-dependency workflow with heterogeneous results and undo                             | Nested workflows, a restricted durable definition, and a Grind-backed runner through optional integration           |
-| Grind                                 | Durable jobs and queue scheduling                                          | A Postgres queue with typed worker registration and explicit delivery semantics              | Typed Saga-authored workflows plus the declared Oban compatibility scope and advanced capabilities                  |
+| Library or working unit | Recommended responsibility                                                    | Initial useful slice                                                                         | Growth after the slice                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| JSON Blueprint          | JSON Schema-aware codecs and validation                                       | A record/union codec produces encoder, decoder, and schema through one controlled definition | Broader schema support, migration guidance, optional generation, and a distinct runtime-schema layer                |
+| Sinal                   | A typed façade over BEAM telemetry                                            | Typed events and spans with synchronous dispatch and explicit handler-failure behavior       | Bridges and exporters through existing telemetry infrastructure                                                     |
+| Warden                  | Typed OIDC relying-party and OAuth client operations                          | A narrow, verified authorization-code flow over an established backend                       | Additional independently tested client operations and provider compatibility                                        |
+| Relay                   | MCP protocol behavior, typed client/server APIs, and transports               | A 2026-07-28 Streamable HTTP server slice with discovery and typed tools                     | Stdio, 2025-11-25 compatibility, client operations, and additional capabilities under explicit conformance coverage |
+| HTTP Gun (`http_gun`)   | Generic HTTP client, byte streaming, TLS/pooling and cassette record/playback | Independent H1 consumer, bounded stream and strict playback                                  | Required release adds H2 and live recording; follow-on HTTP features remain inventoried                             |
+| LLM Wire (`llm_wire`)   | One model interaction, streaming lifecycle, and provider adaptation           | A small common contract exercised by contrasting provider protocols                          | Additional providers and optional provider-specific integrations                                                    |
+| Fabric                  | Bounded agent execution, typed tools, and action policy                       | A scripted-model agent loop with explicit outcomes                                           | Provider integrations, durable suspension, and workflow composition                                                 |
+| Saga                    | Typed workflow definitions and compensation semantics, with a local runner    | A shared-dependency workflow with heterogeneous results and undo                             | Nested workflows, a restricted durable definition, and a Grind-backed runner through optional integration           |
+| Grind                   | Durable jobs and queue scheduling                                             | A Postgres queue with typed worker registration and explicit delivery semantics              | Typed Saga-authored workflows plus the declared Oban compatibility scope and advanced capabilities                  |
 
-- These are responsibility boundaries rather than eight simultaneous implementation projects. Confirm public packaging after the consumer examples demonstrate independent use.
+- These are responsibility boundaries rather than simultaneous implementation projects. Confirm public packaging after the consumer examples demonstrate independent use.
 - Keep Relay's core, client, server, transports, and test support as deliberate modules initially. Split distribution units when target support or optional runtime dependencies justify them; do not publish eight packages merely because the draft lists eight modules.
 - Give the LLM client its own logical boundary from the beginning. Provider-neutral messages and model contracts belong below Fabric, even if early experiments keep all source in one workspace.
 - Keep runtime-authored graph schemas separate from statically typed Saga plans. An arbitrary runtime schema cannot create a new native Gleam type after compilation.
 - Reuse Saga authoring for typed Grind workflows through a restricted durable definition and optional `saga_grind` runner. A Saga may also be an opaque node in Fabric or an external graph; the [composition proposal](research/composition-contracts.md) refines the earlier separation of runtimes without merging their recovery contracts.
+
+- The owner selected [HTTP Gun](http-gun-design.md) on 29 September 2026. Its required independent release includes H1/H2, bounded streaming, strict playback and live recording. The [construction prompt](docs/implementation/http-gun-prompt.md) preserves explicit follow-on scope; the package is not implemented yet.
+- LLM Wire keeps provider semantics and accepts an HTTP client; Fabric owns conversation and durable continuation. Current donor code and prototype signatures do not establish the new package's runtime guarantees.
 
 ## Build, reuse, and wrap recommendations
 
@@ -38,6 +42,7 @@
 | Sinal          | Build a thin typed façade over `:telemetry`                                                                                         | Reuse dispatch and BEAM instrumentation compatibility; do not introduce an actor per event                                                                   |
 | Warden         | Wrap `oidcc`; keep protocol and crypto machinery upstream                                                                           | Own typed boundaries and caller responsibilities explicitly; wrapping does not inherit backend certification                                                 |
 | Relay          | Build a typed protocol implementation with upstream conformance evidence                                                            | The inspected Gleam alternatives target older, narrower protocol surfaces; keep them as reference material rather than assume current conformance            |
+| HTTP Gun       | Build an independent typed client on Gun; generalize proven LLM Wire mechanics                                                      | Keep HTTP values and resource ownership independent of provider, schema and agent types                                                                      |
 | LLM client     | Build a small Gleam core with separately selectable adapters; first attempt narrow reuse of public `anthropic_gleam` APIs           | Keep transport and loop ownership explicit; use native wire code if the reused adapter fails the common contract; ReqLLM remains an optional broader backend |
 | Fabric         | Build the typed agent state machine and tool/policy integration                                                                     | Reuse the one-call client and selected execution adapters; do not recreate provider networking inside the loop                                               |
 | Saga           | Build typed authoring and a native local runner, using Reactor as a scoped oracle; share semantics with a restricted durable runner | Prove the representation before requiring one generic interpreter; persistence-ready definitions are not arbitrary local plans                               |
@@ -64,6 +69,9 @@
 ```mermaid
 flowchart TD
   Fabric --> LLM[Standalone LLM client]
+  LLM --> HTTP[HTTP Gun]
+  HTTP --> Gun[Gun and Cowlib]
+  Ordinary[Ordinary HTTP callers] --> HTTP
   LLM -. JSON Schema paths .-> Blueprint[JSON Blueprint]
   Relay -. JSON Schema paths .-> Blueprint
   Warden --> oidcc
@@ -85,7 +93,8 @@ flowchart TD
 
 | Owner      | Responsibility                                                                                                    | Does not imply                                                              |
 | ---------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| LLM client | One model call, transport deadlines, stream cleanup, safe pre-output retries                                      | Automatic retry of an already observed result or an application tool effect |
+| HTTP Gun   | One HTTP attempt, transport deadlines, byte streams, TLS/pooling and test record/playback                         | Automatic replay, transfer recovery or agent continuation                   |
+| LLM client | One model interaction, provider decoding, semantic limits and retry assessment                                    | Automatic retry of an already observed result or an application tool effect |
 | Saga       | Typed dependency and compensation semantics; local scheduling and retry in local mode                             | Automatic persistence of an arbitrary local plan                            |
 | saga_grind | Durable workflow progress, readiness, activity retry, branch selection, and compensation journal                  | Ownership of queue leases or duplication of the local Saga scheduler        |
 | Grind      | Durable admission, claims, leases, job attempts, delayed retries, cancellation intent, and abandoned-job recovery | Exactly-once business effects or workflow compensation                      |
