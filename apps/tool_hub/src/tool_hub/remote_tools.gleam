@@ -9,13 +9,12 @@
 import fabric/tool as fabric_tool
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import json/blueprint/codec
-import json/blueprint/parser
-import json/blueprint/runtime
-import json/blueprint/value.{type Value}
+import json/blueprint/contract
+import json/blueprint/value.{Null}
 import relay/client
 import relay/content
 import relay/tool as relay_tool
@@ -103,22 +102,22 @@ pub fn mount_discovered(
   declaration: client.ToolDeclaration,
   peer: Peer(context),
 ) -> Result(fabric_tool.Tool(context), DiscoveryError) {
-  use contract <- result.map(
-    parser.parse_schema_document_from_string(
-      parser.default_limits(),
+  use remote <- result.map(
+    contract.parse(
       json.to_string(declaration.input_schema),
+      value.default_limits(),
     )
     |> result.map_error(fn(error) {
-      UnsupportedSchema(declaration.name, string.inspect(error))
+      UnsupportedSchema(declaration.name, contract.describe_load_error(error))
     }),
   )
   let definition =
     fabric_tool.define(
       declaration.name,
       option.unwrap(declaration.description, ""),
-      contract_codec(contract),
+      contract.value_codec(remote),
       // The output is forwarded as the peer sent it.
-      codec.new(Ok, Ok),
+      codec.custom(encode: Ok, decode: Ok, schema: None, placeholder: Null),
     )
   fabric_tool.bind(
     definition,
@@ -127,60 +126,6 @@ pub fn mount_discovered(
     },
     classify(effect_of(declaration.annotations), _),
   )
-}
-
-/// A `Codec(Value)` whose schema is the contract's and whose decoder
-/// validates against it. Blueprint has no constructor for this, and its
-/// validation errors use a vocabulary parallel to its decode errors.
-fn contract_codec(contract: runtime.RuntimeContract) -> codec.Codec(Value) {
-  codec.from_parts(
-    Ok,
-    fn(value) {
-      runtime.validate(contract, value)
-      |> result.map(runtime.encoded)
-      |> result.map_error(decode_error)
-    },
-    runtime.schema(contract),
-  )
-}
-
-fn decode_error(error: runtime.ValidationError) -> codec.DecodeError {
-  let runtime.ValidationError(path:, reason:) = error
-  list.fold_right(
-    path,
-    codec.CannotDecode(decode_reason(reason)),
-    fn(inner, at) {
-      case at {
-        runtime.Property(name) -> codec.DecodeAtField(name, inner)
-        runtime.Index(index) -> codec.DecodeAtIndex(index, inner)
-        runtime.TaggedBranch(tag) -> codec.DecodeAtField(tag, inner)
-      }
-    },
-  )
-}
-
-fn decode_reason(reason: runtime.ValidationReason) -> codec.DecodeReason {
-  case reason {
-    runtime.ExpectedString -> codec.DecodeExpectedString
-    runtime.UnknownEnumLabel(label) -> codec.DecodeUnknownEnumLabel(label)
-    runtime.ExpectedInteger -> codec.DecodeExpectedInt
-    runtime.ExpectedNumber -> codec.DecodeExpectedNumber
-    runtime.ExpectedBoolean -> codec.DecodeExpectedBool
-    runtime.ExpectedArray -> codec.DecodeExpectedArray
-    runtime.ExpectedObject -> codec.DecodeExpectedObject
-    runtime.MissingProperty(name) -> codec.DecodeMissingProperty(name)
-    runtime.UnknownProperty(name) -> codec.DecodeUnknownProperty(name)
-    runtime.DuplicateProperty(name) -> codec.DecodeDuplicateProperty(name)
-    runtime.WrongTupleLength(expected, actual) ->
-      codec.DecodeWrongTupleLength(expected, actual)
-    runtime.IntegerOutsideRange(minimum, maximum, actual) ->
-      codec.DecodeIntegerOutsideRange(minimum, maximum, actual)
-    runtime.NumberOutsideRange(minimum, maximum, actual) ->
-      codec.DecodeNumberOutsideRange(minimum, maximum, actual)
-    runtime.MissingTag -> codec.DecodeMissingTag
-    runtime.NonStringTag -> codec.DecodeExpectedTaggedObject
-    runtime.UnknownTag(tag) -> codec.DecodeUnknownTag(tag)
-  }
 }
 
 // --- outcome mapping -----------------------------------------------------------
