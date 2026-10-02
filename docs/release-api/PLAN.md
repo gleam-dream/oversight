@@ -39,6 +39,46 @@ Wave 1 items are drawn from later proposals and land early in reduced form:
 | Relay starts unauthenticated off loopback        | RELAY-R13 (part)                | `start` fails on a non-loopback bind without protection; `allow_unauthenticated()` opts in.                                                                        |
 | Module docs do not render; no CHANGELOG          | each package's docs proposal    | `////` module docs on every public module; CHANGELOG in grind and http_gun.                                                                                        |
 
+### Wave 1 results (2 October 2026)
+
+Every wave 1 item landed. Each repo passed its own full gate before push.
+
+| Package        | Commits          | Result                                                                                                                                                                                                                                                                                                     |
+| -------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| llm_wire       | 6c1031e…87c96cb  | `ApiKey` and prepared headers held in closures; `provider.headers` → `reveal_headers`, `Spec.headers` is a function (small break). SSE line limit 1 MiB; a quadratic scan found on the way is now linear (4,041 ms → 34 ms per 1 MiB line). Gemini's large tool calls covered. Docs gate added. 234 tests. |
+| relay          | 6e7e449…d908b9f  | `BearerToken` held in a closure. `http.start` refuses a non-loopback host without protection; `http.allow_unauthenticated` opts in (additive). All 17 module docs. 143 tests.                                                                                                                              |
+| json_blueprint | 84a5fe4, 787cf12 | Parse defaults 1 MiB and depth 64; byte checks before 1.x `decode` and generated decoders; peak heap per 1 MiB input 95–106 MB → 14–69 MB. All 12 module docs, with tested examples. 177 Erlang, 176 JavaScript tests.                                                                                     |
+| saga           | 78081e3…a736cff  | All 11 module docs converted to `////` and corrected; docs gate added. 165 tests.                                                                                                                                                                                                                          |
+| sinal          | 59b7723…3db37bf  | Module docs; README leads with the common path and a defaults table; `telemetry >= 1.4.2 and < 2.0.0`; docs gate added. 94 tests.                                                                                                                                                                          |
+| http_gun       | 008da53, b2821fc | 12 module docs rewritten; CHANGELOG; tests prove credential headers never reach failures, telemetry or cassettes. Sinal snapshot refreshed. 136 tests.                                                                                                                                                     |
+| grind          | 9b3d22d          | Database password held in a closure; `Settings.database_url` is a function (small break). Module docs and doc defects fixed; CHANGELOG. 269 tests plus the Oban oracle.                                                                                                                                    |
+| fabric         | fa0cd54          | fabric_typesafe API key and fabric_mcp server environment held in closures (`Options.environment` is a function, small break); inspect tests in core and fabric_postgres; four CHANGELOGs. 45/45 gate checks.                                                                                              |
+| warden         | af26ee1          | Inspect tests confirm every credential-holding type redacts; CHANGELOG; the D7 contradiction in PROGRESS.md fixed. 130 tests.                                                                                                                                                                              |
+
+Relay and saga now pin the wave 1 heads of json_blueprint (787cf12) and sinal
+(3db37bf).
+
+All eight composition apps pass on the wave 1 heads (77 tests). The older
+[ecosystem pilot](../../playground/ecosystem_pilot/README.md) does not
+compile: it calls llm_wire's `Continuation` and `prepare_continue`, which
+llm_wire removed before wave 1 when conversations became caller-owned. The
+`tool_hub` app covers its Relay-to-LLM path, so the pilot is superseded rather
+than ported.
+
+**Follow-ups found during wave 1**, now part of later waves:
+
+| Package        | Item                                                                                                                                                                                                                                                   | Wave  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
+| warden         | `LogoutOutcome.RedirectToProvider(url)` embeds the ID token as `id_token_hint`, so it prints. Redact it with the WARDEN-R7 redesign.                                                                                                                   | 4     |
+| sinal          | Without the `telemetry` application running, `attach` and `observe` crash the caller with `noproc` and `emit` reaches no handler. Start or check the application in sinal.                                                                             | 2     |
+| http_gun       | `cassette.new` keeps caller-supplied credential headers in the in-memory value; the pool's waiting queue holds request headers, which a crash report prints; `fixture.sanitise` drops a fixed list of header names only. Part of the redaction policy. | 3     |
+| grind          | `PoolStartFailed(actor.StartError)` carries a dynamic exit reason that needs a credential audit.                                                                                                                                                       | 3     |
+| json_blueprint | No element-count limit: adding one needs a new error variant, which belongs to the 2.0 error redesign (JSONB-R8). Worst case is about 70 bytes of heap per input byte.                                                                                 | 2     |
+| relay          | About half of the public functions have no function doc. The stdio client's process arguments are not redacted.                                                                                                                                        | 4     |
+| fabric         | fabric_mcp `Options.arguments` is a plain list.                                                                                                                                                                                                        | 5     |
+| all            | llm_wire, saga and sinal gates now fail on a public module without a `////` doc. Add the same check to every package's gate.                                                                                                                           | 2–5   |
+| http_gun       | `AGENTS.md` still says "No push" and keeps oversight and siblings read-only, from the construction phase. It conflicts with release work.                                                                                                              | owner |
+
 ## sinal
 
 | Id        | Change                                                                                              | Breaks              | Effort | Wave | Status                                                              |
