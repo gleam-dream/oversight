@@ -65,76 +65,68 @@ pub fn order_query() -> Codec(OrderQuery) {
   use order_id <- codec.field(
     "order_id",
     codec.string() |> codec.describe("Order id, A-123"),
-    fn(query: OrderQuery) { query.order_id },
+    get: fn(q) { q.order_id },
   )
   codec.success(OrderQuery(order_id:))
 }
 
 pub fn order() -> Codec(Order) {
-  use order_id <- codec.field("order_id", codec.string(), fn(o: Order) {
+  use order_id <- codec.field("order_id", codec.string(), get: fn(o) {
     o.order_id
   })
-  use customer <- codec.field("customer", codec.string(), fn(o: Order) {
+  use customer <- codec.field("customer", codec.string(), get: fn(o) {
     o.customer
   })
-  use total_cents <- codec.field("total_cents", codec.int(), fn(o: Order) {
+  use total_cents <- codec.field("total_cents", codec.int(), get: fn(o) {
     o.total_cents
   })
-  use status <- codec.field("status", codec.string(), fn(o: Order) { o.status })
+  use status <- codec.field("status", codec.string(), get: fn(o) { o.status })
   codec.success(Order(order_id:, customer:, total_cents:, status:))
 }
 
 pub fn eligibility() -> Codec(Eligibility) {
-  use order_id <- codec.field("order_id", codec.string(), fn(e: Eligibility) {
+  use order_id <- codec.field("order_id", codec.string(), get: fn(e) {
     e.order_id
   })
-  use eligible <- codec.field("eligible", codec.bool(), fn(e: Eligibility) {
+  use eligible <- codec.field("eligible", codec.bool(), get: fn(e) {
     e.eligible
   })
   use refundable_cents <- codec.field(
     "refundable_cents",
     codec.int(),
-    fn(e: Eligibility) { e.refundable_cents },
+    get: fn(e) { e.refundable_cents },
   )
-  use note <- codec.field("note", codec.string(), fn(e: Eligibility) { e.note })
+  use note <- codec.field("note", codec.string(), get: fn(e) { e.note })
   codec.success(Eligibility(order_id:, eligible:, refundable_cents:, note:))
 }
 
 pub fn refund_request() -> Codec(RefundRequest) {
-  use order_id <- codec.field("order_id", codec.string(), fn(r: RefundRequest) {
+  use order_id <- codec.field("order_id", codec.string(), get: fn(r) {
     r.order_id
   })
   use amount_cents <- codec.field(
     "amount_cents",
     codec.integer_between(1, max_refund_cents)
       |> codec.describe("Refund amount in cents"),
-    fn(r: RefundRequest) { r.amount_cents },
+    get: fn(r) { r.amount_cents },
   )
-  use reason <- codec.field("reason", codec.string(), fn(r: RefundRequest) {
-    r.reason
-  })
+  use reason <- codec.field("reason", codec.string(), get: fn(r) { r.reason })
   codec.success(RefundRequest(order_id:, amount_cents:, reason:))
 }
 
 pub fn refund_receipt() -> Codec(RefundReceipt) {
-  use refund_id <- codec.field(
-    "refund_id",
-    codec.string(),
-    fn(r: RefundReceipt) { r.refund_id },
-  )
-  use order_id <- codec.field("order_id", codec.string(), fn(r: RefundReceipt) {
+  use refund_id <- codec.field("refund_id", codec.string(), get: fn(r) {
+    r.refund_id
+  })
+  use order_id <- codec.field("order_id", codec.string(), get: fn(r) {
     r.order_id
   })
-  use amount_cents <- codec.field(
-    "amount_cents",
-    codec.int(),
-    fn(r: RefundReceipt) { r.amount_cents },
-  )
-  use ledger_entry <- codec.field(
-    "ledger_entry",
-    codec.int(),
-    fn(r: RefundReceipt) { r.ledger_entry },
-  )
+  use amount_cents <- codec.field("amount_cents", codec.int(), get: fn(r) {
+    r.amount_cents
+  })
+  use ledger_entry <- codec.field("ledger_entry", codec.int(), get: fn(r) {
+    r.ledger_entry
+  })
   codec.success(RefundReceipt(
     refund_id:,
     order_id:,
@@ -154,20 +146,14 @@ pub fn outcome() -> Codec(Outcome) {
 }
 
 pub fn resolution() -> Codec(Resolution) {
-  use order_id <- codec.field("order_id", codec.string(), fn(r: Resolution) {
+  use order_id <- codec.field("order_id", codec.string(), get: fn(r) {
     r.order_id
   })
-  use outcome <- codec.field("outcome", outcome(), fn(r: Resolution) {
-    r.outcome
+  use outcome <- codec.field("outcome", outcome(), get: fn(r) { r.outcome })
+  use refunded_cents <- codec.field("refunded_cents", codec.int(), get: fn(r) {
+    r.refunded_cents
   })
-  use refunded_cents <- codec.field(
-    "refunded_cents",
-    codec.int(),
-    fn(r: Resolution) { r.refunded_cents },
-  )
-  use message <- codec.field("message", codec.string(), fn(r: Resolution) {
-    r.message
-  })
+  use message <- codec.field("message", codec.string(), get: fn(r) { r.message })
   codec.success(Resolution(order_id:, outcome:, refunded_cents:, message:))
 }
 

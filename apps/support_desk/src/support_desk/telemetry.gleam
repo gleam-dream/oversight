@@ -10,14 +10,14 @@
 ////   events.
 //// - saga: its own run counter and the workflow name; nothing a caller
 ////   chose.
-//// - http_gun: a per-request id and an optional caller correlation
-////   (`http_gun.with_correlation`), an opaque VM-local value.
+//// - http_gun: a per-request id and the caller's `Correlation`
+////   (`http_gun.with_correlation`), which is the ticket's own.
 //// - llm_wire: stage, provider and outcome only; no id of any kind.
 ////
-//// The desk registers each ticket's http_gun correlation here, so HTTP
-//// events of calls made with a correlated client can be attributed. Fabric
-//// events are attributed through the run id that `ticket.opened` pairs
-//// with the ticket's correlation.
+//// HTTP events of calls made with a ticket-correlated client carry the
+//// ticket's `Correlation` and need no join. Fabric events are attributed
+//// through the run id that `ticket.opened` pairs with the ticket's
+//// correlation.
 
 import fabric/observation as fabric_obs
 import gleam/erlang/process.{type Subject}
@@ -52,7 +52,7 @@ pub type Key {
   TicketRun(ticket: Correlation, run: String)
   /// Saga's own run number; no caller id reaches saga's events.
   SagaRun(workflow: String, run: Int)
-  /// An HTTP request, with the ticket its correlation was registered for.
+  /// An HTTP request, with the ticket its client was correlated with.
   HttpRequest(ticket: Option(Correlation))
   /// Nothing to join on.
   Unkeyed
@@ -72,13 +72,7 @@ pub opaque type Telemetry {
 
 pub opaque type Message {
   Observed(Observation)
-  ObservedHttp(name: String, correlation: Option(http_obs.Id), detail: String)
-  Register(id: http_obs.Id, ticket: Correlation)
   Read(reply: Subject(List(Observation)))
-}
-
-type State {
-  State(tickets: List(#(http_obs.Id, Correlation)), seen: List(Observation))
 }
 
 /// Starts the collector and a supervised forwarder for http_gun's
@@ -98,15 +92,6 @@ pub fn start() -> Result(Telemetry, String) {
 /// The forwarder to put in `http_gun/config.Config.observations`.
 pub fn forwarder(telemetry: Telemetry) -> forwarder.Forwarder {
   telemetry.forwarder
-}
-
-/// Attributes HTTP events carrying `id` to `ticket`.
-pub fn register(
-  telemetry: Telemetry,
-  id: http_obs.Id,
-  ticket: Correlation,
-) -> Nil {
-  process.send(telemetry.collector, Register(id, ticket))
 }
 
 pub fn observations(telemetry: Telemetry) -> List(Observation) {
@@ -181,15 +166,11 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
       Observed(Observation(Saga, name, SagaRun(workflow, run), detail)),
     )
   }
-  let ticket = fn(name, metadata_ticket, run, detail) {
-    case metadata_ticket {
-      Some(ticket) ->
-        process.send(
-          collector,
-          Observed(Observation(Desk, name, TicketRun(ticket, run), detail)),
-        )
-      None -> Nil
-    }
+  let ticket = fn(name, ticket, run, detail) {
+    process.send(
+      collector,
+      Observed(Observation(Desk, name, TicketRun(ticket, run), detail)),
+    )
   }
   [
     sinal.observe(events.ticket_opened(), fn(_, m) {
@@ -282,22 +263,23 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
       )
     }),
     sinal.observe(http_obs.event(), fn(_, m) {
+      let http = fn(name, detail) {
+        process.send(
+          collector,
+          Observed(Observation(
+            HttpGun,
+            name,
+            HttpRequest(m.correlation),
+            detail,
+          )),
+        )
+      }
       case m.milestone {
         // Only the outcome-bearing milestones; admission steps are noise.
         http_obs.ResponseHeaders(status) ->
-          process.send(
-            collector,
-            ObservedHttp(
-              "response.headers",
-              m.correlation,
-              int.to_string(status),
-            ),
-          )
+          http("response.headers", int.to_string(status))
         http_obs.HttpTerminated(outcome) ->
-          process.send(
-            collector,
-            ObservedHttp("terminated", m.correlation, string.inspect(outcome)),
-          )
+          http("terminated", string.inspect(outcome))
         _ -> Nil
       }
     }),
@@ -318,27 +300,13 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
 // Collector ---------------------------------------------------------------
 
 fn start_collector() -> Result(Subject(Message), String) {
-  actor.new(State([], []))
-  |> actor.on_message(fn(state: State, message) {
+  actor.new([])
+  |> actor.on_message(fn(seen: List(Observation), message) {
     case message {
-      Observed(observation) ->
-        actor.continue(State(..state, seen: [observation, ..state.seen]))
-      ObservedHttp(name, correlation, detail) -> {
-        let ticket =
-          option.then(correlation, fn(id) {
-            list.key_find(state.tickets, id) |> option.from_result
-          })
-        let observation =
-          Observation(HttpGun, name, HttpRequest(ticket), detail)
-        actor.continue(State(..state, seen: [observation, ..state.seen]))
-      }
-      Register(id, ticket) ->
-        actor.continue(
-          State(..state, tickets: [#(id, ticket), ..state.tickets]),
-        )
+      Observed(observation) -> actor.continue([observation, ..seen])
       Read(reply) -> {
-        process.send(reply, list.reverse(state.seen))
-        actor.continue(state)
+        process.send(reply, list.reverse(seen))
+        actor.continue(seen)
       }
     }
   })

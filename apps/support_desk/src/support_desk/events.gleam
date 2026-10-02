@@ -4,7 +4,6 @@
 //// final answer decoded. The collector in `support_desk/telemetry` uses
 //// the first to attribute a run's events to its ticket.
 
-import gleam/option.{type Option, Some}
 import sinal
 import sinal/correlation.{type Correlation}
 import sinal/fields
@@ -20,26 +19,21 @@ pub type Answered {
 }
 
 pub type TicketMetadata {
-  TicketOpened(ticket: Option(Correlation), run: String)
+  TicketOpened(ticket: Correlation, run: String)
 }
 
 pub type AnswerMetadata {
-  TicketAnswered(ticket: Option(Correlation), run: String, answer: Answered)
+  TicketAnswered(ticket: Correlation, run: String, answer: Answered)
 }
 
 pub fn ticket_opened() -> sinal.Event(Nil, TicketMetadata) {
-  sinal.event(
-    ["support_desk", "ticket", "opened"],
-    fields.empty(),
-    fields.record({
-      use ticket <- fields.parameter
-      use run <- fields.parameter
-      TicketOpened(ticket:, run:)
+  sinal.event(["support_desk", "ticket", "opened"], fields.empty(), {
+    use ticket <- fields.include(correlation.required_field(), get: fn(m) {
+      m.ticket
     })
-      |> fields.and(correlation.field(), fn(m: TicketMetadata) { m.ticket })
-      |> fields.and(fields.string("run"), fn(m) { m.run })
-      |> fields.build,
-  )
+    use run <- fields.include(fields.string("run"), get: fn(m) { m.run })
+    fields.success(TicketOpened(ticket:, run:))
+  })
 }
 
 pub fn ticket_answered() -> sinal.Event(Nil, AnswerMetadata) {
@@ -49,15 +43,11 @@ pub fn ticket_answered() -> sinal.Event(Nil, AnswerMetadata) {
 /// The metadata of `ticket.answered`, exposed so a test can check that every
 /// `Answered` constructor is in the `fields.enum` list.
 pub fn answer() -> fields.Fields(AnswerMetadata) {
-  fields.record({
-    use ticket <- fields.parameter
-    use run <- fields.parameter
-    use answer <- fields.parameter
-    TicketAnswered(ticket:, run:, answer:)
+  use ticket <- fields.include(correlation.required_field(), get: fn(m) {
+    m.ticket
   })
-  |> fields.and(correlation.field(), fn(m: AnswerMetadata) { m.ticket })
-  |> fields.and(fields.string("run"), fn(m) { m.run })
-  |> fields.and(
+  use run <- fields.include(fields.string("run"), get: fn(m) { m.run })
+  use answer <- fields.include(
     fields.enum(
       "answer",
       [AnsweredTyped, AnsweredUntyped, AnsweredNothing],
@@ -69,15 +59,15 @@ pub fn answer() -> fields.Fields(AnswerMetadata) {
         }
       },
     ),
-    fn(m) { m.answer },
+    get: fn(m) { m.answer },
   )
-  |> fields.build
+  fields.success(TicketAnswered(ticket:, run:, answer:))
 }
 
 pub fn opened(ticket: Correlation, run: String) -> Nil {
-  sinal.emit(ticket_opened(), Nil, TicketOpened(Some(ticket), run))
+  sinal.emit(ticket_opened(), Nil, TicketOpened(ticket, run))
 }
 
 pub fn answered(ticket: Correlation, run: String, answer: Answered) -> Nil {
-  sinal.emit(ticket_answered(), Nil, TicketAnswered(Some(ticket), run, answer))
+  sinal.emit(ticket_answered(), Nil, TicketAnswered(ticket, run, answer))
 }

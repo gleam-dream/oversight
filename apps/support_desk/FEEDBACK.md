@@ -138,6 +138,8 @@ telemetry trail.
 
 - **Status (wave 2):** partially resolved by sinal 43279b3 (`sinal/correlation`); the app now keys a ticket by its own `Correlation`. The app emits `support_desk.ticket.opened` (ticket correlation plus fabric run id) and `ticket.answered` (`src/support_desk/events.gleam`, 83 lines new), and the collector derives the run-to-ticket join from them, so `telemetry.trail(telemetry, ticket)` no longer takes the run id. The trail grew from 18 to 20 events. The cause is untouched: fabric events still carry a `run: String`, saga and llm_wire carry nothing, and http_gun still uses `telemetry.Id`, so the ticket still has two identities (`Session.ticket` and `Session.http_id`) and `telemetry.register` remains. The 22 saga and 100 llm_wire events stay unattributable until those packages adopt `Correlation`.
 
+- **Status (follow-up):** partially resolved by http_gun c45adfe and 056536b; `desk.correlated` passes `session.ticket` to `http_gun.with_correlation`, so the ticket has one identity. `Session.http_id`, `telemetry.register`, the `Register` message, the collector's id-to-ticket list and `http_obs.new_id()` are deleted (about 45 lines), and the HTTP handler reads `m.correlation` as the ticket directly. The trail stays at 20 events and the four lookup HTTP events still join the ticket. The refund, notify and model calls are still unattributable: saga, fabric_saga (SD-2) and `fabric/llm.model` (no run on `model.Request`) give no way to put the ticket on their clients, and llm_wire and saga events carry no correlation.
+
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
 - **Packages**: fabric, llm_wire, json_blueprint. **Kind**: composition. **Severity**: major (known: fabric card concern 5).
@@ -192,6 +194,7 @@ telemetry trail.
   cliff.
 
 - **Status (wave 2):** resolved by json_blueprint 9a6633a (`codec.field`/`success` builder); `record4` and its 23 lines are deleted (`domain.gleam`). The six codecs and their `let assert Ok` for `integer_between` and `string_enum` now read as plain builders. See the re-run for what that cost in line count.
+- **Status (follow-up):** the annotation cost this left is resolved by json_blueprint bb4da39 (`get:` last); the six codecs drop all 21 getter annotations and shrink from 105 to 91 non-blank lines, several fields now fitting on one line.
 
 ### SD-7 Testing against a built-in provider wire means hand-writing its SSE
 
@@ -337,7 +340,7 @@ lines for ticket events, which is new behavior, not glue: it is what adopting
 
 ### New friction
 
-- **Two builders, two getter conventions.** json_blueprint's `field` wants
+- **Two builders, two getter conventions.** **Status (follow-up):** resolved by json_blueprint bb4da39 and sinal 5e8bee3; both builders now take an unannotated `get:` last, and the `fields.and` getter annotation (`fn(m: AnswerMetadata)`) is gone with `and` itself. Original finding: json_blueprint's `field` wants
   the record type on every getter; sinal's `and` wants it on the first only:
 
   ```gleam
@@ -355,13 +358,13 @@ lines for ticket events, which is new behavior, not glue: it is what adopting
   would help (a `codec.record(Order)` start that fixes `r`), but I did not
   find a way in the current signature.
 
-- **`correlation.field()` is always `Option`.** The desk's events always have
+- **`correlation.field()` is always `Option`.** **Status (follow-up):** resolved by sinal f9cca37 (`correlation.required_field()`); see the re-run below. Original finding: The desk's events always have
   a ticket, yet metadata must hold `Option(Correlation)`, so every emission
   wraps `Some(ticket)` (`events.opened`, `events.answered`) and the collector
   unwraps with a `case` and a `None -> Nil` arm that cannot happen
   (`telemetry.gleam`, the `ticket` closure). A `correlation.required_field()`
   would remove both for app-owned events.
-- **Two identities per ticket until http_gun adopts `Correlation`.**
+- **Two identities per ticket until http_gun adopts `Correlation`.** **Status (follow-up):** resolved by http_gun c45adfe; see SD-3. Original finding:
   `Session.ticket: Correlation` and `Session.http_id: http_obs.Id` must be
   minted together and joined by `telemetry.register`. The migration guide
   says to use `Correlation` for the app's own events and wait for wave 3, but
@@ -388,3 +391,62 @@ wide records; (2) the sinal guide does not say how an app bridges
 that `correlation.field()` forces `Option` on app-owned events; (4) the guide
 lists no replacement for http_gun's forwarder requirement (SD-9) because
 http_gun did not change.
+
+## Re-run after the follow-up fixes
+
+Package heads: json_blueprint bb4da39, sinal 6de2b69, http_gun 056536b.
+12 tests pass (unchanged count; one test constructor and the `register`
+helper call changed), and `gleam run` prints the five tickets, the ledger and
+the T-1 trail as before (20 events; 22 saga and 100 llm_wire events still
+unattributable). `gleam format` is clean and the build has no warnings.
+
+| Seam                                               | Before                                                                  | After                                     | Change                                                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------- |
+| json_blueprint getters (six codecs)                | 105 non-blank lines, 21 getter annotations                              | 91 lines, 0 annotations                   | -14 lines (domain.gleam 201 to 187)                                                         |
+| Sinal record builder (two events)                  | 2 `fields.record`/`parameter`/`and`/`build` chains, 3 annotated getters | 2 `use` blocks with `get:`, 0 annotations | events.gleam 83 to 73 lines (-10, including the removed `Option`/`Some` imports)            |
+| `Option(Correlation)` for an always-present ticket | 2 `Some(ticket)` wraps, 1 unreachable `None -> Nil` arm, 4-line match   | 0 wraps, 0 arms, closure sends directly   | -9 lines (events and the telemetry `ticket` closure)                                        |
+| Ticket identity for http_gun (SD-3)                | 2 ids per ticket, join table, `register` at 2 call sites                | 1 `Correlation`, no table                 | about -45 lines: telemetry.gleam 348 to 316, desk.gleam 259 to 255, 2 `register` calls gone |
+
+Net: 140 lines deleted and 78 added across six files, about 62 net, none of
+it behavior. The ~40-line telemetry correlation seam in the glue measure is
+about 10 lines now: `desk.correlated` (4), the `ticket` closure (5) and the
+`HttpRequest(m.correlation)` read (1), plus the unchanged `ticket.opened`
+join and `events.gleam` that carry fabric runs.
+
+### New friction
+
+- **The correlation reaches only the tool calls, so the fix is half the
+  story.** One id per ticket is true, but only the lookups carry it. The
+  refund and notify HTTP calls run inside the saga on clients captured when
+  the agent is built (SD-2), and model calls run on `fabric/llm.model`'s one
+  client. The demo still prints "every uncorrelated http_gun event" and the
+  test still asserts `HttpRequest(None)` events exist. The http_gun change
+  removed the join table, not the cause.
+- **http_gun's `correlation` is `Option`, the app's is not.** The collector's
+  `HttpRequest(ticket: Option(Correlation))` and the `Some(owner)` filter in
+  `trail` remain, correctly, because uncorrelated requests exist. The guide
+  states that `field()` and `required_field()` interoperate, which is what
+  makes the split safe, but an app that reads both kinds of event holds both
+  shapes.
+- **`fields.include` runs the block with placeholder values.** The sinal guide
+  says to keep a block to `include` calls and `success`. The `answer()` record
+  follows that, but a `case` inside `fields.enum`'s encoder is called with each
+  list entry at definition time; it is pure here, and the rule is easy to
+  break silently in a larger record. A compile-time barrier is not possible,
+  so it is a docs-level hazard.
+- **`fields.enum`'s constructor list is still unchecked** (previous
+  re-run). The round-trip test still guards it; nothing in the new builder
+  changes that.
+- **A `use` record in argument position needs braces.** `sinal.event(.., {
+use .. fields.success(..) })` is a little unusual to read next to the
+  function-body form used for `answer()`; the guide shows both, so this is a
+  nit.
+
+### Migration guides
+
+Sufficient. The `get:` rule in the json_blueprint guide and the
+`required_field()` before/after in the sinal guide matched the edits, and the
+http_gun guide's join-table example covered the whole correlation change. The
+only gap: the http_gun guide says a join table "is no longer needed" but does
+not say that a context type holding the old `Id` (here `Session.http_id`)
+must also change, nor that tool calls inside a saga still cannot be tagged.

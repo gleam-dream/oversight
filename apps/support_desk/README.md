@@ -32,7 +32,7 @@ Seams under test:
 - The approval gate: approve, reject, and cancel while waiting.
 - A typed final answer decoded from the agent's text (`desk.answer`).
 - Telemetry correlation from agent to tool to saga to HTTP: the desk's own
-  `sinal/correlation` ticket id joins fabric runs; saga and llm_wire do not carry it.
+  `sinal/correlation` ticket id joins fabric runs and the lookup HTTP calls; saga and llm_wire do not carry it.
 
 ## Layout
 

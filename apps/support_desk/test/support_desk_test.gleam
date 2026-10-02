@@ -34,7 +34,6 @@ fn open(
 ) -> #(desk.Session, fabric.Run(desk.Session)) {
   let assert Ok(ticket) = correlation.from_string(ticket)
   let session = desk.session(app.desk, ticket, approval_from_cents)
-  telemetry.register(app.telemetry, session.http_id, ticket)
   let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
   #(session, handle)
 }
@@ -256,7 +255,7 @@ pub fn every_answer_kind_round_trips_through_the_event_fields_test() {
   list.each(
     [events.AnsweredTyped, events.AnsweredUntyped, events.AnsweredNothing],
     fn(answer) {
-      let metadata = events.TicketAnswered(Some(ticket), "run-1", answer)
+      let metadata = events.TicketAnswered(ticket, "run-1", answer)
       let raw = fields.encode(events.answer(), metadata)
       assert fields.decode(events.answer(), raw) == Ok(metadata)
     },
