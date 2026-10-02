@@ -31,7 +31,8 @@ Seams under test:
   fabric `Uncertain` effect, then an operator reconciliation (`refund.gleam`).
 - The approval gate: approve, reject, and cancel while waiting.
 - A typed final answer decoded from the agent's text (`desk.answer`).
-- Telemetry correlation from agent to tool to saga to HTTP.
+- Telemetry correlation from agent to tool to saga to HTTP: the desk's own
+  `sinal/correlation` ticket id joins fabric runs; saga and llm_wire do not carry it.
 
 ## Layout
 
@@ -40,6 +41,7 @@ Seams under test:
 - `src/support_desk/desk.gleam`: agent, tools, policy, typed answer.
 - `src/support_desk/domain.gleam`: records, codecs, tool definitions.
 - `src/support_desk/refund.gleam`: the saga. `shop.gleam`: HTTP adapters.
+- `src/support_desk/events.gleam`: the desk's own `ticket.opened` and `ticket.answered` events.
 - `src/support_desk/ledger.gleam`: in-memory ledger.
 - `src/support_desk/services.gleam`, `provider.gleam`: scripted loopback services.
 - `src/support_desk/telemetry.gleam`: event collector and per-ticket trail.
@@ -49,7 +51,7 @@ Seams under test:
 From this directory, inside the oversight dev shell:
 
 ```sh
-gleam test   # 10 tests
+gleam test   # 12 tests
 gleam run    # prints each ticket, the ledger, and one ticket's telemetry trail
 ```
 

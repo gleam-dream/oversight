@@ -26,9 +26,11 @@ import json/blueprint/codec
 import llm_wire/config
 import llm_wire/provider/openai
 import llm_wire/types
+import sinal/correlation.{type Correlation}
 import support_desk/domain.{
   type Eligibility, type OrderQuery, type Resolution, Eligibility,
 }
+import support_desk/events
 import support_desk/ledger.{type Ledger}
 import support_desk/refund
 import support_desk/shop.{
@@ -38,9 +40,11 @@ import support_desk/shop.{
 /// The per-ticket context every tool and policy decision receives.
 pub type Session {
   Session(
-    ticket: String,
-    /// Tags this ticket's HTTP calls in http_gun's observations.
-    correlation: http_obs.Id,
+    /// The desk's own correlation for this ticket, in its `ticket.*` events.
+    ticket: Correlation,
+    /// Tags this ticket's HTTP calls in http_gun's observations, which carry
+    /// their own `Id` until http_gun adopts `Correlation`.
+    http_id: http_obs.Id,
     /// Refunds of at least this many cents need a human approver; 0 means
     /// every refund does.
     approval_from_cents: Int,
@@ -125,11 +129,11 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
   |> result.map_error(fn(errors) { "agent: " <> string.inspect(errors) })
 }
 
-/// A new ticket's session; registering `correlation` with the telemetry
+/// A new ticket's session; registering `http_id` with the telemetry
 /// collector is the caller's job.
 pub fn session(
   desk: Desk,
-  ticket: String,
+  ticket: Correlation,
   approval_from_cents: Int,
 ) -> Session {
   Session(ticket, http_obs.new_id(), approval_from_cents, desk.shop)
@@ -140,7 +144,31 @@ pub fn open_ticket(
   session: Session,
   message: String,
 ) -> Result(fabric.Run(Session), fabric.StartError) {
-  fabric.start(desk.store, desk.agent, session, message)
+  use handle <- result.map(fabric.start(
+    desk.store,
+    desk.agent,
+    session,
+    message,
+  ))
+  events.opened(session.ticket, run.id_to_string(fabric.id(handle)))
+  handle
+}
+
+/// The run's final answer, decoded with `answer`, recorded as the ticket's
+/// `ticket.answered` event.
+pub fn close(
+  session: Session,
+  handle: fabric.Run(Session),
+  outcome: run.Outcome,
+) -> Answer {
+  let decoded = answer(outcome)
+  let kind = case decoded {
+    Resolved(_) -> events.AnsweredTyped
+    Untyped(..) -> events.AnsweredUntyped
+    Ended(_) -> events.AnsweredNothing
+  }
+  events.answered(session.ticket, run.id_to_string(fabric.id(handle)), kind)
+  decoded
 }
 
 /// Refunds at or above the session's threshold wait for an approver.
@@ -159,7 +187,7 @@ pub fn refund_policy(
 fn correlated(session: Session) -> Shop {
   shop.Shop(
     ..session.shop,
-    client: http_gun.with_correlation(session.shop.client, session.correlation),
+    client: http_gun.with_correlation(session.shop.client, session.http_id),
   )
 }
 
@@ -207,7 +235,7 @@ pub fn answer(outcome: run.Outcome) -> Answer {
     run.Completed(text) ->
       case codec.decode_json(domain.resolution(), text) {
         Ok(resolution) -> Resolved(resolution)
-        Error(error) -> Untyped(text, codec.render_json_decode_error(error))
+        Error(error) -> Untyped(text, codec.describe_decode_error(error))
       }
     other -> Ended(other)
   }

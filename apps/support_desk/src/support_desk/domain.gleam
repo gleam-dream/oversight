@@ -6,7 +6,7 @@
 //// typed final `Resolution` parsed out of the agent's answer.
 
 import fabric/tool
-import json/blueprint/codec.{type Codec, type Properties}
+import json/blueprint/codec.{type Codec}
 
 pub type OrderQuery {
   OrderQuery(order_id: String)
@@ -62,94 +62,113 @@ pub const max_refund_cents = 1_000_000
 // Codecs ------------------------------------------------------------------
 
 pub fn order_query() -> Codec(OrderQuery) {
-  codec.field("order_id", codec.string() |> codec.describe("Order id, A-123"))
-  |> codec.imap(OrderQuery, fn(query) { query.order_id })
+  use order_id <- codec.field(
+    "order_id",
+    codec.string() |> codec.describe("Order id, A-123"),
+    fn(query: OrderQuery) { query.order_id },
+  )
+  codec.success(OrderQuery(order_id:))
 }
 
 pub fn order() -> Codec(Order) {
-  record4(
-    codec.required("order_id", codec.string()),
-    codec.required("customer", codec.string()),
-    codec.required("total_cents", codec.int()),
-    codec.required("status", codec.string()),
-    Order,
-    fn(o) { o.order_id },
-    fn(o) { o.customer },
-    fn(o) { o.total_cents },
-    fn(o) { o.status },
-  )
+  use order_id <- codec.field("order_id", codec.string(), fn(o: Order) {
+    o.order_id
+  })
+  use customer <- codec.field("customer", codec.string(), fn(o: Order) {
+    o.customer
+  })
+  use total_cents <- codec.field("total_cents", codec.int(), fn(o: Order) {
+    o.total_cents
+  })
+  use status <- codec.field("status", codec.string(), fn(o: Order) { o.status })
+  codec.success(Order(order_id:, customer:, total_cents:, status:))
 }
 
 pub fn eligibility() -> Codec(Eligibility) {
-  record4(
-    codec.required("order_id", codec.string()),
-    codec.required("eligible", codec.bool()),
-    codec.required("refundable_cents", codec.int()),
-    codec.required("note", codec.string()),
-    Eligibility,
-    fn(e) { e.order_id },
-    fn(e) { e.eligible },
-    fn(e) { e.refundable_cents },
-    fn(e) { e.note },
+  use order_id <- codec.field("order_id", codec.string(), fn(e: Eligibility) {
+    e.order_id
+  })
+  use eligible <- codec.field("eligible", codec.bool(), fn(e: Eligibility) {
+    e.eligible
+  })
+  use refundable_cents <- codec.field(
+    "refundable_cents",
+    codec.int(),
+    fn(e: Eligibility) { e.refundable_cents },
   )
+  use note <- codec.field("note", codec.string(), fn(e: Eligibility) { e.note })
+  codec.success(Eligibility(order_id:, eligible:, refundable_cents:, note:))
 }
 
 pub fn refund_request() -> Codec(RefundRequest) {
-  let assert Ok(amount) = codec.integer_between(1, max_refund_cents)
-  let assert Ok(request) =
-    codec.record3(
-      codec.required("order_id", codec.string()),
-      codec.required(
-        "amount_cents",
-        amount |> codec.describe("Refund amount in cents"),
-      ),
-      codec.required("reason", codec.string()),
-      RefundRequest,
-      fn(r) { r.order_id },
-      fn(r) { r.amount_cents },
-      fn(r) { r.reason },
-    )
-  request
+  use order_id <- codec.field("order_id", codec.string(), fn(r: RefundRequest) {
+    r.order_id
+  })
+  use amount_cents <- codec.field(
+    "amount_cents",
+    codec.integer_between(1, max_refund_cents)
+      |> codec.describe("Refund amount in cents"),
+    fn(r: RefundRequest) { r.amount_cents },
+  )
+  use reason <- codec.field("reason", codec.string(), fn(r: RefundRequest) {
+    r.reason
+  })
+  codec.success(RefundRequest(order_id:, amount_cents:, reason:))
 }
 
 pub fn refund_receipt() -> Codec(RefundReceipt) {
-  record4(
-    codec.required("refund_id", codec.string()),
-    codec.required("order_id", codec.string()),
-    codec.required("amount_cents", codec.int()),
-    codec.required("ledger_entry", codec.int()),
-    RefundReceipt,
-    fn(r) { r.refund_id },
-    fn(r) { r.order_id },
-    fn(r) { r.amount_cents },
-    fn(r) { r.ledger_entry },
+  use refund_id <- codec.field(
+    "refund_id",
+    codec.string(),
+    fn(r: RefundReceipt) { r.refund_id },
   )
+  use order_id <- codec.field("order_id", codec.string(), fn(r: RefundReceipt) {
+    r.order_id
+  })
+  use amount_cents <- codec.field(
+    "amount_cents",
+    codec.int(),
+    fn(r: RefundReceipt) { r.amount_cents },
+  )
+  use ledger_entry <- codec.field(
+    "ledger_entry",
+    codec.int(),
+    fn(r: RefundReceipt) { r.ledger_entry },
+  )
+  codec.success(RefundReceipt(
+    refund_id:,
+    order_id:,
+    amount_cents:,
+    ledger_entry:,
+  ))
 }
 
 pub fn outcome() -> Codec(Outcome) {
-  let assert Ok(outcome) =
-    codec.string_enum([
-      #("refunded", Refunded),
-      #("declined", Declined),
-      #("not_eligible", NotEligible),
-      #("failed", RefundFailed),
-      #("unconfirmed", Unconfirmed),
-    ])
-  outcome
+  codec.string_enum([
+    #("refunded", Refunded),
+    #("declined", Declined),
+    #("not_eligible", NotEligible),
+    #("failed", RefundFailed),
+    #("unconfirmed", Unconfirmed),
+  ])
 }
 
 pub fn resolution() -> Codec(Resolution) {
-  record4(
-    codec.required("order_id", codec.string()),
-    codec.required("outcome", outcome()),
-    codec.required("refunded_cents", codec.int()),
-    codec.required("message", codec.string()),
-    Resolution,
-    fn(r) { r.order_id },
-    fn(r) { r.outcome },
-    fn(r) { r.refunded_cents },
-    fn(r) { r.message },
+  use order_id <- codec.field("order_id", codec.string(), fn(r: Resolution) {
+    r.order_id
+  })
+  use outcome <- codec.field("outcome", outcome(), fn(r: Resolution) {
+    r.outcome
+  })
+  use refunded_cents <- codec.field(
+    "refunded_cents",
+    codec.int(),
+    fn(r: Resolution) { r.refunded_cents },
   )
+  use message <- codec.field("message", codec.string(), fn(r: Resolution) {
+    r.message
+  })
+  codec.success(Resolution(order_id:, outcome:, refunded_cents:, message:))
 }
 
 // Tool definitions --------------------------------------------------------
@@ -178,31 +197,5 @@ pub fn issue_refund() -> tool.Definition(RefundRequest, RefundReceipt) {
     "Refund an order. Needs a human approver above the desk's limit.",
     refund_request(),
     refund_receipt(),
-  )
-}
-
-// Glue: json_blueprint's record helpers stop at three fields. ------------
-
-fn record4(
-  a: Properties(a),
-  b: Properties(b),
-  c: Properties(c),
-  d: Properties(d),
-  construct: fn(a, b, c, d) -> r,
-  get_a: fn(r) -> a,
-  get_b: fn(r) -> b,
-  get_c: fn(r) -> c,
-  get_d: fn(r) -> d,
-) -> Codec(r) {
-  let assert Ok(ab) = codec.combine(a, b)
-  let assert Ok(abc) = codec.combine(ab, c)
-  let assert Ok(abcd) = codec.combine(abc, d)
-  codec.object(abcd)
-  |> codec.imap(
-    fn(values) {
-      let #(#(#(a, b), c), d) = values
-      construct(a, b, c, d)
-    },
-    fn(r) { #(#(#(get_a(r), get_b(r)), get_c(r)), get_d(r)) },
   )
 }

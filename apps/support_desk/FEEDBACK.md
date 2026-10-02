@@ -136,6 +136,8 @@ telemetry trail.
   - saga: an optional caller correlation in `execution.Config`, copied
     into every event's metadata.
 
+- **Status (wave 2):** partially resolved by sinal 43279b3 (`sinal/correlation`); the app now keys a ticket by its own `Correlation`. The app emits `support_desk.ticket.opened` (ticket correlation plus fabric run id) and `ticket.answered` (`src/support_desk/events.gleam`, 83 lines new), and the collector derives the run-to-ticket join from them, so `telemetry.trail(telemetry, ticket)` no longer takes the run id. The trail grew from 18 to 20 events. The cause is untouched: fabric events still carry a `run: String`, saga and llm_wire carry nothing, and http_gun still uses `telemetry.Id`, so the ticket still has two identities (`Session.ticket` and `Session.http_id`) and `telemetry.register` remains. The 22 saga and 100 llm_wire events stay unattributable until those packages adopt `Correlation`.
+
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
 - **Packages**: fabric, llm_wire, json_blueprint. **Kind**: composition. **Severity**: major (known: fabric card concern 5).
@@ -189,6 +191,8 @@ telemetry trail.
 - **Proposal**: as in the card, a property builder that removes the arity
   cliff.
 
+- **Status (wave 2):** resolved by json_blueprint 9a6633a (`codec.field`/`success` builder); `record4` and its 23 lines are deleted (`domain.gleam`). The six codecs and their `let assert Ok` for `integer_between` and `string_enum` now read as plain builders. See the re-run for what that cost in line count.
+
 ### SD-7 Testing against a built-in provider wire means hand-writing its SSE
 
 - **Packages**: llm_wire. **Kind**: ergonomics. **Severity**: minor.
@@ -225,6 +229,8 @@ telemetry trail.
   for one (apps/support_desk/src/support_desk/telemetry.gleam:82-89) before
   either client.
 - **Proposal**: none beyond the sinal card's; the cost is 8 lines.
+
+- **Status (wave 2):** partially resolved by sinal 1ff1c18: `forwarder.new(name)` is total and takes no capacity, so the app drops the `Result` handling and 3 lines; the supervisor and the `config.observations` wiring stay, because http_gun 1dc20a1 still emits only through its own forwarder (it did not adopt `sinal.emit` plus an application route).
 
 ## Glue measure
 
@@ -306,3 +312,79 @@ SD-3).
   instead") during compilation; they come from third-party dependencies and
   need no app change. Hex rate limiting interrupted `gleam update` and the
   first `gleam test` again; a retry after 75 s cleared it.
+
+## Re-run after wave 2
+
+Package heads: sinal 5aef827, json_blueprint f55ec09, fabric 7844fa7,
+saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1. 12 tests pass (10 before,
+plus two for the app's own events), and `gleam run` prints the five tickets,
+the ledger and the T-1 trail (now 20 events with the desk's `ticket.opened`
+and `ticket.answered`; 22 saga and 100 llm_wire events still unattributable).
+fabric's `fork.result_codec` and `fabric_mcp` contract changes do not touch
+this app. Nothing from the fabric `## Unreleased` list needed an edit
+(`fabric_saga.tool`, `tool.define`, `fabric/llm.model` compiled unchanged).
+
+| Seam                                 | Before                                                             | After                                                    | Change                                                                |
+| ------------------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| json_blueprint record arity (SD-6)   | 23 lines of `record4`, 84 for the six codecs                       | 0 glue, 103 for the six codecs                           | -23 glue; codec lines +19 (builder getters carry annotations)         |
+| Sinal handler ids and attach results | 20 lines (`observe` helper, suffix, `try_map`, forwarder `Result`) | 0                                                        | -20; `handlers` returns `List(Attachment)`                            |
+| `let assert Ok` for definitions      | 3 (`integer_between`, `string_enum`, `handler_id`)                 | 0 in codecs and telemetry                                | -3; 3 remain for `saga.define`, `types.*`, `schema_json`              |
+| Telemetry correlation (SD-3)         | ~40 lines, run id passed by the caller                             | ~40 lines plus `events.gleam` (83) and `desk.close` (25) | +108 lines for two new events and a typed ticket id; the join is data |
+
+Net: about 46 lines of glue deleted (23 + 20 + 3). The app gained about 108
+lines for ticket events, which is new behavior, not glue: it is what adopting
+`sinal/correlation` for an id the app invented costs.
+
+### New friction
+
+- **Two builders, two getter conventions.** json_blueprint's `field` wants
+  the record type on every getter; sinal's `and` wants it on the first only:
+
+  ```gleam
+  use order_id <- codec.field("order_id", codec.string(), fn(o: Order) { o.order_id })
+  use customer <- codec.field("customer", codec.string(), fn(o: Order) { o.customer })
+  // ...
+  |> fields.and(correlation.field(), fn(m: AnswerMetadata) { m.ticket })
+  |> fields.and(fields.string("run"), fn(m) { m.run })
+  ```
+
+  For a four-field record the old `record4(.., fn(o) { o.order_id }, ..)`
+  had unannotated getters and fit in 14 lines; the builder takes 19 after
+  `gleam format`, because each `fn(o: Order) { o.x }` repeats the type. The
+  arity cliff is gone, the noise per field is higher. Typing the getter once
+  would help (a `codec.record(Order)` start that fixes `r`), but I did not
+  find a way in the current signature.
+
+- **`correlation.field()` is always `Option`.** The desk's events always have
+  a ticket, yet metadata must hold `Option(Correlation)`, so every emission
+  wraps `Some(ticket)` (`events.opened`, `events.answered`) and the collector
+  unwraps with a `case` and a `None -> Nil` arm that cannot happen
+  (`telemetry.gleam`, the `ticket` closure). A `correlation.required_field()`
+  would remove both for app-owned events.
+- **Two identities per ticket until http_gun adopts `Correlation`.**
+  `Session.ticket: Correlation` and `Session.http_id: http_obs.Id` must be
+  minted together and joined by `telemetry.register`. The migration guide
+  says to use `Correlation` for the app's own events and wait for wave 3, but
+  does not say a second id is needed meanwhile; the app now carries both.
+- **Event descriptors are rebuilt per call.** `events.ticket_opened()` builds
+  the `Event` on every call (`sinal.event` is total but not free), and
+  `emit` and `observe` both call it. A module-level constant is not possible
+  for a value built with functions, so the app pays a rebuild for each
+  emission. Not measured; probably small.
+- **`fields.enum` list is unchecked.** `events.answer()` repeats the
+  constructors next to a `case`; the compiler checks the `case` but not the
+  list. The guide's advice (a round-trip test) is followed in
+  `every_answer_kind_round_trips_through_the_event_fields_test`.
+
+### Migration guides
+
+Sufficient. The sinal guide's before/after for `observe`, `forwarder.new` and
+`handler_id` covered every edit, and the json_blueprint guide's record,
+`string_enum` and `render_json_decode_error` entries covered the codecs; the
+app compiled after those edits with no other change. Gaps: (1) the
+json_blueprint guide shows the getter annotation rule but not the cost for
+wide records; (2) the sinal guide does not say how an app bridges
+`Correlation` and http_gun's `Id` before wave 3; (3) neither guide mentions
+that `correlation.field()` forces `Option` on app-owned events; (4) the guide
+lists no replacement for http_gun's forwarder requirement (SD-9) because
+http_gun did not change.

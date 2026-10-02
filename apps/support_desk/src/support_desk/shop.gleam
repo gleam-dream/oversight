@@ -52,7 +52,7 @@ pub fn get_order(shop: Shop, order_id: String) -> Result(Order, LookupError) {
     200 ->
       codec.decode_json(domain.order(), response.body)
       |> result.map_error(fn(error) {
-        OrdersUnavailable(codec.render_json_decode_error(error))
+        OrdersUnavailable(codec.describe_decode_error(error))
       })
     404 -> Error(NoSuchOrder(order_id))
     _ -> Error(OrdersUnavailable("orders API answered " <> status(response)))

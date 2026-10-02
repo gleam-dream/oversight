@@ -6,10 +6,13 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import saga/execution
+import sinal/correlation
+import sinal/fields
 import support_desk
 import support_desk/app.{type App}
 import support_desk/desk
 import support_desk/domain
+import support_desk/events
 import support_desk/ledger
 import support_desk/provider
 import support_desk/refund
@@ -29,8 +32,9 @@ fn open(
   message: String,
   approval_from_cents: Int,
 ) -> #(desk.Session, fabric.Run(desk.Session)) {
+  let assert Ok(ticket) = correlation.from_string(ticket)
   let session = desk.session(app.desk, ticket, approval_from_cents)
-  telemetry.register(app.telemetry, session.correlation, ticket)
+  telemetry.register(app.telemetry, session.http_id, ticket)
   let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
   #(session, handle)
 }
@@ -221,12 +225,15 @@ pub fn telemetry_follows_agent_and_tool_http_but_not_the_saga_test() {
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
     fabric.approve(handle, pending.reference, reviewer: None, context: session)
-  let _ = finish(handle)
-  let run_id = run.id_to_string(fabric.id(handle))
-  let trail = telemetry.trail(app.telemetry, "T-9", run_id)
+  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert desk.Resolved(_) = desk.close(session, handle, outcome)
+  let trail = telemetry.trail(app.telemetry, session.ticket)
   let names = list.map(trail, fn(o) { o.name })
-  // Fabric's events carry the run id; the lookups' HTTP calls carry the
-  // ticket's correlation because the tool handler receives the session.
+  // The desk's own events carry the ticket's correlation and the run id,
+  // which attributes fabric's events; the lookups' HTTP calls carry the
+  // ticket's http_gun id because the tool handler receives the session.
+  assert list.contains(names, "ticket.opened")
+  assert list.contains(names, "ticket.answered")
   assert list.contains(names, "approval.request")
   assert list.contains(names, "run.stop")
   assert telemetry.count(trail, telemetry.HttpGun) == 4
@@ -241,6 +248,31 @@ pub fn telemetry_follows_agent_and_tool_http_but_not_the_saga_test() {
   let uncorrelated =
     list.count(all, fn(o) { o.key == telemetry.HttpRequest(None) })
   assert uncorrelated > 0
+  app.stop(app)
+}
+
+pub fn every_answer_kind_round_trips_through_the_event_fields_test() {
+  let ticket = correlation.unique()
+  list.each(
+    [events.AnsweredTyped, events.AnsweredUntyped, events.AnsweredNothing],
+    fn(answer) {
+      let metadata = events.TicketAnswered(Some(ticket), "run-1", answer)
+      let raw = fields.encode(events.answer(), metadata)
+      assert fields.decode(events.answer(), raw) == Ok(metadata)
+    },
+  )
+}
+
+pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
+  let limits = agent.Limits(..agent.default_limits(), max_turns: 2)
+  let assert Ok(app) = app.start_with(limits, shop_deadline_ms: 1000)
+  let #(session, handle) = open(app, "T-10", "Refund order A-100.", 0)
+  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert desk.Ended(_) = desk.close(session, handle, outcome)
+  let trail = telemetry.trail(app.telemetry, session.ticket)
+  let assert Ok(answered) =
+    list.find(trail, fn(o) { o.name == "ticket.answered" })
+  assert answered.detail == "AnsweredNothing"
   app.stop(app)
 }
 
