@@ -79,6 +79,45 @@ than ported.
 | all            | llm_wire, saga and sinal gates now fail on a public module without a `////` doc. Add the same check to every package's gate.                                                                                                                           | 2–5   |
 | http_gun       | `AGENTS.md` still says "No push" and keeps oversight and siblings read-only, from the construction phase. It conflicts with release work.                                                                                                              | owner |
 
+### Wave 2 results (2 October 2026)
+
+Wave 2 redesigned the two leaf packages, migrated every dependent package and
+all eight apps, and validated the whole set before anything was pushed. Every
+package's full gate passed against the final heads (sinal 5aef827,
+json_blueprint 8d4839b).
+
+| Package        | Commits          | Result                                                                                                                                                                                                                                                                                                   |
+| -------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sinal          | 1ff1c18…5aef827  | SINAL-R1–R10. `sinal/correlation`; total definitions that panic with the key; one route-aware `emit`; automatic handler ids; one `Subscription`; forwarder default capacity 1,024. Starts `telemetry` itself. A decode failure now skips one call instead of detaching the handler. 114 tests.           |
+| json_blueprint | 0cc4b60…8d4839b  | JSONB-R1–R10. Functions 228 → 129, modules 12 → 6. `use` record builder, N-ary union builder, `to_json`/`decoder` bridges, `contract` with `value_codec`, element-count limit (262,144), codegen in a dev-only package, 1.x frozen at the root. 210 Erlang tests, 69 codegen, `jsonschema` oracle 73/73. |
+| http_gun       | 0f2e74f…1b705cc  | Migrated; no API change. Sinal snapshot at 5aef827. 136 tests, full gate.                                                                                                                                                                                                                                |
+| saga           | 43ae141, 2eb5cf5 | Migrated; no API change; 235 added, 340 removed. 165 tests plus examples, negative fixtures and durable restart.                                                                                                                                                                                         |
+| grind          | c1920e6, 69bbc3c | Migrated; no API change; 823 added, 1,339 removed. 269 tests, Oban oracle, consumer 12.                                                                                                                                                                                                                  |
+| llm_wire       | 6b5ae2d, bc5d626 | Migrated. `tool_from_contract` takes `contract.Contract`. The Float-based Value→JSON bridge is replaced by exact `value.to_json`. 234 tests, full gate.                                                                                                                                                  |
+| relay          | 23e4063, cf0295b | Migrated; the ~70-line Value↔JSON bridge is gone. Tool schemas expose `UnionSchema`. 143 tests in CI mode.                                                                                                                                                                                               |
+| warden         | bf4f796, efead8a | Migrated; no API change. 130 tests, negative compile tests, consumer 8.                                                                                                                                                                                                                                  |
+| fabric         | 7844fa7          | Migrated. `fork.result_codec` returns the codec directly. `graph/llm` receipts write v2 and still read v1. 45/45 gate checks, core 653.                                                                                                                                                                  |
+
+All eight apps pass on these heads. Each recorded its result in a `## Re-run
+after wave 2` section of its `FEEDBACK.md`. Resolved outright: EXT-6, SD-6,
+SMCP-8 and TH-6. Partly resolved: the Blueprint bridge findings (EXT-5, RA-8)
+and every correlation and handler-id finding on the application side.
+
+**Follow-ups found during wave 2**, now part of later waves:
+
+| Package               | Item                                                                                                                                                                                                                           | Wave    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| grind, json_blueprint | Grind's `worker.codec` encoder cannot fail; Blueprint's `to_json` can. Apps bridge with a panic. Give grind's codec a failure channel (GRIND-R5/R6), so a value the codec rejects fails at submit with a typed error.          | 3       |
+| http_gun              | http_gun already writes its own random id under the metadata key `correlation`, which clashes with `sinal/correlation`. HTTPGUN-R8 must replace it, not add a second key.                                                      | 3       |
+| sinal                 | `correlation.field()` is always `Option`; events that always carry a correlation need `Some` wrappers and an unreachable `None` arm. Add a required variant. Three apps hit this.                                              | 3       |
+| sinal                 | `fields.enum` repeats the constructor list and the compiler cannot check it is complete. Decode failures no longer detach handlers, and emit warns on unlisted values; document a test pattern that round-trips every variant. | 3       |
+| sinal                 | Automatic handler ids show as `{sinal_handler, N}`, so an app cannot tell its handlers apart; `with_id` reintroduces a `Result`. Add a readable label that cannot fail.                                                        | 3       |
+| sinal                 | No accessor returns an `Event`'s field codecs, so a test cannot encode an event without a native handler. `fields.encode_for_emit` is `@internal` in a public module (convention 9).                                           | 3       |
+| json_blueprint        | No `codec.placeholder(codec)` accessor, so a generic wrapper cannot derive a placeholder (fabric has three workarounds). No `codec.value()` identity codec for a pass-through `Value`. Both are additive.                      | 3       |
+| json_blueprint        | Every getter in the record builder needs a type annotation; Gleam's inference cannot remove it, so one-field records are longer than before. Documented; revisit if Gleam's inference improves.                                | —       |
+| json_blueprint        | `gleam.toml` still says version 1.7.1. Bump to 2.0.0 when publishing.                                                                                                                                                          | publish |
+| relay                 | Tool declarations expose `input_schema` as `json.Json`, so consumers render and reparse it. Expose the contract or the schema value (RELAY-R4).                                                                                | 4       |
+
 ## sinal
 
 | Id        | Change                                                                                              | Breaks              | Effort | Wave | Status                                                              |
