@@ -130,9 +130,6 @@ pub fn start(options: Options) -> Result(Service, String) {
       clock: options.clock,
       snooze: attempt.default_snooze(),
       max_response_bytes: 4096,
-      correlate: fn(id, delivery_id) {
-        telemetry.note_http(collector, id, delivery_id)
-      },
     )
   let worker = delivery.worker(deps, options.plan)
   let context =

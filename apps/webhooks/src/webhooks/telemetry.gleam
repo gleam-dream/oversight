@@ -1,20 +1,18 @@
 //// Collects the Sinal events of every package in the app and joins them per
 //// delivery.
 ////
-//// The app's own event carries the delivery id as the shared Sinal
-//// `correlation` key. grind and http_gun do not carry a correlation yet:
-//// grind events carry `job_id`, http_gun events carry an opaque `request_id`
-//// and an optional opaque correlation `Id`, and the delivery worker learns
-//// neither its job id nor anything it can put into http_gun's correlation.
-//// The collector therefore keeps two join tables the app fills in by hand:
-//// job id -> delivery id (at submit time) and http correlation Id ->
-//// delivery id (inside the worker).
+//// The app's own event and every http_gun event carry the delivery id as the
+//// shared Sinal `correlation` key: the worker passes the delivery's
+//// `Correlation` to http_gun. grind does not carry a correlation yet: its
+//// events carry `job_id`, and the delivery worker does not learn its job id.
+//// The collector therefore keeps one join table the app fills in by hand:
+//// job id -> delivery id (at submit time).
 
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option}
 import gleam/otp/actor
 import gleam/string
 import grind/diagnostic
@@ -56,35 +54,33 @@ pub type Outcome {
 
 /// `[webhooks, delivery, attempted]`, emitted synchronously by the worker.
 pub fn delivery_attempted() -> sinal.Event(AttemptMeasurements, AttemptMetadata) {
-  let measurements =
-    fields.record({
-      use duration_ms <- fields.parameter
-      AttemptMeasurements(duration_ms:)
-    })
-    |> fields.and(fields.int("duration_ms"), fn(m: AttemptMeasurements) {
+  let measurements = {
+    use duration_ms <- fields.include(fields.int("duration_ms"), get: fn(m) {
       m.duration_ms
     })
-    |> fields.build
-  let metadata =
-    fields.record({
-      use correlation <- fields.parameter
-      use tenant <- fields.parameter
-      use outcome <- fields.parameter
-      use status <- fields.parameter
-      AttemptMetadata(correlation:, tenant:, outcome:, status:)
+    fields.success(AttemptMeasurements(duration_ms:))
+  }
+  let metadata = {
+    use correlation <- fields.include(correlation.field(), get: fn(m) {
+      m.correlation
     })
-    |> fields.and(correlation.field(), fn(m: AttemptMetadata) { m.correlation })
-    |> fields.and(fields.string("tenant"), fn(m) { m.tenant })
-    |> fields.and(
+    use tenant <- fields.include(fields.string("tenant"), get: fn(m) {
+      m.tenant
+    })
+    use outcome <- fields.include(
       fields.enum(
         "outcome",
         [Delivered, Retried, Snoozed, Gone, Refused, Rejected],
         outcome_name,
       ),
-      fn(m) { m.outcome },
+      get: fn(m) { m.outcome },
     )
-    |> fields.and(fields.optional(fields.int("status")), fn(m) { m.status })
-    |> fields.build
+    use status <- fields.include(
+      fields.optional(fields.int("status")),
+      get: fn(m) { m.status },
+    )
+    fields.success(AttemptMetadata(correlation:, tenant:, outcome:, status:))
+  }
   sinal.event(["webhooks", "delivery", "attempted"], measurements, metadata)
 }
 
@@ -110,7 +106,6 @@ pub fn delivery_correlation(delivery_id: String) -> Option(Correlation) {
 
 pub type Key {
   Job(Int)
-  Http(http_telemetry.Id)
   Correlated(Correlation)
   Unkeyed
 }
@@ -126,22 +121,16 @@ pub opaque type Collector {
 pub opaque type Message {
   Record(source: String, name: String, key: Key, detail: String)
   NoteJob(job_id: Int, delivery_id: String)
-  NoteHttp(id: http_telemetry.Id, delivery_id: String)
   Snapshot(reply: Subject(State))
 }
 
 pub opaque type State {
-  State(
-    seq: Int,
-    lines: List(Line),
-    jobs: Dict(Int, String),
-    https: Dict(http_telemetry.Id, String),
-  )
+  State(seq: Int, lines: List(Line), jobs: Dict(Int, String))
 }
 
 pub fn start() -> Collector {
   let assert Ok(started) =
-    actor.new(State(0, [], dict.new(), dict.new()))
+    actor.new(State(0, [], dict.new()))
     |> actor.on_message(fn(state: State, message) {
       case message {
         Record(source, name, key, detail) ->
@@ -154,10 +143,6 @@ pub fn start() -> Collector {
         NoteJob(job, delivery) ->
           actor.continue(
             State(..state, jobs: dict.insert(state.jobs, job, delivery)),
-          )
-        NoteHttp(id, delivery) ->
-          actor.continue(
-            State(..state, https: dict.insert(state.https, id, delivery)),
           )
         Snapshot(reply) -> {
           process.send(reply, state)
@@ -173,14 +158,6 @@ pub fn note_job(collector: Collector, job_id: Int, delivery_id: String) -> Nil {
   process.send(collector.subject, NoteJob(job_id, delivery_id))
 }
 
-pub fn note_http(
-  collector: Collector,
-  id: http_telemetry.Id,
-  delivery_id: String,
-) -> Nil {
-  process.send(collector.subject, NoteHttp(id, delivery_id))
-}
-
 pub fn lines(collector: Collector) -> List(Line) {
   let state = process.call(collector.subject, 1000, Snapshot)
   list.reverse(state.lines)
@@ -194,7 +171,6 @@ pub fn trace(collector: Collector, delivery_id: String) -> List(Line) {
   |> list.filter(fn(line) {
     case line.key {
       Job(job) -> dict.get(state.jobs, job) == Ok(delivery_id)
-      Http(id) -> dict.get(state.https, id) == Ok(delivery_id)
       Correlated(c) -> correlation.to_string(c) == delivery_id
       Unkeyed -> False
     }
@@ -279,13 +255,12 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
     watch(c, diagnostic.capacity(), "grind.diag.capacity", fn(_, _) {
       #(Unkeyed, "")
     }),
-    // http_gun lifecycle, keyed by the correlation Id when one was set
+    // http_gun lifecycle, keyed by the delivery's correlation
     watch(c, http_telemetry.event(), "http_gun.lifecycle", fn(_, m) {
-      let key = case m.correlation {
-        Some(id) -> Http(id)
-        None -> Unkeyed
-      }
-      #(key, milestone(m.milestone) <> " mode=" <> string.inspect(m.mode))
+      #(
+        keyed(m.correlation),
+        milestone(m.milestone) <> " mode=" <> string.inspect(m.mode),
+      )
     }),
     // sinal's own drop accounting
     watch(c, forwarder.dropped_event(), "sinal.forwarder.dropped", fn(d, m) {
@@ -301,7 +276,7 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
     // the app's own attempt event
     watch(c, delivery_attempted(), "webhooks.delivery.attempted", fn(ms, m) {
       #(
-        option.map(m.correlation, Correlated) |> option.unwrap(Unkeyed),
+        keyed(m.correlation),
         outcome_name(m.outcome)
           <> " status="
           <> option.map(m.status, int.to_string) |> option.unwrap("-")
@@ -334,6 +309,10 @@ fn watch(
     let #(key, detail) = describe(m, d)
     process.send(collector.subject, Record(source, name, key, detail))
   })
+}
+
+fn keyed(correlation: Option(Correlation)) -> Key {
+  option.map(correlation, Correlated) |> option.unwrap(Unkeyed)
 }
 
 fn milestone(m: http_telemetry.Milestone) -> String {

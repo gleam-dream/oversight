@@ -4,8 +4,8 @@
 
 grind, http_gun and sinal compose into a working webhook service through
 public imports only. All 8 tests pass, and `gleam run` prints the full
-narrative. (Re-runs after the package fixes and after wave 2, both on
-2 Oct 2026: see the last two sections.) Most of the composition is direct. A grind worker is a closure, so
+narrative. (Re-runs after the package fixes, after wave 2 and after the follow-up
+fixes, all on 2 Oct 2026: see the last three sections.) Most of the composition is direct. A grind worker is a closure, so
 it can capture an http_gun client, and that includes a cassette playback
 client. http_gun's typed `Failure` maps cleanly onto grind's
 `WorkerResponse`. grind's retry policy receives the typed error, so a 429
@@ -219,6 +219,21 @@ registered version delivery-error-v1")`. Test:
   sees the delivery id in the app's event and a `#Reference<..>` string in
   http_gun's events for the same delivery. The http_gun and grind proposals
   above stay open (HTTPGUN-R8 is the http_gun half).
+
+- **Status (follow-up):** partially resolved by http_gun 056536b (c45adfe);
+  the http_gun join table and the key clash are gone. `with_correlation`
+  takes the delivery's `Correlation`, so the worker no longer calls
+  `new_id`, no `NoteHttp` message, `https` dictionary, `note_http` function
+  or `Deps.correlate` callback exists, and `service.gleam` no longer wires
+  one. The collector keys http_gun lines as `Correlated(Correlation)`, like
+  the app's own event; `Key.Http` is deleted, and `trace` matches both by
+  the same text comparison. Native consumers now read the delivery id from
+  `metadata.correlation` in both events (http_gun's opaque id moved to
+  `request_id`). About 48 correlation glue lines became about 30 (see the
+  follow-up re-run). Still open: the job id → delivery id table
+  (`web.gleam:166`, `service.gleam:146-148`, `telemetry.note_job`), because
+  grind's events carry `job_id` and the queue handler cannot see it; and the
+  forwarder ordering and the missing grind timestamps above.
 
 ### WHK-6 http_gun failure reasons have no stable public name
 
@@ -497,6 +512,15 @@ New friction from the redesigned APIs:
   guide's `fields.field(key, encode, decode.map(..))` form is shorter for
   one-field wrappers; the README could say when to prefer it.
 
+  **Status (follow-up):** partially resolved by sinal 5e8bee3. The
+  `parameter` line, the `fn(m: Type)` getter annotation and `build` are
+  gone, and each value is bound next to its field and getter, so a swapped
+  pair no longer compiles silently. The one-field measurements record went
+  8 → 5 lines and the whole descriptor 32 → 30. Each key still appears
+  twice (field, getter) plus the constructor label, and `gleam format`
+  still breaks most `include` lines, so the four-key metadata block is 22
+  lines.
+
 - **A correlation built from an app id is fallible**
   (sinal, ergonomics, minor). The delivery id is `event_id <> ":" <> sub.id`,
   and the event id is publisher input, so `correlation.from_string` can
@@ -509,9 +533,21 @@ New friction from the redesigned APIs:
   to "any application id" in the module doc, and consider a total
   `correlation.derive(String) -> Correlation` that hashes values over the
   bound.
+
+  **Status (follow-up):** not resolved, and wider. `required_field()` does
+  not apply: this event cannot promise a correlation, so it keeps
+  `correlation.field()` and `Option(Correlation)`, and `delivery_correlation`
+  stays. The same `Option` now reaches http_gun: `delivery.deliver` must
+  branch (`Some(c) -> with_correlation(client, c)`, `None -> client`), so a
+  delivery with an over-long id loses its correlation in the http_gun
+  events as well as in the app's event.
+
 - **Same key, different meaning on the wire** (http_gun, sinal,
   composition, minor): see the WHK-5 status. Until http_gun carries a
   `Correlation`, its `correlation` key holds an opaque VM reference string.
+
+  **Status (follow-up):** resolved by http_gun 056536b. The key holds the
+  caller's `Correlation`, and the opaque value lives under `request_id`.
 
 Migration guides: the sinal guide was sufficient for every compile error;
 each removed item the app used (`handler_id`, three-argument `observe`,
@@ -522,3 +558,58 @@ metadata record), so the 128-byte refusal for derived ids is easy to miss;
 it does not warn that a value missing from `fields.enum`'s list detaches
 `observe` handlers; and it does not say that http_gun's `correlation` key
 is not yet a `Correlation`. The json_blueprint guide does not apply.
+
+## Re-run after the follow-up fixes (2 Oct 2026)
+
+Heads: sinal 6de2b69 (record builder 5e8bee3, `required_field` f9cca37),
+grind 2d66835 (fallible encoders c44e4be), http_gun 056536b (caller
+correlation c45adfe). json_blueprint is not a dependency, so its follow-up
+does not apply.
+`../scripts/with-postgres.sh gleam test`: 9 passed, no failures (unchanged).
+No test changed: `delivery_test` already asserts that the `/flaky` trace
+contains `http_gun.lifecycle` lines, which now reach the delivery through
+the `Correlation` key and no longer through the join table. `gleam run`
+prints the full narrative and the `/flaky` trace as before; the trace shows
+http_gun lines for all three attempts.
+
+Glue, same measure as before (non-blank, non-comment lines):
+
+| Seam                                                | Before → after | Change                                                                                                                                                    |
+| --------------------------------------------------- | -------------: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App event descriptor (`delivery_attempted`)         |        32 → 30 | `parameter`, `and`, `build` and the getter annotation gone; each value bound by name next to its getter                                                   |
+| Codec encoders (`attempt.gleam`, 3 `worker.codec`)  |          0 → 0 | 3 `worker.infallible(..)` wrappers, a 2-line change each (opening and closing) with no new lines; plain gleam_json, no Blueprint bridge here              |
+| http_gun correlation (join table, `Deps.correlate`) |       ~16 → ~8 | `new_id`, `correlate`, `NoteHttp`, `note_http`, `https`, `Key.Http` and its collector arm deleted; a 4-line `case` on `Option` and a 3-line `keyed` added |
+| Cross-package correlation (job join table, wiring)  |      ~48 → ~38 | the job id → delivery id table, `note_job` and `on_submitted` stay                                                                                        |
+
+Net over `src/`: 48 lines added, 77 removed (comments and blank lines
+included; the module doc lost 5 lines of "grind and http_gun do not carry a
+correlation yet"). No test lines changed.
+
+New friction:
+
+- **The correlation is `Option` end to end, so every consumer branches**
+  (app design plus sinal, minor). `required_field()` would have removed the
+  `Some(..)` wrapper and the `None` arm, but only if the id fit in 128
+  bytes; see the status on the fallible-correlation note. The cost moved
+  rather than vanished: `delivery.deliver` has a `case` and the collector a
+  `keyed` helper. A total `correlation.derive` would let both go.
+- **`worker.codec` still returns `Result` for a constant version string**
+  (grind, ergonomics, nit). The three `let assert Ok(codec) = worker.codec(..)`
+  in `attempt.gleam` survive unchanged, so wrapping the encoder in
+  `worker.infallible` is purely ceremony here: the app's encoders are
+  total, and the `Result` the follow-up added shows up as a visible adapter
+  at each of the three call sites. A `worker.codec_total` (or a default of
+  total) would spare the common case.
+- **The collector still cannot attribute 148 of 251 events** (grind, composition, minor).
+  The `/flaky` run reports them as unattributed; they are grind
+  diagnostics (`checkout`, `ack`) with no job id and no correlation. The
+  follow-up fixes make http_gun joinable and leave grind as the remaining
+  seam (WHK-5, WHK-8).
+
+Migration guides: the sinal record-builder rule, the grind wrap and the
+http_gun before/after snippets were sufficient and accurate for this app,
+and the dependents table named every webhooks call site. One miss: the
+http_gun guide lists `delivery.gleam:44,117,121` and
+`telemetry.gleam:113,129,138,178,284,304` but not `service.gleam:133`
+(the `Deps.correlate` closure that disappears with the join table), which
+is visible only once `Deps` loses the field.
