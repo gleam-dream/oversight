@@ -67,6 +67,7 @@ orders.
 - Grind admission next to an app transaction (outbox plus `submit_with_id`).
 - One pog pool for the app and the saga storage; grind keeps its own.
 - Sinal: saga (synchronous), http_gun (app-owned forwarder) and grind
-  (grind-owned forwarder) events collected and attributed to one order.
+  (grind-owned forwarder) events collected and attributed to one order,
+  keyed by a `sinal/correlation` value made from the order id.
 
 The friction is in [FEEDBACK.md](FEEDBACK.md).

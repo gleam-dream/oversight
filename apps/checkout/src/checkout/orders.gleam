@@ -79,7 +79,7 @@ pub fn place_local(s: Services, order: OrderRequest) -> Report {
       telemetry.link(
         s.collector,
         telemetry.SagaRun(execution.run_id(run)),
-        order.order_id,
+        telemetry.order(order.order_id),
       )
       case execution.await(run, 60_000) {
         Ok(outcome) -> finalize(s, order, outcome)

@@ -96,7 +96,8 @@ pub fn order_api_confirms_and_sends_receipt_test() {
   assert eventually(fn() { db.receipt_sent(pool, "happy-1") }, 100)
 
   // One order can be followed across saga, http_gun and grind.
-  let trace = telemetry.trace(application.services.collector, "happy-1")
+  let trace =
+    telemetry.trace(application.services.collector, telemetry.order("happy-1"))
   let sources = list.map(trace, fn(e) { e.source }) |> list.unique
   assert list.contains(sources, telemetry.Saga)
   assert list.contains(sources, telemetry.Http)
@@ -273,7 +274,7 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
 
   // Two saga runs (before and after the kill), both attributed to the order.
   let runs =
-    telemetry.trace(services.collector, "durable-1")
+    telemetry.trace(services.collector, telemetry.order("durable-1"))
     |> list.count(fn(e) {
       e.source == telemetry.Saga && e.line == "run start checkout"
     })
