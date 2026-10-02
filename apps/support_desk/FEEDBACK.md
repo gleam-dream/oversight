@@ -211,6 +211,10 @@ telemetry trail.
   resolution friction was Hex rate limiting ("The rate limit for the Hex
   API has been exceeded"), which a retry after 60 s cleared.
 - **Proposal** (fabric, saga): widen to `< 2.0.0` with the siblings.
+- **Status (2 Oct 2026):** resolved by fabric db81b79 (fabric and
+  fabric_saga), saga 26dbc73 and llm_wire 56d793d. `gleam update` resolved
+  gleam_stdlib 1.0.5 (was 0.71.0), mist 6.0.3, gleam_crypto 1.6.0; no app
+  lines changed, because the app already allowed `< 2.0.0`.
 
 ### SD-9 http_gun observations need a supervised forwarder; the others emit inline
 
@@ -231,7 +235,7 @@ Lines of adapter or glue code per seam, excluding blank lines and comments.
 | http_gun failure → saga step error (evidence-aware)           | 50    | shop.gleam:63-88 (refund mapping), :124-148 (`gleam/http` request helper)               |
 | Telemetry correlation across fabric, http_gun (saga: none)    | ~40   | desk.gleam:40-50, :159-164; telemetry.gleam:68-74, :104-105, :123-137, :318-330         |
 | Saga outcome → fabric tool outcome via fabric_saga            | 38    | desk.gleam:93-102 (10), refund.gleam:46-55 `Hold` (10, SD-1), :107-124 `explain` (18)   |
-| fabric ↔ llm_wire ↔ http_gun model wiring and loopback policy | 38    | desk.gleam:81-92 (12), app.gleam:44-59 (16), :82-91 (10); configuration, not adaptation |
+| fabric ↔ llm_wire ↔ http_gun model wiring and loopback policy | 38    | desk.gleam:81-92 (12), app.gleam:44-59 (16), :84-93 (10); configuration, not adaptation |
 | Typed final answer (schema in prompt, decode text)            | 23    | desk.gleam:185-214                                                                      |
 | json_blueprint record arity                                   | 23    | domain.gleam:186-208                                                                    |
 | One tool definition shared by fabric, llm_wire and policy     | 0     | domain.gleam:157-182 is the declaration itself                                          |
@@ -248,7 +252,7 @@ and the telemetry handlers themselves (about 150).
   no llm_wire tool code.
 - **Caller-owned client in `fabric/llm.model`.** After fabric 8648f6f, the
   OpenAI adapter ran first time against the loopback provider. Admitting
-  loopback was one nested record update (app.gleam:82-91). Starting the
+  loopback was one nested record update (app.gleam:84-93). Starting the
   client is visibly the app's job.
 - **The approval gate.** `RequireApproval` suspends the run as data;
   `approve` with a reviewer resumes it, `reject` shows the model
@@ -267,3 +271,38 @@ and the telemetry handlers themselves (about 150).
   string parsing.
 - **Typed Sinal descriptors.** 17 `sinal.observe` calls across four packages
   received typed metadata with no `Dynamic` handling.
+
+## Re-run after fixes (2 Oct 2026)
+
+Package heads: fabric db81b79, saga 26dbc73, llm_wire 56d793d, http_gun
+a2869b7. `gleam update` resolved gleam_stdlib 1.0.5 (was 0.71.0). 10 tests
+pass, and `gleam run` prints the five tickets, the ledger and the T-1 trail
+as before (18 events; 22 saga and 100 llm_wire events still unattributable,
+SD-3).
+
+| Seam                                                          | Before | After | Change                                                                        |
+| ------------------------------------------------------------- | ------ | ----- | ----------------------------------------------------------------------------- |
+| fabric ↔ llm_wire ↔ http_gun model wiring and loopback policy | 38     | 38    | `config.allow_loopback` not adopted: it keeps `allow_public: True`, see below |
+| Telemetry correlation across fabric, http_gun (saga: none)    | ~40    | ~40   | none; the `model_turn` usage change needed no edit                            |
+| All other seams                                               | —      | —     | unchanged; SD-1 to SD-7 and SD-9 are not addressed by these fixes             |
+
+- **Loopback helper.** `http_config.allow_loopback(config)` sets only
+  `allow_loopback: True` (http_gun/src/http_gun/config.gleam:84-89), so on
+  `default()` it leaves public destinations admitted. Both clients reach
+  only the scripted loopback services, and `loopback()` deliberately closes
+  public destinations too (app.gleam:84-93). Using the helper would drop
+  that restriction, and restoring it needs the same nested
+  `destination.Policy` update, so the app keeps its 10 lines. A companion
+  such as `config.deny_public(config)`, or `allow_loopback` documented as
+  "in addition to public", would make the two-line intent explicit.
+- **Model-turn usage.** `observation.model_turn()` is now
+  `Event(Option(Usage), ModelTurn)` and `RunTotals` gained
+  `unreported_replies`. The app's handlers ignore the turn measurement and
+  read only `totals.turns` (telemetry.gleam:178, :219), so both changes
+  compiled without edits.
+- **New friction.** None from the packages. The widened stdlib pulled
+  mist 6.0.3, glisten 9.0.1 and gramps 6.0.1, whose sources now print nine
+  "Deprecated type used" warnings (`Header`, "Use #(String, String)
+  instead") during compilation; they come from third-party dependencies and
+  need no app change. Hex rate limiting interrupted `gleam update` and the
+  first `gleam test` again; a retry after 75 s cleared it.

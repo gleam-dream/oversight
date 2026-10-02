@@ -78,7 +78,9 @@ pub fn stop(app: App) -> Nil {
 }
 
 /// http_gun's default policy admits public destinations only; the scripted
-/// services live on loopback.
+/// services live on loopback. `http_config.allow_loopback` would admit
+/// loopback but leave public destinations open, and these clients reach
+/// nothing else, so the policy closes public destinations as well.
 pub fn loopback() -> http_config.Config {
   http_config.Config(
     ..http_config.default(),
