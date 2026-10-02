@@ -114,11 +114,11 @@ pub fn discover(
   mcp_url: String,
   token: Option(String),
 ) -> Result(Reply, String) {
-  rpc(mcp_url, token, "server/discover", None, [])
+  rpc(mcp_url, token, "server/discover", None, [], [])
 }
 
 pub fn list_tools(mcp_url: String, token: String) -> Result(Reply, String) {
-  rpc(mcp_url, Some(token), "tools/list", None, [])
+  rpc(mcp_url, Some(token), "tools/list", None, [], [])
 }
 
 pub fn call_tool(
@@ -127,10 +127,25 @@ pub fn call_tool(
   name: String,
   arguments: json.Json,
 ) -> Result(Reply, String) {
-  rpc(mcp_url, token, "tools/call", Some(name), [
-    #("name", json.string(name)),
-    #("arguments", arguments),
-  ])
+  call_tool_with_headers(mcp_url, token, name, arguments, [])
+}
+
+/// `call_tool` with extra request headers, such as `x-request-id`.
+pub fn call_tool_with_headers(
+  mcp_url: String,
+  token: Option(String),
+  name: String,
+  arguments: json.Json,
+  headers: List(#(String, String)),
+) -> Result(Reply, String) {
+  rpc(
+    mcp_url,
+    token,
+    "tools/call",
+    Some(name),
+    [#("name", json.string(name)), #("arguments", arguments)],
+    headers,
+  )
 }
 
 fn rpc(
@@ -139,6 +154,7 @@ fn rpc(
   method: String,
   name: Option(String),
   params: List(#(String, json.Json)),
+  headers: List(#(String, String)),
 ) -> Result(Reply, String) {
   let meta =
     json.object([
@@ -164,6 +180,8 @@ fn rpc(
     |> request.set_header("mcp-protocol-version", "2026-07-28")
     |> request.set_header("mcp-method", method)
     |> request.set_body(body)
+  let req =
+    list.fold(headers, req, fn(req, h) { request.set_header(req, h.0, h.1) })
   let req = case name {
     Some(n) -> request.set_header(req, "mcp-name", n)
     None -> req

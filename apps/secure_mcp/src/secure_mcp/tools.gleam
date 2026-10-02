@@ -12,6 +12,7 @@ import secure_mcp/reports.{
   type Report, type ReportJob, ReportJob, ReportStatus, Submitted,
 }
 import secure_mcp/telemetry
+import sinal/correlation.{type Correlation}
 
 pub const queue = "reports"
 
@@ -19,7 +20,7 @@ pub const queue = "reports"
 /// listener builds context from `fn() -> context`, which cannot see the
 /// request; the mount builds this value after authentication.
 pub type McpContext {
-  McpContext(request_id: Int, principal: Principal)
+  McpContext(correlation: Correlation, principal: Principal)
 }
 
 pub type ReportWorker =
@@ -66,21 +67,20 @@ pub fn registry(
   use status_name <- result.try(
     tool.tool_name("report_status") |> result.map_error(describe),
   )
-  use request_codec <- result.try(
-    reports.request_codec() |> result.map_error(describe),
-  )
-  use submitted_codec <- result.try(
-    reports.submitted_codec() |> result.map_error(describe),
-  )
-  use status_codec <- result.try(
-    reports.status_codec() |> result.map_error(describe),
-  )
   use generate <- result.try(
-    tool.definition(generate_name, request_codec, submitted_codec)
+    tool.definition(
+      generate_name,
+      reports.request_codec(),
+      reports.submitted_codec(),
+    )
     |> result.map_error(describe),
   )
   use status <- result.try(
-    tool.definition(status_name, reports.status_request_codec(), status_codec)
+    tool.definition(
+      status_name,
+      reports.status_request_codec(),
+      reports.status_codec(),
+    )
     |> result.map_error(describe),
   )
   let generate =
@@ -132,7 +132,7 @@ fn generate_report(
     |> result.replace_error(SubmitFailed),
   )
   let job_id = job.id_value(handle)
-  telemetry.report_submitted(context.request_id, job_id)
+  telemetry.report_submitted(context.correlation, job_id)
   Ok(tool.Complete(Submitted(job_id:, state: "queued"), []))
 }
 

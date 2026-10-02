@@ -2,6 +2,7 @@
 //// RFC 9728 protected-resource metadata, and the protected MCP endpoint.
 
 import gleam/http
+import gleam/http/request
 import gleam/json
 import gleam/option.{None, Some}
 import gleam/result
@@ -13,6 +14,7 @@ import secure_mcp/dev_provider
 import secure_mcp/mcp_mount
 import secure_mcp/telemetry
 import secure_mcp/tools.{type McpContext, McpContext}
+import sinal/correlation.{type Correlation}
 import warden
 import wisp.{type Request, type Response}
 
@@ -175,15 +177,15 @@ fn mcp(req: Request, context: Context) -> Response {
     Error(failure) -> auth.challenge(failure, context.metadata_url)
     Ok(grant) -> {
       let principal = authorization.granted_principal(grant)
-      let request_id = unique()
+      let correlation = request_correlation(req)
       mcp_mount.handle(
         req,
         context.mcp,
-        McpContext(request_id:, principal:),
+        McpContext(correlation:, principal:),
         mcp_mount.default_limits(),
         fn(exchange) {
           telemetry.mcp_request(
-            request_id,
+            correlation,
             server.exchange_id_to_int(exchange),
             principal.subject,
           )
@@ -193,5 +195,13 @@ fn mcp(req: Request, context: Context) -> Response {
   }
 }
 
-@external(erlang, "secure_mcp_dev_ffi", "unique")
-fn unique() -> Int
+/// The caller's `x-request-id` when it is a valid correlation (1 to 128
+/// bytes); otherwise a fresh one. The header is untrusted input, so it is
+/// validated where it enters the app.
+fn request_correlation(req: Request) -> Correlation {
+  request.get_header(req, "x-request-id")
+  |> result.try(fn(value) {
+    correlation.from_string(value) |> result.replace_error(Nil)
+  })
+  |> result.lazy_unwrap(correlation.unique)
+}

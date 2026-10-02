@@ -147,6 +147,12 @@ tool handlers receive the authenticated principal, and `generate_report` /
   (relay/src/relay/transport/http.gleam:826), which mcp_mount.gleam
   re-implements, so the mounted endpoint does not inherit it. Each Relay fix
   to the buffered handler widens this gap.
+- **Status (wave 2):** not resolved by relay 23e4063; relay kept its
+  signatures and exposes no mountable handler. `mcp_mount.gleam` compiles and
+  passes its tests against relay 23e4063 with no edit: it uses only
+  `relay/runtime` (`RuntimeConfig`, `start`, `send_frame`, `stop`,
+  `OutputWrite`/`OutputClose`) and `relay/server` (`fresh_exchange`,
+  `http_admission_failure`), none of which changed shape. 114 lines remain.
 
 ### SMCP-3 Relay's authorization values cannot be read, so a verifier cannot see its token
 
@@ -302,6 +308,14 @@ tool handlers receive the authenticated principal, and `generate_report` /
   and `codec.decoder(Codec(a)) -> decode.Decoder(a)`. Grind then accepts
   `worker.codec(version, fn(v) { to_json(c, v) |> result.unwrap(json.null()) }, codec.decoder(c))`
   without a dependency between the two packages.
+- **Status (wave 2):** resolved by json_blueprint 94438b9 (`codec.to_json`,
+  `codec.decoder`, the `use`-based record builder). `Report` has one codec
+  (reports.gleam:`report_codec`); Grind's codec is derived by a single
+  11-line bridge `grind(version, codec)`. The 38-line gleam_json twin and the
+  nested-`combine` four-field record (30 lines) are gone; the four-field record
+  is now 12 lines with no arity limit. `ReportJob` and the error string, which
+  had only gleam_json codecs, now use the same bridge, so the app has no
+  `gleam/decode` field lists left.
 
 ### SMCP-9 Telemetry: one request is followable only through app bridge events
 
@@ -328,6 +342,18 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `HandlerCallContext`, and put the tool name in `invocation.started`.
   relay: emit `[relay, authorization, decided]` from `admit` with the outcome
   (once SMCP-2 gives Relay the request).
+- **Status (wave 2):** partially resolved by sinal 43279b3
+  (`sinal/correlation`). The app's own key is now a `Correlation` instead of
+  an `Int` from `unique_integer`: `McpContext.correlation`, the
+  `[secure_mcp, mcp, request]` and `[secure_mcp, report, submitted]` events
+  (via `correlation.field()`), and an inbound `x-request-id` validated with
+  `correlation.from_string` where it enters the app (web.gleam,
+  `request_correlation`, 8 lines; test `request_id_header_correlation_test`).
+  The bridge events are still required: relay's `HandlerCallContext` and
+  events, grind's job events and warden's HTTP event carry no `Correlation`
+  (packages adopt it in their own waves), so the 60-line bridge (68 before)
+  remains and the join is still `correlation -> exchange_id` and
+  `correlation -> job_id` through the app events.
 
 ### SMCP-10 Small gaps found on the way
 
@@ -431,3 +457,91 @@ New friction from the fixes:
 - Grind's default retry policy retries a business failure, so a probe
   worker needs `worker.DoNotRetry` before its failure is terminal. This
   is documented behavior, but a test of a typed failure has to know it.
+
+## Re-run after wave 2
+
+Against sinal 2b689c5, json_blueprint c96a8c3, relay 23e4063, grind c1920e6,
+warden bf4f796 and http_gun 1dc20a1. `../scripts/with-postgres.sh gleam test`:
+11 passed, no failures (10 existing plus `request_id_header_correlation_test`).
+`gleam run` exits 0 and narrates the same session and telemetry; the app
+events now print `correlation=<32 hex>` instead of `request=<int>`.
+`gleam format` is clean and the build has no warnings.
+
+| Seam                                                | Before                                            | After                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Second codec set for Grind (SMCP-8)                 | 38 lines of gleam_json/decode twins               | 19 lines: one 11-line bridge and three 2-line wrappers; 0 duplicated field lists        |
+| Blueprint records (reports.gleam)                   | 117 lines for both systems (4-field record: 30)   | 93 lines for all codecs, incl. the new Blueprint `ReportJob` codec (4-field record: 12) |
+| Codec constructors returning `Result` (tools.gleam) | 13 lines of `use ... result.try` for 3 codecs     | 0                                                                                       |
+| Sinal handler ids (telemetry.gleam)                 | 14 lines (`observe` helper, `handler_id`, FFI id) | 0; `sinal.observe(event, run)` called directly, `result.values` dropped                 |
+| Sinal bridge event definitions (SMCP-9)             | 68 lines (`let assert`, `pair`, `imap`, `Result`) | 60 lines with the record builder; `emit` is a bare call (no `let _ =`)                  |
+| App correlation key                                 | `Int` from an FFI `unique_integer` (web.gleam, 2) | `sinal/correlation`; FFI call removed from web.gleam; header validation added (+8)      |
+| MCP mounted in wisp (SMCP-2)                        | 114                                               | 114 (open; compiles unchanged against relay 23e4063)                                    |
+| Challenges, metadata, client, Warden provider       | 41, 109, 459                                      | unchanged (open)                                                                        |
+
+Net, `git diff --stat` over `src` and `test`: 355 lines added and 369
+removed. By file, `reports.gleam` -40 and `telemetry.gleam` -43 are glue
+removed; `tools.gleam` is 0 (13 lines of `result.try` for codecs went, 13
+lines of now-longer `tool.definition` calls came); `web.gleam` +10 (header
+validation), `client.gleam` +18 and the new test +41 are new capability.
+
+Relay's tool schemas now render `UnionSchema` where `TaggedSchema` was; this
+app's tools use only records, so the `tools/list` test is unaffected.
+
+### New friction
+
+- **The `use` builder repeats the record type per field.** Every getter
+  needs an annotation, and `gleam format` puts a one-line getter on three
+  lines when the field name is long:
+
+  ```gleam
+  use job_id <- codec.field("job_id", codec.int(), fn(s: ReportStatus) {
+    s.job_id
+  })
+  use state <- codec.field("state", codec.string(), fn(s: ReportStatus) {
+    s.state
+  })
+  ```
+
+  For records of one to three fields this reads about as long as `record2`
+  did and is less obvious to a new reader than the old positional form; the
+  gain is the missing arity limit and the missing `Result`. A getter-last
+  variant, or a way to annotate once (`codec.record(fn(r: ReportStatus) { .. })`),
+  would remove the repetition.
+
+- **The Grind bridge swallows an encode failure.** `codec.to_json` returns
+  `Result`, Grind's encoder returns `json.Json`, so the guide's own recipe is
+  `result.unwrap(json.null())`: an unencodable value is stored as `null` and
+  fails later at decode. For a string-only codec it cannot happen, but the
+  signature cannot say that. `worker.codec` also still returns
+  `Result(_, CodecError)` for an empty version, so each of the three worker
+  codecs keeps a `use ... result.try` in tools.gleam. A Grind-side
+  `worker.blueprint_codec(version, codec)` would own both.
+- **`correlation.field()` forces `Option` onto an always-present key.** The
+  app creates the id before any event, but the metadata field is
+  `Option(Correlation)`, so both app events hold `Option(Correlation)`, both
+  emitters wrap in `option.Some`, and the collector unwraps with
+  `option.map(..) |> option.unwrap("-")`. This is right for libraries that
+  may run uncorrelated; an application that always has one pays three small
+  conversions (about 6 lines).
+- **A one-field record is not a one-line `fields.field`.** `ReportSubmitted`
+  and `McpRequest` use the record builder with a mandatory annotation on the
+  first getter only; that works, but the nesting under `sinal.event(..)`
+  after `gleam format` puts the builder chain inside the call and indents it
+  two extra levels. Defining the metadata codec in its own function (as the
+  packages do) reads better.
+- Nothing from relay 23e4063: the buffered-handler gap in SMCP-2 is
+  unchanged and unaddressed, and the changelog's "signatures are unchanged"
+  held for everything this app calls.
+
+### Migration guides
+
+Sufficient for every edit in this app: the sinal guide's handler-id,
+`pair`/`imap` and `optional` recipes and the json_blueprint guide's record
+and bridge recipes applied one-to-one. Gaps: (1) neither guide says a
+Blueprint codec's `Result` return was removed from the constructors, so a
+caller learns that only from the compile error in code that pattern-matched
+it (tools.gleam's `use ... result.try`); (2) the json_blueprint bridge snippet
+does not mention that `worker.codec` still returns a `Result`; (3) the sinal
+guide shows `sinal/correlation` only for library metadata, with no
+application recipe for an inbound id, which this app wrote as
+`correlation.from_string` plus `lazy_unwrap(correlation.unique)`.
