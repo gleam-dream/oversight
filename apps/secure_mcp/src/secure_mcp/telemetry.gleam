@@ -16,7 +16,6 @@
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{type Option}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -30,49 +29,36 @@ import sinal/forwarder
 import warden/observation as warden_observation
 
 pub type McpRequest {
-  McpRequest(
-    correlation: Option(Correlation),
-    exchange_id: Int,
-    subject: String,
-  )
+  McpRequest(correlation: Correlation, exchange_id: Int, subject: String)
 }
 
 pub type ReportSubmitted {
-  ReportSubmitted(correlation: Option(Correlation), job_id: Int)
+  ReportSubmitted(correlation: Correlation, job_id: Int)
 }
 
 pub fn mcp_request_event() -> sinal.Event(Nil, McpRequest) {
-  sinal.event(
-    ["secure_mcp", "mcp", "request"],
-    fields.empty(),
-    fields.record({
-      use correlation <- fields.parameter
-      use exchange_id <- fields.parameter
-      use subject <- fields.parameter
-      McpRequest(correlation:, exchange_id:, subject:)
+  sinal.event(["secure_mcp", "mcp", "request"], fields.empty(), {
+    use correlation <- fields.include(correlation.required_field(), get: fn(m) {
+      m.correlation
     })
-      |> fields.and(correlation.field(), fn(m: McpRequest) { m.correlation })
-      |> fields.and(fields.int("exchange_id"), fn(m) { m.exchange_id })
-      |> fields.and(fields.string("subject"), fn(m) { m.subject })
-      |> fields.build,
-  )
+    use exchange_id <- fields.include(fields.int("exchange_id"), get: fn(m) {
+      m.exchange_id
+    })
+    use subject <- fields.include(fields.string("subject"), get: fn(m) {
+      m.subject
+    })
+    fields.success(McpRequest(correlation:, exchange_id:, subject:))
+  })
 }
 
 pub fn report_submitted_event() -> sinal.Event(Nil, ReportSubmitted) {
-  sinal.event(
-    ["secure_mcp", "report", "submitted"],
-    fields.empty(),
-    fields.record({
-      use correlation <- fields.parameter
-      use job_id <- fields.parameter
-      ReportSubmitted(correlation:, job_id:)
+  sinal.event(["secure_mcp", "report", "submitted"], fields.empty(), {
+    use correlation <- fields.include(correlation.required_field(), get: fn(m) {
+      m.correlation
     })
-      |> fields.and(correlation.field(), fn(m: ReportSubmitted) {
-        m.correlation
-      })
-      |> fields.and(fields.int("job_id"), fn(m) { m.job_id })
-      |> fields.build,
-  )
+    use job_id <- fields.include(fields.int("job_id"), get: fn(m) { m.job_id })
+    fields.success(ReportSubmitted(correlation:, job_id:))
+  })
 }
 
 pub fn mcp_request(
@@ -83,7 +69,7 @@ pub fn mcp_request(
   sinal.emit(
     mcp_request_event(),
     Nil,
-    McpRequest(correlation: option.Some(correlation), exchange_id:, subject:),
+    McpRequest(correlation:, exchange_id:, subject:),
   )
 }
 
@@ -91,7 +77,7 @@ pub fn report_submitted(correlation: Correlation, job_id: Int) -> Nil {
   sinal.emit(
     report_submitted_event(),
     Nil,
-    ReportSubmitted(correlation: option.Some(correlation), job_id:),
+    ReportSubmitted(correlation:, job_id:),
   )
 }
 
@@ -242,7 +228,7 @@ pub fn start() -> Result(Collector, String) {
         "app",
         "mcp.request",
         "correlation="
-          <> correlation_text(m.correlation)
+          <> correlation.to_string(m.correlation)
           <> " exchange="
           <> int.to_string(m.exchange_id)
           <> " subject="
@@ -254,7 +240,7 @@ pub fn start() -> Result(Collector, String) {
         "app",
         "report.submitted",
         "correlation="
-          <> correlation_text(m.correlation)
+          <> correlation.to_string(m.correlation)
           <> " job="
           <> int.to_string(m.job_id),
       )
@@ -277,8 +263,4 @@ pub fn format(line: Line) -> String {
 
 fn state_label(state: job.State) -> String {
   string.lowercase(string.inspect(state))
-}
-
-fn correlation_text(value: Option(Correlation)) -> String {
-  option.map(value, correlation.to_string) |> option.unwrap("-")
 }

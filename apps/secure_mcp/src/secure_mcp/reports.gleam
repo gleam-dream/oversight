@@ -5,7 +5,6 @@
 //// through `codec.to_json` and `codec.decoder`, so the two cannot disagree.
 
 import gleam/erlang/process
-import gleam/json
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
@@ -67,75 +66,66 @@ pub fn request_codec() -> codec.Codec(ReportRequest) {
   use title <- codec.field(
     "title",
     codec.string() |> codec.describe("Report title, e.g. Revenue"),
-    fn(r: ReportRequest) { r.title },
+    get: fn(r) { r.title },
   )
   use period <- codec.field(
     "period",
     codec.string() |> codec.describe("Reporting period, e.g. 2026-Q3"),
-    fn(r: ReportRequest) { r.period },
+    get: fn(r) { r.period },
   )
   codec.success(ReportRequest(title:, period:))
 }
 
 pub fn submitted_codec() -> codec.Codec(Submitted) {
-  use job_id <- codec.field("job_id", codec.int(), fn(s: Submitted) { s.job_id })
-  use state <- codec.field("state", codec.string(), fn(s: Submitted) { s.state })
+  use job_id <- codec.field("job_id", codec.int(), get: fn(s) { s.job_id })
+  use state <- codec.field("state", codec.string(), get: fn(s) { s.state })
   codec.success(Submitted(job_id:, state:))
 }
 
 pub fn status_request_codec() -> codec.Codec(StatusRequest) {
-  use job_id <- codec.field("job_id", codec.int(), fn(s: StatusRequest) {
-    s.job_id
-  })
+  use job_id <- codec.field("job_id", codec.int(), get: fn(s) { s.job_id })
   codec.success(StatusRequest(job_id:))
 }
 
 pub fn job_input_codec() -> codec.Codec(ReportJob) {
-  use owner <- codec.field("owner", codec.string(), fn(j: ReportJob) { j.owner })
-  use title <- codec.field("title", codec.string(), fn(j: ReportJob) { j.title })
-  use period <- codec.field("period", codec.string(), fn(j: ReportJob) {
-    j.period
-  })
+  use owner <- codec.field("owner", codec.string(), get: fn(j) { j.owner })
+  use title <- codec.field("title", codec.string(), get: fn(j) { j.title })
+  use period <- codec.field("period", codec.string(), get: fn(j) { j.period })
   codec.success(ReportJob(owner:, title:, period:))
 }
 
 pub fn report_codec() -> codec.Codec(Report) {
-  use owner <- codec.field("owner", codec.string(), fn(r: Report) { r.owner })
-  use title <- codec.field("title", codec.string(), fn(r: Report) { r.title })
-  use period <- codec.field("period", codec.string(), fn(r: Report) { r.period })
-  use summary <- codec.field("summary", codec.string(), fn(r: Report) {
-    r.summary
-  })
+  use owner <- codec.field("owner", codec.string(), get: fn(r) { r.owner })
+  use title <- codec.field("title", codec.string(), get: fn(r) { r.title })
+  use period <- codec.field("period", codec.string(), get: fn(r) { r.period })
+  use summary <- codec.field("summary", codec.string(), get: fn(r) { r.summary })
   codec.success(Report(owner:, title:, period:, summary:))
 }
 
 pub fn status_codec() -> codec.Codec(ReportStatus) {
-  use job_id <- codec.field("job_id", codec.int(), fn(s: ReportStatus) {
-    s.job_id
+  use job_id <- codec.field("job_id", codec.int(), get: fn(s) { s.job_id })
+  use state <- codec.field("state", codec.string(), get: fn(s) { s.state })
+  use report <- codec.optional_field("report", report_codec(), get: fn(s) {
+    s.report
   })
-  use state <- codec.field("state", codec.string(), fn(s: ReportStatus) {
-    s.state
-  })
-  use report <- codec.optional_field(
-    "report",
-    report_codec(),
-    fn(s: ReportStatus) { s.report },
-  )
   codec.success(ReportStatus(job_id:, state:, report:))
 }
 
 // --- Grind codecs, derived from the Blueprint codecs -------------------------
 
 /// The one bridge: a Blueprint codec as a versioned Grind codec. A value the
-/// codec cannot encode is stored as `null` and then fails to decode, instead
-/// of crashing the worker.
+/// codec cannot encode is rejected with the codec's own message, so Grind fails
+/// the submit or ends the job instead of storing something unreadable.
 fn grind(
   version: String,
   codec: codec.Codec(a),
 ) -> Result(worker.Codec(a), worker.CodecError) {
   worker.codec(
     version,
-    fn(value) { codec.to_json(codec, value) |> result.unwrap(json.null()) },
+    fn(value) {
+      codec.to_json(codec, value)
+      |> result.map_error(codec.describe_encode_error)
+    },
     codec.decoder(codec),
   )
 }
