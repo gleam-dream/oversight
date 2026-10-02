@@ -322,6 +322,21 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   inside the 128-byte limit) can serve as the correlation and `link` and
   `Link` can go; the agent still has to be rebuilt per question until fabric
   passes the run id to the model function.
+- **Status (follow-up):** partially resolved by http_gun c45adfe;
+  `with_correlation` takes a `sinal/correlation.Correlation` and the event's
+  `correlation` key carries it, so `telemetry.new_id()` and the `Id` type are
+  gone from the app (`correlation.unique()`, `Correlation`; 0 lines removed,
+  the import swapped). The join does not shrink: `llm.model` still binds its
+  client when the agent is built and the run id exists only after
+  `fabric.start` (fabric/src/fabric/llm.gleam:42-50), so the app cannot use
+  the run id as the correlation and still rebuilds the agent per question and
+  keeps `Link`, `link` and the `follow` lookup (~35 lines, unchanged). The
+  correlation also does not follow a question further: only http_gun writes
+  the `correlation` key. No relay, llm_wire or fabric event carries one
+  (grep of `correlation` in their `src` finds only fabric/graph.gleam), so
+  the same 24 http_gun events join and the same 18 relay and 17 llm_wire
+  events do not. The new type is correct for when they adopt it, and the
+  per-question correlation is then the only key an app needs.
 
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
@@ -504,3 +519,42 @@ New friction:
   close the client and every other call on it.
 
 Package heads for this section: sinal 5aef827, json_blueprint f55ec09.
+
+## Re-run after the follow-up fixes
+
+Package heads: json_blueprint bb4da39, sinal 6de2b69 (required_field f9cca37),
+http_gun c45adfe. 11 tests pass; `gleam run` prints the same trail (12 fabric
+and 24 http_gun events joined, 18 relay and 17 llm_wire not).
+
+The app emits no events of its own, so the sinal builder and
+`required_field()` do not apply: it only reads other packages' events, and
+http_gun's `Metadata.correlation` is still `Option(Correlation)` (the key is
+absent when a view has none), so the handler keeps its `None -> NoKey` arm.
+grind is not used.
+
+| Seam                                                    | Before | After | Change                                                                                                                      |
+| ------------------------------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------------------------------------------- |
+| Codec getter annotations (inventory, assistant)         | 18     | 0     | every `fn(x: T)` is `get: fn(x)`; 4 fewer lines in inventory.gleam after `gleam format`, 0 in assistant.gleam               |
+| One-field codec (`stock_query_codec`)                   | 1      | 1     | stays one line; `question_codec` and `search_result_codec` keep three-line calls because the arguments do not fit           |
+| Handler getter annotation (`get_stock`)                 | 1      | 0     | `fn(query: StockQuery) {..}` is `fn(query) {..}` (3 lines to 1); the `StockQuery` type is inferred from the definition      |
+| http_gun correlation (agent per question, link, follow) | ~35    | ~35   | `Id`/`new_id()` are `Correlation`/`correlation.unique()`; no join table can go because the run id is unknown at agent build |
+
+Net diff for the app: 4 files, +34 -40 lines, all from annotations and the
+type swap. No logic changed.
+
+New friction:
+
+- The 1-to-4-line one-field codec from wave 2 only shrinks where the whole
+  call fits in 80 columns. `get:` adds 5 characters, so `price_cents` and
+  `warehouse` still wrap after `gleam format` (3 lines each, as before).
+  The annotation friction is gone; the label costs about what it saved in
+  the narrowest calls.
+- `with_correlation` removes the app's reason for `Id`, but not for the join.
+  A Correlation is what the app wants to key a question by, yet the app must
+  still learn the run id after start and link the two. fabric passing the run
+  id (or a caller-supplied correlation) to the model function is now the only
+  thing between this app and zero join glue (TH-7).
+- http_gun still emits through its own forwarder (TH-11), so a correlation
+  handler cannot be written once for every package: `sinal.observe` on
+  `http_telemetry.event()` matches only http_gun, and the other packages
+  have no `correlation` key to match.
