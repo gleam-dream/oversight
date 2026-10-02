@@ -4,12 +4,12 @@
 //// - Warden emits `[warden, http, request]` synchronously in the process that
 ////   called it (the wisp request process), with no correlation field.
 //// - http_gun emits `[http_gun, lifecycle]` through a Sinal forwarder (a
-////   different process), carrying an optional correlation `Id`.
+////   different process), carrying the caller's optional `Correlation`.
 //// - wisp, mist and pog emit nothing through Sinal.
 ////
-//// To join the two, each request registers `self()` with a fresh http_gun
-//// correlation id; Warden events are attributed by emitting pid, http_gun
-//// events by correlation.
+//// To join the two, each request registers `self()` with a fresh Sinal
+//// `Correlation`, which it also passes to http_gun; Warden events are
+//// attributed by emitting pid, http_gun events by the correlation they carry.
 
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Pid, type Subject}
@@ -23,19 +23,20 @@ import gleam/result
 import gleam/string
 import http_gun/telemetry as gun_telemetry
 import sinal
+import sinal/correlation.{type Correlation}
 import sinal/forwarder.{type Forwarder}
 import warden/observation
 
 pub type Record {
   WardenHttp(
     /// The request that emitted it, resolved from the emitting pid.
-    request: Option(gun_telemetry.Id),
+    request: Option(Correlation),
     method: String,
     path: String,
     outcome: String,
     duration_ms: Int,
   )
-  GunLifecycle(correlation: Option(gun_telemetry.Id), milestone: String)
+  GunLifecycle(correlation: Option(Correlation), milestone: String)
   ForwarderDropped(rejected: Int, lost: Int, unavailable: Int)
 }
 
@@ -51,8 +52,8 @@ pub opaque type Telemetry {
 type State {
   State(
     records: List(Record),
-    links: Dict(Pid, gun_telemetry.Id),
-    last: Option(gun_telemetry.Id),
+    links: Dict(Pid, Correlation),
+    last: Option(Correlation),
     echo_: Bool,
   )
 }
@@ -60,8 +61,8 @@ type State {
 type Message {
   Add(Record)
   AddWarden(Pid, Record)
-  Link(Pid, gun_telemetry.Id)
-  All(reply: Subject(#(List(Record), Option(gun_telemetry.Id))))
+  Link(Pid, Correlation)
+  All(reply: Subject(#(List(Record), Option(Correlation))))
 }
 
 /// Start the collector and the http_gun forwarder, and attach handlers to
@@ -143,12 +144,12 @@ pub fn forwarder(telemetry: Telemetry) -> Forwarder {
   telemetry.forwarder
 }
 
-/// Start tracing the calling request process: returns the correlation id to
+/// Start tracing the calling request process: returns the correlation to
 /// attach to http_gun calls with `http_gun.with_correlation`.
-pub fn begin_request(telemetry: Telemetry) -> gun_telemetry.Id {
-  let id = gun_telemetry.new_id()
-  process.send(telemetry.collector, Link(process.self(), id))
-  id
+pub fn begin_request(telemetry: Telemetry) -> Correlation {
+  let request = correlation.unique()
+  process.send(telemetry.collector, Link(process.self(), request))
+  request
 }
 
 /// Every recorded event of the most recently traced request. http_gun
