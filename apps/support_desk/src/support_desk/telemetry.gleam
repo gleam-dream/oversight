@@ -4,6 +4,8 @@
 ////
 //// What each package gives to join on:
 ////
+//// - the desk itself: its own `Correlation` for the ticket, with the fabric
+////   run id, in `ticket.opened` and `ticket.answered`.
 //// - fabric: the run id, plus turn and call id for tool and approval
 ////   events.
 //// - saga: its own run counter and the workflow name; nothing a caller
@@ -14,11 +16,11 @@
 ////
 //// The desk registers each ticket's http_gun correlation here, so HTTP
 //// events of calls made with a correlated client can be attributed. Fabric
-//// events are attributed by the run id the app learns after `start`.
+//// events are attributed through the run id that `ticket.opened` pairs
+//// with the ticket's correlation.
 
 import fabric/observation as fabric_obs
 import gleam/erlang/process.{type Subject}
-import gleam/erlang/reference
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -30,9 +32,12 @@ import http_gun/telemetry as http_obs
 import llm_wire/telemetry as llm_obs
 import saga/observation as saga_obs
 import sinal
+import sinal/correlation.{type Correlation}
 import sinal/forwarder
+import support_desk/events
 
 pub type Source {
+  Desk
   Fabric
   Saga
   HttpGun
@@ -43,10 +48,12 @@ pub type Source {
 pub type Key {
   /// A fabric run id.
   FabricRun(String)
+  /// One of the desk's own ticket events: the ticket and its fabric run.
+  TicketRun(ticket: Correlation, run: String)
   /// Saga's own run number; no caller id reaches saga's events.
   SagaRun(workflow: String, run: Int)
   /// An HTTP request, with the ticket its correlation was registered for.
-  HttpRequest(ticket: Option(String))
+  HttpRequest(ticket: Option(Correlation))
   /// Nothing to join on.
   Unkeyed
 }
@@ -66,33 +73,26 @@ pub opaque type Telemetry {
 pub opaque type Message {
   Observed(Observation)
   ObservedHttp(name: String, correlation: Option(http_obs.Id), detail: String)
-  Register(id: http_obs.Id, ticket: String)
+  Register(id: http_obs.Id, ticket: Correlation)
   Read(reply: Subject(List(Observation)))
 }
 
 type State {
-  State(tickets: List(#(http_obs.Id, String)), seen: List(Observation))
+  State(tickets: List(#(http_obs.Id, Correlation)), seen: List(Observation))
 }
 
 /// Starts the collector and a supervised forwarder for http_gun's
 /// observations, and attaches to every event.
 pub fn start() -> Result(Telemetry, String) {
   use collector <- result.try(start_collector())
-  use fwd <- result.try(
-    forwarder.new(process.new_name("support_desk_http_events"), 1024)
-    |> result.replace_error("invalid forwarder capacity"),
-  )
-  use _ <- result.try(
+  let fwd = forwarder.new(process.new_name("support_desk_http_events"))
+  use _ <- result.map(
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(forwarder.supervised(fwd))
     |> supervisor.start
     |> result.replace_error("could not start the event forwarder"),
   )
-  let suffix = string.inspect(reference.new())
-  use attachments <- result.map(
-    list.try_map(handlers(collector), fn(attach) { attach(suffix) }),
-  )
-  Telemetry(collector, fwd, attachments)
+  Telemetry(collector, fwd, handlers(collector))
 }
 
 /// The forwarder to put in `http_gun/config.Config.observations`.
@@ -101,7 +101,11 @@ pub fn forwarder(telemetry: Telemetry) -> forwarder.Forwarder {
 }
 
 /// Attributes HTTP events carrying `id` to `ticket`.
-pub fn register(telemetry: Telemetry, id: http_obs.Id, ticket: String) -> Nil {
+pub fn register(
+  telemetry: Telemetry,
+  id: http_obs.Id,
+  ticket: Correlation,
+) -> Nil {
   process.send(telemetry.collector, Register(id, ticket))
 }
 
@@ -118,17 +122,22 @@ pub fn stop(telemetry: Telemetry) -> Nil {
   })
 }
 
-/// The events attributable to one ticket: its fabric run's events and its
-/// correlated HTTP requests. Saga and llm_wire events never qualify.
-pub fn trail(
-  telemetry: Telemetry,
-  ticket: String,
-  run_id: String,
-) -> List(Observation) {
-  observations(telemetry)
-  |> list.filter(fn(observation) {
+/// The events attributable to one ticket: its own events, its fabric
+/// run's events and its correlated HTTP requests. Saga and llm_wire events
+/// never qualify.
+pub fn trail(telemetry: Telemetry, ticket: Correlation) -> List(Observation) {
+  let all = observations(telemetry)
+  let runs =
+    list.filter_map(all, fn(observation) {
+      case observation.key {
+        TicketRun(owner, run) if owner == ticket -> Ok(run)
+        _ -> Error(Nil)
+      }
+    })
+  list.filter(all, fn(observation) {
     case observation.key {
-      FabricRun(id) -> id == run_id
+      TicketRun(owner, _) -> owner == ticket
+      FabricRun(id) -> list.contains(runs, id)
       HttpRequest(Some(owner)) -> owner == ticket
       _ -> False
     }
@@ -142,6 +151,7 @@ pub fn count(observations: List(Observation), source: Source) -> Int {
 
 pub fn render(observation: Observation) -> String {
   let source = case observation.source {
+    Desk -> "desk    "
     Fabric -> "fabric  "
     Saga -> "saga    "
     HttpGun -> "http_gun"
@@ -149,8 +159,10 @@ pub fn render(observation: Observation) -> String {
   }
   let key = case observation.key {
     FabricRun(id) -> "run " <> id
+    TicketRun(ticket, run) ->
+      "ticket " <> correlation.to_string(ticket) <> ", run " <> run
     SagaRun(workflow, run) -> workflow <> "#" <> int.to_string(run)
-    HttpRequest(Some(ticket)) -> "ticket " <> ticket
+    HttpRequest(Some(ticket)) -> "ticket " <> correlation.to_string(ticket)
     HttpRequest(None) -> "uncorrelated"
     Unkeyed -> "-"
   }
@@ -159,9 +171,7 @@ pub fn render(observation: Observation) -> String {
 
 // Handlers ----------------------------------------------------------------
 
-fn handlers(
-  collector: Subject(Message),
-) -> List(fn(String) -> Result(sinal.Attachment, String)) {
+fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
   let fabric = fn(name, key, detail) {
     process.send(collector, Observed(Observation(Fabric, name, key, detail)))
   }
@@ -171,52 +181,64 @@ fn handlers(
       Observed(Observation(Saga, name, SagaRun(workflow, run), detail)),
     )
   }
+  let ticket = fn(name, metadata_ticket, run, detail) {
+    case metadata_ticket {
+      Some(ticket) ->
+        process.send(
+          collector,
+          Observed(Observation(Desk, name, TicketRun(ticket, run), detail)),
+        )
+      None -> Nil
+    }
+  }
   [
-    observe("fabric.run.start", fabric_obs.run_started(), fn(_, m) {
+    sinal.observe(events.ticket_opened(), fn(_, m) {
+      ticket("ticket.opened", m.ticket, m.run, "")
+    }),
+    sinal.observe(events.ticket_answered(), fn(_, m) {
+      ticket("ticket.answered", m.ticket, m.run, string.inspect(m.answer))
+    }),
+    sinal.observe(fabric_obs.run_started(), fn(_, m) {
       fabric("run.start", FabricRun(m.run), m.agent)
     }),
-    observe("fabric.model.stop", fabric_obs.model_turn(), fn(_, m) {
+    sinal.observe(fabric_obs.model_turn(), fn(_, m) {
       fabric(
         "model.stop",
         FabricRun(m.run),
         "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
       )
     }),
-    observe(
-      "fabric.approval.request",
-      fabric_obs.approval_requested(),
-      fn(_, m) {
-        fabric("approval.request", FabricRun(m.action.run), m.action.tool)
-      },
-    ),
-    observe("fabric.approval.answer", fabric_obs.approval_answered(), fn(_, m) {
+    sinal.observe(fabric_obs.approval_requested(), fn(_, m) {
+      fabric("approval.request", FabricRun(m.action.run), m.action.tool)
+    }),
+    sinal.observe(fabric_obs.approval_answered(), fn(_, m) {
       fabric(
         "approval.answer",
         FabricRun(m.action.run),
         m.action.tool <> " " <> string.inspect(m.answer),
       )
     }),
-    observe("fabric.tool.start", fabric_obs.tool_dispatched(), fn(_, m) {
+    sinal.observe(fabric_obs.tool_dispatched(), fn(_, m) {
       fabric(
         "tool.start",
         FabricRun(m.action.run),
         m.action.tool <> " " <> m.action.call_id,
       )
     }),
-    observe("fabric.tool.stop", fabric_obs.tool_settled(), fn(_, m) {
+    sinal.observe(fabric_obs.tool_settled(), fn(_, m) {
       fabric(
         "tool.stop",
         FabricRun(m.action.run),
         m.action.tool <> " " <> string.inspect(m.disposition),
       )
     }),
-    observe("fabric.settlement", fabric_obs.settlement_refused(), fn(_, m) {
+    sinal.observe(fabric_obs.settlement_refused(), fn(_, m) {
       fabric("tool.settlement.refuse", FabricRun(m.action.run), m.summary)
     }),
-    observe("fabric.run.cancel", fabric_obs.run_cancelled(), fn(_, m) {
+    sinal.observe(fabric_obs.run_cancelled(), fn(_, m) {
       fabric("run.cancel", FabricRun(m.run), "")
     }),
-    observe("fabric.run.stop", fabric_obs.run_finished(), fn(totals, m) {
+    sinal.observe(fabric_obs.run_finished(), fn(totals, m) {
       fabric(
         "run.stop",
         FabricRun(m.run),
@@ -226,16 +248,16 @@ fn handlers(
           <> " turns",
       )
     }),
-    observe("saga.run.start", saga_obs.run_started(), fn(_, m) {
+    sinal.observe(saga_obs.run_started(), fn(_, m) {
       saga("run.start", m.workflow, m.run, "")
     }),
-    observe("saga.run.stop", saga_obs.run_stopped(), fn(_, m) {
+    sinal.observe(saga_obs.run_stopped(), fn(_, m) {
       saga("run.stop", m.workflow, m.run, string.inspect(m.outcome))
     }),
-    observe("saga.step.start", saga_obs.step_started(), fn(_, m) {
+    sinal.observe(saga_obs.step_started(), fn(_, m) {
       saga("step.start", m.workflow, m.run, m.step)
     }),
-    observe("saga.step.stop", saga_obs.step_stopped(), fn(_, m) {
+    sinal.observe(saga_obs.step_stopped(), fn(_, m) {
       saga(
         "step.stop",
         m.workflow,
@@ -243,7 +265,7 @@ fn handlers(
         m.step <> " " <> string.inspect(m.result),
       )
     }),
-    observe("saga.compensate", saga_obs.compensation_stopped(), fn(_, m) {
+    sinal.observe(saga_obs.compensation_stopped(), fn(_, m) {
       saga(
         "step.compensate",
         m.workflow,
@@ -251,7 +273,7 @@ fn handlers(
         m.step <> " " <> string.inspect(m.decision),
       )
     }),
-    observe("saga.undo", saga_obs.undo_stopped(), fn(_, m) {
+    sinal.observe(saga_obs.undo_stopped(), fn(_, m) {
       saga(
         "step.undo",
         m.workflow,
@@ -259,7 +281,7 @@ fn handlers(
         m.step <> " " <> string.inspect(m.result),
       )
     }),
-    observe("http_gun.lifecycle", http_obs.event(), fn(_, m) {
+    sinal.observe(http_obs.event(), fn(_, m) {
       case m.milestone {
         // Only the outcome-bearing milestones; admission steps are noise.
         http_obs.ResponseHeaders(status) ->
@@ -279,7 +301,7 @@ fn handlers(
         _ -> Nil
       }
     }),
-    observe("llm_wire.observation", llm_obs.observation_event(), fn(_, m) {
+    sinal.observe(llm_obs.observation_event(), fn(_, m) {
       process.send(
         collector,
         Observed(Observation(
@@ -291,20 +313,6 @@ fn handlers(
       )
     }),
   ]
-}
-
-fn observe(
-  name: String,
-  event: sinal.Event(m, d),
-  handler: fn(m, d) -> Nil,
-) -> fn(String) -> Result(sinal.Attachment, String) {
-  fn(suffix) {
-    let assert Ok(id) = sinal.handler_id("support_desk." <> name <> suffix)
-    sinal.observe(id, event, handler)
-    |> result.map_error(fn(error) {
-      "could not attach " <> name <> ": " <> string.inspect(error)
-    })
-  }
 }
 
 // Collector ---------------------------------------------------------------

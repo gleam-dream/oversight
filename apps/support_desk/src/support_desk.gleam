@@ -8,6 +8,7 @@ import gleam/io
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
+import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
 import support_desk/desk
 import support_desk/ledger
@@ -69,9 +70,13 @@ pub fn main() -> Nil {
     "\nshop API calls: " <> string.join(services.calls(app.services), ", "),
   )
   io.println(
-    "\ntelemetry trail for " <> ticket <> " (fabric run " <> run_id <> "):",
+    "\ntelemetry trail for "
+    <> correlation.to_string(ticket)
+    <> " (fabric run "
+    <> run_id
+    <> "):",
   )
-  telemetry.trail(app.telemetry, ticket, run_id)
+  telemetry.trail(app.telemetry, ticket)
   |> list.each(fn(o) { io.println("  " <> telemetry.render(o)) })
   let all = telemetry.observations(app.telemetry)
   io.println(
@@ -91,10 +96,11 @@ pub fn handle_ticket(
   ticket: String,
   message: String,
   approver: Approver,
-) -> #(String, String) {
+) -> #(Correlation, String) {
   io.println("\n" <> ticket <> ": " <> message)
+  let assert Ok(ticket) = correlation.from_string(ticket)
   let session = desk.session(app.desk, ticket, 0)
-  telemetry.register(app.telemetry, session.correlation, ticket)
+  telemetry.register(app.telemetry, session.http_id, ticket)
   let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
   let run_id = run.id_to_string(fabric.id(handle))
   drive(handle, session, approver)
@@ -140,7 +146,7 @@ fn drive(
       drive(handle, session, approver)
     }
     Ok(run.Finished(outcome)) ->
-      case desk.answer(outcome) {
+      case desk.close(session, handle, outcome) {
         desk.Resolved(resolution) ->
           io.println("  resolved: " <> desk.describe(resolution))
         desk.Untyped(text, problem) ->
