@@ -256,6 +256,16 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   keys correlation on its own `telemetry.Id` (HTTPGUN-R8 has not landed). The
   pid-link glue stays (`telemetry.gleam:60-65,84-106,148-170,215-238`).
   `sinal/correlation` was not adopted; see "Re-run after wave 2".
+- **Status (follow-up):** partially resolved by http_gun c45adfe.
+  `http_gun.with_correlation` takes a `sinal/correlation.Correlation` and the
+  `correlation` key in http_gun events carries it, so the app's request key is
+  now `correlation.unique()` instead of a borrowed http_gun `Id`: the type
+  change touches 9 lines of `telemetry.gleam` and removes the `gun_telemetry.new_id`
+  call (`web.gleam:224-225` is unchanged). The join glue does not shrink,
+  because Warden still carries no correlation. The collector keeps its
+  `Dict(Pid, Correlation)`, `Link`, `AddWarden` and the emission-time pid
+  resolution (`telemetry.gleam:60-65,84-106,148-170,215-238`, about 45
+  lines). Only the second key the wave 2 re-run feared never appeared.
 
 ### SSO-8 gleam_http interop: Warden's web boundary is strings
 
@@ -452,3 +462,50 @@ Migration guides: the sinal guide was enough. Its `observe` and
 names sso_portal under the telemetry start. It does not say what to use for
 a correlation key while the packages still carry their own; the CHANGELOG's
 HTTPGUN-R8 line implies "wait", which this app did.
+
+## Re-run after the follow-up fixes
+
+Packages: http_gun c45adfe (056536b), sinal and warden at head. All 10 tests
+pass under `../scripts/with-postgres.sh gleam test`, and `gleam run` prints the
+full narrative. The step 2 trace is unchanged: every http_gun milestone is
+`(correlated)` and the Warden `POST /token` sits between the two attempts.
+Step 4 still reports one provider refresh token active after logout (SSO-2).
+
+Only `telemetry.gleam` changed (16 added, 15 removed, 253 → 254 lines). The app
+defines no Sinal events and no record builders, uses no json_blueprint and no
+grind, so the Blueprint field, sinal builder, `required_field()` and grind
+`worker.codec` follow-ups do not touch it.
+
+| Seam                         | Before                                                      | After                                                                 |
+| ---------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------- |
+| Request key type             | `gun_telemetry.Id` from `new_id()`, http_gun's own id       | `correlation.unique()`, the shared Sinal type; 1 import, 0 net lines  |
+| http_gun side of the join    | `GunLifecycle.correlation` compared to the pid-link id      | same comparison, now against the `Correlation` the app passed in      |
+| Warden side of the join      | ~45 (pid links, `AddWarden`, `begin_request`, trace filter) | ~45, unchanged (SSO-7)                                                |
+| `begin_request` return value | an http_gun `Id` that only http_gun understood              | a `Correlation` the app can also log, return to the browser, or reuse |
+
+Net: the glue did not shrink. The brief expected join tables keyed on
+http_gun's old `Id` to disappear, but this app never had one: it had a single
+pid → id map, and that map is needed for Warden, not for http_gun. The change
+is a type swap; the app gains a vocabulary that Warden can adopt later, not
+fewer lines.
+
+New friction:
+
+- **The pid map is the whole cost and no http_gun change can remove it.**
+  Warden's `[warden, http, request]` event has no `correlation` field, so the
+  collector still resolves the emitting pid at emission time. Once Warden
+  accepts a `Correlation` (the SSO-7 proposal, now with the right type),
+  `begin_request` is `correlation.unique()`, `Link`, `AddWarden` and the dict
+  go, about 45 lines.
+- **A request process cannot hand its correlation to a library that calls
+  Warden on its behalf.** The correlation reaches http_gun through
+  `with_correlation` on a client view, but `warden.restore_session` and
+  `refresh_session` take no equivalent, so the one call that produces the
+  `/token` event is the one call the app cannot tag.
+- **`Correlation` is opaque with only `unique()` and `from_string`.** The app
+  never needs to construct one from an inbound header, so this costs nothing
+  here, but `last_request_trace` still selects "the most recent request" by
+  the collector's own `last` field rather than by a value a test could name.
+- No breaking change beyond `with_correlation`'s argument type had to be
+  absorbed, and the migration guide's before/after snippet matched the app's
+  one call site.
