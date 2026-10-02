@@ -12,8 +12,6 @@
 //// events by correlation.
 
 import gleam/dict.{type Dict}
-import gleam/dynamic.{type Dynamic}
-import gleam/erlang/atom
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/int
 import gleam/io
@@ -69,11 +67,6 @@ type Message {
 /// Start the collector and the http_gun forwarder, and attach handlers to
 /// every package's events. `print` echoes each event as it arrives.
 pub fn start(print: Bool) -> Result(Telemetry, String) {
-  // Attaching needs the telemetry application; nothing else starts it first.
-  use _ <- result.try(
-    ensure_all_started(atom.create("telemetry"))
-    |> result.replace_error("telemetry application did not start"),
-  )
   use collector <- result.try(
     actor.new(State([], dict.new(), option.None, print))
     |> actor.on_message(collect)
@@ -81,22 +74,15 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
     |> result.map(fn(started) { started.data })
     |> result.replace_error("collector did not start"),
   )
-  use forwarder <- result.try(
-    forwarder.new(process.new_name("sso_portal_http_gun_events"), 1024)
-    |> result.replace_error("forwarder config rejected"),
-  )
+  let forwarder = forwarder.new(process.new_name("sso_portal_http_gun_events"))
   use sup <- result.try(
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(forwarder.supervised(forwarder))
     |> supervisor.start
     |> result.replace_error("forwarder did not start"),
   )
-  let suffix = int.to_string(int.random(1_000_000_000))
-  let assert Ok(warden_id) = sinal.handler_id("sso-portal-warden-" <> suffix)
-  let assert Ok(gun_id) = sinal.handler_id("sso-portal-http-gun-" <> suffix)
-  let assert Ok(drop_id) = sinal.handler_id("sso-portal-dropped-" <> suffix)
-  use warden_attachment <- result.try(
-    sinal.observe(warden_id, observation.http_request(), fn(m, r) {
+  let warden_attachment =
+    sinal.observe(observation.http_request(), fn(m, r) {
       process.send(
         collector,
         AddWarden(
@@ -118,10 +104,8 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
         ),
       )
     })
-    |> result.replace_error("warden attach failed"),
-  )
-  use gun_attachment <- result.try(
-    sinal.observe(gun_id, gun_telemetry.event(), fn(_timing, meta) {
+  let gun_attachment =
+    sinal.observe(gun_telemetry.event(), fn(_timing, meta) {
       process.send(
         collector,
         Add(GunLifecycle(
@@ -130,17 +114,13 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
         )),
       )
     })
-    |> result.replace_error("http_gun attach failed"),
-  )
-  use drop_attachment <- result.try(
-    sinal.observe(drop_id, forwarder.dropped_event(), fn(d, _meta) {
+  let drop_attachment =
+    sinal.observe(forwarder.dropped_event(), fn(d, _meta) {
       process.send(
         collector,
         Add(ForwarderDropped(d.rejected, d.lost, d.unavailable)),
       )
     })
-    |> result.replace_error("forwarder drop attach failed"),
-  )
   Ok(Telemetry(
     collector:,
     forwarder:,
@@ -271,6 +251,3 @@ fn milestone(m: gun_telemetry.Milestone) -> String {
       "terminated(" <> string.inspect(outcome) <> ")"
   }
 }
-
-@external(erlang, "application", "ensure_all_started")
-fn ensure_all_started(application: atom.Atom) -> Result(Dynamic, Dynamic)
