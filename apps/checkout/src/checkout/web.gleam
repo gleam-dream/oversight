@@ -20,6 +20,7 @@ import gleam/result
 import gleam/string
 import http_gun/error
 import mist
+import sinal/correlation
 import wisp
 import wisp/wisp_mist
 
@@ -93,7 +94,13 @@ fn show(app: App, order_id: String) -> wisp.Response {
 }
 
 fn decode_order(body: decode.Dynamic) -> Result(domain.OrderRequest, Nil) {
-  decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil)
+  use order <- result.try(
+    decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil),
+  )
+  // The order id is the order's telemetry correlation.
+  correlation.from_string(order.order_id)
+  |> result.replace(order)
+  |> result.replace_error(Nil)
 }
 
 fn report_json(order_id: String, report: Report) -> json.Json {

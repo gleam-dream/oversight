@@ -2,7 +2,8 @@
 //// http_gun, grind) and collects them, so one order can be followed across
 //// packages.
 ////
-//// No package carries the order id, so correlation is reconstructed here:
+//// An order's correlation is a `sinal/correlation` value made from its
+//// order id. No package carries it yet, so each event is linked to it here:
 //// - http_gun: an opaque `telemetry.Id` per order, created by this module
 ////   and attached to the client with `http_gun.with_correlation`;
 //// - saga: local runs are linked by `execution.run_id`; durable runs expose
@@ -24,6 +25,7 @@ import grind/observation as grind_obs
 import http_gun/telemetry as http_telemetry
 import saga/observation as saga_obs
 import sinal
+import sinal/correlation.{type Correlation}
 
 pub type Source {
   Saga
@@ -50,17 +52,31 @@ pub opaque type Collector {
 type State {
   State(
     entries: List(Entry),
-    links: Dict(Key, String),
-    http_ids: Dict(String, http_telemetry.Id),
+    links: Dict(Key, Correlation),
+    http_ids: Dict(Correlation, http_telemetry.Id),
   )
 }
 
 type Message {
   Record(Entry)
-  Link(Key, String)
-  HttpId(order_id: String, reply: Subject(http_telemetry.Id))
-  Trace(order_id: String, reply: Subject(List(Entry)))
+  Link(Key, Correlation)
+  HttpId(order: Correlation, reply: Subject(http_telemetry.Id))
+  Trace(order: Correlation, reply: Subject(List(Entry)))
   Unattributed(reply: Subject(List(Entry)))
+}
+
+/// The correlation of an order. The web layer refuses an order id that is
+/// not a valid correlation (empty, or longer than 128 bytes).
+pub fn order(order_id: String) -> Correlation {
+  let assert Ok(order) = correlation.from_string(order_id)
+  order
+}
+
+/// The order behind an id of the form `"<kind>:<order id>"`, as used for
+/// saga execution ids and grind submission ids.
+pub fn from_tagged_id(id: String) -> Result(Correlation, Nil) {
+  use #(_, order_id) <- result.try(string.split_once(id, ":"))
+  correlation.from_string(order_id) |> result.replace_error(Nil)
 }
 
 /// Starts the collector and attaches one handler per event descriptor.
@@ -70,9 +86,7 @@ pub fn start() -> Collector {
     |> actor.on_message(handle)
     |> actor.start
   let subject = started.data
-  let suffix = "-" <> int.to_string(int.random(1_000_000_000_000))
-  let attachments = attach_all(subject, suffix)
-  Collector(subject:, attachments:)
+  Collector(subject:, attachments: attach_all(subject))
 }
 
 pub fn stop(collector: Collector) -> Nil {
@@ -83,19 +97,19 @@ pub fn stop(collector: Collector) -> Nil {
 }
 
 /// The http_gun correlation id for an order, created on first use.
-pub fn http_id(collector: Collector, order_id: String) -> http_telemetry.Id {
-  actor.call(collector.subject, 1000, HttpId(order_id, _))
+pub fn http_id(collector: Collector, order: Correlation) -> http_telemetry.Id {
+  actor.call(collector.subject, 1000, HttpId(order, _))
 }
 
-pub fn link(collector: Collector, key: Key, order_id: String) -> Nil {
-  actor.send(collector.subject, Link(key, order_id))
+pub fn link(collector: Collector, key: Key, order: Correlation) -> Nil {
+  actor.send(collector.subject, Link(key, order))
 }
 
-/// Every collected event attributed to `order_id`, in arrival order.
-pub fn trace(collector: Collector, order_id: String) -> List(Entry) {
+/// Every collected event attributed to `order`, in arrival order.
+pub fn trace(collector: Collector, order: Correlation) -> List(Entry) {
   // Forwarded events (http_gun, grind) arrive asynchronously.
   process.sleep(50)
-  actor.call(collector.subject, 1000, Trace(order_id, _))
+  actor.call(collector.subject, 1000, Trace(order, _))
 }
 
 /// Events that could not be attributed to any order.
@@ -153,26 +167,23 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
   }
 }
 
-fn owner(state: State, entry: Entry) -> Option(String) {
+fn owner(state: State, entry: Entry) -> Option(Correlation) {
   list.find_map(entry.keys, fn(key) { dict.get(state.links, key) })
   |> option.from_result
 }
 
 // --- attachments ----------------------------------------------------------
 
-fn attach_all(
-  subject: Subject(Message),
-  suffix: String,
-) -> List(sinal.Attachment) {
+fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
   let record = fn(source, keys, line) {
     process.send(subject, Record(Entry(source, keys, line)))
   }
   let saga_keys = fn(run) { [SagaRun(run), Emitter(process.self())] }
   [
-    observe("saga-run-start" <> suffix, saga_obs.run_started(), fn(_m, d) {
+    sinal.observe(saga_obs.run_started(), fn(_m, d) {
       record(Saga, saga_keys(d.run), "run start " <> d.workflow)
     }),
-    observe("saga-run-stop" <> suffix, saga_obs.run_stopped(), fn(m, d) {
+    sinal.observe(saga_obs.run_stopped(), fn(m, d) {
       record(
         Saga,
         saga_keys(d.run),
@@ -182,14 +193,14 @@ fn attach_all(
           <> int.to_string(m.undone),
       )
     }),
-    observe("saga-step-start" <> suffix, saga_obs.step_started(), fn(_m, d) {
+    sinal.observe(saga_obs.step_started(), fn(_m, d) {
       record(
         Saga,
         saga_keys(d.run),
         "step start " <> d.step <> " attempt=" <> int.to_string(d.attempt),
       )
     }),
-    observe("saga-step-stop" <> suffix, saga_obs.step_stopped(), fn(_m, d) {
+    sinal.observe(saga_obs.step_stopped(), fn(_m, d) {
       record(
         Saga,
         saga_keys(d.run),
@@ -201,42 +212,34 @@ fn attach_all(
           <> string.inspect(d.result),
       )
     }),
-    observe(
-      "saga-compensate" <> suffix,
-      saga_obs.compensation_stopped(),
-      fn(_m, d) {
-        record(
-          Saga,
-          saga_keys(d.run),
-          "compensate " <> d.step <> " " <> string.inspect(d.decision),
-        )
-      },
-    ),
-    observe("saga-undo" <> suffix, saga_obs.undo_stopped(), fn(_m, d) {
+    sinal.observe(saga_obs.compensation_stopped(), fn(_m, d) {
+      record(
+        Saga,
+        saga_keys(d.run),
+        "compensate " <> d.step <> " " <> string.inspect(d.decision),
+      )
+    }),
+    sinal.observe(saga_obs.undo_stopped(), fn(_m, d) {
       record(
         Saga,
         saga_keys(d.run),
         "undo " <> d.step <> " " <> string.inspect(d.result),
       )
     }),
-    observe("http-lifecycle" <> suffix, http_telemetry.event(), fn(_m, d) {
+    sinal.observe(http_telemetry.event(), fn(_m, d) {
       let keys = case d.correlation {
         Some(id) -> [HttpCorrelation(id)]
         None -> []
       }
       record(Http, keys, "request " <> string.inspect(d.milestone))
     }),
-    observe("grind-admitted" <> suffix, grind_obs.admitted(), fn(_m, d) {
+    sinal.observe(grind_obs.admitted(), fn(_m, d) {
       // The submission id is "<kind>:<order id>"; nothing else in grind's
       // metadata identifies the application's order.
-      case d.submission_id {
-        Some(id) ->
-          case string.split_once(id, ":") {
-            Ok(#(_, order)) ->
-              process.send(subject, Link(GrindJob(d.ref.job_id), order))
-            Error(Nil) -> Nil
-          }
-        None -> Nil
+      case option.map(d.submission_id, from_tagged_id) {
+        Some(Ok(order)) ->
+          process.send(subject, Link(GrindJob(d.ref.job_id), order))
+        _ -> Nil
       }
       record(
         Grind,
@@ -247,7 +250,7 @@ fn attach_all(
           <> job.state_to_stored(d.committed_state),
       )
     }),
-    observe("grind-claimed" <> suffix, grind_obs.claimed(), fn(_m, d) {
+    sinal.observe(grind_obs.claimed(), fn(_m, d) {
       record(
         Grind,
         [GrindJob(d.ref.job_id)],
@@ -257,7 +260,7 @@ fn attach_all(
           <> int.to_string(d.attempt.attempt),
       )
     }),
-    observe("grind-acknowledged" <> suffix, grind_obs.acknowledged(), fn(_m, d) {
+    sinal.observe(grind_obs.acknowledged(), fn(_m, d) {
       record(
         Grind,
         [GrindJob(d.ref.job_id)],
@@ -267,14 +270,14 @@ fn attach_all(
           <> job.state_to_stored(d.committed_state),
       )
     }),
-    observe("grind-quarantined" <> suffix, grind_obs.quarantined(), fn(_m, d) {
+    sinal.observe(grind_obs.quarantined(), fn(_m, d) {
       record(
         Grind,
         [GrindJob(d.ref.job_id)],
         "job quarantined " <> job_line(d.ref),
       )
     }),
-    observe("grind-resolved" <> suffix, grind_obs.resolved(), fn(_m, d) {
+    sinal.observe(grind_obs.resolved(), fn(_m, d) {
       record(
         Grind,
         [GrindJob(d.ref.job_id)],
@@ -282,16 +285,6 @@ fn attach_all(
       )
     }),
   ]
-  |> result.values
-}
-
-fn observe(
-  name: String,
-  event: sinal.Event(m, d),
-  run: fn(m, d) -> Nil,
-) -> Result(sinal.Attachment, sinal.AttachError) {
-  let assert Ok(id) = sinal.handler_id("checkout-" <> name)
-  sinal.observe(id, event, run)
 }
 
 fn job_line(ref: grind_obs.JobRef) -> String {

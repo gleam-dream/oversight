@@ -193,6 +193,24 @@ Failure(DeadlineExceeded, MayHaveBeenSent))`. Its decider retries under the
   - grind: repeat `submission_id: Option(String)` in `ClaimedMetadata` and
     `AcknowledgedMetadata`.
 
+**Status (wave 2):** partially resolved by sinal 43279b3 (`sinal/correlation`),
+for the shared value only. The app's order key is now a `Correlation` made from
+the order id (apps/checkout/src/checkout/telemetry.gleam:70-80), and the web
+layer refuses an order id that is not a valid correlation
+(apps/checkout/src/checkout/web.gleam:96-104). No package carries the value
+yet: saga, http_gun and grind metadata are unchanged at 43ae141, 1dc20a1 and
+c1920e6. The registry, all four key kinds, the order → `telemetry.Id` map, the
+claim hook and the `process.self()` trick stay. Lines removed: 0 from this
+seam; the two `"<kind>:<order>"` parsers became one `from_tagged_id` helper,
+which the type change made worth sharing. Lines added: 10 (see the re-run
+section). The wave also makes the process trick more fragile: saga now calls
+`sinal.emit`, which follows `forwarder.route`
+(saga/CHANGELOG.md, "Built on the wave 2 Sinal API"). A
+`forwarder.route(["saga"], ..)` anywhere in the VM would move the handlers off
+the runner, so `Emitter(process.self())`
+(apps/checkout/src/checkout/telemetry.gleam:181) would name the forwarder and
+every durable saga event would become unattributed, with no error.
+
 ### CHK-6 A crashed grind attempt leaves the saga runner alive, and recovery needs an operator
 
 - **Packages**: grind, saga. **Kind**: composition. **Severity**: major.
@@ -236,6 +254,19 @@ StopRunner | Detach)`. `StopRunner` kills the runner and keeps the
   `error.decoder() -> Decoder(Failure)` with stable tags. The saga↔grind
   codec bridge is a further 18 lines (codecs.gleam:22-47; saga card,
   "Codec fragmentation").
+
+**Status (wave 2):** open. http_gun 1dc20a1 adds no serialised form
+(`error.gleam` still exports only `describe` and `file_description`), and saga
+`codec.Codec` and grind `worker.Codec` are unchanged, so both the 129-line
+codec and the 18-line bridge stay. json_blueprint 2.0 would not shrink
+either. The app does not use Blueprint, and `codec.to_json`/`codec.decoder`
+bridge Blueprint to gleam_json, not to saga's or grind's codec type, so the
+bridge would keep `to_grind` and `to_saga`. Rewriting the `Failure` codec as a
+`codec.union` would need one `use .. <- codec.variant(..)` line and one
+`match` arm for each of the 23 `Reason` constructors, a field codec for
+`LimitExceeded`, a `codec.custom` for the lossy `FixtureIo`, and the same two
+`string_enum` tables. That is not shorter than the current encoder and
+decoder, and it adds a dependency. The cure stays in http_gun.
 
 ### CHK-8 Saga effect keys cannot serve as provider idempotency keys
 
@@ -383,3 +414,83 @@ original policy also pinned `allowed_hosts: Some(["127.0.0.1"])` and set
 payment client must not reach hosts outside its allowlist. A
 `config.allow_only_hosts(config, List(String))` helper (http_gun) would let
 an app keep both in one pipeline. Severity: minor.
+
+## Re-run after wave 2
+
+The heads are sinal a0c05ef, saga 43ae141, grind c1920e6 and http_gun
+1dc20a1. The app does not use json_blueprint. All 9 tests pass. `gleam run`
+narrates the six orders, prints both traces and reports 0 unattributed
+events. Compile errors on the new heads came only from
+`apps/checkout/src/checkout/telemetry.gleam` (`sinal.handler_id`, the
+three-argument `observe`). `forwarder.new(name, 1024)` also changed.
+
+| Seam                                                               | Before | After | Change                                                                                                                             |
+| ------------------------------------------------------------------ | -----: | ----: | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Handler ids (helper, random per-collector suffix, `result.values`) |     11 |     0 | `sinal.observe(event, run)` returns an `Attachment`; automatic ids remove the suffix that kept test collectors apart               |
+| Forwarder construction                                             |      2 |     2 | `let assert Ok(..) = forwarder.new(name, 1024)` → `forwarder.new(name)`; 1024 is now `default_capacity`                            |
+| Telemetry correlation (CHK-5)                                      |    ~75 |   ~85 | The order key is a `Correlation`: `order` and `from_tagged_id` (8), the web check (5), wrapped call sites (+3), shared parser (−6) |
+| http_gun `Failure` codec (CHK-7)                                   |    129 |   129 | Unchanged; no upstream serialised form                                                                                             |
+| Saga ↔ grind codec bridge (CHK-7)                                  |     18 |    18 | Unchanged; both codec types are unchanged                                                                                          |
+
+Code lines across `src` and `test` (excluding blanks and comments) go from
+3,219 to 3,218. The handler-id glue that was removed is offset by the
+correlation glue that was added. Other seams (CHK-1 to CHK-4, CHK-6, CHK-8,
+CHK-10, CHK-11) are unchanged.
+
+New friction:
+
+- **Adopting `Correlation` before packages carry it costs lines and buys
+  nothing yet** (sinal, minor). `from_string` returns a `Result`, so an id
+  from the request needs a validation point and every other use needs a
+  `let assert` or a fallback:
+
+  ```gleam
+  // telemetry.gleam:70: a precondition the web layer has to uphold
+  pub fn order(order_id: String) -> Correlation {
+    let assert Ok(order) = correlation.from_string(order_id)
+    order
+  }
+
+  // web.gleam:100: the new validation point
+  correlation.from_string(order.order_id)
+  |> result.replace(order)
+  |> result.replace_error(Nil)
+  ```
+
+  This is the right type, and the 128-byte bound is a reasonable thing to
+  refuse at the edge. The payoff depends on the other waves. With
+  `http_gun.with_correlation(client, Correlation)`, the `http_ids` map, the
+  `HttpId` message and `http_id` (about 20 lines) disappear. With saga and
+  grind metadata carrying `correlation`, the `Key` type, the claim hook and
+  the submission-id parsing disappear too.
+
+- **Routing makes the saga process trick fail silently** (sinal and saga,
+  minor). See the CHK-5 status. `forwarder.route` is VM-global, so a library
+  or test that routes `["saga"]` changes which process runs the app's
+  handlers. Until saga carries an execution id, CHK-5's proposal is the only
+  robust fix.
+- **Three delivery models remain** (http_gun, grind, nit). Saga emits with
+  `sinal.emit` and can now be routed. Grind emits into its own forwarder.
+  http_gun still emits only into the forwarder the app passes in
+  (`client_config(Some(forwarder))`); with `None` it emits nothing, so the app
+  cannot use `forwarder.route(["http_gun"], ..)` instead of the explicit
+  forwarder.
+
+Positive: `sinal.observe(event, run)` reads better than before. The eleven
+attachments are now one list of plain calls, and the random suffix existed
+only because handler ids were global and tests start several collectors.
+
+Migration guides: the sinal guide was sufficient for every compile error;
+its `handler_id` and `forwarder.new` examples are this app's own code. Two
+gaps:
+
+- It says "http_gun replaces `telemetry.Id` as the cross-package key with
+  `Correlation` (HTTPGUN-R8)" in the present tense. At 1dc20a1, http_gun still
+  takes `telemetry.Id` in `with_correlation`, so an app reading the guide
+  would look for an API that does not exist yet.
+- It does not say how an application should use `Correlation` while its
+  packages do not carry it. It does not say where to validate an untrusted
+  id, or whether to keep an app-side registry.
+
+The json_blueprint guide does not apply; see the CHK-7 status for why
+adopting json_blueprint would not shrink this app's codecs.

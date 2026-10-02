@@ -101,10 +101,13 @@ fn demo(url: String) -> Nil {
   })
 
   io.println("\nTelemetry for ord-happy (saga + http_gun + grind):")
-  telemetry.trace(application.services.collector, "ord-happy")
+  telemetry.trace(application.services.collector, telemetry.order("ord-happy"))
   |> list.each(fn(e) { io.println("  " <> telemetry.render(e)) })
   io.println("\nTelemetry for ord-durable:")
-  telemetry.trace(application.services.collector, "ord-durable")
+  telemetry.trace(
+    application.services.collector,
+    telemetry.order("ord-durable"),
+  )
   |> list.each(fn(e) { io.println("  " <> telemetry.render(e)) })
   let stray = telemetry.unattributed(application.services.collector)
   io.println("\nUnattributed events: " <> int.to_string(list.length(stray)))

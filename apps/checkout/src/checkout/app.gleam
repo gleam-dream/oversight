@@ -95,8 +95,8 @@ pub fn start(config: Config) -> Result(App, String) {
   )
 
   // Observability: a supervised forwarder for http_gun lifecycle events.
-  let assert Ok(http_observations) =
-    forwarder.new(process.new_name("checkout_http_observations"), 1024)
+  let http_observations =
+    forwarder.new(process.new_name("checkout_http_observations"))
   use observability <- result.try(
     static_supervisor.new(static_supervisor.OneForOne)
     |> static_supervisor.add(forwarder.supervised(http_observations))
@@ -121,14 +121,16 @@ pub fn start(config: Config) -> Result(App, String) {
       shipping_deadline_ms: config.shipping_deadline_ms,
     )
   let client_for = fn(order_id) {
-    http_gun.with_correlation(http, telemetry.http_id(collector, order_id))
+    http_gun.with_correlation(
+      http,
+      telemetry.http_id(collector, telemetry.order(order_id)),
+    )
   }
   let store =
     saga_store.start(pool, config.saga_lease_ms, fn(id, pid) {
       // Execution ids are "checkout:<order id>".
-      case string.split_once(id, ":") {
-        Ok(#(_, order_id)) ->
-          telemetry.link(collector, telemetry.Emitter(pid), order_id)
+      case telemetry.from_tagged_id(id) {
+        Ok(order) -> telemetry.link(collector, telemetry.Emitter(pid), order)
         Error(Nil) -> Nil
       }
     })
