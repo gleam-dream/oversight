@@ -12,8 +12,8 @@ import gleam/result
 import gleam/uri
 import grind/worker.{type Worker}
 import http_gun
-import http_gun/body
 import http_gun/error
+import http_gun/request_options
 import http_gun/telemetry as http_telemetry
 import pog
 import sinal
@@ -187,27 +187,27 @@ pub fn build_request(
 }
 
 /// Send and read the status. The body is read only up to `max_body` for the
-/// delivery log: a 200 with an oversized body is still a delivered webhook.
-/// (`http_gun.send` would turn that 200 into `LimitExceeded` and drop the
-/// status, which a retrying worker would then deliver twice.)
+/// delivery log: under the `Truncate` policy a 200 with an oversized body is
+/// still a delivered webhook, so a retrying worker never delivers it twice.
 pub fn send(
   client: http_gun.Client,
   req: Request(BitArray),
   max_body: Int,
 ) -> Result(Reply, error.Failure) {
-  http_gun.try_with_response(client, req, fn(failure) { failure }, fn(resp) {
-    let retry_after =
-      response.get_header(resp, "retry-after") |> option.from_result
-    let note = case body.collect(resp.body, max_body) {
-      Ok(collected) -> attempt.BodyRead(bit_array.byte_size(collected.bytes))
-      Error(error.Failure(
-        error.LimitExceeded(error.CollectedBodyBytes, limit, _),
-        _,
-      )) -> attempt.BodyOverLimit(limit)
-      Error(_) -> attempt.BodyUnread
-    }
-    Ok(attempt.Reply(resp.status, retry_after, note))
-  })
+  let options =
+    request_options.Options(
+      ..request_options.default(),
+      collect: Some(request_options.Collect(max_body, request_options.Truncate)),
+    )
+  use sent <- result.map(http_gun.send_with_options(client, req, options))
+  let resp = sent.response
+  let note = case sent.truncated {
+    True -> attempt.BodyOverLimit(max_body)
+    False -> attempt.BodyRead(bit_array.byte_size(resp.body))
+  }
+  let retry_after =
+    response.get_header(resp, "retry-after") |> option.from_result
+  attempt.Reply(resp.status, retry_after, note)
 }
 
 fn describe(disposition: Disposition) -> String {

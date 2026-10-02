@@ -9,7 +9,6 @@ import grind/postgres
 import grind/queue
 import grind/worker
 import webhooks/attempt
-import webhooks/jobs
 import webhooks/receiver
 import webhooks/signing
 import webhooks/store
@@ -29,7 +28,7 @@ pub fn common_path_signed_delivery_test() {
 
   use consumer <- support.with_consumer(svc)
   assert queue.process_one(consumer) == Ok(True)
-  assert jobs.outcome(svc.jobs, svc.worker, job_id)
+  assert support.outcome(svc, job_id)
     == Ok(job.SucceededWith(attempt.Receipt(204, attempt.BodyRead(0))))
 
   // The receiver got one signed request carrying the idempotency key.
@@ -47,13 +46,11 @@ pub fn common_path_signed_delivery_test() {
   assert support.publish(svc, raw) == [#(delivery_id, job_id)]
   assert queue.process_one(consumer) == Ok(False)
 
-  // Grind defect evidence (WHK-2): the worker cannot re-bind its own
-  // succeeded job, because the success ACK nulls error_version.
-  let assert Error(postgres.CodecContractMismatch(
-    kind: worker.ErrorCodec,
-    expected: "delivery-error-v1",
-    actual: "none",
-  )) = postgres.bind_handle(svc.jobs, svc.worker, job_id)
+  // WHK-2: the worker itself, error codec included, re-binds its own
+  // succeeded job; no read-only twin definition is needed.
+  let assert Ok(handle) = postgres.bind_handle(svc.jobs, svc.worker, job_id)
+  assert postgres.outcome(svc.jobs, handle)
+    == Ok(job.SucceededWith(attempt.Receipt(204, attempt.BodyRead(0))))
 
   // One delivery can be followed across grind, http_gun and the app, but
   // only through the app's own join tables.
@@ -81,7 +78,7 @@ pub fn receiver_down_retries_then_exhausts_test() {
   assert queue.process_one(consumer) == Ok(True)
   assert queue.process_one(consumer) == Ok(True)
   assert queue.process_one(consumer) == Ok(False)
-  assert jobs.outcome(svc.jobs, svc.worker, job_id)
+  assert support.outcome(svc, job_id)
     == Ok(job.BusinessFailedWithCause(
       attempt.Transport("connection_failed.connection_refused"),
       worker.BudgetExhausted,
@@ -143,12 +140,11 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
   assert queue.process_one(consumer) == Ok(False)
 
   list.each(acme, fn(entry) {
-    assert jobs.outcome(svc.jobs, svc.worker, entry.1)
+    assert support.outcome(svc, entry.1)
       == Ok(job.DiscardedWithReason("destination rejected by policy"))
   })
   let assert [#(_, ops_job)] = ops
-  let assert Ok(job.SucceededWith(_)) =
-    jobs.outcome(svc.jobs, svc.worker, ops_job)
+  let assert Ok(job.SucceededWith(_)) = support.outcome(svc, ops_job)
   // Only the internal tenant's request reached the receiver.
   let assert [only] = receiver.received(rx)
   assert string.starts_with(

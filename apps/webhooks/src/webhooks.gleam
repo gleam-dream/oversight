@@ -17,6 +17,7 @@ import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import grind/job
+import grind/postgres
 import grind/queue
 import http_gun
 import http_gun/config
@@ -25,7 +26,6 @@ import mist
 import webhooks/attempt
 import webhooks/delivery
 import webhooks/egress
-import webhooks/jobs
 import webhooks/receiver
 import webhooks/service
 import webhooks/signing
@@ -74,17 +74,7 @@ fn run(url: String) -> Nil {
   let api = start_api(svc.context)
   // The operator's own client for calling the API: a third policy.
   let assert Ok(admin) =
-    http_gun.start(
-      config.Config(
-        ..config.default(),
-        destination: destination.Policy(
-          ..destination.default(),
-          allow_public: False,
-          allow_loopback: True,
-          allowed_hosts: Some(["127.0.0.1"]),
-        ),
-      ),
-    )
+    http_gun.start(config.default() |> config.allow_loopback)
   io.println("== webhooks: grind + http_gun + sinal on wisp/mist/pog ==")
   io.println(
     "API on 127.0.0.1:"
@@ -285,7 +275,9 @@ fn await_outcomes(
 ) -> List(#(String, job.Outcome(attempt.Receipt, attempt.DeliveryError))) {
   let outcomes =
     list.map(published, fn(entry) {
-      let assert Ok(outcome) = jobs.outcome(svc.jobs, svc.worker, entry.1)
+      let assert Ok(handle) =
+        postgres.bind_handle(svc.jobs, svc.worker, entry.1)
+      let assert Ok(outcome) = postgres.outcome(svc.jobs, handle)
       #(entry.0, outcome)
     })
   let settled =
