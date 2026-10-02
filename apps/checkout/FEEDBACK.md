@@ -270,6 +270,10 @@ StopRunner | Detach)`. `StopRunner` kills the runner and keeps the
 
 - **Proposal** (saga, grind): widen to `< 2.0.0` as http_gun and sinal did.
 
+**Status (2 Oct 2026):** resolved by grind b2545a9 and saga 26dbc73 (both
+now allow `gleam_stdlib < 2.0.0`). `gleam update` resolves gleam_stdlib 1.0.5
+with no app change; the app already asked for `< 2.0.0`.
+
 ### CHK-10 A queue-handler-only grind worker needs a dummy `perform`
 
 - **Packages**: grind. **Kind**: ergonomics. **Severity**: minor.
@@ -280,6 +284,13 @@ StopRunner | Detach)`. `StopRunner` kills the runner and keeps the
   `fn(_order) { Error(Nil) }` (apps/checkout/src/checkout/jobs.gleam:37).
 - **Proposal** (grind): `worker.define_responding(id, version, input, output,
 handler: fn(input) -> WorkerResponse(output, error))`.
+
+**Status (2 Oct 2026):** open. grind 7a04831 fixes the error-contract version
+but adds no handler-only definition, so `fn(_order) { Error(Nil) }` stays
+(apps/checkout/src/checkout/jobs.gleam:37). The app never had an error-codec
+workaround to remove: both workers use `worker.define` with `Nil` errors,
+because the durable handler answers only `Succeeded`, `Snoozed`, `Uncertain`
+or `Cancelled`, and the receipt failure carries nothing worth keeping.
 
 ### CHK-11 Lowering grind's statement deadline trips a private margin
 
@@ -295,16 +306,16 @@ handler: fn(input) -> WorkerResponse(output, error))`.
 
 Lines of code, excluding blanks and comments.
 
-| Seam                                                         | Lines | Where                                                       |
-| ------------------------------------------------------------ | ----: | ----------------------------------------------------------- |
-| Saga `Storage` on pog (owner registry, lease, fencing)       |   334 | saga_store.gleam (326), db.gleam:52-60 (8)                  |
-| http_gun `Failure` codec for durable step errors             |   129 | codecs.gleam:236-373                                        |
-| Saga ↔ grind codec bridge                                    |    18 | codecs.gleam:22-47                                          |
-| Receipt outbox (no transactional enqueue)                    |    76 | db.gleam:44-48, :222-273; orders.gleam:249-275              |
-| Grind worker driving durable saga (outcome → response)       |    63 | jobs.gleam                                                  |
-| Telemetry correlation (registry, keys, claim hook, wiring)   |   ~75 | telemetry.gleam:35-40, :86-159, :229-240; app.gleam:123-134 |
-| Unknown-outcome handling in steps (deciders, key derivation) |   ~45 | workflow.gleam:38-44, :128-160, :198-224                    |
-| http_gun loopback destination policy                         |    13 | gateway.gleam:39-54                                         |
+| Seam                                                         | Lines | Where                                                                                      |
+| ------------------------------------------------------------ | ----: | ------------------------------------------------------------------------------------------ |
+| Saga `Storage` on pog (owner registry, lease, fencing)       |   334 | saga_store.gleam (326), db.gleam:52-60 (8)                                                 |
+| http_gun `Failure` codec for durable step errors             |   129 | codecs.gleam:236-373                                                                       |
+| Saga ↔ grind codec bridge                                    |    18 | codecs.gleam:22-47                                                                         |
+| Receipt outbox (no transactional enqueue)                    |    76 | db.gleam:44-48, :222-273; orders.gleam:249-275                                             |
+| Grind worker driving durable saga (outcome → response)       |    63 | jobs.gleam                                                                                 |
+| Telemetry correlation (registry, keys, claim hook, wiring)   |   ~75 | telemetry.gleam:35-40, :86-159, :229-240; app.gleam:123-134                                |
+| Unknown-outcome handling in steps (deciders, key derivation) |   ~45 | workflow.gleam:38-44, :128-160, :198-224                                                   |
+| http_gun loopback destination policy                         |    13 | gateway.gleam:39-54 (unchanged on 2 Oct: `config.allow_loopback` cannot keep the host pin) |
 
 The rest (domain, providers, web, the telemetry handlers themselves, and
 the order tables) is ordinary application code.
@@ -345,3 +356,30 @@ the order tables) is ordinary application code.
 - **wisp, mist and pog needed nothing special.** Grind using its own schema
   (`with_schema("checkout_jobs")`) kept its migration runner away from the
   app's tables in the shared database.
+
+## Re-run after fixes (2 Oct 2026)
+
+`gleam update` on the new heads (grind b2545a9, saga 26dbc73, http_gun
+a2869b7) resolved gleam_stdlib 1.0.5 (was 0.71.0). It also moved gleeunit
+1.11.0, glisten 9.0.1, gramps 6.0.1 and mist 6.0.3. All 9 tests pass, and
+`gleam run` narrates the six orders and the trace with no unattributed
+events.
+
+| Seam                                 | Before | After | Change                                                                                |
+| ------------------------------------ | -----: | ----: | ------------------------------------------------------------------------------------- |
+| http_gun loopback destination policy |     13 |    13 | kept: `config.allow_loopback` cannot also pin `allowed_hosts` and refuse public hosts |
+| gleam_stdlib resolution (CHK-9)      |      0 |     0 | No app glue existed; the manifest now resolves stdlib 1.0.x                           |
+| Dummy `perform` (CHK-10)             |      1 |     1 | Unchanged; no handler-only definition yet                                             |
+
+Other seams are unchanged: CHK-1 to CHK-8 and CHK-11 stay open. The
+`request_options.Options` field addition needed no change, because
+`gateway.gleam` already builds options with a record update from
+`request_options.default()`.
+
+New friction: `config.allow_loopback` only sets `allow_loopback: True`. The
+original policy also pinned `allowed_hosts: Some(["127.0.0.1"])` and set
+`allow_public: False`. Keeping that pin still needs the nested
+`destination.Policy` record update. The app keeps that update, because a
+payment client must not reach hosts outside its allowlist. A
+`config.allow_only_hosts(config, List(String))` helper (http_gun) would let
+an app keep both in one pipeline. Severity: minor.
