@@ -17,7 +17,9 @@ import fabric
 import fabric/agent.{type Agent}
 import fabric/run
 import fabric/store.{type Store}
+import gleam/dynamic/decode
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -51,12 +53,32 @@ pub type Deps {
   )
 }
 
-/// Typed for the retry policy; erased on persistence because the worker has
-/// no error codec (see FEEDBACK RA-9 on why).
+/// The job's typed failure. The worker's error codec keeps it through
+/// persistence, so `outcome` returns it and the retry policy sees it.
 pub type ResearchError {
   NoSources(reason: String)
   AgentStopped(reason: String)
   Storage(reason: String)
+}
+
+fn research_error_json(error: ResearchError) -> json.Json {
+  let #(kind, reason) = case error {
+    NoSources(reason) -> #("no_sources", reason)
+    AgentStopped(reason) -> #("agent_stopped", reason)
+    Storage(reason) -> #("storage", reason)
+  }
+  json.object([#("kind", json.string(kind)), #("reason", json.string(reason))])
+}
+
+fn research_error_decoder() -> decode.Decoder(ResearchError) {
+  use kind <- decode.field("kind", decode.string)
+  use reason <- decode.field("reason", decode.string)
+  case kind {
+    "no_sources" -> decode.success(NoSources(reason))
+    "agent_stopped" -> decode.success(AgentStopped(reason))
+    "storage" -> decode.success(Storage(reason))
+    _ -> decode.failure(Storage(reason), "ResearchError")
+  }
 }
 
 pub fn worker(deps: Deps) -> Worker(Research, Published, ResearchError) {
@@ -68,15 +90,28 @@ pub fn worker(deps: Deps) -> Worker(Research, Published, ResearchError) {
       domain.published_json,
       domain.published_decoder(),
     )
+  let assert Ok(error) =
+    worker.codec(
+      "research-error-1",
+      research_error_json,
+      research_error_decoder(),
+    )
   // `define` needs a plain handler even though the queue handler below is
   // the one Grind calls (EXT-8).
   let assert Ok(defined) =
-    worker.define("research.run", "1", input, output, fn(research) {
-      case handle(deps, research) {
-        worker.WorkerSucceeded(published) -> Ok(published)
-        _ -> Error(AgentStopped("see the queue handler"))
-      }
-    })
+    worker.define_with_error_codec(
+      "research.run",
+      "1",
+      input,
+      output,
+      error,
+      fn(research) {
+        case handle(deps, research) {
+          worker.WorkerSucceeded(published) -> Ok(published)
+          _ -> Error(AgentStopped("see the queue handler"))
+        }
+      },
+    )
   let assert Ok(defined) = worker.with_max_attempts(defined, 2)
   defined
   |> worker.with_queue_handler(handle(deps, _))

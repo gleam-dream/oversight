@@ -67,19 +67,20 @@ pub fn endpoints(services: String) -> researcher.Endpoints {
 }
 
 /// The loopback policy every client here needs: http_gun admits public
-/// destinations only by default.
+/// destinations only by default. `allow_loopback` admits loopback; the
+/// allowlist that confines the clients to the scripted services has no
+/// helper, so it stays a nested record update.
 fn loopback(
   deadline_ms: Int,
   observations: Option(forwarder.Forwarder),
 ) -> http_config.Config {
-  let defaults = http_config.default()
+  let config = http_config.default() |> http_config.allow_loopback
   http_config.Config(
-    ..defaults,
+    ..config,
     deadline_ms:,
     observations:,
     destination: destination.Policy(
-      ..defaults.destination,
-      allow_loopback: True,
+      ..config.destination,
       allowed_hosts: Some(["127.0.0.1"]),
     ),
   )

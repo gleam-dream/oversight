@@ -257,6 +257,16 @@ cancellation to another, so the app owns the joins (RA-1).
   works well.
 - **Proposal**: as EXT-1.
 
+**Status (2 Oct 2026):** resolved by grind 7a04831. The worker is defined
+with `worker.define_with_error_codec` again, with a `research-error-1` codec
+for `ResearchError` (jobs.gleam:64-82, 93-114); the "erased on persistence"
+caveat is gone. `bind_handle` works on the finished, cancelled and replayed
+jobs of this worker, and the crash tests (replay after `SIGKILL` on an OTP
+peer) pass with it. The test now asserts
+`BusinessFailedWithCause(NoSources("the search service is unavailable"), BudgetExhausted)`
+(research_agent_test.gleam:173-179). No lines were removed: restoring the
+codec adds 26 lines of gleam_json glue (see RA-8).
+
 ### RA-10 A typed agent ends with a string; the article shape is a prompt convention
 
 - **Packages**: fabric. **Kind**: ergonomics. **Severity**: minor (fabric card
@@ -288,11 +298,26 @@ cancellation to another, so the app owns the joins (RA-1).
 - **Loopback** (http_gun, nit): both clients need the same 16-line policy
   (app.gleam:71-86). The provider client needs a 120 s ceiling and the tool
   client 5 s, as in EXT-7.
+
+  **Status (2 Oct 2026):** partially resolved by http_gun a2869b7. `loopback`
+  now starts from `config.default() |> config.allow_loopback`
+  (app.gleam:73-87), which removes the `allow_loopback: True` field. The
+  nested `destination.Policy(..)` update stays, because the app also confines
+  both clients to `allowed_hosts: Some(["127.0.0.1"])` and the helper does
+  not set an allowlist; using the helper alone would admit every public
+  host. One line removed.
+
 - **Dependency resolution**: no friction. pog resolved to 4.1.0, since grind
   and fabric_postgres both pin `>= 4.1.0 < 4.2.0` (the pins must widen
   together); mist 6.0.2, gleam_stdlib 0.71.0. Depending on both `fabric` and
   `fabric/integrations/fabric_postgres` (which itself names `fabric = ../..`)
   resolved to one package.
+
+  **Status (2 Oct 2026):** after `gleam update` on fabric db81b79, grind
+  b2545a9, saga, llm_wire and http_gun a2869b7, gleam_stdlib resolves to
+  1.0.5 (was 0.71.0). pog stays at 4.1.0 (fabric_postgres and grind still
+  share `< 4.2.0`); mist moved to 6.0.3, gleam_crypto to 1.6.0. No app code
+  changed for the new stdlib, and the app builds with `--warnings-as-errors`.
 
 ## Glue measure
 
@@ -339,8 +364,38 @@ cancellation to another, so the app owns the joins (RA-1).
   failed publish deletes the draft (research_agent_test.gleam:184-201).
 - **Saga's conformance suite** caught both ownership mistakes in the app's
   adapter before any workflow ran on it.
-- **Grind's retry policy sees the typed error before it is erased.** "No
+- **Grind's retry policy sees the typed error.** "No
   sources" is retried with a fresh run, and other failures are not
-  (jobs.gleam:83-94).
+  (jobs.gleam:118-129).
 - **One Sinal forwarder** carries http_gun's observations and Fabric's routed
   events, so Fabric's handlers stay out of its runners (app.gleam:92-105).
+
+## Re-run after fixes (2 Oct 2026)
+
+Package heads: fabric db81b79, grind b2545a9 (includes 7a04831), http_gun
+a2869b7, plus saga, llm_wire, json_blueprint and sinal at master. gleam_stdlib
+resolved to 1.0.5.
+
+- **Tests**: 8 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests. `gleam run` prints the
+  four-scenario narrative unchanged.
+- **Glue measure, before → after**:
+
+  | Seam                             | Before | After | Change                                                                 |
+  | -------------------------------- | ------ | ----- | ---------------------------------------------------------------------- |
+  | grind error contract (RA-9)      | 0      | 26    | codec restored; the typed error now survives (jobs.gleam:64-82, 93-99) |
+  | codec bridges (RA-8)             | 96     | 122   | the error codec is one more gleam_json pair                            |
+  | http_gun loopback policy (RA-11) | 16     | 15    | `config.allow_loopback`; the allowlist update remains                  |
+  | telemetry: fabric model turn     | 11     | 11    | no change (the handler never read usage)                               |
+
+  RA-9 trades a lost type for 26 lines. That is the design the brief asked
+  for, but it shows RA-8 again: a third hand-written gleam_json codec for one
+  job.
+
+- **New friction**: none that needed code. Fabric's `model_turn()` is now
+  `Event(Option(Usage), ModelTurn)` and `RunTotals` gained
+  `unreported_replies`. The app's handlers ignore the measurements of
+  `model_turn` and `run_finished` (telemetry.gleam:211-222, 253-260), so the
+  breaking change compiled unchanged. The http_gun allowlist still has no
+  helper to match `config.allow_loopback` (RA-11), so the loopback helper
+  removes only one field from the nested update.
