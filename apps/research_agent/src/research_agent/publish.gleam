@@ -170,16 +170,12 @@ pub fn article_codec() -> saga_codec.Codec(Article) {
 
 fn pair_codec() -> saga_codec.Codec(#(Article, String)) {
   wire.saga("article-draft-1", {
-    use article <- codec.field(
-      "article",
-      domain.article_codec(),
-      fn(pair: #(Article, String)) { pair.0 },
-    )
-    use draft_id <- codec.field(
-      "draft_id",
-      codec.string(),
-      fn(pair: #(Article, String)) { pair.1 },
-    )
+    use article <- codec.field("article", domain.article_codec(), get: fn(pair) {
+      pair.0
+    })
+    use draft_id <- codec.field("draft_id", codec.string(), get: fn(pair) {
+      pair.1
+    })
     codec.success(#(article, draft_id))
   })
 }
@@ -190,12 +186,8 @@ pub fn published_codec() -> saga_codec.Codec(Published) {
 
 fn error_codec() -> saga_codec.Codec(PublishError) {
   wire.saga("publish-error-1", {
-    use step <- codec.field("step", codec.string(), fn(e: PublishError) {
-      e.step
-    })
-    use detail <- codec.field("detail", codec.string(), fn(e: PublishError) {
-      e.detail
-    })
+    use step <- codec.field("step", codec.string(), get: fn(e) { e.step })
+    use detail <- codec.field("detail", codec.string(), get: fn(e) { e.detail })
     codec.success(PublishError(step:, detail:))
   })
 }

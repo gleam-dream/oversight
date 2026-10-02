@@ -8,8 +8,9 @@
 //// - grind: `job_id` (the handler is never told it; the app records job id
 ////   to research id at submission);
 //// - fabric: `run` (issued by `fabric.start`; the app records it);
-//// - http_gun: an opaque correlation `Id` the app mints with `new_id` and
-////   attaches with `with_correlation` (the tool handlers do that per call);
+//// - http_gun: the research id as a `Correlation`, attached with
+////   `with_correlation` (the tool handlers do that per call), so it joins
+////   like the app's own events;
 //// - llm_wire: nothing (stage, provider, outcome);
 //// - saga: `workflow` name and a per-VM `run: Int` that the app never sees
 ////   for a durable run (`durable.drive` hides the execution).
@@ -35,11 +36,11 @@ import sinal/forwarder
 
 /// What an event can be joined on.
 pub type Key {
-  /// The research id itself, from the app's own events (`events`).
+  /// The research id itself, from the app's own events (`events`) and from
+  /// http_gun requests made on a correlated client.
   Research(String)
   Job(Int)
   Run(String)
-  Http(http_events.Id)
   Unkeyed
 }
 
@@ -55,17 +56,7 @@ pub opaque type Message {
   Record(Observed)
   BindJob(Int, String)
   BindRun(String, String)
-  BindHttp(http_events.Id, String)
-  Snapshot(
-    Subject(
-      #(
-        List(Observed),
-        Dict(String, String),
-        Dict(Int, String),
-        Dict(http_events.Id, String),
-      ),
-    ),
-  )
+  Snapshot(Subject(#(List(Observed), Dict(String, String), Dict(Int, String))))
 }
 
 type State {
@@ -73,7 +64,6 @@ type State {
     events: List(Observed),
     runs: Dict(String, String),
     jobs: Dict(Int, String),
-    http: Dict(http_events.Id, String),
     echo_events: Bool,
   )
 }
@@ -82,7 +72,7 @@ type State {
 /// `echo_events`, each event is printed as it arrives.
 pub fn start(echo_events: Bool) -> Telemetry {
   let assert Ok(started) =
-    actor.new(State([], dict.new(), dict.new(), dict.new(), echo_events))
+    actor.new(State([], dict.new(), dict.new(), echo_events))
     |> actor.on_message(handle)
     |> actor.start
   let collector = started.data
@@ -92,16 +82,12 @@ pub fn start(echo_events: Bool) -> Telemetry {
   let attachments = [
     // the app's own events: the research id is their correlation
     sinal.observe(events.state_changed(), fn(_, m: events.Transition) {
-      case m.correlation {
-        Some(id) ->
-          record(
-            "research_agent",
-            "research.state",
-            Research(correlation.to_string(id)),
-            events.state_name(m.state),
-          )
-        None -> Nil
-      }
+      record(
+        "research_agent",
+        "research.state",
+        Research(correlation.to_string(m.correlation)),
+        events.state_name(m.state),
+      )
     }),
     // grind
     sinal.observe(
@@ -294,7 +280,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
     // http_gun (only clients started with `observations: Some(forwarder)`)
     sinal.observe(http_events.event(), fn(_, m: http_events.Metadata) {
       let key = case m.correlation {
-        Some(id) -> Http(id)
+        Some(id) -> Research(correlation.to_string(id))
         None -> Unkeyed
       }
       case m.milestone {
@@ -339,14 +325,6 @@ pub fn bind_run(
   each(telemetry, BindRun(run, research))
 }
 
-pub fn bind_http(
-  telemetry: Option(Telemetry),
-  id: http_events.Id,
-  research: String,
-) -> Nil {
-  each(telemetry, BindHttp(id, research))
-}
-
 fn each(telemetry: Option(Telemetry), message: Message) -> Nil {
   case telemetry {
     Some(t) -> process.send(t.collector, message)
@@ -363,14 +341,12 @@ pub type Trace {
 pub fn trace(telemetry: Telemetry, research: String) -> Trace {
   // Let in-flight forwarder deliveries land.
   process.sleep(100)
-  let #(events, runs, jobs, http) =
-    process.call(telemetry.collector, 2000, Snapshot)
+  let #(events, runs, jobs) = process.call(telemetry.collector, 2000, Snapshot)
   let owner = fn(key) {
     case key {
       Research(id) -> Ok(id)
       Job(id) -> dict.get(jobs, id)
       Run(id) -> dict.get(runs, id)
-      Http(id) -> dict.get(http, id)
       Unkeyed -> Error(Nil)
     }
   }
@@ -410,17 +386,8 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
       actor.continue(
         State(..state, runs: dict.insert(state.runs, id, research)),
       )
-    BindHttp(id, research) ->
-      actor.continue(
-        State(..state, http: dict.insert(state.http, id, research)),
-      )
     Snapshot(reply) -> {
-      process.send(reply, #(
-        list.reverse(state.events),
-        state.runs,
-        state.jobs,
-        state.http,
-      ))
+      process.send(reply, #(list.reverse(state.events), state.runs, state.jobs))
       actor.continue(state)
     }
   }

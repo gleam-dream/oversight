@@ -50,25 +50,23 @@ pub fn search_query_codec() -> codec.Codec(SearchQuery) {
   use query <- codec.field(
     "query",
     codec.string() |> codec.describe("Search terms"),
-    fn(q: SearchQuery) { q.query },
+    get: fn(q) { q.query },
   )
   codec.success(SearchQuery(query:))
 }
 
 pub fn hit_codec() -> codec.Codec(Hit) {
-  use title <- codec.field("title", codec.string(), fn(hit: Hit) { hit.title })
-  use url <- codec.field("url", codec.string(), fn(hit: Hit) { hit.url })
+  use title <- codec.field("title", codec.string(), get: fn(hit) { hit.title })
+  use url <- codec.field("url", codec.string(), get: fn(hit) { hit.url })
   codec.success(Hit(title:, url:))
 }
 
 /// Also decodes the search API's response body: one codec for the HTTP
 /// payload and the tool output the model reads.
 pub fn search_results_codec() -> codec.Codec(SearchResults) {
-  use hits <- codec.field(
-    "results",
-    codec.list(hit_codec()),
-    fn(r: SearchResults) { r.hits },
-  )
+  use hits <- codec.field("results", codec.list(hit_codec()), get: fn(r) {
+    r.hits
+  })
   codec.success(SearchResults(hits:))
 }
 
@@ -76,14 +74,14 @@ pub fn page_request_codec() -> codec.Codec(PageRequest) {
   use url <- codec.field(
     "url",
     codec.string() |> codec.describe("A URL from search"),
-    fn(p: PageRequest) { p.url },
+    get: fn(p) { p.url },
   )
   codec.success(PageRequest(url:))
 }
 
 pub fn page_codec() -> codec.Codec(Page) {
-  use url <- codec.field("url", codec.string(), fn(page: Page) { page.url })
-  use text <- codec.field("text", codec.string(), fn(page: Page) { page.text })
+  use url <- codec.field("url", codec.string(), get: fn(page) { page.url })
+  use text <- codec.field("text", codec.string(), get: fn(page) { page.text })
   codec.success(Page(url:, text:))
 }
 
@@ -93,25 +91,25 @@ pub fn page_codec() -> codec.Codec(Page) {
 // and Saga's codec types.
 
 pub fn research_codec() -> codec.Codec(Research) {
-  use id <- codec.field("id", codec.string(), fn(r: Research) { r.id })
-  use topic <- codec.field("topic", codec.string(), fn(r: Research) { r.topic })
+  use id <- codec.field("id", codec.string(), get: fn(r) { r.id })
+  use topic <- codec.field("topic", codec.string(), get: fn(r) { r.topic })
   codec.success(Research(id:, topic:))
 }
 
 pub fn published_codec() -> codec.Codec(Published) {
-  use draft_id <- codec.field("draft_id", codec.string(), fn(p: Published) {
+  use draft_id <- codec.field("draft_id", codec.string(), get: fn(p) {
     p.draft_id
   })
-  use url <- codec.field("url", codec.string(), fn(p: Published) { p.url })
+  use url <- codec.field("url", codec.string(), get: fn(p) { p.url })
   codec.success(Published(draft_id:, url:))
 }
 
 pub fn article_codec() -> codec.Codec(Article) {
-  use research_id <- codec.field("research_id", codec.string(), fn(a: Article) {
+  use research_id <- codec.field("research_id", codec.string(), get: fn(a) {
     a.research_id
   })
-  use title <- codec.field("title", codec.string(), fn(a: Article) { a.title })
-  use body <- codec.field("body", codec.string(), fn(a: Article) { a.body })
+  use title <- codec.field("title", codec.string(), get: fn(a) { a.title })
+  use body <- codec.field("body", codec.string(), get: fn(a) { a.body })
   codec.success(Article(research_id:, title:, body:))
 }
 

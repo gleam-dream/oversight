@@ -5,12 +5,10 @@ import gleam/http
 import gleam/http/request
 import gleam/int
 import gleam/list
-import gleam/option.{type Option}
 import gleam/result
 import http_gun
 import http_gun/error
-import http_gun/telemetry as http_events
-import research_agent/telemetry.{type Telemetry}
+import sinal/correlation
 
 pub type Failure {
   /// The request never produced a response.
@@ -28,16 +26,16 @@ pub fn describe(failure: Failure) -> String {
   }
 }
 
-/// A client whose requests carry a fresh correlation id bound to `research`
-/// in the telemetry collector.
+/// A client whose requests carry the research id as their correlation. An
+/// id that is not a valid `Correlation` leaves the client uncorrelated.
 pub fn correlated(
   client: http_gun.Client,
-  telemetry: Option(Telemetry),
   research: String,
 ) -> http_gun.Client {
-  let id = http_events.new_id()
-  telemetry.bind_http(telemetry, id, research)
-  http_gun.with_correlation(client, id)
+  case correlation.from_string(research) {
+    Ok(id) -> http_gun.with_correlation(client, id)
+    Error(_) -> client
+  }
 }
 
 pub fn call(
