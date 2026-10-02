@@ -1,0 +1,21 @@
+name = "tool_hub"
+version = "0.1.0"
+target = "erlang"
+description = "Composition app: MCP in both directions with relay, fabric, llm_wire, json_blueprint, http_gun and sinal."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 1.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+mist = ">= 6.0.2 and < 7.0.0"
+relay = { path = "../../../relay" }
+fabric = { path = "../../../fabric" }
+llm_wire = { path = "../../../llm_wire" }
+json_blueprint = { path = "../../../json_blueprint" }
+http_gun = { path = "../../../http_gun" }
+sinal = { path = "../../../sinal" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
