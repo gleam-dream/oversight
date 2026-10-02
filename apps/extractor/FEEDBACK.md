@@ -140,6 +140,19 @@ prints the demo batch.
   with `OutputFailure = InvalidJson(parser.ParseError) | SchemaRejected(runtime.ValidationError) | CodecRejected(codec.DecodeError)`,
   and retry evidence that records a completed response. json_blueprint adds a
   renderer for `runtime.ValidationError`.
+- **Status (wave 2):** partially resolved by llm_wire 6b5ae2d and json_blueprint
+  94438b9; the app changed only its test. The discard reason is now readable
+  text from `describe_decode_error` and `contract.describe_validation_error`
+  instead of `string.inspect` output:
+  `Structured output failed schema validation: $["currency"]: unknown enum label`
+  and `... failed codec decode: $["total_cents"]: custom validation failed`
+  (the two test assertions went from `starts_with` on a prefix to the full
+  text). Still open: `OutputValidationError` carries a `String`, the raw
+  output is unavailable on failure, and the schema-versus-codec distinction
+  is still a prefix match in `outcome.decide_extract`. The new wording also
+  drops the app's own message: `describe_decode_error` omits `Custom`
+  messages, so `total 9999 differs from line sum 4490` no longer reaches the
+  discard reason (see the re-run section).
 
 ### EXT-4 One job cannot be followed across packages without an app registry; llm_wire events cannot be attributed
 
@@ -168,6 +181,17 @@ prints the demo batch.
     correlation, and a client label in `Metadata`.
   - grind: a handler job context with job id and attempt (grind card,
     "Calling other packages from a worker").
+- **Status (wave 2):** partially resolved by sinal 1ff1c18; correlation itself
+  is not resolved. The handler-id helper (`observe`, 8 lines), the
+  `Result` around `forwarder.new` (4 lines) and `result.values` are gone, and
+  `telemetry.start` lost its `label` parameter (13 glue lines removed). The
+  registry (job id, `http_telemetry.Id` and emitting pid to document id,
+  telemetry.gleam:39-60, :156-210) is unchanged: `sinal/correlation` exists
+  (sinal 43279b3), but http_gun still emits and accepts its own opaque `Id`,
+  llm_wire's `Metadata` has no correlation, and grind has no job context, so
+  the app has no event to feed a `Correlation` into and no key of its own to
+  replace. `one_job_is_followed_across_packages_test` still sees 1 of 5
+  llm_wire events attributed and `gleam run` still reports 23 unattributed.
 
 ### EXT-5 One Blueprint codec cannot serve as a Grind codec or a pog row decoder
 
@@ -189,6 +213,18 @@ prints the demo batch.
 - **Proposal** (json_blueprint): `codec.to_json(codec, value) -> Result(json.Json, EncodeError)`
   and `codec.decoder(codec) -> decode.Decoder(a)`. The Grind codec becomes one
   `worker.codec(version, to_json, decoder)` call and the placeholder disappears.
+- **Status (wave 2):** partially resolved by json_blueprint 94438b9. The Grind
+  half is resolved: `codec.to_json` and `codec.decoder` feed `worker.codec`,
+  so the invoice is stored as a JSON object under the output codec (version
+  bumped to `extracted-v2`) instead of text inside a string, and the
+  placeholder `Invoice` in the Grind decoder is gone. The three Grind codecs
+  went from 77 lines (jobs.gleam:128-212) to 57 (jobs.gleam:126-190) because
+  the input and error codecs became Blueprint record codecs too; the output
+  codec alone went from 27 to 11 plus a shared 13-line `grind_codec` helper.
+  The pog half is unchanged (14 lines in store.gleam:92-105 plus the 3-line
+  placeholder): the row arrives as `payload::text`, so the decoder still goes
+  through `decode_json` and `decode.failure` needs a placeholder `Invoice`.
+  `codec.decoder` reads a parsed `Dynamic` and cannot read a column of text.
 
 ### EXT-6 A six-field record codec needs combine chains and nested tuples
 
@@ -205,6 +241,16 @@ prints the demo batch.
   `use vendor <- codec.property("vendor", codec.string(), fn(i) { i.vendor })`
   ending in `codec.build(Invoice(..))`, returning one `Result` for duplicate
   names.
+- **Status (wave 2):** resolved in shape, not in size, by json_blueprint
+  94438b9. The five `combine` calls, the nine `let assert`s, the
+  five-level tuple in both directions and `invalid_date` are gone, and the
+  record builder keeps `Invoice` and `LineItem` flat. `invoice.codec()` went
+  from 57 to 62 lines (invoice.gleam:47-108) and the file from 142 to 147
+  lines: every getter needs its own `fn(i: Invoice)` annotation and the
+  formatter wraps most `use` lines. The cross-field total check moved into the
+  codec: the `total_cents` codec is built inside the `use` chain after
+  `line_items`, so `codec.try_map` sees the lines and the error stays located
+  at `Field("total_cents")` (see the re-run section).
 
 ### EXT-7 llm_wire and http_gun define loopback differently
 
@@ -369,3 +415,98 @@ New friction:
   The helper saves one line per client here (EXT-7).
 - No fix broke the app's build: `gleam update` and the changes above were
   the whole migration.
+
+## Re-run after wave 2 (2 Oct 2026)
+
+Package heads: sinal a0c05ef, json_blueprint c96a8c3, llm_wire 6b5ae2d, grind
+c1920e6, http_gun 1dc20a1. 11 tests pass
+(`../scripts/with-postgres.sh gleam test`) and `gleam run` prints the same demo
+batch: three stored invoices, four discards, two provider calls for `globex`.
+The migration changed 7 files: 173 lines added and 209 removed (net -36),
+including tests and formatting.
+
+| Seam                                                     | Before | After | Change                                                                       |
+| -------------------------------------------------------- | ------ | ----- | ---------------------------------------------------------------------------- |
+| Six-field Invoice codec (EXT-6)                          | 57     | 62    | Builder replaces `combine` and tuples; getters need annotations (+5)         |
+| Total check (domain code)                                | 13     | 16    | `check_total` becomes `total_matching`, located at `total_cents`             |
+| Grind codecs: input, output, error (EXT-5)               | 77     | 57    | `grind_codec` (13) over `to_json` and `decoder`; the output codec is 27 → 11 |
+| pog row decoder (EXT-5)                                  | 17     | 17    | Unchanged: jsonb arrives as text                                             |
+| Name tables for the enums (`provider_from_name`, stages) | 23     | 13    | `string_enum` for provider and stage; `stage_name`/`stage_from_name` deleted |
+| Telemetry handler ids and forwarder `Result` (EXT-4)     | 13     | 0     | `sinal.observe(event, run)`; `forwarder.new(name)`; no label parameter       |
+| Telemetry correlation registry (EXT-4)                   | ~60    | ~60   | Unchanged; no package carries `Correlation` yet                              |
+| Other seams (EXT-2, EXT-8, EXT-9, EXT-11)                | 198    | 198   | Untouched                                                                    |
+
+Net glue by seam: Grind codecs -20, name tables -10, handler ids -13, invoice
+codec +5 (and +3 for the total check). The app does not use `sinal/correlation`
+or the sinal `fields` builder: it defines no events of its own, and http_gun's
+`Id` is the only correlation key its collector can use.
+
+New friction:
+
+- **Blueprint's record builder needs a type annotation on every getter; Sinal's
+  needs one.** `fields.and(f, fn(r) { r.x })` after `fields.record(..)` knows `r`
+  from the piped `Record`. `codec.field(name, c, get, then)` checks `get` before
+  the continuation fixes `r`, so `fn(i) { i.number }` fails with "Unknown type
+  for record access". Six annotations in `Invoice`, three in `LineItem`, and
+  `gleam format` wraps most `use` lines to three. The result is no shorter
+  than the old `combine` chain (62 lines against 57), though it has no tuples,
+  no `let assert` and no arity limit.
+- **`codec.try_map` has no field location for a cross-field check, and
+  `describe_decode_error` drops `Custom` messages.** A `try_map` over the whole
+  record fails at path `[]`. With the first draft, `gleam run` printed
+  `failed codec decode: $: custom validation failed`, where it used to print
+  the total and the line sum. The working form builds the `total_cents` codec
+  inside the `use` chain, after `line_items`:
+
+  ```gleam
+  use total_cents <- codec.field(
+    "total_cents",
+    total_matching(line_items, cents),
+    fn(i: Invoice) { i.total_cents },
+  )
+  ```
+
+  It gives `$["total_cents"]: custom validation failed`, but the message `total
+9999 differs from line sum 4490` is still omitted from the text llm_wire
+  stores as the discard reason. That is deliberate in `describe_decode_error`
+  (no input values), but it makes `Custom` useless for a model-facing or
+  operator-facing explanation. The app can read the message only from the typed
+  `DecodeError`, which llm_wire flattens to a string (EXT-3).
+
+- **`codec.to_json` returns a `Result`, and `worker.codec` wants a total
+  function.** The guide suggests `result.unwrap(json.null())`, which stores a
+  `null` that fails on read. The app uses `let assert Ok(..) as "..."` inside
+  `grind_codec`, which is one more assert on a definition that cannot fail for
+  these codecs. A total `codec.to_json_or_panic`, or `to_json` documented as
+  infallible for codecs without `custom`, would remove it.
+- **Wire format change.** The invoice stored by Grind is now an object, not a
+  JSON string, so the output codec version moved to `extracted-v2`. Jobs
+  already stored under `extracted-v1` would no longer read back, and a
+  deployment would need a plan for them.
+- **`string_enum` repeats the names the app already keeps.** `llm.provider_name`
+  (used for the store column and the printout) and `llm.provider_codec` list
+  the same three labels; deriving one from the other needs a third list.
+- **Correlation remains the app's own.** Nothing in wave 2 reduced the
+  registry: reaching "following one job" needs http_gun and llm_wire to carry
+  `Correlation` and grind to give a handler its job id.
+
+Migration guides: sufficient for compiling. Every symbol this app imports is
+in the json_blueprint index, and the sinal guide covered `observe`,
+`forwarder.new` and the removed ids exactly. Gaps:
+
+- llm_wire's CHANGELOG `Unreleased` does not say that `OutputValidationError`
+  text changed from `string.inspect` output to `describe_*` wording (only the
+  commit message of 6b5ae2d does). Anyone who prefix-matches it, as this
+  app's tests do, needs that line.
+- The json_blueprint guide shows `try_map` for a single value but not how to
+  keep a cross-field check located (build the dependent codec inside the `use`
+  chain) and does not say that a record-level `try_map` reports path `[]`.
+- The guide shows `result.unwrap(json.null())` for `to_json` without noting
+  that the failure then surfaces on read.
+- Neither guide covers pog: a Blueprint codec still cannot be a pog row
+  decoder because jsonb arrives as text.
+
+**Follow-up (json_blueprint f55ec09):** `describe_decode_error` now renders the
+caller's `try_map` message, so the discard reason reads
+`$["total_cents"]: total 9999 differs from line sum 4490`. The lost-message
+friction above is resolved; the test asserts the full message.

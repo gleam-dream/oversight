@@ -10,7 +10,7 @@ import extractor/scripted
 import extractor/store
 import extractor/telemetry
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -56,7 +56,7 @@ fn with_pipeline(
   run: fn(Context) -> a,
 ) -> a {
   let assert Ok(services) = scripted.start(documents)
-  let assert Ok(collector) = telemetry.start(queue)
+  let assert Ok(collector) = telemetry.start()
   let assert Ok(http) =
     clients.start(
       clients.Loopback([fixtures.document_host]),
@@ -111,13 +111,17 @@ pub fn invoice_codec_round_trips_and_checks_totals_test() {
   assert string.contains(schema, "\"enum\":[\"USD\",\"EUR\",\"GBP\"]")
   assert string.contains(schema, "\"additionalProperties\":false")
   // A total that contradicts the lines fails inside the codec, not the schema.
-  let assert Error(codec.TypedCodecFailure(codec.DecodeAtField("total_cents", _))) =
-    codec.decode_json(invoice_codec, string.replace(text, "4490", "9999"))
-  // An unknown currency fails as an enum label.
-  let assert Error(codec.TypedCodecFailure(codec.DecodeAtField(
-    "currency",
-    codec.CannotDecode(codec.DecodeUnknownEnumLabel("YEN")),
-  ))) = codec.decode_json(invoice_codec, string.replace(text, "EUR", "YEN"))
+  let assert Error(codec.DecodeError(
+    path: [codec.Field("total_cents")],
+    reason: codec.Custom(message),
+  )) = codec.decode_json(invoice_codec, string.replace(text, "4490", "9999"))
+  assert string.contains(message, "differs from line sum")
+  // An unknown currency fails as an enum label, located at its field.
+  assert codec.decode_json(invoice_codec, string.replace(text, "EUR", "YEN"))
+    == Error(codec.DecodeError(
+      [codec.Field("currency")],
+      codec.UnknownEnumLabel,
+    ))
 }
 
 pub fn batch_is_extracted_and_stored_test() {
@@ -176,8 +180,14 @@ pub fn same_extraction_runs_on_three_providers_test() {
 
 pub fn nullable_output_field_is_not_portable_to_google_test() {
   // An optional purchase-order number, explicit null when absent.
-  let with_po =
-    codec.object(codec.required("po_number", codec.nullable(codec.string())))
+  let with_po = {
+    use po_number <- codec.field(
+      "po_number",
+      codec.nullable(codec.string()),
+      fn(po_number: Option(String)) { po_number },
+    )
+    codec.success(po_number)
+  }
   let prepared =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
       let assert Ok(model) =
@@ -249,14 +259,10 @@ pub fn invalid_structured_output_is_discarded_test() {
       finish(context, _),
     )
   // Schema validation rejects the enum; the codec's own check rejects the total.
-  assert string.starts_with(
-    currency,
-    "invalid structured output: Structured output failed schema validation",
-  )
-  assert string.starts_with(
-    total,
-    "invalid structured output: Structured output failed codec decode",
-  )
+  assert currency
+    == "invalid structured output: Structured output failed schema validation: $[\"currency\"]: unknown enum label"
+  assert total
+    == "invalid structured output: Structured output failed codec decode: $[\"total_cents\"]: total 9999 differs from line sum 4490"
   assert store.find(context.env.store, "bad-currency") == Ok([])
 }
 
