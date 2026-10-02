@@ -5,8 +5,7 @@ import gleam/option.{None, Some}
 import http_gun/destination
 import http_gun/error
 import webhooks/attempt.{
-  BodyRead, BodyUnread, Delivered, Gone, Receipt, Refused, Reject, Reply, Retry,
-  Snooze,
+  BodyRead, Delivered, Gone, Receipt, Refused, Reject, Reply, Retry, Snooze,
 }
 import webhooks/signing
 import webhooks/subscription.{
@@ -15,12 +14,11 @@ import webhooks/subscription.{
 }
 
 fn reply(status: Int, retry_after) {
-  Ok(Reply(status, retry_after, BodyUnread))
+  Ok(Reply(status, retry_after, BodyRead(0)))
 }
 
 pub fn status_and_failure_mapping_test() {
   let snooze = attempt.default_snooze()
-  let snoozing = attempt.SnoozePolicy(..snooze, mode: attempt.SnoozeOnRateLimit)
   assert attempt.classify(Ok(Reply(204, None, BodyRead(0))), snooze)
     == Delivered(Receipt(204, BodyRead(0)))
   assert attempt.classify(reply(503, None), snooze)
@@ -30,21 +28,15 @@ pub fn status_and_failure_mapping_test() {
     == Gone("receiver answered 410 Gone")
   assert attempt.classify(reply(400, None), snooze)
     == Reject(attempt.ClientError(400))
-  // 429 with Retry-After: snooze when asked, otherwise the workaround retry.
-  assert attempt.classify(reply(429, Some("7")), snoozing)
-    == Snooze(7000, "receiver answered 429; retry-after 7")
+  // 429 snoozes for Retry-After; the snooze does not consume an attempt.
   assert attempt.classify(reply(429, Some("7")), snooze)
-    == Retry(attempt.RateLimited(7000))
+    == Snooze(7000, "receiver answered 429; retry-after 7")
   // Missing, malformed or huge Retry-After falls back or is clamped.
-  assert attempt.classify(reply(429, None), snooze)
-    == Retry(attempt.RateLimited(60_000))
-  assert attempt.classify(
-      reply(429, Some("Wed, 21 Oct 2026 07:28:00 GMT")),
-      snooze,
-    )
-    == Retry(attempt.RateLimited(60_000))
-  assert attempt.classify(reply(429, Some("999999")), snooze)
-    == Retry(attempt.RateLimited(3_600_000))
+  let assert Snooze(60_000, _) = attempt.classify(reply(429, None), snooze)
+  let assert Snooze(60_000, _) =
+    attempt.classify(reply(429, Some("Wed, 21 Oct 2026 07:28:00 GMT")), snooze)
+  let assert Snooze(3_600_000, _) =
+    attempt.classify(reply(429, Some("999999")), snooze)
   // http_gun failure classes.
   let failed = fn(reason, evidence) {
     attempt.classify(Error(error.Failure(reason, evidence)), snooze)

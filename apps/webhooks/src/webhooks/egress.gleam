@@ -20,8 +20,6 @@ pub type Settings {
   Settings(
     /// Request ceiling for one delivery attempt.
     deadline_ms: Int,
-    /// Bound for buffering a receiver's response body.
-    collect_bytes: Int,
     /// Hosts the internal tier may reach; loopback is allowed only for them.
     internal_hosts: List(String),
     /// Test seam: simulated DNS for the public tier. `None` uses the system resolver.
@@ -33,21 +31,20 @@ pub type Settings {
 pub fn default_settings() -> Settings {
   Settings(
     deadline_ms: 5000,
-    collect_bytes: 16_384,
     internal_hosts: ["127.0.0.1", "localhost"],
     public_resolver: None,
     observations: None,
   )
 }
 
-/// Shared limits for both tiers.
+/// Shared limits for both tiers. The response-body bound is per request
+/// (`delivery.send`), not per client.
 pub fn base_config(settings: Settings) -> config.Config {
   let d = config.default()
   config.Config(
     ..d,
     deadline_ms: settings.deadline_ms,
     connect_ms: int_min(settings.deadline_ms, d.connect_ms),
-    limits: config.Limits(..d.limits, collect_bytes: settings.collect_bytes),
     observations: settings.observations,
   )
 }
@@ -74,13 +71,12 @@ pub fn internal_config(settings: Settings) -> config.Config {
   config.Config(
     ..base,
     destination: destination.Policy(
+      ..base.destination,
       allow_public: False,
-      allow_loopback: True,
-      allow_private: False,
       allowed_hosts: Some(settings.internal_hosts),
-      resolver: None,
     ),
   )
+  |> config.allow_loopback
 }
 
 pub fn start(settings: Settings) -> Result(Egress, error.Failure) {

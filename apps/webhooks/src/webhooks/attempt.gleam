@@ -31,8 +31,8 @@ pub type Delivery {
 /// the outcome; the body is diagnostic only.
 pub type BodyNote {
   BodyRead(bytes: Int)
+  /// The body exceeded the read limit; only the first `limit` bytes were kept.
   BodyOverLimit(limit: Int)
-  BodyUnread
 }
 
 pub type Receipt {
@@ -48,9 +48,6 @@ pub type DeliveryError {
   Transport(cause: String)
   /// The local client could not take the request; nothing was sent.
   Unavailable(reason: String)
-  /// 429 handled as a retry (see `RateLimitMode`): the policy waits
-  /// `retry_after_ms` instead of its own backoff.
-  RateLimited(retry_after_ms: Int)
   /// A local defect or configuration problem; never retried.
   Internal(reason: String)
 }
@@ -97,7 +94,6 @@ pub fn receipt_codec() -> worker.Codec(Receipt) {
         let #(kind, n) = case r.body {
           BodyRead(bytes) -> #("read", bytes)
           BodyOverLimit(limit) -> #("over_limit", limit)
-          BodyUnread -> #("unread", 0)
         }
         json.object([
           #("status", json.int(r.status)),
@@ -109,12 +105,12 @@ pub fn receipt_codec() -> worker.Codec(Receipt) {
         use status <- decode.field("status", decode.int)
         use kind <- decode.field("body", decode.string)
         use n <- decode.field("bytes", decode.int)
-        let body = case kind {
-          "read" -> BodyRead(n)
-          "over_limit" -> BodyOverLimit(n)
-          _ -> BodyUnread
+        case kind {
+          "read" -> decode.success(Receipt(status:, body: BodyRead(n)))
+          "over_limit" ->
+            decode.success(Receipt(status:, body: BodyOverLimit(n)))
+          _ -> decode.failure(Receipt(status:, body: BodyRead(n)), "BodyNote")
         }
-        decode.success(Receipt(status:, body:))
       },
     )
   codec
@@ -123,7 +119,7 @@ pub fn receipt_codec() -> worker.Codec(Receipt) {
 pub fn error_codec() -> worker.Codec(DeliveryError) {
   let assert Ok(codec) =
     worker.codec(
-      "delivery-error-v1",
+      "delivery-error-v2",
       fn(e: DeliveryError) {
         let #(kind, status, text) = case e {
           ServerError(s) -> #("server_error", s, "")
@@ -131,7 +127,6 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
           Timeout -> #("timeout", 0, "")
           Transport(cause) -> #("transport", 0, cause)
           Unavailable(reason) -> #("unavailable", 0, reason)
-          RateLimited(ms) -> #("rate_limited", ms, "")
           Internal(reason) -> #("internal", 0, reason)
         }
         json.object([
@@ -150,7 +145,6 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
           "timeout" -> decode.success(Timeout)
           "transport" -> decode.success(Transport(text))
           "unavailable" -> decode.success(Unavailable(text))
-          "rate_limited" -> decode.success(RateLimited(status))
           "internal" -> decode.success(Internal(text))
           _ -> decode.failure(Internal(text), "DeliveryError")
         }
@@ -166,7 +160,6 @@ pub fn describe_error(e: DeliveryError) -> String {
     Timeout -> "timeout"
     Transport(cause) -> "transport: " <> cause
     Unavailable(reason) -> "unavailable: " <> reason
-    RateLimited(ms) -> "rate limited for " <> int.to_string(ms) <> "ms"
     Internal(reason) -> "internal: " <> reason
   }
 }
@@ -194,28 +187,14 @@ pub type Disposition {
   Reject(DeliveryError)
 }
 
+/// How long a 429 snoozes when Retry-After is absent or unusable, and the
+/// most it ever waits.
 pub type SnoozePolicy {
-  SnoozePolicy(default_ms: Int, maximum_ms: Int, mode: RateLimitMode)
-}
-
-/// How a 429 reaches grind.
-pub type RateLimitMode {
-  /// `WorkerSnoozed`: the intended mapping; does not consume an attempt.
-  /// Broken in grind today for workers with an error codec: the snooze ACK
-  /// nulls `error_version` and the next claim parks the job in
-  /// `contract_mismatch` (see FEEDBACK.md, WHK-1).
-  SnoozeOnRateLimit
-  /// Workaround: `WorkerFailed(RateLimited(ms))`, and the retry policy waits
-  /// exactly Retry-After. Consumes an attempt.
-  RetryOnRateLimit
+  SnoozePolicy(default_ms: Int, maximum_ms: Int)
 }
 
 pub fn default_snooze() -> SnoozePolicy {
-  SnoozePolicy(
-    default_ms: 60_000,
-    maximum_ms: 3_600_000,
-    mode: RetryOnRateLimit,
-  )
+  SnoozePolicy(default_ms: 60_000, maximum_ms: 3_600_000)
 }
 
 pub fn classify(
@@ -228,16 +207,11 @@ pub fn classify(
         _ if status >= 200 && status < 300 -> Delivered(Receipt(status, body))
         410 -> Gone("receiver answered 410 Gone")
         429 ->
-          case snooze.mode {
-            SnoozeOnRateLimit ->
-              Snooze(
-                retry_after_ms(retry_after, snooze),
-                "receiver answered 429; retry-after "
-                  <> option.unwrap(retry_after, "absent"),
-              )
-            RetryOnRateLimit ->
-              Retry(RateLimited(retry_after_ms(retry_after, snooze)))
-          }
+          Snooze(
+            retry_after_ms(retry_after, snooze),
+            "receiver answered 429; retry-after "
+              <> option.unwrap(retry_after, "absent"),
+          )
         408 -> Retry(Timeout)
         _ if status >= 500 -> Retry(ServerError(status))
         _ -> Reject(ClientError(status))
@@ -382,11 +356,6 @@ pub fn retry_policy(backoff: Backoff) -> worker.RetryPolicy(DeliveryError) {
     let worker.BusinessFailure(e) = failure
     case e {
       ClientError(_) | Internal(_) -> worker.DoNotRetry
-      RateLimited(ms) ->
-        case worker.retry_delay(ms) {
-          Ok(d) -> worker.RetryAfter(d)
-          Error(_) -> worker.DoNotRetry
-        }
       ServerError(_) | Timeout | Transport(_) | Unavailable(_) -> {
         let exponent = int.max(context.current_attempt - 1, 0)
         let delay =

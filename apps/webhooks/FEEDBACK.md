@@ -4,17 +4,19 @@
 
 grind, http_gun and sinal compose into a working webhook service through
 public imports only. All 8 tests pass, and `gleam run` prints the full
-narrative. Most of the composition is direct. A grind worker is a closure, so
+narrative. (Re-run after the package fixes on 2 Oct 2026: see the last
+section.) Most of the composition is direct. A grind worker is a closure, so
 it can capture an http_gun client, and that includes a cassette playback
 client. http_gun's typed `Failure` maps cleanly onto grind's
 `WorkerResponse`. grind's retry policy receives the typed error, so a 429
 can wait exactly as long as `Retry-After` says.
 
-Two grind defects block the intended design. A snooze in a worker that has an
-error codec parks the job as a contract mismatch (WHK-1, blocker). The same
-worker cannot re-bind its own finished job (WHK-2). Both have workarounds in
-the app: 429s become attempt-consuming retries, and finished jobs are read
-back through a twin worker. http_gun's destination policy works, including
+The first run hit two grind defects: a snooze in a worker that has an error
+codec parked the job as a contract mismatch (WHK-1, blocker), and the same
+worker could not re-bind its own finished job (WHK-2). grind 7a04831 fixed
+both, so the app now runs the intended design: a 429 snoozes for
+`Retry-After` without consuming an attempt, and finished jobs are read back
+through the worker itself. No blocker remains. http_gun's destination policy works, including
 against DNS rebinding, but it belongs to a client. A multi-tenant app
 therefore runs one client per policy tier and duplicates the policy check to
 validate endpoints at registration (WHK-4). Following one request across
@@ -60,6 +62,14 @@ registered version delivery-error-v1")`. Test:
   contract against a separate column. Add a consumer test that snoozes a
   `define_with_error_codec` worker and then claims it again.
 
+- **Status (2 Oct 2026):** resolved by grind 7a04831. 429 maps to
+  `WorkerSnoozed` again; the `RateLimitMode` switch, the `RateLimited` error
+  variant, its codec branches and its retry-policy branch are gone
+  (`src/webhooks/attempt.gleam`, 31 lines removed net).
+  `cassette_test.snooze_with_error_codec_runs_again_test` now asserts that the
+  snoozed job stays bindable as `Pending(Scheduled)`, runs again, and
+  succeeds with both cassette exchanges consumed.
+
 ### WHK-2 `bind_handle` fails for a finished job whose worker has an error codec
 
 - **Packages:** grind. **Kind:** defect. **Severity:** major.
@@ -77,6 +87,12 @@ registered version delivery-error-v1")`. Test:
 - **Proposal (grind):** the WHK-1 fix removes this too. A cheaper interim
   fix is for `bind_handle` to accept a `NULL` stored error version for rows
   in non-failure terminal or scheduled states.
+
+- **Status (2 Oct 2026):** resolved by grind 7a04831. `src/webhooks/jobs.gleam`
+  (the read-only twin worker, 30 glue lines) is deleted; reads are a plain
+  `postgres.bind_handle` with the registered worker, then `postgres.outcome`.
+  `delivery_test.common_path_signed_delivery_test` now asserts the re-bind
+  succeeds and returns the typed receipt.
 
 ### WHK-3 `send` turns a delivered 200 with a large body into a failure without a status
 
@@ -100,6 +116,16 @@ registered version delivery-error-v1")`. Test:
   `collect: Option(Collect(limit: Int, overflow: Truncate | Fail))`, so
   `send_with_options` can return `Buffered` with a truncated body. At
   minimum, document that callers who need the status must stream.
+
+- **Status (2 Oct 2026):** resolved by http_gun a2869b7 (94b11b9).
+  `delivery.send` calls `send_with_options` with
+  `Collect(max_body, Truncate)` and reads `Buffered.truncated`; the manual
+  `try_with_response` + `body.collect` + `LimitExceeded` match is gone, and
+  so is the client-wide `collect_bytes` setting in `egress.Settings`. The
+  line count barely moves (19 → 20) because building `Options` takes a
+  nested record update (see the re-run section). The cassette test now
+  shows both policies on the same exchange: `Fail` loses the status,
+  `Truncate` returns the 200 with 1024 bytes and `truncated: True`.
 
 ### WHK-4 Destination policy belongs to the client only; the check cannot be reused
 
@@ -137,6 +163,15 @@ registered version delivery-error-v1")`. Test:
      client's policy. Then one public client can serve every tenant, with
      tenant allowlists applied per request.
   3. Optionally, allow `host:port` allowlist entries.
+
+- **Status (2 Oct 2026):** partially resolved by http_gun a2869b7
+  (ba497b9). `config.allow_loopback` replaces the nested policy update for
+  the operator's API client (`src/webhooks.gleam`, 9 lines → 1) and the
+  loopback flag of the internal tier. The tier still needs a nested
+  `destination.Policy(..base.destination, allow_public:, allowed_hosts:)`
+  update, because only loopback has a helper. Every proposal above
+  (public `parse_address`/`check`, per-request narrowing, `host:port`
+  entries) is still open, so the tiered clients and the FFI stay.
 
 ### WHK-5 One delivery can be followed across packages only through app-maintained join tables
 
@@ -225,6 +260,12 @@ Permanent | Local` helper would cover most retry mappings.
   where `JobContext` holds the job id, the attempt and the `RetryContext`.
   Also add a `define_queue_worker` that does not ask for `perform`.
 
+- **Status (2 Oct 2026):** not resolved, and now live. With 429 restored to
+  a snooze, the snooze ACK still rolls `attempt_count` back and the handler
+  still cannot see `snooze_count`, so a receiver that always answers 429 is
+  snoozed forever (at most `SnoozePolicy.maximum_ms`, 1 h, apart). The app
+  has no cap; the only bound left is the subscription being disabled by hand.
+
 ### WHK-9 Dependency resolution: grind's stdlib cap rules out the current mist
 
 - **Packages:** grind, http_gun (with mist, glisten). **Kind:** ecosystem-interop. **Severity:** minor.
@@ -243,6 +284,11 @@ Permanent | Local` helper would cover most retry mappings.
     pog 4.1.0 without conflict.
 - **Proposal (grind):** widen `gleam_stdlib` to `< 2.0.0`, as http_gun and
   sinal already do.
+
+- **Status (2 Oct 2026):** resolved by grind b2545a9 (stdlib `< 2.0.0`).
+  The app's own `gleam_stdlib` bound is widened to `< 2.0.0`; `gleam update`
+  resolves gleam_stdlib 1.0.5, mist 6.0.3, glisten 9.0.1, gramps 6.0.1,
+  gleam_crypto 1.6.0, with wisp 2.2.2 and pog 4.1.0 unchanged.
 
 ### WHK-10 Observation wiring differs per package
 
@@ -291,3 +337,50 @@ evidence)` with typed transport causes covered every branch, and status
   retry and snooze behavior, and WHK-1 itself, easy to see in the trace.
 - **grind installs cleanly in its own schema** (`with_schema("grind")`)
   next to the app's tables in `public`.
+
+## Re-run after fixes (2 Oct 2026)
+
+Heads: grind b2545a9 (includes 7a04831), http_gun a2869b7, sinal unchanged.
+Resolved: gleam_stdlib 1.0.5, mist 6.0.3, glisten 9.0.1, wisp 2.2.2, pog 4.1.0.
+`../scripts/with-postgres.sh gleam test`: 8 passed, no failures.
+`gleam run` prints the full narrative; `/busy` (429) now snoozes and is
+delivered on the next claim, and `/big` is delivered as a 200 with its body
+truncated at 4096 bytes.
+
+Glue, same measure as the verdict table (non-blank, non-comment lines):
+
+| Seam                                              | Before → after | Change                                                                                    |
+| ------------------------------------------------- | -------------: | ----------------------------------------------------------------------------------------- |
+| http_gun failure/status → grind outcome           |      210 → 192 | `RateLimitMode`, `RateLimited` and its codec and retry-policy branches removed (WHK-1)    |
+| Re-binding a finished job                         |         30 → 0 | `src/webhooks/jobs.gleam` deleted; reads are `bind_handle` + `outcome` (WHK-2)            |
+| Response body over collect limit, keep status     |        19 → 20 | manual stream read replaced by `Collect(limit, Truncate)`; `egress.collect_bytes` removed |
+| Per-tenant destination policy (`egress.gleam`)    |        87 → 83 | `config.allow_loopback` for the internal tier; nested update still needed for the rest    |
+| Operator API client policy (`src/webhooks.gleam`) |          9 → 1 | `config.default() \|> config.allow_loopback`                                              |
+
+Net over the app: 154 lines added, 225 removed (tests included).
+
+New friction from the fixes:
+
+- **`request_options.Options` grew a field, so one setting takes a nested
+  record update** (http_gun, ergonomics, nit). Setting only the collect
+  policy is
+  `Options(..request_options.default(), collect: Some(Collect(limit, Truncate)))`,
+  five formatted lines in `delivery.send`, which is why the WHK-3 seam did
+  not shrink. A builder such as
+  `request_options.default() |> request_options.with_collect(limit, Truncate)`
+  would make it one line and survive later fields. The note about building
+  `Options` with a record update, never positionally, is now a rule callers
+  must know.
+- **Only loopback has a helper** (http_gun, ergonomics, nit). The internal
+  tier needs `allow_public: False` and `allowed_hosts`, so it still writes
+  `destination.Policy(..base.destination, ...)` and then pipes into
+  `config.allow_loopback`, mixing the two styles. `config.allowed_hosts` and
+  `config.deny_public` (or one `config.with_destination`) would finish it.
+- **Restoring the snooze makes WHK-8 live** (grind, extensibility, now
+  major). See the WHK-8 status: an always-429 receiver is snoozed without
+  bound, because the snooze rolls the attempt back and the handler cannot
+  see `snooze_count`.
+- **Breaking changes absorbed:** none at compile time. Removing the
+  `rate_limited` kind changed the error codec's shape, so its version is now
+  `delivery-error-v2`; jobs stored under v1 would be reported as contract
+  mismatches rather than mis-decoded.

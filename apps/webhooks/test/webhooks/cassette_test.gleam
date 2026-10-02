@@ -1,22 +1,22 @@
 //// http_gun cassettes inside grind worker tests: the worker's deps hold a
 //// playback client, so a real queue consumer runs real attempts offline.
 
+import gleam/bit_array
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/list
-import gleam/string
+import gleam/option.{Some}
 import grind/job
-import grind/postgres
 import grind/queue
 import http_gun
 import http_gun/cassette
 import http_gun/error
 import http_gun/fixture
+import http_gun/request_options
 import webhooks/attempt
 import webhooks/delivery
 import webhooks/egress
-import webhooks/jobs
 import webhooks/receiver
 import webhooks/service
 import webhooks/signing
@@ -70,10 +70,6 @@ fn answer(
   fixture.Respond(response.set_body(resp, [body]), fixture.Complete([]))
 }
 
-fn tape_settings() -> egress.Settings {
-  egress.Settings(..egress.default_settings(), collect_bytes: 1024)
-}
-
 fn setup(svc: service.Service) -> Nil {
   let assert Ok(Nil) =
     store.insert_subscription(
@@ -89,17 +85,12 @@ fn setup(svc: service.Service) -> Nil {
   Nil
 }
 
-fn worker_with(
-  svc: service.Service,
-  tape: http_gun.Client,
-  mode: attempt.RateLimitMode,
-) {
+fn worker_with(svc: service.Service, tape: http_gun.Client) {
   delivery.worker(
     delivery.Deps(
       ..svc.deps,
       egress: egress.Egress(public: tape, internal: tape),
       max_response_bytes: 1024,
-      snooze: attempt.SnoozePolicy(..attempt.default_snooze(), mode:),
     ),
     delivery.Plan(max_attempts: 3, backoff: attempt.Backoff(0, 0)),
   )
@@ -109,7 +100,7 @@ fn options() -> service.Options {
   service.Options(..support.options(), clock: fn() { now })
 }
 
-pub fn cassette_drives_retry_discard_and_body_limit_test() {
+pub fn cassette_drives_snooze_discard_and_body_limit_test() {
   use svc <- support.with_service(options())
   setup(svc)
   let exchanges = [
@@ -124,7 +115,7 @@ pub fn cassette_drives_retry_discard_and_body_limit_test() {
   let assert Ok(tape) = cassette.new(exchanges)
   let assert Ok(tape) = cassette.parse(cassette.encode(tape), 1_048_576)
   let assert Ok(client) =
-    cassette.playback(tape, egress.public_config(tape_settings()))
+    cassette.playback(tape, egress.public_config(egress.default_settings()))
 
   let assert [#(_, rate_limited)] = support.publish(svc, event("evt_1"))
   let assert [#(_, big)] = support.publish(svc, event("evt_2"))
@@ -133,44 +124,68 @@ pub fn cassette_drives_retry_discard_and_body_limit_test() {
   let consumer =
     service.start_consumer_with(
       svc,
-      worker_with(svc, client, attempt.RetryOnRateLimit),
+      worker_with(svc, client),
       service.manual_policy(),
     )
   assert queue.process_one(consumer) == Ok(True)
   assert queue.process_one(consumer) == Ok(True)
   assert queue.process_one(consumer) == Ok(True)
-  // The 429 waits out Retry-After (120 s) as a retry, so nothing is due.
+  // The 429 snoozes for Retry-After (120 s), so nothing is due.
   assert queue.process_one(consumer) == Ok(False)
   let assert Ok(_) = queue.stop(consumer)
 
-  assert jobs.outcome(svc.jobs, svc.worker, rate_limited)
-    == Ok(job.Pending(job.Retryable))
+  assert support.outcome(svc, rate_limited) == Ok(job.Pending(job.Scheduled))
   // The oversized body does not hide the 200.
-  assert jobs.outcome(svc.jobs, svc.worker, big)
+  assert support.outcome(svc, big)
     == Ok(job.SucceededWith(attempt.Receipt(200, attempt.BodyOverLimit(1024))))
-  assert jobs.outcome(svc.jobs, svc.worker, gone)
+  assert support.outcome(svc, gone)
     == Ok(job.DiscardedWithReason("receiver answered 410 Gone"))
   let assert Ok(subscription.Subscription(status: subscription.Disabled(_), ..)) =
     store.get_subscription(svc.db, sub_id)
 
-  // Contrast: `http_gun.send` on the same exchange loses the status.
-  let assert Ok(tape) =
-    cassette.new([
-      fixture.Exchange(expected("evt_2"), answer(200, [], receiver.big_body())),
-    ])
-  let assert Ok(client) =
-    cassette.playback(tape, egress.public_config(tape_settings()))
+  // The same exchange through http_gun directly: the default policy fails
+  // without a status; the `Truncate` policy the worker uses keeps the 200.
+  let big_tape = fn() {
+    let assert Ok(tape) =
+      cassette.new([
+        fixture.Exchange(
+          expected("evt_2"),
+          answer(200, [], receiver.big_body()),
+        ),
+      ])
+    let assert Ok(client) =
+      cassette.playback(tape, egress.public_config(egress.default_settings()))
+    client
+  }
+  let collect = fn(overflow) {
+    request_options.Options(
+      ..request_options.default(),
+      collect: Some(request_options.Collect(1024, overflow)),
+    )
+  }
   let assert Error(error.Failure(
     error.LimitExceeded(error.CollectedBodyBytes, 1024, _),
     error.MayHaveBeenSent,
-  )) = http_gun.send(client, expected("evt_2"))
+  )) =
+    http_gun.send_with_options(
+      big_tape(),
+      expected("evt_2"),
+      collect(request_options.Fail),
+    )
+  let assert Ok(http_gun.Buffered(response:, truncated: True, ..)) =
+    http_gun.send_with_options(
+      big_tape(),
+      expected("evt_2"),
+      collect(request_options.Truncate),
+    )
+  assert response.status == 200
+  assert bit_array.byte_size(response.body) == 1024
   Nil
 }
 
-/// Documents WHK-1: a 429 mapped to `WorkerSnoozed` by a worker that has an
-/// error codec never runs again; the snooze ACK nulls `error_version` and
-/// the next claim parks the job as a contract mismatch.
-pub fn snooze_with_error_codec_parks_job_test() {
+/// WHK-1: a 429 snoozes a worker that has an error codec; the job stays
+/// bindable while scheduled, runs again, and the second exchange delivers.
+pub fn snooze_with_error_codec_runs_again_test() {
   use svc <- support.with_service(options())
   setup(svc)
   let assert Ok(tape) =
@@ -182,27 +197,26 @@ pub fn snooze_with_error_codec_parks_job_test() {
       fixture.Exchange(expected("evt_s"), answer(204, [], <<>>)),
     ])
   let assert Ok(client) =
-    cassette.playback(tape, egress.public_config(tape_settings()))
-  let assert [#(_, job_id)] = support.publish(svc, event("evt_s"))
+    cassette.playback(tape, egress.public_config(egress.default_settings()))
+  let assert [#(delivery_id, job_id)] = support.publish(svc, event("evt_s"))
   let consumer =
     service.start_consumer_with(
       svc,
-      worker_with(svc, client, attempt.SnoozeOnRateLimit),
+      worker_with(svc, client),
       service.manual_policy(),
     )
   assert queue.process_one(consumer) == Ok(True)
-  // The snooze ACK already nulled error_version: the job cannot be re-bound.
-  let assert Error(postgres.CodecContractMismatch(..)) =
-    postgres.bind_handle(svc.jobs, svc.worker, job_id)
-  let _second = queue.process_one(consumer)
+  assert support.outcome(svc, job_id) == Ok(job.Pending(job.Scheduled))
+  assert queue.process_one(consumer) == Ok(True)
+  assert queue.process_one(consumer) == Ok(False)
   let assert Ok(_) = queue.stop(consumer)
 
-  let assert Ok(job.FailedOperationally(reason)) =
-    jobs.outcome(svc.jobs, svc.worker, job_id)
-  assert string.contains(reason, "error codec version none")
-  // The second exchange was never consumed: the worker did not run again.
-  let assert Ok(http_gun.Buffered(response:, ..)) =
+  assert support.outcome(svc, job_id)
+    == Ok(job.SucceededWith(attempt.Receipt(204, attempt.BodyRead(0))))
+  let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
+  assert row.attempts == 2
+  // Both exchanges were consumed.
+  let assert Error(error.Failure(error.FixtureExhausted, _)) =
     http_gun.send(client, expected("evt_s"))
-  assert response.status == 204
   Nil
 }

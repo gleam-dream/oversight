@@ -5,6 +5,9 @@ import gleam/http
 import gleam/int
 import gleam/json
 import gleam/option.{Some}
+import gleam/result
+import grind/job
+import grind/postgres
 import grind/queue
 import http_gun/destination
 import pog
@@ -43,6 +46,18 @@ pub fn options() -> service.Options {
       public_resolver: Some(test_dns),
     ),
   )
+}
+
+/// Reads a delivery job back from the id the API handed out.
+pub fn outcome(
+  svc: Service,
+  id: Int,
+) -> Result(
+  job.Outcome(attempt.Receipt, attempt.DeliveryError),
+  postgres.JobReadError,
+) {
+  use handle <- result.try(postgres.bind_handle(svc.jobs, svc.worker, id))
+  postgres.outcome(svc.jobs, handle)
 }
 
 pub fn with_service(options: service.Options, run: fn(Service) -> a) -> a {
