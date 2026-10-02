@@ -52,6 +52,8 @@
             beam28Packages.erlang
             rebar3
             elixirPackage
+            # Disposable clusters for the composition apps (Grind, Fabric, Saga storage).
+            postgresql_16
             (python3.withPackages (pythonPackages: [ pythonPackages.jsonschema ]))
           ];
         };
