@@ -265,6 +265,47 @@ pub fn telemetry_correlation_test() {
   })
 }
 
+/// The caller's `x-request-id` becomes the correlation of the app's events
+/// when it is a valid `Correlation`; an oversized one is replaced by a fresh
+/// 32-character id instead of reaching telemetry.
+pub fn request_id_header_correlation_test() {
+  let assert Ok(collector) = telemetry.start()
+  let lines = {
+    use running <- with_app
+    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let call = fn(request_id) {
+      let assert Ok(Structured(_)) =
+        client.call_tool_with_headers(
+          running.mcp_url,
+          Some(alice.access_token),
+          "generate_report",
+          json.object([
+            #("title", json.string("Revenue")),
+            #("period", json.string("2026-Q2")),
+          ]),
+          [#("x-request-id", request_id)],
+        )
+      Nil
+    }
+    call("trace-abc-123")
+    call(string.repeat("x", 129))
+    process.sleep(100)
+    telemetry.lines(collector)
+  }
+  telemetry.stop(collector)
+  let correlations =
+    lines
+    |> list.filter(fn(l) { l.event == "mcp.request" })
+    |> list.filter_map(fn(l) {
+      string.split(l.detail, " ")
+      |> list.first
+      |> result.map(string.replace(_, "correlation=", ""))
+    })
+  assert list.contains(correlations, "trace-abc-123")
+  assert !list.contains(correlations, string.repeat("x", 129))
+  assert list.any(correlations, fn(c) { string.length(c) == 32 })
+}
+
 // --- Evidence for FEEDBACK -----------------------------------------------------
 
 /// SMCP-6: Relay's own client has no way to attach a bearer token, so it

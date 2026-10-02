@@ -34,17 +34,17 @@ Sinal event it collected.
 
 ## Layout
 
-| Module                    | Role                                                                                |
-| ------------------------- | ----------------------------------------------------------------------------------- |
-| `secure_mcp/app`          | Starts and stops provider, Warden, Grind, Relay server and the listener             |
-| `secure_mcp/web`          | wisp routes: Warden login/callback, `/me/token`, RFC 9728 metadata, `/mcp`          |
-| `secure_mcp/auth`         | Bearer extraction, Relay verifier backed by `warden.introspect`, challenges         |
-| `secure_mcp/mcp_mount`    | Glue: Relay's custom-transport runtime driven from a wisp handler                   |
-| `secure_mcp/tools`        | `generate_report` / `report_status` (`relay/tool.handle_advanced`) over Grind       |
-| `secure_mcp/reports`      | Domain types, with Blueprint codecs (Relay) and gleam_json codecs (Grind)           |
-| `secure_mcp/telemetry`    | Sinal subscriptions for relay, warden, grind and sinal, plus two bridge events      |
-| `secure_mcp/client`       | Scripted browser and a raw JSON-RPC MCP client that can send a bearer token         |
-| `secure_mcp/dev_provider` | Scripted OpenID provider (discovery, JWKS, authorize, token, introspection) on mist |
+| Module                    | Role                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `secure_mcp/app`          | Starts and stops provider, Warden, Grind, Relay server and the listener                                     |
+| `secure_mcp/web`          | wisp routes: Warden login/callback, `/me/token`, RFC 9728 metadata, `/mcp`                                  |
+| `secure_mcp/auth`         | Bearer extraction, Relay verifier backed by `warden.introspect`, challenges                                 |
+| `secure_mcp/mcp_mount`    | Glue: Relay's custom-transport runtime driven from a wisp handler                                           |
+| `secure_mcp/tools`        | `generate_report` / `report_status` (`relay/tool.handle_advanced`) over Grind                               |
+| `secure_mcp/reports`      | Domain types with one Blueprint codec each; Grind codecs derive from them                                   |
+| `secure_mcp/telemetry`    | Sinal subscriptions for relay, warden, grind and sinal, plus two bridge events keyed by `sinal/correlation` |
+| `secure_mcp/client`       | Scripted browser and a raw JSON-RPC MCP client that can send a bearer token                                 |
+| `secure_mcp/dev_provider` | Scripted OpenID provider (discovery, JWKS, authorize, token, introspection) on mist                         |
 
 ## Packages and seams exercised
 
@@ -56,8 +56,12 @@ Sinal event it collected.
   `restore_session`, `session_access_token`, `introspect`.
 - grind: worker definition with an error codec, `submit`, `bind_handle`,
   `arguments` (owner check), `outcome`, a polling consumer and a manual one.
-- json_blueprint: tool input/output contracts, including a four-field record.
-- sinal: one collector attached to every package's descriptors.
+- json_blueprint: tool input/output contracts with the `use`-based record
+  builder; the same codecs serve Grind through `codec.to_json` and
+  `codec.decoder`.
+- sinal: one collector attached to every package's descriptors; the app's own
+  events carry a `sinal/correlation` id taken from a valid `x-request-id`
+  header or generated.
 - wisp, mist: one listener for browser routes and MCP; mist with TLS for the
   provider. pog: only through Grind, which owns the pool.
 
