@@ -65,6 +65,48 @@ These items are defects or cheap changes that block a common design today.
 | Fabric's `model.stop` event reports unreported usage as zero.                                                                                                                                                                                                                               | fabric                                       | TH-10                                      | Report usage as `Option(Usage)`.                                                                                                                                                                    |
 | Relay's CI uses path dependencies but clones no siblings, so it cannot run on GitHub.                                                                                                                                                                                                       | relay                                        | relay pin refresh                          | Check out the pinned sibling SHAs in CI, as saga's workflow does.                                                                                                                                   |
 
+## Fix round results (2 October 2026)
+
+The fix round addressed every item in the table above. Each package passed its
+own full gate before push, and all eight apps were re-run on the new heads.
+Every package and app now resolves `gleam_stdlib` 1.0.5.
+
+| Item                         | Status   | Commits                                                                                                        | Effect on the apps                                                                                                                                                                                                                        |
+| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Grind error-contract version | fixed    | grind 7a04831                                                                                                  | extractor, webhooks, secure_mcp and research_agent restored their error codecs and real snoozes. webhooks deleted its read-back worker. The EXT-1 and WHK-1 blockers are gone.                                                            |
+| Dependency ranges            | fixed    | warden 845b75e, relay c62bc29, grind b2545a9, saga 26dbc73, llm_wire 56d793d, fabric db81b79, http_gun a2869b7 | secure_mcp deleted its vendored `gleam_crypto` (759 lines). The SMCP-1 blocker is gone. Exact pins remain only on gun and cowlib (http_gun), and on pog and pgo (grind, fabric_postgres), each with a documented private-contract reason. |
+| Warden logout                | fixed    | warden 47e49d8                                                                                                 | sso_portal removed its 19-line restore-and-retry glue.                                                                                                                                                                                    |
+| Relay HTTP cancellation      | narrowed | relay 5caff50                                                                                                  | MCP 2026-07-28 makes connection close the HTTP cancellation, and `notifications/cancelled` is not expected. Relay now cancels a buffered call when its client disconnects. tool_hub deleted its 68-line raw cancel client.                |
+| http_gun oversized body      | fixed    | http_gun 94b11b9                                                                                               | A per-request collect policy with `Truncate` keeps the status. The failure value itself still drops the status, because changing it would break warden's exhaustive match.                                                                |
+| Fabric unreported usage      | fixed    | fabric c60bc1c                                                                                                 | `model_turn()` reports `Option(Usage)`, and run totals count unreported replies.                                                                                                                                                          |
+| Relay CI                     | fixed    | relay b07a88c                                                                                                  | CI checks out pinned siblings. It needs a `SIBLINGS_READ_TOKEN` repository secret with read access to gleam-dream/sinal. Saga's CI fails today for the same reason.                                                                       |
+| Loopback helper (theme 10)   | partial  | http_gun ba497b9                                                                                               | `config.allow_loopback` replaced the nested update in four apps. Apps that also deny public hosts or pin `allowed_hosts` still need the nested update.                                                                                    |
+
+Two blockers remain: grind cannot use the application's pog pool (CHK-1), and
+Warden custody cannot be made durable (SSO-1). Both belong to theme 2.
+
+The fix round produced four new findings:
+
+- **Adding a field to a public record breaks positional construction.**
+  http_gun added a field to `request_options.Options`, which broke llm_wire's
+  positional constructor. A package should document which records callers
+  must build with a record update from a default value. Adding a variant to
+  a public union also breaks an exhaustive match in a consumer: warden
+  matches every http_gun failure reason. Changes to http_gun's failure type
+  therefore need warden and llm_wire changed with them.
+- **The loopback helper covers only one decision.** A test client usually
+  allows loopback and also denies public hosts or pins `allowed_hosts`.
+  http_gun should offer a helper such as `config.allow_only_hosts(config,
+hosts)` that expresses both (checkout, research_agent, support_desk).
+- **A snooze that never consumes an attempt can repeat forever.** With real
+  snoozes restored, a receiver that always answers 429 is snoozed without end,
+  because the worker cannot see the snooze count. WHK-8 (`JobContext`) is
+  therefore major.
+- **Relay's client timeout leaves the server working.** A timeout cancels the
+  gun stream but keeps the HTTP/1.1 connection open, so the server keeps
+  working until `client.close`, which drops every call on that client. The
+  client should close a call's connection on timeout or cancel (TH-2).
+
 ## Cross-package themes
 
 Each theme appeared in at least three apps. A theme describes a convention that
@@ -373,9 +415,10 @@ preserve them.
 
 ## Suggested order
 
-1. **Hygiene.** Make the [Fix first](#fix-first) changes, starting with the
-   grind error-contract defect and the dependency ranges. Refresh the stale
-   design statements that the scans found. For example, `sinal-design.md` still
+1. **Hygiene.** The [Fix first](#fix-first) changes landed on 2 October 2026
+   (see [Fix round results](#fix-round-results-2-october-2026)). Still open:
+   add the `SIBLINGS_READ_TOKEN` secret for relay and saga CI, and refresh the
+   stale design statements that the scans found. For example, `sinal-design.md` still
    calls the native adapter pending, and `llm-design.md` mentions the removed
    `provider.Replay`.
 2. **Conventions.** Record themes 1, 2, 4, 6, 7, 8 and 9 in the
