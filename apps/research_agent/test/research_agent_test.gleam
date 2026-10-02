@@ -12,12 +12,15 @@ import grind/worker
 import pog
 import research_agent/app.{type App}
 import research_agent/db
+import research_agent/events
 import research_agent/jobs
 import research_agent/node
 import research_agent/saga_store
 import research_agent/services.{type Services}
 import research_agent/telemetry.{type Telemetry}
 import saga/storage/conformance
+import sinal
+import sinal/correlation
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -118,6 +121,14 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let trace = telemetry.trace(f.telemetry, id)
   let sources = telemetry.sources(trace)
   let assert True = list.contains(sources, "grind")
+  // The app's own events carry the research id as a `Correlation`: they join
+  // with no registry, in the order the states were reached.
+  let assert True = list.contains(sources, "research_agent")
+  let states =
+    trace.events
+    |> list.filter(fn(e) { e.source == "research_agent" })
+    |> list.map(fn(e) { e.detail })
+  let assert ["queued", "researching", "publishing", "published"] = states
   let assert True = list.contains(sources, "fabric")
   let assert True = list.contains(sources, "http_gun")
   let assert False = list.contains(sources, "llm_wire")
@@ -387,4 +398,38 @@ pub fn the_postgres_saga_storage_passes_saga_conformance_test() {
       },
       5000,
     )
+}
+
+// The app's own event ------------------------------------------------------------
+
+/// `fields.enum` cannot check its list against the type, so every state must
+/// round-trip through the event: a constructor missing from the list would
+/// make observers skip it.
+pub fn every_research_state_reaches_an_observer_with_its_correlation_test() {
+  let seen = process.new_subject()
+  let attachment =
+    sinal.observe(events.state_changed(), fn(_, m: events.Transition) {
+      process.send(seen, m)
+    })
+  let id = correlation.unique()
+  let states = [
+    events.Queued,
+    events.Researching,
+    events.Publishing,
+    events.Published,
+    events.Failed,
+    events.Cancelled,
+  ]
+  list.each(states, fn(state) {
+    events.announce(correlation.to_string(id), state)
+  })
+  let received =
+    list.map(states, fn(_) {
+      let assert Ok(transition) = process.receive(seen, 1000)
+      transition
+    })
+  let assert Ok(Nil) = sinal.detach(attachment)
+  let assert True =
+    received
+    == list.map(states, fn(state) { events.Transition(state, Some(id)) })
 }

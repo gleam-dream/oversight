@@ -8,6 +8,7 @@ import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import pog
+import research_agent/events
 
 pub type Row {
   Row(
@@ -54,6 +55,7 @@ pub fn insert(
   |> pog.parameter(pog.text(id))
   |> pog.parameter(pog.text(topic))
   |> exec(db, _)
+  |> announced(id, events.Queued)
 }
 
 pub fn set_job(
@@ -82,21 +84,33 @@ pub fn set_run(
   |> pog.parameter(pog.text(id))
   |> pog.parameter(pog.text(run_id))
   |> exec(db, _)
+  |> announced(id, events.Researching)
 }
 
 pub fn set_state(
   db: pog.Connection,
   id: String,
-  state: String,
+  state: events.State,
   detail: String,
 ) -> Result(Nil, String) {
   pog.query(
     "UPDATE research SET state = $2, detail = $3, updated_at = now() WHERE id = $1",
   )
   |> pog.parameter(pog.text(id))
-  |> pog.parameter(pog.text(state))
+  |> pog.parameter(pog.text(events.state_name(state)))
   |> pog.parameter(pog.text(detail))
   |> exec(db, _)
+  |> announced(id, state)
+}
+
+/// Announces a state the table now holds.
+fn announced(
+  written: Result(Nil, String),
+  id: String,
+  state: events.State,
+) -> Result(Nil, String) {
+  use Nil <- result.map(written)
+  events.announce(id, state)
 }
 
 pub fn get(db: pog.Connection, id: String) -> Result(Row, String) {

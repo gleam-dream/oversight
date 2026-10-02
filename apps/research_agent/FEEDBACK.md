@@ -230,6 +230,20 @@ cancellation to another, so the app owns the joins (RA-1).
   the durable `reference_id` to its run and step metadata. The http_gun half
   (`telemetry.id_from_string`) is EXT-4's.
 
+  **Status (wave 2):** partially resolved by sinal 5aef827
+  (`sinal/correlation`); no package carries `Correlation` yet, so the
+  package-side proposal stands. The app's own events now do: the new
+  `research_agent.research.state` event (events.gleam, 72 lines) carries the
+  research id as `Correlation` through the record builder, and the collector
+  joins it with no binding (telemetry.gleam, 12 lines; the research id is now
+  `correlation.unique()`). The common-path test asserts the four states
+  arrive in order. The 22 package events still join through `bind_job`,
+  `bind_run` and `bind_http`, and the 26 unattributed llm_wire, saga and
+  http_gun events are unchanged. This adds a fourth source to the trace
+  (26 joined events, was 22) and removes nothing: the registry
+  (~110 lines) goes only when http_gun (wave 3) and the other packages accept
+  the app's `Correlation`.
+
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
 - **Packages**: grind, saga, json_blueprint. **Kind**: ergonomics.
@@ -242,6 +256,23 @@ cancellation to another, so the app owns the joins (RA-1).
 - **Proposal** (saga): `codec.json(version, to_json, decoder)`, a constructor
   over gleam_json and `decode`, which would remove the helper and match
   Grind's `worker.codec` shape.
+
+  **Status (wave 2):** partially resolved by json_blueprint f55ec09
+  (`codec.to_json`, `codec.decoder`, the `use` record builder and the union
+  builder). Six values (`Research`, `Published`, `Article`, the draft pair,
+  `PublishError`, `ResearchError`) now have one Blueprint codec each, and no
+  gleam_json encoder or decoder remains in the app. Two adapters
+  (wire.gleam, 38 lines) turn a codec into Grind's `worker.codec` and into
+  Saga's `codec.new`. The three tool-side codecs use the record builder.
+  Bridges: 122 lines of twin encoders and decoders over three systems → 85
+  lines of codecs (domain.gleam 28, publish.gleam 38, jobs.gleam 19) plus
+  the 38-line adapter module, so about the same count with half the
+  definitions (12 gleam_json functions and the `json_codec` helper → 6 codecs
+  and 2 adapters), and the three `let assert Ok(worker.codec(..))` blocks in
+  `jobs.worker` became one line each. Saga needs the adapter because
+  `saga/codec` is a `String` codec and has no Blueprint bridge. The proposal
+  to grind and saga stands: `worker.codec` and `saga/codec.new` could each
+  accept a Blueprint codec directly, which would remove wire.gleam.
 
 ### RA-9 The worker drops its error codec to avoid the known snooze/bind defect
 
@@ -399,3 +430,92 @@ resolved to 1.0.5.
   breaking change compiled unchanged. The http_gun allowlist still has no
   helper to match `config.allow_loopback` (RA-11), so the loopback helper
   removes only one field from the nested update.
+
+## Re-run after wave 2
+
+Package heads: sinal 5aef827, json_blueprint f55ec09, fabric 7844fa7,
+grind c1920e6, saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1.
+
+- **Tests**: 9 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests. One test is new: every
+  research state reaches an observer with its correlation (see below).
+  `gleam run` prints the four-scenario narrative; the trace line now reads
+  "26 events from research_agent, grind, fabric, http_gun". The build passes
+  `--warnings-as-errors` and `gleam format --check`.
+- **Glue measure, before → after**:
+
+  | Seam                                     | Before         | After                           | Change                                                                                                                         |
+  | ---------------------------------------- | -------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+  | codec bridges (RA-8)                     | 122, 3 systems | 85 + 38 adapters, 1 system      | one Blueprint codec per value; line count flat, 12 gleam_json functions → 6 codecs + 2 adapters                                |
+  | tool codecs (domain.gleam)               | 36             | 36                              | `use` builder replaces `record2`, `required`, `imap` and two `let assert Ok`; two-field records shrank, one-field records grew |
+  | telemetry: handler ids                   | 59             | 0                               | `attach` helper, id suffix and two arguments for each of 23 observers deleted; `sinal.observe(event, run)`                     |
+  | `forwarder.new` and fabric prefix        | 3 + 2 atoms    | 3                               | `forwarder.new(name) \|> with_capacity(4096)`; `["fabric"]`; no `let assert`, no `atom.create`                                 |
+  | app's own events and correlation (RA-7)  | 0              | +72 events.gleam, +12 collector | new; the research id is a `Correlation`; the `db` writers announce each state                                                  |
+  | package events joined per request (RA-7) | ~110 registry  | ~110 registry                   | unchanged: packages do not carry `Correlation` yet                                                                             |
+
+  Source totals: telemetry.gleam 487 → 433, domain.gleam 180 → 163,
+  publish.gleam 228 → 214, jobs.gleam 335 → 325, plus wire.gleam (41) and
+  events.gleam (72). `json_blueprint` and `sinal` did not change any other
+  seam of this app.
+
+- **New friction**:
+  - **One-field records got longer.** The old single-property `codec.field`
+    plus `imap` was two lines; the builder needs the record type annotated
+    on the getter and a `success`, which `gleam format` spreads over seven:
+
+    ```gleam
+    // before
+    codec.field("query", codec.string() |> codec.describe("Search terms"))
+    |> codec.imap(SearchQuery, fn(q) { q.query })
+
+    // after
+    use query <- codec.field(
+      "query",
+      codec.string() |> codec.describe("Search terms"),
+      fn(q: SearchQuery) { q.query },
+    )
+    codec.success(SearchQuery(query:))
+    ```
+
+    For records of two or more fields the builder reads better than
+    `record2` with positional constructors (`hit_codec` is 5 lines, was 9).
+    Three of the app's tool payloads are single-field wrappers, and a
+    `codec.wrap(codec, Constructor, getter)` shortcut would serve them.
+
+  - **Grind's encoder has no failure channel.** The guide's bridge,
+    `codec.to_json(c, x) |> result.unwrap(json.null())`, stores `null` when a
+    value cannot be encoded, and the decoder then rejects it at read time.
+    wire.gleam panics with `describe_encode_error` instead. `worker.codec`
+    still returns a `Result` (empty version only), so the adapter needs a
+    `let assert Ok` as well. A bridge in grind that takes a Blueprint codec
+    would own both decisions once.
+  - **`fields.enum` repeats the type.** `[Queued, Researching, ..]` and
+    `state_name` list the constructors twice and the compiler checks only
+    `state_name`. The guide says to test each constructor; the new test does
+    (one `observe`, six emissions), 30 lines for a property the type could
+    give. A missing constructor is now a logged skip and a
+    `MalformedMetadata` for each handler, not a detach, so the failure is
+    visible.
+  - **`Correlation` re-validates at each emission.** `Research.id` is a
+    `String`, so `events.announce` calls `correlation.from_string` and keeps
+    `None` on an error that cannot happen for app-generated ids
+    (`option.from_result`). Making `domain.Research.id` a `Correlation` would
+    remove that, but it also changes the table, the saga execution id and the
+    job input, which is a larger change than this wave covered.
+  - **Constructor names clash.** `events.State` needs a `Published`
+    constructor, which collides with `domain.Published`; the module is
+    imported qualified and its doc says so.
+- **Migration guides**: sufficient for the sinal side (every edit was in the
+  table: no `atom.create`, no handler id, no `let assert` around definitions,
+  `forwarder.new` plus `with_capacity`, `["fabric"]` prefix) and for the
+  record and union builders. Gaps, all in the json_blueprint guide: (1) the
+  `to_json` bridge example is for Grind's JSON encoder only and shows
+  `unwrap(json.null())` without saying what a failed encode then stores;
+  (2) nothing says how to bridge to a `String` codec such as Saga's
+  (`encode_json`, `decode_json` and the two `describe_*` functions do it);
+  (3) a union of `String`-payload variants changes the wire from
+  `{"kind", "reason"}` to `{"tag", "value"}`, so a stored value needs a new
+  codec version (`research-error-2` here); the union section mentions the
+  wire only for unit variants. Nothing in the fabric, grind or saga changelogs
+  needed an app change: the fabric v2 receipt is internal to graph runs, which
+  this app does not use, and `model_turn()` handlers still ignore usage.
