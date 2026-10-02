@@ -17,6 +17,7 @@ import gleam/time/duration
 import gleam/time/timestamp
 import gleeunit
 import grind/job
+import grind/postgres
 import grind/worker
 import http_gun/error as http_error
 import json/blueprint/codec
@@ -54,16 +55,6 @@ fn with_pipeline(
   providers_base: fn(scripted.Services) -> String,
   run: fn(Context) -> a,
 ) -> a {
-  with_retention(queue, documents, providers_base, jobs.DescriptionOnly, run)
-}
-
-fn with_retention(
-  queue: String,
-  documents: List(scripted.Document),
-  providers_base: fn(scripted.Services) -> String,
-  retention: jobs.ErrorRetention,
-  run: fn(Context) -> a,
-) -> a {
   let assert Ok(services) = scripted.start(documents)
   let assert Ok(collector) = telemetry.start(queue)
   let assert Ok(http) =
@@ -82,7 +73,7 @@ fn with_retention(
       collector:,
       limits: document.default_limits(),
     )
-  let assert Ok(pipeline) = jobs.start(database_url(), queue, env, retention)
+  let assert Ok(pipeline) = jobs.start(database_url(), queue, env)
   let result = run(Context(services:, collector:, http:, env:, pipeline:))
   jobs.stop(pipeline)
   clients.stop(http)
@@ -314,11 +305,12 @@ pub fn provider_transport_failure_retries_until_budget_test() {
     "http://127.0.0.1:9"
   })
   let submitted = submit(context, "acme", llm.OpenAi)
-  // Without an error codec (the EXT-1 workaround) the typed JobError is
-  // gone; only Grind's fixed description survives.
-  let assert job.FailedOperationallyWithCause(detail, worker.BudgetExhausted) =
-    finish(context, submitted)
-  assert detail == "worker returned an application error"
+  // The worker's error codec keeps the typed JobError and its detail.
+  let assert job.BusinessFailedWithCause(
+    outcome.Transient(outcome.Extract, detail),
+    worker.BudgetExhausted,
+  ) = finish(context, submitted)
+  assert string.starts_with(detail, "Connection failed")
   let trace = telemetry.trace(context.collector, "acme")
   assert list.count(trace.attributed, fn(record) {
       string.starts_with(record.summary, "claimed attempt")
@@ -382,20 +374,25 @@ pub fn one_job_is_followed_across_packages_test() {
   assert llm_lost >= 4
 }
 
-/// Documents the Grind defect behind EXT-1: with an error codec, a snoozed
-/// job is re-claimed as a contract mismatch instead of running again.
-pub fn snooze_with_error_codec_is_a_contract_mismatch_test() {
-  use context <- with_retention(
+/// EXT-1 regression: with an error codec, a snoozed job is re-claimed and
+/// runs again, and its finished job can be re-bound from its id.
+pub fn snoozed_job_with_error_codec_runs_again_test() {
+  use context <- with_pipeline(
     "extract_snooze_typed",
     fixtures.batch(),
     scripted.providers_base,
-    jobs.TypedErrors,
   )
   let submitted = submit(context, "globex", llm.Anthropic)
-  assert finish(context, submitted)
-    == job.FailedOperationally(
-      "stored error codec version none does not match registered version job-error-v1",
+  let assert job.SucceededWith(jobs.Extracted(invoice:, ..)) as finished =
+    finish(context, submitted)
+  assert invoice == fixtures.globex()
+  // The rate-limited first call and the successful second call.
+  assert scripted.provider_calls(context.services, "globex") == 2
+  let assert Ok(rebound) =
+    postgres.bind_handle(
+      context.pipeline.database,
+      context.pipeline.worker,
+      job.id_value(submitted.1),
     )
-  // The second, successful provider call never happens.
-  assert scripted.provider_calls(context.services, "globex") == 1
+  assert postgres.outcome(context.pipeline.database, rebound) == Ok(finished)
 }

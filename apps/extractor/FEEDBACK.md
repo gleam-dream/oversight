@@ -8,10 +8,12 @@ Grind jobs; each job fetches with a bounded http_gun stream, extracts a typed
 Messages or Google, and stores it in Postgres. 11 tests pass and `gleam run`
 prints the demo batch.
 
-- One Grind defect blocks the intended design: a snoozed job whose worker has
-  an error codec is re-claimed as a contract mismatch (EXT-1). The app drops
-  the error codec, which also drops every detail of an exhausted retry.
-- The rest is glue, about 240 lines across five seams (see the glue measure).
+- No blocker remains. The Grind defect that blocked the intended design
+  (EXT-1, a snoozed job with an error codec re-claimed as a contract
+  mismatch) is fixed in grind 7a04831: the worker keeps its error codec,
+  snoozes on a 429, and an exhausted retry reads back as the app's typed
+  `JobError` with its detail.
+- The rest is glue, about 225 lines across five seams (see the glue measure).
   The largest pieces are the llm_wire-to-Grind failure mapping and the
   telemetry correlation registry.
 - Structured output is portable across the three providers for a closed,
@@ -77,6 +79,16 @@ prints the demo batch.
   value's version; at minimum, leave `error_version` unchanged in the snooze
   UPDATE. Add a test that snoozes and re-claims a `define_with_error_codec`
   worker.
+- **Status (2 Oct 2026):** resolved by grind 7a04831; the worker is always
+  defined with `define_with_error_codec` and snoozes on a 429. The
+  `ErrorRetention` type, its `DescriptionOnly` branch and the `retention`
+  parameter of `jobs.start` are gone (12 glue lines in jobs.gleam, the
+  9-line `with_retention` test wrapper, 5 lines in extractor.gleam). An
+  exhausted retry now reads back as
+  `BusinessFailedWithCause(Transient(Extract, "Connection failed: ..."), BudgetExhausted)`.
+  The defect test became `snoozed_job_with_error_codec_runs_again_test`: the
+  snoozed job runs again (two provider calls, `SucceededWith`), and
+  `postgres.bind_handle` re-binds the finished job with the same outcome.
 
 ### EXT-2 llm_wire retry advice needs app classification before it becomes a Grind outcome
 
@@ -212,6 +224,13 @@ prints the demo batch.
 - **Proposal** (llm_wire): admit `http://` when http_gun's destination check
   classifies the resolved address as loopback, instead of matching the host
   string. http_gun could add optional ports to `allowed_hosts` entries.
+- **Status (2 Oct 2026):** partially resolved by http_gun a2869b7;
+  both clients start from `config.default() |> config.allow_loopback`, which
+  removes the two `allow_loopback: True` field lines (clients.gleam:30, :54).
+  Both clients still need the nested `destination.Policy` update for
+  `allowed_hosts` (and the fetcher for its `resolver`). llm_wire still matches
+  the host string (llm_wire/src/llm_wire/internal/api.gleam:1472), and
+  `allowed_hosts` still ignores ports.
 
 ### EXT-8 A queue handler still requires an unused `perform` function
 
@@ -257,6 +276,10 @@ prints the demo batch.
   latest release today) and mist 6.0.2 without conflict.
 
 - **Proposal** (grind, llm_wire): widen to `< 2.0.0`.
+- **Status (2 Oct 2026):** resolved by grind b2545a9 and llm_wire 56d793d;
+  `gleam update` resolves gleam_stdlib 1.0.5 (was 0.71.0) with no app change.
+  gleam_crypto, gleeunit, glisten, gramps and mist moved to newer patch or
+  minor releases (mist 6.0.3); pog stays at 4.1.0.
 
 ### EXT-11 Small gaps in public read helpers
 
@@ -313,3 +336,36 @@ and the six-field codec (57 lines) are domain code rather than adapter code.
   decode errors are located (`DecodeAtField("currency", DecodeUnknownEnumLabel("YEN"))`).
 - **Typed Sinal descriptors.** Six `sinal.observe` calls received typed
   metadata from three packages with no `Dynamic` handling.
+
+## Re-run after fixes (2 Oct 2026)
+
+Package heads: grind b2545a9 (fix 7a04831), http_gun a2869b7, llm_wire
+56d793d, gleam_stdlib 1.0.5. 11 tests pass
+(`../scripts/with-postgres.sh gleam test`), and `gleam run` prints the demo
+batch: three stored invoices, four discards, and two provider calls for the
+rate-limited `globex` with `acknowledged scheduled` between its two claims.
+
+| Seam                                                    | Before | After | Change                                                     |
+| ------------------------------------------------------- | ------ | ----- | ---------------------------------------------------------- |
+| EXT-1 workaround and unused `perform` (error retention) | 49     | 37    | `ErrorRetention` and the `define` branch removed (EXT-1)   |
+| Two HTTP clients and their destination policies         | 40     | 38    | `config.allow_loopback` replaces the flag field (EXT-7)    |
+| Test harness (`with_retention` wrapper)                 | 9      | 0     | One `with_pipeline` serves every test                      |
+| Other seams                                             | 198    | 198   | Unchanged (EXT-2 to EXT-6, EXT-8, EXT-9, EXT-11 untouched) |
+
+The remaining 37 lines of the worker definition hold the 10-line `perform`
+that EXT-8 still requires.
+
+The per-request collect policy (http_gun 94b11b9) does not apply here. The
+fetcher streams with `try_with_response`, checks the head first, and caps
+the body with `body.collect`, which already fails with a typed
+`LimitExceeded`; `Truncate` would hand a partial document to the model. The
+app never builds `request_options.Options`, so the new field needed no change.
+
+New friction:
+
+- `config.allow_loopback` sets only the loopback flag. Both clients also
+  restrict `allowed_hosts`, and the fetcher sets a `resolver`, so each client
+  keeps the nested `destination.Policy` update and now mixes a pipe with it.
+  The helper saves one line per client here (EXT-7).
+- No fix broke the app's build: `gleam update` and the changes above were
+  the whole migration.

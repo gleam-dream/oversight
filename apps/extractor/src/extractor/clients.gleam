@@ -27,7 +27,7 @@ pub fn fetcher_config(
   network: Network,
   observations: Option(forwarder.Forwarder),
 ) -> config.Config {
-  let defaults = config.default()
+  let defaults = config.default() |> config.allow_loopback
   let Loopback(document_hosts) = network
   config.Config(
     ..defaults,
@@ -42,7 +42,6 @@ pub fn fetcher_config(
     observations:,
     destination: destination.Policy(
       ..defaults.destination,
-      allow_loopback: True,
       allowed_hosts: Some(document_hosts),
       resolver: Some(fn(_host, _remaining_ms) {
         Ok([destination.Ipv4(127, 0, 0, 1)])
@@ -52,14 +51,13 @@ pub fn fetcher_config(
 }
 
 pub fn llm_config(observations: Option(forwarder.Forwarder)) -> config.Config {
-  let defaults = config.default()
+  let defaults = config.default() |> config.allow_loopback
   config.Config(
     ..defaults,
     deadline_ms: 120_000,
     observations:,
     destination: destination.Policy(
       ..defaults.destination,
-      allow_loopback: True,
       allowed_hosts: Some(["127.0.0.1"]),
     ),
   )

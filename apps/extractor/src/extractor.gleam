@@ -72,12 +72,7 @@ pub fn run(database_url: String) -> Result(Nil, String) {
       collector:,
       limits: document.default_limits(),
     )
-  use pipeline <- result.try(jobs.start(
-    database_url,
-    "extraction",
-    env,
-    jobs.DescriptionOnly,
-  ))
+  use pipeline <- result.try(jobs.start(database_url, "extraction", env))
   io.println(
     "Submitting a batch of "
     <> int.to_string(list.length(assignments()))
