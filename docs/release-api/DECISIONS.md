@@ -2,7 +2,15 @@
 
 The [release API review](README.md) left five decisions that block the most
 work. Each section states the context, the options with their trade-offs, and
-a recommendation. Status: proposed, awaiting the owner.
+a recommendation.
+
+| Decision                | Status (2 October 2026)                                                                   |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| 1. Durability ownership | Deferred. The owner explores 1 and 2 together before deciding.                            |
+| 2. Graph runtime in 1.0 | Deferred with decision 1.                                                                 |
+| 3. Correlation shape    | Accepted: opaque string up to 128 bytes, W3C trace id valid, `causation` deferred.        |
+| 4. Definition bugs      | Accepted: panic for source definitions; typed errors and `check` for runtime definitions. |
+| 5. Default numbers      | Accepted: the table in section 5.                                                         |
 
 ## 1. Durability ownership
 
