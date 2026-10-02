@@ -37,11 +37,18 @@ pub fn report_worker() -> Result(ReportWorker, String) {
   use output <- result.try(
     reports.report_json_codec() |> result.map_error(describe),
   )
-  // WORKAROUND (SMCP-7): with `define_with_error_codec`, `bind_handle` rejects
-  // every succeeded job (`CodecContractMismatch(ErrorCodec, ..)`), so the
-  // worker keeps no typed error and failures surface as descriptions.
+  use error <- result.try(
+    reports.report_error_codec() |> result.map_error(describe),
+  )
   // A report failure is deterministic (no data), so it is not retried.
-  worker.define("reports.generate", "v1", input, output, reports.build)
+  worker.define_with_error_codec(
+    "reports.generate",
+    "v1",
+    input,
+    output,
+    error,
+    reports.build,
+  )
   |> result.map(worker.with_retry_policy(
     _,
     worker.retry_policy(fn(_failure, _context) { worker.DoNotRetry }),

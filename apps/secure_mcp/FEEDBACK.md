@@ -2,19 +2,21 @@
 
 ## Verdict
 
-The combination works, but only after a dependency workaround, about 480
-lines of adapter glue and a 459-line scripted OpenID provider. A user signs in through Warden in a wisp app, the MCP endpoint
+The combination works with about 480 lines of adapter glue and a 459-line
+scripted OpenID provider; since 2 Oct 2026 it resolves from its manifest with
+no dependency workaround. A user signs in through Warden in a wisp app, the MCP endpoint
 `/mcp` runs inside the same mist listener, each request is admitted by
 Relay's `authorization.admit` with a verifier backed by `warden.introspect`,
 tool handlers receive the authenticated principal, and `generate_report` /
 `report_status` run through Grind jobs that only their owner can read.
 10 tests pass and `gleam run` narrates the session and its telemetry.
 
-- **The packages do not resolve together (SMCP-1, blocker).** Warden pins
-  `gleam_crypto == 1.6.0`, which needs `gleam_stdlib >= 1.0`. Relay and Grind
-  cap `gleam_stdlib < 1.0.0`. No app can depend on Relay and Warden, or on
-  Grind and Warden, from their manifests. The app vendors gleam_crypto 1.6.0
-  with unchanged source and a widened stdlib range.
+- **The packages now resolve together (SMCP-1, blocker, resolved).** Warden
+  pinned `gleam_crypto == 1.6.0` (stdlib >= 1.0) while Relay and Grind capped
+  `gleam_stdlib < 1.0.0`, so the app vendored gleam_crypto. With warden
+  845b75e, relay 5caff50 and grind 7a04831 the app resolves gleam_stdlib
+  1.0.5, gleam_crypto 1.6.0 and mist 6.0.3 from Hex, and the vendored copy is
+  gone.
 - **Relay has authorization primitives but no resource-server transport.**
   Mounting MCP in wisp meant re-implementing Relay's buffered HTTP handler on
   its custom-transport runtime (SMCP-2, 114 lines). A verifier cannot read
@@ -24,8 +26,9 @@ tool handlers receive the authenticated principal, and `generate_report` /
   Introspection returns no audience and does not check `exp` (SMCP-4), and
   Warden ships no testing support, so the app carries its own OpenID provider
   (SMCP-5, 459 lines).
-- **One Grind defect** blocks typed errors: a worker with an error codec
-  cannot be re-bound by id after it succeeds (SMCP-7).
+- **One Grind defect** blocked typed errors: a worker with an error codec
+  could not be re-bound by id after it succeeded (SMCP-7). Fixed by grind
+  7a04831; the report worker has its error codec back.
 
 ## Answers to the brief's questions
 
@@ -98,6 +101,15 @@ tool handlers receive the authenticated principal, and `generate_report` /
 - **Proposal**: warden: `gleam_crypto = ">= 1.0.0 and < 2.0.0"`. relay and
   grind: `gleam_stdlib = ">= 0.70.0 and < 2.0.0"`. relay: `mist = ">= 6.0.2 and < 7.0.0"`.
   Each package's gate should resolve against the newest allowed versions.
+- **Status (2 Oct 2026):** resolved by warden 845b75e (`gleam_crypto = ">= 1.6.0 and < 2.0.0"`),
+  relay 5caff50 and grind 7a04831 (`gleam_stdlib < 2.0.0`; relay also
+  `mist >= 6.0.2 and < 7.0.0`, `gun < 3.0.0`). The app deleted
+  `vendor/gleam_crypto` (8 files, 759 lines) and the 4-line path override in
+  gleam.toml. `gleam update` resolves gleam_stdlib 0.71.0 → 1.0.5,
+  gleam_crypto 1.6.0 (now from Hex instead of `vendor/`), mist 6.0.2 → 6.0.3,
+  glisten 9.0.0 → 9.0.1, gramps 6.0.0 → 6.0.1 and gun 2.6.0. Because
+  `dev_provider.gleam` imports `gleam/crypto` itself, gleam.toml:17 now
+  declares `gleam_crypto = ">= 1.6.0 and < 2.0.0"` as an ordinary dependency.
 
 ### SMCP-2 Relay cannot be mounted in an application router; the app re-implements the HTTP handler
 
@@ -129,6 +141,12 @@ tool handlers receive the authenticated principal, and `generate_report` /
   The `Error` branch lets the application answer 401/403 before Relay reads
   the body. A wisp app then mounts it with `wisp_mist` passthrough, and the
   existing listener becomes `handler` plus `mist.start`.
+- **Status (2 Oct 2026):** still open; relay 5caff50 changed no public API.
+  Its new behavior (a buffered call is cancelled when its client
+  disconnects) lives in the private `handle_buffered_request`
+  (relay/src/relay/transport/http.gleam:826), which mcp_mount.gleam
+  re-implements, so the mounted endpoint does not inherit it. Each Relay fix
+  to the buffered handler widens this gap.
 
 ### SMCP-3 Relay's authorization values cannot be read, so a verifier cannot see its token
 
@@ -152,6 +170,7 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `authorization.challenge(AdmissionError, metadata_url: String) -> #(Int, String)`
   (status and `WWW-Authenticate`) and
   `authorization.resource_metadata(ProtectionConfig, authorization_servers: List(String)) -> json.Json`.
+- **Status (2 Oct 2026):** still open (relay 5caff50 changed no public API).
 
 ### SMCP-4 Warden introspection is not ready for a resource-server decision: no audience, no `exp` check
 
@@ -223,6 +242,9 @@ tool handlers receive the authenticated principal, and `generate_report` /
   so a refreshing source can be plugged in; and a typed
   `HttpRejected(status: Int, www_authenticate: Option(String))` in the
   client's errors instead of the string.
+- **Status (2 Oct 2026):** still open (relay 5caff50 changed no public API);
+  `relay_client_cannot_authenticate_test` (secure_mcp_test.gleam:272) still
+  observes the prose 401.
 
 ### SMCP-7 `bind_handle` rejects a succeeded job when the worker has an error codec
 
@@ -251,6 +273,16 @@ tool handlers receive the authenticated principal, and `generate_report` /
   column that acknowledgements never clear, and compare that in `bind_handle`
   and at claim. Add a test that re-binds a succeeded and a cancelled job of a
   `define_with_error_codec` worker.
+- **Status (2 Oct 2026):** resolved by grind 7a04831. The report worker is
+  `worker.define_with_error_codec` again with a `report-error-v1` codec
+  (tools.gleam:40-51, reports.gleam:107-110); the 3-line workaround comment
+  and the codec-less `worker.define` call are gone. `report_status` still
+  re-binds by id with `bind_handle` (tools.gleam:148), and a failed report now
+  reads `failed: no data for period` (`failed_report_test`,
+  secure_mcp_test.gleam:115). The defect test became
+  `grind_bind_handle_after_terminal_write_test` (secure_mcp_test.gleam:287):
+  a succeeded and a business-failed job re-bind by id and read
+  `SucceededWith("hello")` and the typed reason `"refused"`.
 
 ### SMCP-8 One report type needs two codec systems
 
@@ -367,3 +399,35 @@ The scripted browser (client.gleam:20-98) is test scaffolding.
 - **Sinal descriptors from four packages attach the same way.** One
   collector, one `observe` helper, typed measurements and metadata from
   relay, warden, grind and sinal's own forwarder event.
+
+## Re-run after fixes (2 Oct 2026)
+
+Against warden 845b75e, grind 7a04831, relay 5caff50 and http_gun a2869b7
+(through Warden). `../scripts/with-postgres.sh gleam test`: 10 passed, no
+failures. `gleam run` narrates the session and its telemetry as before
+(exit 0). `gleam format` is clean. The app resolves gleam_stdlib 1.0.5 and
+gleam_crypto 1.6.0 from Hex, mist 6.0.3, gun 2.6.0 and wisp 2.2.2.
+
+| Seam                                      | Before                                         | After                                        |
+| ----------------------------------------- | ---------------------------------------------- | -------------------------------------------- |
+| Dependency resolution (SMCP-1)            | 4 lines in gleam.toml + vendored package (759) | 0 (one ordinary `gleam_crypto` range line)   |
+| Typed report failure (SMCP-7)             | 4 (workaround comment + codec-less `define`)   | 0; restored design adds a 3-line error codec |
+| MCP mounted in wisp (SMCP-2)              | 114                                            | 114 (open)                                   |
+| Challenges and RFC 9728 metadata (SMCP-3) | 41                                             | 41 (open)                                    |
+| Authenticated MCP client (SMCP-6)         | 109                                            | 109 (open)                                   |
+
+The loopback helper does not apply: the app builds no http_gun `Config`.
+Warden keeps HTTP Gun internal and exposes its own
+`config.AllowLoopbackForTesting` destination policy (app.gleam:101-106),
+which is already a one-field record update; no host allowlist is involved.
+
+New friction from the fixes:
+
+- None from the package APIs; no app code had to change to absorb them.
+- Removing the vendored path dependency left a stale entry in
+  `build/packages/packages.toml`, so `gleam build` failed with "File IO
+  failure … build/packages/gleam_crypto/gleam.toml" until the entry was
+  deleted. This is Gleam build-cache behavior, not a package issue.
+- Grind's default retry policy retries a business failure, so a probe
+  worker needs `worker.DoNotRetry` before its failure is terminal. This
+  is documented behavior, but a test of a typed failure has to know it.

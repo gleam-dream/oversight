@@ -14,15 +14,12 @@ mist = ">= 5.0.0 and < 7.0.0"
 pog = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
+gleam_crypto = ">= 1.6.0 and < 2.0.0"
 relay = { path = "../../../relay" }
 warden = { path = "../../../warden" }
 grind = { path = "../../../grind" }
 json_blueprint = { path = "../../../json_blueprint" }
 sinal = { path = "../../../sinal" }
-# Workaround SMCP-1: warden pins gleam_crypto == 1.6.0 (stdlib >= 1.0) while
-# relay and grind cap gleam_stdlib < 1.0.0. This app-local copy of
-# gleam_crypto 1.6.0 only relaxes its stdlib range.
-gleam_crypto = { path = "vendor/gleam_crypto" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
