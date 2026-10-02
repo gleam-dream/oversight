@@ -141,18 +141,28 @@ fn deliver(
     }
     _ -> Nil
   }
-  let _ =
-    sinal.emit(
-      telemetry.delivery_attempted(),
-      telemetry.AttemptMeasurements(now_ms() - started),
-      telemetry.AttemptMetadata(
-        delivery.delivery_id,
-        delivery.tenant,
-        attempt.disposition_name(disposition),
-        status,
-      ),
-    )
+  sinal.emit(
+    telemetry.delivery_attempted(),
+    telemetry.AttemptMeasurements(now_ms() - started),
+    telemetry.AttemptMetadata(
+      correlation: telemetry.delivery_correlation(delivery.delivery_id),
+      tenant: delivery.tenant,
+      outcome: outcome(disposition),
+      status:,
+    ),
+  )
   attempt.to_response(disposition)
+}
+
+fn outcome(disposition: Disposition) -> telemetry.Outcome {
+  case disposition {
+    attempt.Delivered(_) -> telemetry.Delivered
+    attempt.Retry(_) -> telemetry.Retried
+    attempt.Snooze(_, _) -> telemetry.Snoozed
+    attempt.Gone(_) -> telemetry.Gone
+    attempt.Refused(_) -> telemetry.Refused
+    attempt.Reject(_) -> telemetry.Rejected
+  }
 }
 
 /// The signed request. The body is the event exactly as the tenant's app

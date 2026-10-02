@@ -1,9 +1,13 @@
 //// Pure tests: no database, no network.
 
 import gleam/bit_array
+import gleam/erlang/process
 import gleam/option.{None, Some}
+import gleam/string
 import http_gun/destination
 import http_gun/error
+import sinal
+import sinal/correlation
 import webhooks/attempt.{
   BodyRead, Delivered, Gone, Receipt, Refused, Reject, Reply, Retry, Snooze,
 }
@@ -12,6 +16,7 @@ import webhooks/subscription.{
   CredentialsInUrl, ForbiddenAddress, HostNotAllowlisted, InternalTier,
   PublicTier, UnsupportedScheme,
 }
+import webhooks/telemetry
 
 fn reply(status: Int, retry_after) {
   Ok(Reply(status, retry_after, BodyRead(0)))
@@ -102,4 +107,33 @@ pub fn registration_rejects_unsafe_endpoints_test() {
   // DNS-rebinding test).
   let assert Ok(_) = check("https://rebind.acme.test/hook", PublicTier)
   let assert Ok(_) = check("http://127.0.0.1:4000/hook", InternalTier)
+}
+
+/// The app's event round-trips through native telemetry, with the delivery
+/// id as the shared `correlation` key and the outcome as a closed enum.
+pub fn delivery_attempted_event_round_trip_test() {
+  let seen = process.new_subject()
+  let attachment =
+    sinal.observe(telemetry.delivery_attempted(), fn(m, d) {
+      process.send(seen, #(m, d))
+    })
+  let metadata =
+    telemetry.AttemptMetadata(
+      correlation: telemetry.delivery_correlation("evt_1:sub_1"),
+      tenant: "acme",
+      outcome: telemetry.Snoozed,
+      status: None,
+    )
+  sinal.emit(
+    telemetry.delivery_attempted(),
+    telemetry.AttemptMeasurements(3),
+    metadata,
+  )
+  let assert Ok(Nil) = sinal.detach(attachment)
+  assert process.receive(seen, 100)
+    == Ok(#(telemetry.AttemptMeasurements(3), metadata))
+  let assert Some(c) = metadata.correlation
+  assert correlation.to_string(c) == "evt_1:sub_1"
+  // A delivery id longer than a correlation allows is emitted without one.
+  assert telemetry.delivery_correlation(string.repeat("x", 200)) == None
 }

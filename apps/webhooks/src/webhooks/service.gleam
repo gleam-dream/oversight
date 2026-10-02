@@ -76,8 +76,8 @@ pub fn start(options: Options) -> Result(Service, String) {
   let attachments = telemetry.attach(collector)
 
   // http_gun only emits through a forwarder the application owns.
-  let assert Ok(http_observations) =
-    forwarder.new(process.new_name("webhooks_http_observations"), 1024)
+  let http_observations =
+    forwarder.new(process.new_name("webhooks_http_observations"))
   let assert Ok(_) =
     static_supervisor.new(static_supervisor.OneForOne)
     |> static_supervisor.add(forwarder.supervised(http_observations))

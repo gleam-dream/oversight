@@ -4,8 +4,8 @@
 
 grind, http_gun and sinal compose into a working webhook service through
 public imports only. All 8 tests pass, and `gleam run` prints the full
-narrative. (Re-run after the package fixes on 2 Oct 2026: see the last
-section.) Most of the composition is direct. A grind worker is a closure, so
+narrative. (Re-runs after the package fixes and after wave 2, both on
+2 Oct 2026: see the last two sections.) Most of the composition is direct. A grind worker is a closure, so
 it can capture an http_gun client, and that includes a cassette playback
 client. http_gun's typed `Failure` maps cleanly onto grind's
 `WorkerResponse`. grind's retry policy receives the typed error, so a 429
@@ -204,6 +204,22 @@ registered version delivery-error-v1")`. Test:
   - **grind:** add a monotonic timestamp measurement to `[grind, job, *]`
     events, matching http_gun's `Timing(monotonic_ms)`.
 
+- **Status (wave 2):** partially resolved by sinal 43279b3 (`sinal/correlation`),
+  on the app's side only. The app's own `[webhooks, delivery, attempted]`
+  event now carries the delivery id as the shared `correlation` key
+  (`correlation.field()`), and the collector's `Delivery(String)` key became
+  `Correlated(Correlation)` (`src/webhooks/telemetry.gleam`). Neither join
+  table goes away: grind and http_gun do not carry a `Correlation` yet, the
+  queue handler still cannot see its job id, and http_gun's correlation is
+  still the opaque `telemetry.Id` from `new_id()`. The correlation glue is
+  unchanged at ~45 lines, plus a 3-line `delivery_correlation`, because
+  `correlation.from_string` can refuse an id (see the wave 2 re-run). Worse
+  for native consumers, http_gun already writes its opaque `Id` under the
+  same `correlation` key, so an Erlang handler reading `metadata.correlation`
+  sees the delivery id in the app's event and a `#Reference<..>` string in
+  http_gun's events for the same delivery. The http_gun and grind proposals
+  above stay open (HTTPGUN-R8 is the http_gun half).
+
 ### WHK-6 http_gun failure reasons have no stable public name
 
 - **Packages:** http_gun (into grind). **Kind:** ergonomics. **Severity:** minor.
@@ -307,6 +323,20 @@ Permanent | Local` helper would cover most retry mappings.
   app routes `[http_gun]` once. sinal should make `event` and `pair` total,
   as in card concern 2.
 
+- **Status (wave 2):** partially resolved by sinal 1ff1c18. The 19 attachments
+  no longer take handler ids: `watch` lost its `sinal.handler_id` call and
+  `let assert`s (19 → 17 lines), and the collector lost the `suffix` field
+  and `unique_int` call that existed only to keep handler ids unique per
+  collector. The app's descriptor has no `let assert` (4 → 0), and
+  `forwarder.new(name)` is total with the 1,024 default, so its
+  `let assert` and explicit capacity are gone. Still open: the app needs 19
+  `sinal.observe` calls, one per event, because the events have different
+  types; and http_gun (1dc20a1) still emits only through the forwarder in
+  `config.observations`, so the app still creates, supervises and passes
+  its own forwarder (`src/webhooks/service.gleam:78-84`) instead of one
+  `forwarder.route(["http_gun"], ..)`. `sinal.emit` now follows routes; the
+  remaining step is http_gun emitting with it.
+
 ## What worked well
 
 - **The grind worker closure is the right seam.** The handler captures an
@@ -384,3 +414,111 @@ New friction from the fixes:
   `rate_limited` kind changed the error codec's shape, so its version is now
   `delivery-error-v2`; jobs stored under v1 would be reported as contract
   mismatches rather than mis-decoded.
+
+## Re-run after wave 2 (2 Oct 2026)
+
+Heads: sinal a0c05ef (API 1ff1c18, telemetry start 355b100, correlation
+43279b3), grind c1920e6, http_gun 1dc20a1. json_blueprint is not a
+dependency.
+`../scripts/with-postgres.sh gleam test`: 9 passed, no failures (8 before,
+plus `core_test.delivery_attempted_event_round_trip_test`, which emits the
+app's event through native telemetry and checks the decoded record, the
+correlation text, and that an over-long delivery id is emitted without a
+correlation). `gleam run` prints the full narrative and the `/flaky` trace
+as before. The migration only touched the app's own Sinal code: grind's and
+http_gun's descriptors and every field the collector reads compiled
+unchanged.
+
+Glue, same measure as the verdict table (non-blank, non-comment lines):
+
+| Seam                                                  | Before → after | Change                                                                                                                         |
+| ----------------------------------------------------- | -------------: | ------------------------------------------------------------------------------------------------------------------------------ |
+| App event descriptor (`delivery_attempted`)           |        34 → 32 | `pair`/`imap`/`atom.create`/4 `let assert` → record builder; one more key (`outcome` enum) and the shared `correlation` key    |
+| App event outcome as a closed enum                    |        10 → 28 | string `attempt.disposition_name` deleted; `Outcome` type (8), `outcome_name` (10), `Disposition → Outcome` mapping (10) added |
+| Attachment helper (`watch`) and handler-id uniqueness |        21 → 17 | `handler_id`, two `let assert`s, the collector `suffix` and its `unique_int` call removed                                      |
+| http_gun forwarder wiring (`service.gleam`)           |          6 → 6 | `forwarder.new(name)` without `let assert` or capacity; the app still owns the forwarder                                       |
+| Cross-package correlation (join tables, wiring)       |      ~45 → ~48 | key type swapped to `Correlation`; `delivery_correlation` (3) added; both join tables stay                                     |
+| `sinal.emit` call site                                |        11 → 10 | `let _ =` gone; labelled metadata fields                                                                                       |
+
+Net over `src/`: 83 lines added, 71 removed; tests: 30 added. Without the
+enum the migration would have removed lines (−6 net); the enum's +18 is
+what grows the app.
+
+New friction from the redesigned APIs:
+
+- **`fields.enum` takes an unchecked value list, and a missing value
+  silently detaches the observer** (sinal, defect-prone ergonomics, major).
+  The name function is exhaustive, but the list is not:
+
+  ```gleam
+  fields.enum(
+    "outcome",
+    [Delivered, Retried, Snoozed, Gone, Refused, Rejected],
+    outcome_name,
+  )
+  ```
+
+  Add a seventh `Outcome`, extend `outcome_name`, forget the list, and
+  everything compiles. Encoding writes the new name; decoding fails with
+  "one of …"; `sinal.observe`'s handler has a no-op `on_failure`, so
+  telemetry removes it and every later event of that kind is lost for that
+  observer. A probe confirmed it: with `fields.enum("t", [A], name)`,
+  emitting `B` and then `A` delivers nothing, and `detach` returns
+  `Error(Nil)`. Proposal (sinal): the list cannot be checked against the
+  type at definition time, so make encoding refuse a value whose name is
+  not in the list (a panic at the emit site, where the bug is, instead of
+  a silent detach in every observer), and document the hazard on `enum`
+  and `observe`.
+
+- **`fields.enum` costs lines when the domain type carries payloads**
+  (ergonomics, minor). The worker's `Disposition` holds receipts and
+  reasons, so the event needs its own payload-free `Outcome`, a name
+  function and a mapping: 28 lines where `fields.string` with the old
+  `disposition_name` took 10. The gain is a typed, closed `outcome` for
+  handlers; for a log-only app event the string was enough.
+- **The record builder repeats each field three times and does not shrink
+  small records** (ergonomics, nit). Each key appears as a `parameter`, a
+  constructor label and a getter, and `gleam format` breaks most `and`
+  lines, so the one-field measurements record is 8 lines:
+
+  ```gleam
+  fields.record({
+    use duration_ms <- fields.parameter
+    AttemptMeasurements(duration_ms:)
+  })
+  |> fields.and(fields.int("duration_ms"), fn(m: AttemptMeasurements) {
+    m.duration_ms
+  })
+  |> fields.build
+  ```
+
+  It reads far better than `pair`/`imap` over nested tuples and has no
+  `let assert`, but the four-key descriptor went only 34 → 32 lines. The
+  guide's `fields.field(key, encode, decode.map(..))` form is shorter for
+  one-field wrappers; the README could say when to prefer it.
+
+- **A correlation built from an app id is fallible**
+  (sinal, ergonomics, minor). The delivery id is `event_id <> ":" <> sub.id`,
+  and the event id is publisher input, so `correlation.from_string` can
+  return `CorrelationTooLong`. The app emits `None` then
+  (`delivery_correlation`), which breaks the trace for exactly the
+  deliveries with long ids. The alternatives are a `let assert` (a crash in
+  the worker) or a new `correlation.unique()` stored with the job, which
+  changes the job codec. The app's own `submission.submission_id` has the
+  same shape of bound. Proposal (sinal): document the 128-byte bound next
+  to "any application id" in the module doc, and consider a total
+  `correlation.derive(String) -> Correlation` that hashes values over the
+  bound.
+- **Same key, different meaning on the wire** (http_gun, sinal,
+  composition, minor): see the WHK-5 status. Until http_gun carries a
+  `Correlation`, its `correlation` key holds an opaque VM reference string.
+
+Migration guides: the sinal guide was sufficient for every compile error;
+each removed item the app used (`handler_id`, three-argument `observe`,
+`pair`, `imap`, fallible `event`/`optional`/`forwarder.new`, `emit`'s
+`Result`) has a before/after snippet. Gaps: it does not show an
+application adopting `sinal/correlation` for its own key (only a package
+metadata record), so the 128-byte refusal for derived ids is easy to miss;
+it does not warn that a value missing from `fields.enum`'s list detaches
+`observe` handlers; and it does not say that http_gun's `correlation` key
+is not yet a `Correlation`. The json_blueprint guide does not apply.
