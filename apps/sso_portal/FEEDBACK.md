@@ -247,6 +247,15 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `HttpRequest` metadata and forward it to Warden's http_gun calls. Add
   typed `[warden, session, *]` events (login completed or rejected, refresh
   outcome, logout) with closed, non-secret metadata.
+- **Status (wave 2):** partially resolved by sinal 355b100. `attach` and
+  `observe` start the `telemetry` application, so the hand start is gone:
+  the `ensure_all_started` call, its comment, the `@external` and two imports
+  (10 lines, old `telemetry.gleam:15-16,72-76,274-276`). The correlation
+  itself is unchanged. Warden's `HttpRequest` still has no correlation field,
+  Warden's provider calls still emit no http_gun events, and http_gun still
+  keys correlation on its own `telemetry.Id` (HTTPGUN-R8 has not landed). The
+  pid-link glue stays (`telemetry.gleam:60-65,84-106,148-170,215-238`).
+  `sinal/correlation` was not adopted; see "Re-run after wave 2".
 
 ### SSO-8 gleam_http interop: Warden's web boundary is strings
 
@@ -379,3 +388,67 @@ New friction:
 - No breaking change had to be absorbed: the app does not build
   `request_options.Options` or call `send_with_options`, and `logout`'s
   signature is unchanged.
+
+## Re-run after wave 2
+
+Packages: sinal a0c05ef, http_gun 1dc20a1, warden bf4f796 (all migrated to
+the wave 2 Sinal API). The app does not use json_blueprint. All 10 tests pass
+under `../scripts/with-postgres.sh gleam test`, and `gleam run` prints the
+full narrative. The step 2 trace is unchanged, and step 4 still reports one
+provider refresh token active after logout (SSO-2).
+
+Only `telemetry.gleam` changed: 276 → 253 lines, 7 added and 30 removed.
+
+| Seam                               | Before                                                              | After                                  |
+| ---------------------------------- | ------------------------------------------------------------------- | -------------------------------------- |
+| Telemetry application start        | 10 (`ensure_all_started`, comment, `@external`, 2 imports)          | 0                                      |
+| Handler ids                        | 4 (random suffix + 3 `sinal.handler_id`)                            | 0                                      |
+| `observe` error plumbing           | 6 (`replace_error` and `)` around each of 3 `use … <- result.try(`) | 0; `let attachment = sinal.observe(…)` |
+| Forwarder construction             | 4 (`forwarder.new(name, 1024)` + `replace_error`)                   | 1 (`forwarder.new(name)`)              |
+| Correlation across Warden/http_gun | ~45 (pid links, `AddWarden`, `begin_request`, trace filter)         | ~45, unchanged (SSO-7)                 |
+
+The random suffix existed only because a node runs several portals in one
+test run and fixed handler ids would collide. Automatic ids remove the reason
+for it.
+
+New friction:
+
+- **`sinal/correlation` cannot replace the app's request key yet.** The app
+  does not invent a key type; it borrows http_gun's `telemetry.Id`, because
+  `http_gun.with_correlation(client, telemetry.Id)` is the only
+  correlation-carrying call in the request path. Adopting `Correlation` today
+  would add a second key and a second map in the collector for no gain:
+
+  ```gleam
+  pub fn begin_request(t: Telemetry) -> #(correlation.Correlation, gun_telemetry.Id) {
+    let request = correlation.unique()
+    let gun = gun_telemetry.new_id()
+    // the collector now maps pid -> Correlation and gun Id -> Correlation
+    process.send(t.collector, Link(process.self(), request, gun))
+    #(request, gun)
+  }
+  ```
+
+  So the app keeps `gun_telemetry.Id`. Once http_gun takes a `Correlation`
+  (HTTPGUN-R8) and Warden forwards one (SSO-7), `begin_request` becomes
+  `correlation.unique()` and the pid map goes.
+
+- **Automatic ids lose attribution.** `telemetry:list_handlers([])` used to
+  show `sso-portal-warden-…`; it now shows `{sinal_handler, N}`. `with_id`
+  restores a name, but brings back `Result(_, AttachError)` and the
+  uniqueness problem the random suffix solved. A `with_label` prefix that
+  stays unique (`{sinal_handler, Label, N}`) would keep both. Nit.
+- **Forwarder names are node-lifetime.** `telemetry.start` calls
+  `process.new_name("sso_portal_http_gun_events")`, so each start leaves one
+  `persistent_term` entry of drop counters for the life of the node (about
+  one per test). The forwarder docs say so. For an app that starts once this
+  costs nothing; a test suite that starts the app per test accrues the
+  entries. Nit.
+
+No new API read worse than the old one here: every change removed lines.
+
+Migration guides: the sinal guide was enough. Its `observe` and
+`forwarder.new` snippets match the app's code almost line for line, and it
+names sso_portal under the telemetry start. It does not say what to use for
+a correlation key while the packages still carry their own; the CHANGELOG's
+HTTPGUN-R8 line implies "wait", which this app did.
