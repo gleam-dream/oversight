@@ -21,7 +21,6 @@ import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import http_gun
-import http_gun/telemetry as http_obs
 import json/blueprint/codec
 import llm_wire/config
 import llm_wire/provider/openai
@@ -42,9 +41,6 @@ pub type Session {
   Session(
     /// The desk's own correlation for this ticket, in its `ticket.*` events.
     ticket: Correlation,
-    /// Tags this ticket's HTTP calls in http_gun's observations, which carry
-    /// their own `Id` until http_gun adopts `Correlation`.
-    http_id: http_obs.Id,
     /// Refunds of at least this many cents need a human approver; 0 means
     /// every refund does.
     approval_from_cents: Int,
@@ -129,14 +125,14 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
   |> result.map_error(fn(errors) { "agent: " <> string.inspect(errors) })
 }
 
-/// A new ticket's session; registering `http_id` with the telemetry
-/// collector is the caller's job.
+/// A new ticket's session. The ticket's correlation also tags its HTTP
+/// calls (`correlated`), so there is nothing to register with telemetry.
 pub fn session(
   desk: Desk,
   ticket: Correlation,
   approval_from_cents: Int,
 ) -> Session {
-  Session(ticket, http_obs.new_id(), approval_from_cents, desk.shop)
+  Session(ticket, approval_from_cents, desk.shop)
 }
 
 pub fn open_ticket(
@@ -187,7 +183,7 @@ pub fn refund_policy(
 fn correlated(session: Session) -> Shop {
   shop.Shop(
     ..session.shop,
-    client: http_gun.with_correlation(session.shop.client, session.http_id),
+    client: http_gun.with_correlation(session.shop.client, session.ticket),
   )
 }
 

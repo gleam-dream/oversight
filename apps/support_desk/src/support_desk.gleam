@@ -100,7 +100,6 @@ pub fn handle_ticket(
   io.println("\n" <> ticket <> ": " <> message)
   let assert Ok(ticket) = correlation.from_string(ticket)
   let session = desk.session(app.desk, ticket, 0)
-  telemetry.register(app.telemetry, session.http_id, ticket)
   let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
   let run_id = run.id_to_string(fabric.id(handle))
   drive(handle, session, approver)
