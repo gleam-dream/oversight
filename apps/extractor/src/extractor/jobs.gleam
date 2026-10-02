@@ -8,9 +8,7 @@ import extractor/llm
 import extractor/outcome
 import extractor/store
 import extractor/telemetry
-import gleam/dynamic/decode
 import gleam/erlang/process
-import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
@@ -127,87 +125,67 @@ pub fn attempt(
 
 // Codecs ------------------------------------------------------------------
 
-fn input_codec() -> worker.Codec(DocumentJob) {
-  let assert Ok(codec) =
+/// One Blueprint codec serves as the Grind codec: `to_json` and `decoder`
+/// replace a hand-written gleam_json twin.
+fn grind_codec(version: String, blueprint: codec.Codec(a)) -> worker.Codec(a) {
+  let assert Ok(wire) =
     worker.codec(
-      "document-job-v1",
-      fn(job: DocumentJob) {
-        json.object([
-          #("document_id", json.string(job.document_id)),
-          #("url", json.string(job.url)),
-          #("provider", json.string(llm.provider_name(job.provider))),
-        ])
+      version,
+      fn(value) {
+        let assert Ok(encoded) = codec.to_json(blueprint, value)
+          as "a codec built from total conversions encodes every value"
+        encoded
       },
-      {
-        use document_id <- decode.field("document_id", decode.string)
-        use url <- decode.field("url", decode.string)
-        use name <- decode.field("provider", decode.string)
-        case llm.provider_from_name(name) {
-          Ok(provider) ->
-            decode.success(DocumentJob(document_id, url, provider))
-          Error(Nil) ->
-            decode.failure(
-              DocumentJob(document_id, url, llm.OpenAi),
-              "Provider",
-            )
-        }
-      },
+      codec.decoder(blueprint),
     )
-  codec
+  wire
 }
 
-/// Grind codecs are gleam_json + decode; the invoice codec is Blueprint.
-/// Blueprint has no `json.Json` or `decode.Decoder` bridge, so the invoice
-/// travels as Blueprint JSON text inside a JSON string.
-fn output_codec() -> worker.Codec(Extracted) {
-  let assert Ok(codec) =
-    worker.codec(
-      "extracted-v1",
-      fn(extracted: Extracted) {
-        let assert Ok(text) =
-          codec.encode_json(invoice.codec(), extracted.invoice)
-        json.object([
-          #("row_id", json.int(extracted.row_id)),
-          #("invoice", json.string(text)),
-        ])
-      },
-      {
-        use row_id <- decode.field("row_id", decode.int)
-        use text <- decode.field("invoice", decode.string)
-        case codec.decode_json(invoice.codec(), text) {
-          Ok(invoice) -> decode.success(Extracted(row_id, invoice))
-          Error(_) ->
-            decode.failure(
-              Extracted(row_id, invoice.Invoice("", "", "", invoice.Usd, [], 0)),
-              "Invoice",
-            )
-        }
-      },
+fn input_codec() -> worker.Codec(DocumentJob) {
+  grind_codec("document-job-v1", {
+    use document_id <- codec.field(
+      "document_id",
+      codec.string(),
+      fn(job: DocumentJob) { job.document_id },
     )
-  codec
+    use url <- codec.field("url", codec.string(), fn(job: DocumentJob) {
+      job.url
+    })
+    use provider <- codec.field(
+      "provider",
+      llm.provider_codec(),
+      fn(job: DocumentJob) { job.provider },
+    )
+    codec.success(DocumentJob(document_id:, url:, provider:))
+  })
+}
+
+fn output_codec() -> worker.Codec(Extracted) {
+  grind_codec("extracted-v2", {
+    use row_id <- codec.field("row_id", codec.int(), fn(e: Extracted) {
+      e.row_id
+    })
+    use invoice <- codec.field("invoice", invoice.codec(), fn(e: Extracted) {
+      e.invoice
+    })
+    codec.success(Extracted(row_id:, invoice:))
+  })
 }
 
 fn error_codec() -> worker.Codec(outcome.JobError) {
-  let assert Ok(codec) =
-    worker.codec(
-      "job-error-v1",
-      fn(error: outcome.JobError) {
-        json.object([
-          #("stage", json.string(outcome.stage_name(error.stage))),
-          #("detail", json.string(error.detail)),
-        ])
-      },
-      {
-        use stage <- decode.field("stage", decode.string)
-        use detail <- decode.field("detail", decode.string)
-        case outcome.stage_from_name(stage) {
-          Ok(stage) -> decode.success(outcome.Transient(stage, detail))
-          Error(Nil) ->
-            decode.failure(outcome.Transient(outcome.Extract, detail), "Stage")
-        }
-      },
-    )
-  codec
+  let stage =
+    codec.string_enum([
+      #("fetch", outcome.Fetch),
+      #("extract", outcome.Extract),
+      #("store", outcome.Store),
+    ])
+  grind_codec("job-error-v1", {
+    use stage <- codec.field("stage", stage, fn(e: outcome.JobError) { e.stage })
+    use detail <- codec.field("detail", codec.string(), fn(e: outcome.JobError) {
+      e.detail
+    })
+    codec.success(outcome.Transient(stage:, detail:))
+  })
 }
 
 // Pipeline ----------------------------------------------------------------

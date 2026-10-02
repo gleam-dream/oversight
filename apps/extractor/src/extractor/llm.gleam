@@ -7,6 +7,7 @@
 import extractor/invoice.{type Invoice}
 import gleam/result
 import http_gun
+import json/blueprint/codec
 import llm_wire/config
 import llm_wire/provider
 import llm_wire/provider/anthropic
@@ -29,13 +30,12 @@ pub fn provider_name(provider: Provider) -> String {
   }
 }
 
-pub fn provider_from_name(name: String) -> Result(Provider, Nil) {
-  case name {
-    "openai" -> Ok(OpenAi)
-    "anthropic" -> Ok(Anthropic)
-    "google" -> Ok(Google)
-    _ -> Error(Nil)
-  }
+pub fn provider_codec() -> codec.Codec(Provider) {
+  codec.string_enum([
+    #("openai", OpenAi),
+    #("anthropic", Anthropic),
+    #("google", Google),
+  ])
 }
 
 /// A prepared provider choice: settings plus the model to ask.

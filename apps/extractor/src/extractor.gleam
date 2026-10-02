@@ -52,7 +52,7 @@ fn assignments() -> List(#(String, llm.Provider)) {
 
 pub fn run(database_url: String) -> Result(Nil, String) {
   use services <- result.try(scripted.start(fixtures.batch()))
-  use collector <- result.try(telemetry.start("extractor.main"))
+  use collector <- result.try(telemetry.start())
   use http <- result.try(
     clients.start(
       clients.Loopback([fixtures.document_host]),

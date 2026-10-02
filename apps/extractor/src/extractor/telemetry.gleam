@@ -69,7 +69,7 @@ pub type Collector {
 
 /// Starts the collector, the forwarder http_gun clients emit through, and
 /// one Sinal handler per observed event.
-pub fn start(label: String) -> Result(Collector, String) {
+pub fn start() -> Result(Collector, String) {
   use subject <- result.try(
     actor.new(State([], dict.new(), [], dict.new()))
     |> actor.on_message(handle)
@@ -77,10 +77,8 @@ pub fn start(label: String) -> Result(Collector, String) {
     |> result.map(fn(started) { started.data })
     |> result.replace_error("could not start the telemetry collector"),
   )
-  use http_observations <- result.try(
-    forwarder.new(process.new_name("extractor_http_observations"), 1024)
-    |> result.replace_error("invalid forwarder capacity"),
-  )
+  let http_observations =
+    forwarder.new(process.new_name("extractor_http_observations"))
   use _ <- result.try(
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(forwarder.supervised(http_observations))
@@ -91,38 +89,34 @@ pub fn start(label: String) -> Result(Collector, String) {
     process.send(subject, Observed(Record(source, key, summary)))
   }
   let attachments = [
-    observe(label <> ".grind.admitted", observation.admitted(), fn(_, meta) {
+    sinal.observe(observation.admitted(), fn(_, meta) {
       record(
         Grind,
         JobId(meta.ref.job_id),
         "admitted " <> state(meta.committed_state),
       )
     }),
-    observe(label <> ".grind.claimed", observation.claimed(), fn(_, meta) {
+    sinal.observe(observation.claimed(), fn(_, meta) {
       record(
         Grind,
         JobId(meta.ref.job_id),
         "claimed attempt " <> int.to_string(meta.attempt.attempt),
       )
     }),
-    observe(
-      label <> ".grind.acknowledged",
-      observation.acknowledged(),
-      fn(_, meta) {
-        record(
-          Grind,
-          JobId(meta.ref.job_id),
-          "acknowledged " <> state(meta.committed_state),
-        )
-      },
-    ),
-    observe(label <> ".grind.released", observation.released(), fn(_, meta) {
+    sinal.observe(observation.acknowledged(), fn(_, meta) {
+      record(
+        Grind,
+        JobId(meta.ref.job_id),
+        "acknowledged " <> state(meta.committed_state),
+      )
+    }),
+    sinal.observe(observation.released(), fn(_, meta) {
       record(Grind, JobId(meta.ref.job_id), "released")
     }),
-    observe(label <> ".http", http_telemetry.event(), fn(_, meta) {
+    sinal.observe(http_telemetry.event(), fn(_, meta) {
       record(Http, HttpCorrelation(meta.correlation), milestone(meta.milestone))
     }),
-    observe(label <> ".llm", llm_telemetry.observation_event(), fn(_, meta) {
+    sinal.observe(llm_telemetry.observation_event(), fn(_, meta) {
       record(
         Llm,
         EmitterPid(process.self()),
@@ -130,20 +124,7 @@ pub fn start(label: String) -> Result(Collector, String) {
       )
     }),
   ]
-  Ok(Collector(
-    subject:,
-    attachments: result.values(attachments),
-    http_observations:,
-  ))
-}
-
-fn observe(
-  name: String,
-  event: sinal.Event(m, d),
-  run: fn(m, d) -> Nil,
-) -> Result(sinal.Attachment, Nil) {
-  use id <- result.try(sinal.handler_id(name) |> result.replace_error(Nil))
-  sinal.observe(id, event, run) |> result.replace_error(Nil)
+  Ok(Collector(subject:, attachments:, http_observations:))
 }
 
 pub fn stop(collector: Collector) -> Nil {

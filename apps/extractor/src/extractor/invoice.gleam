@@ -40,67 +40,74 @@ pub fn line_total(item: LineItem) -> Int {
   item.quantity * item.unit_price_cents
 }
 
-/// The Blueprint codec for an invoice. Six properties exceed `record3`, so
-/// the properties are combined pairwise and mapped through nested tuples.
+/// The Blueprint codec for an invoice. The record builder lists the six
+/// properties in schema order. The `total_cents` codec is built after
+/// `line_items` decodes, so its check sees the lines and a mismatch is
+/// reported at `total_cents`.
 pub fn codec() -> codec.Codec(Invoice) {
-  let assert Ok(currency) =
+  let currency =
     codec.string_enum([#("USD", Usd), #("EUR", Eur), #("GBP", Gbp)])
-  let assert Ok(quantity) = codec.integer_between(1, 1_000_000)
-  let assert Ok(cents) = codec.integer_between(0, 1_000_000_000)
-  let assert Ok(line_item) =
-    codec.record3(
-      codec.required("description", codec.string()),
-      codec.required("quantity", quantity),
-      codec.required("unit_price_cents", cents),
-      LineItem,
-      fn(item) { item.description },
-      fn(item) { item.quantity },
-      fn(item) { item.unit_price_cents },
+  let quantity = codec.integer_between(1, 1_000_000)
+  let cents = codec.integer_between(0, 1_000_000_000)
+  let line_item = {
+    use description <- codec.field(
+      "description",
+      codec.string(),
+      fn(item: LineItem) { item.description },
     )
+    use quantity <- codec.field("quantity", quantity, fn(item: LineItem) {
+      item.quantity
+    })
+    use unit_price_cents <- codec.field(
+      "unit_price_cents",
+      cents,
+      fn(item: LineItem) { item.unit_price_cents },
+    )
+    codec.success(LineItem(description:, quantity:, unit_price_cents:))
+  }
   let date =
-    codec.try_imap(codec.string(), check_date, Ok)
-    |> codec.describe("Issue date as YYYY-MM-DD")
-  let assert Ok(head) =
-    codec.combine(
-      codec.required("vendor", codec.string()),
-      codec.required("number", codec.string()),
+    codec.try_map(
+      codec.string(),
+      decode: check_date,
+      encode: Ok,
+      placeholder: "1970-01-01",
     )
-  let assert Ok(head) = codec.combine(head, codec.required("issued_on", date))
-  let assert Ok(head) =
-    codec.combine(head, codec.required("currency", currency))
-  let assert Ok(head) =
-    codec.combine(head, codec.required("line_items", codec.list(line_item)))
-  let assert Ok(all) = codec.combine(head, codec.required("total_cents", cents))
-  codec.object(all)
-  |> codec.try_imap(
-    fn(fields) {
-      let #(#(#(#(#(vendor, number), issued_on), currency), line_items), total) =
-        fields
-      check_total(Invoice(
-        vendor:,
-        number:,
-        issued_on:,
-        currency:,
-        line_items:,
-        total_cents: total,
-      ))
-    },
-    fn(invoice: Invoice) {
-      Ok(#(
-        #(
-          #(
-            #(#(invoice.vendor, invoice.number), invoice.issued_on),
-            invoice.currency,
-          ),
-          invoice.line_items,
-        ),
-        invoice.total_cents,
-      ))
-    },
-  )
+    |> codec.describe("Issue date as YYYY-MM-DD")
+  {
+    use vendor <- codec.field("vendor", codec.string(), fn(i: Invoice) {
+      i.vendor
+    })
+    use number <- codec.field("number", codec.string(), fn(i: Invoice) {
+      i.number
+    })
+    use issued_on <- codec.field("issued_on", date, fn(i: Invoice) {
+      i.issued_on
+    })
+    use currency <- codec.field("currency", currency, fn(i: Invoice) {
+      i.currency
+    })
+    use line_items <- codec.field(
+      "line_items",
+      codec.list(line_item),
+      fn(i: Invoice) { i.line_items },
+    )
+    use total_cents <- codec.field(
+      "total_cents",
+      total_matching(line_items, cents),
+      fn(i: Invoice) { i.total_cents },
+    )
+    codec.success(Invoice(
+      vendor:,
+      number:,
+      issued_on:,
+      currency:,
+      line_items:,
+      total_cents:,
+    ))
+  }
 }
 
-fn check_date(text: String) -> Result(String, codec.DecodeError) {
+fn check_date(text: String) -> Result(String, String) {
   case string.split(text, "-") {
     [year, month, day] ->
       case
@@ -113,30 +120,28 @@ fn check_date(text: String) -> Result(String, codec.DecodeError) {
       {
         True, Ok(_), Ok(m), Ok(d) if m >= 1 && m <= 12 && d >= 1 && d <= 31 ->
           Ok(text)
-        _, _, _, _ -> invalid_date(text)
+        _, _, _, _ -> Error("not a date: " <> text)
       }
-    _ -> invalid_date(text)
+    _ -> Error("not a date: " <> text)
   }
 }
 
-fn invalid_date(text: String) -> Result(String, codec.DecodeError) {
-  Error(codec.CannotDecode(codec.CustomDecodeReason("not a date: " <> text)))
-}
-
-fn check_total(invoice: Invoice) -> Result(Invoice, codec.DecodeError) {
-  let sum =
-    list.fold(invoice.line_items, 0, fn(acc, item) { acc + line_total(item) })
-  case sum == invoice.total_cents {
-    True -> Ok(invoice)
-    False ->
-      Error(codec.DecodeAtField(
-        "total_cents",
-        codec.CannotDecode(codec.CustomDecodeReason(
+fn total_matching(
+  items: List(LineItem),
+  cents: codec.Codec(Int),
+) -> codec.Codec(Int) {
+  let check = fn(total) {
+    let sum = list.fold(items, 0, fn(acc, item) { acc + line_total(item) })
+    case sum == total {
+      True -> Ok(total)
+      False ->
+        Error(
           "total "
-          <> int.to_string(invoice.total_cents)
+          <> int.to_string(total)
           <> " differs from line sum "
           <> int.to_string(sum),
-        )),
-      ))
+        )
+    }
   }
+  codec.try_map(cents, decode: check, encode: Ok, placeholder: 0)
 }

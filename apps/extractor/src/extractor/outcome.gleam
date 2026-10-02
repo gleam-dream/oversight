@@ -156,20 +156,3 @@ pub fn describe(error: types.WireError) -> String {
     types.CancelledLocally -> "cancelled locally"
   }
 }
-
-pub fn stage_name(stage: Stage) -> String {
-  case stage {
-    Fetch -> "fetch"
-    Extract -> "extract"
-    Store -> "store"
-  }
-}
-
-pub fn stage_from_name(name: String) -> Result(Stage, Nil) {
-  case name {
-    "fetch" -> Ok(Fetch)
-    "extract" -> Ok(Extract)
-    "store" -> Ok(Store)
-    _ -> Error(Nil)
-  }
-}
