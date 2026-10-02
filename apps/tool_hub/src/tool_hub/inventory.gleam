@@ -53,9 +53,9 @@ pub type InventoryError {
 // --- codecs: one per wire shape -------------------------------------------
 
 pub fn product_codec() -> Codec(Product) {
-  use sku <- codec.field("sku", codec.string(), fn(p: Product) { p.sku })
-  use name <- codec.field("name", codec.string(), fn(p: Product) { p.name })
-  use price_cents <- codec.field("price_cents", codec.int(), fn(p: Product) {
+  use sku <- codec.field("sku", codec.string(), get: fn(p) { p.sku })
+  use name <- codec.field("name", codec.string(), get: fn(p) { p.name })
+  use price_cents <- codec.field("price_cents", codec.int(), get: fn(p) {
     p.price_cents
   })
   codec.success(Product(sku:, name:, price_cents:))
@@ -65,13 +65,11 @@ pub fn search_query_codec() -> Codec(SearchQuery) {
   use text <- codec.field(
     "text",
     codec.string() |> codec.describe("Words to match in product names"),
-    fn(q: SearchQuery) { q.text },
+    get: fn(q) { q.text },
   )
-  use limit <- codec.field(
-    "limit",
-    codec.integer_between(1, 10),
-    fn(q: SearchQuery) { q.limit },
-  )
+  use limit <- codec.field("limit", codec.integer_between(1, 10), get: fn(q) {
+    q.limit
+  })
   codec.success(SearchQuery(text:, limit:))
 }
 
@@ -79,31 +77,31 @@ pub fn search_result_codec() -> Codec(SearchResult) {
   use products <- codec.field(
     "products",
     codec.list(product_codec()),
-    fn(r: SearchResult) { r.products },
+    get: fn(r) { r.products },
   )
   codec.success(SearchResult(products:))
 }
 
 pub fn stock_query_codec() -> Codec(StockQuery) {
-  use sku <- codec.field("sku", codec.string(), fn(q: StockQuery) { q.sku })
+  use sku <- codec.field("sku", codec.string(), get: fn(q) { q.sku })
   codec.success(StockQuery(sku:))
 }
 
 pub fn stock_codec() -> Codec(Stock) {
-  use sku <- codec.field("sku", codec.string(), fn(s: Stock) { s.sku })
-  use on_hand <- codec.field("on_hand", codec.int(), fn(s: Stock) { s.on_hand })
-  use warehouse <- codec.field("warehouse", codec.string(), fn(s: Stock) {
+  use sku <- codec.field("sku", codec.string(), get: fn(s) { s.sku })
+  use on_hand <- codec.field("on_hand", codec.int(), get: fn(s) { s.on_hand })
+  use warehouse <- codec.field("warehouse", codec.string(), get: fn(s) {
     s.warehouse
   })
   codec.success(Stock(sku:, on_hand:, warehouse:))
 }
 
 pub fn reserve_request_codec() -> Codec(ReserveRequest) {
-  use sku <- codec.field("sku", codec.string(), fn(r: ReserveRequest) { r.sku })
+  use sku <- codec.field("sku", codec.string(), get: fn(r) { r.sku })
   use quantity <- codec.field(
     "quantity",
     codec.integer_between(1, 100),
-    fn(r: ReserveRequest) { r.quantity },
+    get: fn(r) { r.quantity },
   )
   codec.success(ReserveRequest(sku:, quantity:))
 }
@@ -112,12 +110,10 @@ pub fn reservation_codec() -> Codec(Reservation) {
   use reservation_id <- codec.field(
     "reservation_id",
     codec.string(),
-    fn(r: Reservation) { r.reservation_id },
+    get: fn(r) { r.reservation_id },
   )
-  use sku <- codec.field("sku", codec.string(), fn(r: Reservation) { r.sku })
-  use quantity <- codec.field("quantity", codec.int(), fn(r: Reservation) {
-    r.quantity
-  })
+  use sku <- codec.field("sku", codec.string(), get: fn(r) { r.sku })
+  use quantity <- codec.field("quantity", codec.int(), get: fn(r) { r.quantity })
   codec.success(Reservation(reservation_id:, sku:, quantity:))
 }
 
@@ -259,9 +255,7 @@ pub fn tools(catalog: Catalog) -> List(tool.ContextTool(Nil)) {
     }),
     tool.handle_with_error_renderer(
       get_stock(),
-      fn(query: StockQuery) {
-        process.call(subject, 1000, Lookup(query.sku, _))
-      },
+      fn(query) { process.call(subject, 1000, Lookup(query.sku, _)) },
       render_error,
     ),
     tool.handle_with_error_renderer(

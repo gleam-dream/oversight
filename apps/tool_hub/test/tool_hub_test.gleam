@@ -11,13 +11,13 @@ import gleam/otp/actor
 import gleam/string
 import gleeunit
 import http_gun
-import http_gun/telemetry as http_gun_telemetry
 import json/blueprint/contract
 import json/blueprint/value.{type Value}
 import llm_wire/testing
 import relay/client
 import relay/content
 import relay/transport/http
+import sinal/correlation
 import tool_hub
 import tool_hub/assistant
 import tool_hub/inventory
@@ -424,8 +424,7 @@ fn ask_in_background(
 fn cancelled_run(hub: tool_hub.Hub) -> run.Status {
   let assert [id] = run_ids(telemetry.records(hub.telemetry))
   let assert Ok(parsed) = run.parse_id(id)
-  let assert Ok(desk) =
-    assistant.agent_for(hub.assistant, http_gun_telemetry.new_id())
+  let assert Ok(desk) = assistant.agent_for(hub.assistant, correlation.unique())
   let assert Ok(handle) =
     fabric.open(hub.store, desk, hub.assistant.context, parsed)
   let assert Ok(status) = fabric.await(handle, 2000)

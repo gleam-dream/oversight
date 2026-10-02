@@ -3,7 +3,7 @@
 ////
 //// Join keys available today:
 //// - fabric: the run id on every agent event.
-//// - http_gun: an opaque correlation id the app chose (`with_correlation`).
+//// - http_gun: the `Correlation` the app passed to `with_correlation`.
 //// - relay: an exchange or invocation integer, with no server name and no
 ////   link to the tool handler that ran.
 //// - llm_wire: none; only stage, provider and outcome.
@@ -21,13 +21,14 @@ import http_gun/telemetry as http_telemetry
 import llm_wire/telemetry as llm_telemetry
 import relay/telemetry as relay_telemetry
 import sinal
+import sinal/correlation.{type Correlation}
 import sinal/forwarder
 
 pub type Key {
   /// A fabric run id.
   RunKey(String)
-  /// An http_gun correlation id.
-  HttpKey(http_telemetry.Id)
+  /// The `Correlation` the app gave http_gun for one question.
+  HttpKey(Correlation)
   /// A Relay exchange id (per HTTP POST).
   ExchangeKey(Int)
   /// A Relay invocation id.
@@ -54,12 +55,12 @@ pub opaque type Telemetry {
 }
 
 type State {
-  State(records: List(Record), links: List(#(String, http_telemetry.Id)))
+  State(records: List(Record), links: List(#(String, Correlation)))
 }
 
 type Message {
   Add(Record)
-  Link(run: String, http: http_telemetry.Id)
+  Link(run: String, http: Correlation)
   Snapshot(Subject(State))
 }
 
@@ -141,7 +142,7 @@ pub fn http_forwarder(telemetry: Telemetry) -> forwarder.Forwarder {
 }
 
 /// Records which HTTP correlation a run's model calls carry.
-pub fn link(telemetry: Telemetry, run: String, http: http_telemetry.Id) -> Nil {
+pub fn link(telemetry: Telemetry, run: String, http: Correlation) -> Nil {
   process.send(telemetry.collector, Link(run, http))
 }
 

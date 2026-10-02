@@ -14,7 +14,6 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import http_gun
-import http_gun/telemetry as http_telemetry
 import json/blueprint/codec.{type Codec}
 import llm_wire/config
 import llm_wire/types
@@ -22,6 +21,7 @@ import relay/client
 import relay/server
 import relay/tool as relay_tool
 import relay/transport/http
+import sinal/correlation.{type Correlation}
 
 /// What every tool call of a run receives.
 pub type Context {
@@ -41,7 +41,7 @@ pub type Assistant {
     budget_ms: Int,
     /// Called once a run exists, with the HTTP correlation id its model
     /// calls carry, so telemetry can join the two.
-    on_run: fn(run.RunId, http_telemetry.Id) -> Nil,
+    on_run: fn(run.RunId, Correlation) -> Nil,
     /// Cancel the run when the asking process dies (see `ask`).
     cancel_with_caller: Bool,
   )
@@ -69,14 +69,14 @@ pub fn question_codec() -> Codec(Question) {
   use question <- codec.field(
     "question",
     codec.string() |> codec.describe("A question about products or stock"),
-    fn(q: Question) { q.question },
+    get: fn(q) { q.question },
   )
   codec.success(Question(question:))
 }
 
 pub fn answer_codec() -> Codec(Answer) {
-  use answer <- codec.field("answer", codec.string(), fn(a: Answer) { a.answer })
-  use run_id <- codec.field("run_id", codec.string(), fn(a: Answer) { a.run_id })
+  use answer <- codec.field("answer", codec.string(), get: fn(a) { a.answer })
+  use run_id <- codec.field("run_id", codec.string(), get: fn(a) { a.run_id })
   codec.success(Answer(answer:, run_id:))
 }
 
@@ -94,7 +94,7 @@ pub fn ask_assistant() -> relay_tool.Definition(Question, Answer) {
 /// model calls carry a per-question HTTP correlation id.
 pub fn agent_for(
   assistant: Assistant,
-  correlation: http_telemetry.Id,
+  correlation: Correlation,
 ) -> Result(agent.Agent(Context), List(agent.ConfigError)) {
   let model =
     llm.model(
@@ -120,7 +120,7 @@ pub fn ask(
   assistant: Assistant,
   question: Question,
 ) -> Result(Answer, AskError) {
-  let correlation = http_telemetry.new_id()
+  let correlation = correlation.unique()
   use desk <- result.try(
     agent_for(assistant, correlation)
     |> result.map_error(fn(errors) { StartFailed(string.inspect(errors)) }),
