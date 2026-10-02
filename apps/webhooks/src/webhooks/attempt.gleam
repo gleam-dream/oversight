@@ -56,7 +56,7 @@ pub fn delivery_codec() -> worker.Codec(Delivery) {
   let assert Ok(codec) =
     worker.codec(
       "delivery-v1",
-      fn(d: Delivery) {
+      worker.infallible(fn(d: Delivery) {
         json.object([
           #("delivery_id", json.string(d.delivery_id)),
           #("event_id", json.string(d.event_id)),
@@ -65,7 +65,7 @@ pub fn delivery_codec() -> worker.Codec(Delivery) {
           #("subscription_id", json.string(d.subscription_id)),
           #("body", json.string(d.body)),
         ])
-      },
+      }),
       {
         use delivery_id <- decode.field("delivery_id", decode.string)
         use event_id <- decode.field("event_id", decode.string)
@@ -90,7 +90,7 @@ pub fn receipt_codec() -> worker.Codec(Receipt) {
   let assert Ok(codec) =
     worker.codec(
       "receipt-v1",
-      fn(r: Receipt) {
+      worker.infallible(fn(r: Receipt) {
         let #(kind, n) = case r.body {
           BodyRead(bytes) -> #("read", bytes)
           BodyOverLimit(limit) -> #("over_limit", limit)
@@ -100,7 +100,7 @@ pub fn receipt_codec() -> worker.Codec(Receipt) {
           #("body", json.string(kind)),
           #("bytes", json.int(n)),
         ])
-      },
+      }),
       {
         use status <- decode.field("status", decode.int)
         use kind <- decode.field("body", decode.string)
@@ -120,7 +120,7 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
   let assert Ok(codec) =
     worker.codec(
       "delivery-error-v2",
-      fn(e: DeliveryError) {
+      worker.infallible(fn(e: DeliveryError) {
         let #(kind, status, text) = case e {
           ServerError(s) -> #("server_error", s, "")
           ClientError(s) -> #("client_error", s, "")
@@ -134,7 +134,7 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
           #("status", json.int(status)),
           #("text", json.string(text)),
         ])
-      },
+      }),
       {
         use kind <- decode.field("kind", decode.string)
         use status <- decode.field("status", decode.int)

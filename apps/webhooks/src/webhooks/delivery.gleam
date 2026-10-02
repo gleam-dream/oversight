@@ -14,7 +14,6 @@ import grind/worker.{type Worker}
 import http_gun
 import http_gun/error
 import http_gun/request_options
-import http_gun/telemetry as http_telemetry
 import pog
 import sinal
 import webhooks/attempt.{
@@ -40,8 +39,6 @@ pub type Deps {
     snooze: SnoozePolicy,
     /// How much of a receiver's response body an attempt will buffer.
     max_response_bytes: Int,
-    /// Glue for telemetry correlation (see `webhooks/telemetry`).
-    correlate: fn(http_telemetry.Id, String) -> Nil,
   )
 }
 
@@ -112,13 +109,11 @@ fn deliver(
   let #(result, disposition) = case build_request(sub, delivery, deps.clock()) {
     Error(e) -> #(Error(Nil), attempt.Reject(e))
     Ok(req) -> {
-      // Glue: the worker cannot see its grind job id, and http_gun's
-      // correlation Id is opaque, so the app registers the pairing itself.
-      let correlation = http_telemetry.new_id()
-      deps.correlate(correlation, delivery.delivery_id)
-      let client =
-        egress.client_for(deps.egress, tier)
-        |> http_gun.with_correlation(correlation)
+      let client = egress.client_for(deps.egress, tier)
+      let client = case telemetry.delivery_correlation(delivery.delivery_id) {
+        Some(correlation) -> http_gun.with_correlation(client, correlation)
+        None -> client
+      }
       let sent = send(client, req, deps.max_response_bytes)
       #(result.replace_error(sent, Nil), attempt.classify(sent, deps.snooze))
     }
