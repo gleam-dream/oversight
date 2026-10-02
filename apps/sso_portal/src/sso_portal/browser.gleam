@@ -12,7 +12,6 @@ import gleam/string
 import gleam/uri
 import http_gun
 import http_gun/config
-import http_gun/destination
 import sso_portal/pki.{type Pki}
 
 pub type Browser {
@@ -26,19 +25,14 @@ pub type Page {
 /// The browser trusts the provider's self-signed certificate and may reach
 /// loopback, like a developer's browser would.
 pub fn new(pki: Pki) -> Browser {
-  let defaults = config.default()
   let assert Ok(client) =
-    http_gun.start(
-      config.Config(
-        ..defaults,
-        trust: config.Anchors([pki.certificate_der]),
-        deadline_ms: 10_000,
-        destination: destination.Policy(
-          ..defaults.destination,
-          allow_loopback: True,
-        ),
-      ),
+    config.Config(
+      ..config.default(),
+      trust: config.Anchors([pki.certificate_der]),
+      deadline_ms: 10_000,
     )
+    |> config.allow_loopback
+    |> http_gun.start
   Browser(client:, jar: dict.new())
 }
 

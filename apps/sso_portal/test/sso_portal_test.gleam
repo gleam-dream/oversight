@@ -232,8 +232,9 @@ pub fn sessions_survive_web_restart_but_not_warden_restart_test() {
   app.stop(portal)
 }
 
-pub fn logout_with_a_stale_session_revision_keeps_custody_test() {
-  // Two requests hold the same session; one refreshes, the other logs out.
+pub fn logout_with_a_stale_session_revision_ends_custody_test() {
+  // Two requests hold the same session; one refreshes, the other logs out
+  // with the revision it read before the refresh. Logout is by reference.
   use portal, b <- with_app(options())
   let _ = sign_in(portal, b)
   let assert Ok(pog.Returned(rows: [reference], ..)) =
@@ -249,9 +250,9 @@ pub fn logout_with_a_stale_session_revision_keeps_custody_test() {
       post_logout_redirect_uri: option.None,
       state: option.None,
     )
-  let assert Error(warden.LogoutSession(warden.SessionStale)) =
-    warden.logout(portal.warden, held, no_redirect)
-  // The session the user asked to end is still live in custody.
-  let assert Ok(_) = warden.restore_session(portal.warden, reference)
+  let assert Ok(_) = warden.logout(portal.warden, held, no_redirect)
+  // The session the user asked to end is gone from custody.
+  let assert Error(warden.SessionNotFound) =
+    warden.restore_session(portal.warden, reference)
   Nil
 }
