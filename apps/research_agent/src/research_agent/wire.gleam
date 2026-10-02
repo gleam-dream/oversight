@@ -7,18 +7,15 @@ import grind/worker
 import json/blueprint/codec
 import saga/codec as saga_codec
 
-/// A Grind codec. Grind's encoder has no failure channel, so a value the
-/// codec cannot encode (a definition mistake) crashes where it is encoded
-/// instead of storing a `null` that no decoder accepts.
+/// A Grind codec. A value the codec cannot encode (a refinement it fails)
+/// is rejected by Grind: `submit` returns `InvalidInput`, and a handler
+/// output or error ends the job as an operational failure.
 pub fn grind(version: String, c: codec.Codec(a)) -> worker.Codec(a) {
   let assert Ok(wire) =
     worker.codec(
       version,
       fn(value) {
-        case codec.to_json(c, value) {
-          Ok(json) -> json
-          Error(error) -> panic as codec.describe_encode_error(error)
-        }
+        codec.to_json(c, value) |> result.map_error(codec.describe_encode_error)
       },
       codec.decoder(c),
     )

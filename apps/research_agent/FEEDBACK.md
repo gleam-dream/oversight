@@ -244,6 +244,20 @@ cancellation to another, so the app owns the joins (RA-1).
   (~110 lines) goes only when http_gun (wave 3) and the other packages accept
   the app's `Correlation`.
 
+  **Status (follow-up):** partially resolved by http_gun c45adfe and
+  sinal f9cca37 / 5e8bee3. `http_gun.with_correlation` takes the research's
+  `Correlation` (remote.gleam), and `metadata.correlation` carries it, so
+  http_gun events join like the app's own events. The `http_events.new_id`
+  mint, the `bind_http` message, the id-to-research table, the `Http` key and
+  its `Snapshot` slot are gone (telemetry.gleam 433 → 400 lines;
+  `researcher.context` lost its telemetry argument). The package-side
+  proposal stands for the rest: the model's HTTP calls run on the client fixed
+  at `llm.model(client, ..)`, so the 6 http_gun, 15 llm_wire and 5 saga events
+  per request stay unattributed, and the Grind and Fabric joins
+  (`bind_job`, `bind_run`) are unchanged. The app's own event now holds the
+  `Correlation` itself through `required_field()` (events.gleam 72 → 64
+  lines; no `Some(..)`, no `None` arm in the collector).
+
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
 - **Packages**: grind, saga, json_blueprint. **Kind**: ergonomics.
@@ -273,6 +287,14 @@ cancellation to another, so the app owns the joins (RA-1).
   `saga/codec` is a `String` codec and has no Blueprint bridge. The proposal
   to grind and saga stands: `worker.codec` and `saga/codec.new` could each
   accept a Blueprint codec directly, which would remove wire.gleam.
+
+  **Status (follow-up):** partially resolved by grind c44e4be and
+  json_blueprint bb4da39. `worker.codec` takes a fallible encoder, so the
+  Blueprint bridge returns `codec.to_json(c, v) |> result.map_error(..)`
+  instead of a four-line `case` with `panic` (wire.gleam 41 → 38 lines); a
+  rejected value is now `submission.InvalidInput` at submit. The bridge itself
+  stays: Grind still has no Blueprint-aware constructor, and `worker.codec`
+  still returns a `Result` for an empty version, so `let assert Ok` remains.
 
 ### RA-9 The worker drops its error codec to avoid the known snooze/bind defect
 
@@ -482,6 +504,14 @@ grind c1920e6, saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1.
     Three of the app's tool payloads are single-field wrappers, and a
     `codec.wrap(codec, Constructor, getter)` shortcut would serve them.
 
+    **Status (follow-up):** partially resolved by json_blueprint bb4da39. The
+    getter needs no annotation (`get: fn(q) { q.query }`), and 12 getter
+    annotations are gone across domain.gleam and publish.gleam. The one-field
+    records did not get shorter: `search_query_codec` and
+    `page_request_codec` are still 7 lines, because the `describe` call
+    forces `gleam format` to break the argument list. The wrapper
+    shortcut remains a gap.
+
   - **Grind's encoder has no failure channel.** The guide's bridge,
     `codec.to_json(c, x) |> result.unwrap(json.null())`, stores `null` when a
     value cannot be encoded, and the decoder then rejects it at read time.
@@ -489,6 +519,12 @@ grind c1920e6, saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1.
     still returns a `Result` (empty version only), so the adapter needs a
     `let assert Ok` as well. A bridge in grind that takes a Blueprint codec
     would own both decisions once.
+
+    **Status (follow-up):** partially resolved by grind c44e4be. The panic is
+    gone and a failed encode is a typed `InvalidInput` at submit or an
+    operational job failure; the `let assert Ok` around `worker.codec` and the
+    Blueprint-to-Grind adapter remain.
+
   - **`fields.enum` repeats the type.** `[Queued, Researching, ..]` and
     `state_name` list the constructors twice and the compiler checks only
     `state_name`. The guide says to test each constructor; the new test does
@@ -502,6 +538,14 @@ grind c1920e6, saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1.
     (`option.from_result`). Making `domain.Research.id` a `Correlation` would
     remove that, but it also changes the table, the saga execution id and the
     job input, which is a larger change than this wave covered.
+
+    **Status (follow-up):** partially resolved by sinal f9cca37. The event
+    holds a `Correlation` through `required_field()` and the collector has no
+    `None` arm. The `String` to `Correlation` parse moved rather than
+    vanished: `events.announce` and `remote.correlated` each call
+    `correlation.from_string` and drop the impossible `Error` silently. See
+    the re-run below.
+
   - **Constructor names clash.** `events.State` needs a `Published`
     constructor, which collides with `domain.Published`; the module is
     imported qualified and its doc says so.
@@ -519,3 +563,56 @@ grind c1920e6, saga 43ae141, llm_wire bc5d626, http_gun 1dc20a1.
   wire only for unit variants. Nothing in the fabric, grind or saga changelogs
   needed an app change: the fabric v2 receipt is internal to graph runs, which
   this app does not use, and `model_turn()` handlers still ignore usage.
+
+## Re-run after the follow-up fixes
+
+Package heads: json_blueprint bb4da39, sinal 5e8bee3 (with f9cca37), grind
+c44e4be, http_gun c45adfe.
+
+- **Tests**: 9 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests. The build passes
+  `--warnings-as-errors` and `gleam format --check`. `gleam run` prints the
+  same four-scenario narrative and counts: "26 events from research_agent,
+  grind, fabric, http_gun" are joined and the same 6 / 15 / 5 http_gun,
+  llm_wire and saga events stay unattributed.
+- **Glue measure, before → after**:
+
+  | Seam                                  | Before                                                                         | After                                             | Change                                                                                     |
+  | ------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+  | getter annotations (domain, publish)  | 12 `fn(x: Type)`                                                               | 0                                                 | `get: fn(x) { x.field }`; domain 163 → 161 lines, publish 214 → 206                        |
+  | one-field Blueprint records           | 7 lines each (x2)                                                              | 7 lines each                                      | annotation gone, but `describe` still makes `gleam format` break the call                  |
+  | Blueprint → Grind bridge (wire.gleam) | 41 (4-line `case` with `panic`)                                                | 38 (`result.map_error`)                           | panic deleted; bridge and `let assert Ok(worker.codec(..))` kept                           |
+  | state event (events.gleam)            | 72, `Option(Correlation)`                                                      | 64, `required_field()` + `include`                | `Some`/`option.from_result` wrapper, `Option` import and the `fields.parameter` block gone |
+  | collector arm for the state event     | `case Some/None`                                                               | direct                                            | the unreachable `None -> Nil` arm deleted                                                  |
+  | http_gun join table (telemetry)       | `new_id` + `BindHttp` + `Dict` + `Http` key + 3-tuple `Snapshot` + `bind_http` | pass the research's `Correlation`; `Research` key | telemetry.gleam 433 → 400; `researcher.context` 3 → 2 args; remote.gleam 81 → 79           |
+
+  Net: 61 source lines removed, 0 added in new modules; tests changed by 2
+  lines (`Transition(state, id)`, one comment).
+
+- **New friction**:
+  - **The id is parsed twice and the failure is swallowed twice.**
+    `Research.id` is a `String`, so `events.announce` and `remote.correlated`
+    each call `correlation.from_string`. In `announce` an `Error` skips the
+    event; in `correlated` it returns an uncorrelated client, which silently
+    drops that request's http_gun events from the trace. Both are unreachable
+    for ids from `correlation.unique()`, but a test or caller that passes a
+    long id loses telemetry with no signal. `Research.id: Correlation`
+    (with a codec that stores the string) would remove both, at the cost of
+    touching the row, job input and saga execution id.
+  - **`field()` still forces an `Option` on the http_gun side.** The collector
+    keeps `case m.correlation { Some(id) -> .. None -> Unkeyed }` for
+    http_gun events, as intended for a library, so the model's un-tagged
+    calls remain `Unkeyed`.
+  - **The new Grind rejection path is not exercised.** None of this app's
+    codecs has a refinement, so `InvalidInput` and `ExecutedUnencodable`
+    cannot happen here; the fix removes a panic that no test could reach. A
+    codec with `integer_between` on `Research` would be needed to cover it.
+  - **Formatting cost of `get:`.** The labelled getter after the field adds
+    characters, and several calls that fit on one line before now wrap
+    (`draft_id`, `research_id`); the net is still fewer lines because the
+    `fn(x: Type)` annotation went.
+- **Migration guides**: sufficient. The sinal and json_blueprint tables and the
+  http_gun "pass the app's own correlation" example covered every edit,
+  including the exact research_agent call sites. Gap: the http_gun guide
+  tells apps to drop their join table but not what to do when the app's id is a
+  `String` that must be parsed (the `from_string` failure case above).

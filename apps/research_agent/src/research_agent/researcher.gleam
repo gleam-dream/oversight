@@ -7,7 +7,7 @@ import fabric/policy
 import fabric/run
 import fabric/tool
 import gleam/http
-import gleam/option.{type Option, Some}
+import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import gleam/uri
@@ -20,21 +20,16 @@ import research_agent/domain.{
   type Page, type PageRequest, type SearchQuery, type SearchResults, Page,
 }
 import research_agent/remote
-import research_agent/telemetry.{type Telemetry}
 
 /// The live context of one run. Fabric never stores it: `start`, `open` and
 /// `recover` each take it again. The HTTP client carries the research id as
-/// its telemetry correlation.
+/// its correlation.
 pub type Context {
   Context(research: String, http: http_gun.Client)
 }
 
-pub fn context(
-  http: http_gun.Client,
-  telemetry: Option(Telemetry),
-  research: String,
-) -> Context {
-  Context(research:, http: remote.correlated(http, telemetry, research))
+pub fn context(http: http_gun.Client, research: String) -> Context {
+  Context(research:, http: remote.correlated(http, research))
 }
 
 /// Where the tools and the provider live.

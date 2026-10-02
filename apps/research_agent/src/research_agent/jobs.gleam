@@ -122,7 +122,7 @@ pub fn handle(
   deps: Deps,
   research: Research,
 ) -> worker.WorkerResponse(Published, ResearchError) {
-  let context = researcher.context(deps.http, deps.telemetry, research.id)
+  let context = researcher.context(deps.http, research.id)
   case drive_agent(deps, context, research) {
     Ok(domain.Written(title, body)) -> {
       let _ = db.set_state(deps.db, research.id, events.Publishing, title)

@@ -2,10 +2,9 @@
 ////
 //// It carries the research id as a `sinal/correlation.Correlation`, so an
 //// observer follows a request through these events without a registry.
-//// Packages do not carry `Correlation` yet, so Grind, Fabric and http_gun
-//// events still join through `telemetry`'s bindings.
+//// http_gun carries it too (`remote.correlated`); Grind, Fabric, llm_wire and
+//// Saga events still join through `telemetry`'s bindings.
 
-import gleam/option.{type Option}
 import sinal
 import sinal/correlation.{type Correlation}
 import sinal/fields
@@ -22,7 +21,7 @@ pub type State {
 }
 
 pub type Transition {
-  Transition(state: State, correlation: Option(Correlation))
+  Transition(state: State, correlation: Correlation)
 }
 
 pub fn state_name(state: State) -> String {
@@ -37,36 +36,29 @@ pub fn state_name(state: State) -> String {
 }
 
 pub fn state_changed() -> sinal.Event(Nil, Transition) {
-  sinal.event(
-    ["research_agent", "research", "state"],
-    fields.empty(),
-    fields.record({
-      use state <- fields.parameter
-      use correlation <- fields.parameter
-      Transition(state:, correlation:)
+  sinal.event(["research_agent", "research", "state"], fields.empty(), {
+    use state <- fields.include(
+      fields.enum(
+        "state",
+        [Queued, Researching, Publishing, Published, Failed, Cancelled],
+        state_name,
+      ),
+      get: fn(t) { t.state },
+    )
+    use correlation <- fields.include(correlation.required_field(), get: fn(t) {
+      t.correlation
     })
-      |> fields.and(
-        fields.enum(
-          "state",
-          [Queued, Researching, Publishing, Published, Failed, Cancelled],
-          state_name,
-        ),
-        fn(t: Transition) { t.state },
-      )
-      |> fields.and(correlation.field(), fn(t) { t.correlation })
-      |> fields.build,
-  )
+    fields.success(Transition(state:, correlation:))
+  })
 }
 
 /// Announces that research `id` entered `state`. Ids come from
-/// `app.start_research` (`correlation.unique`), so they always fit.
+/// `app.start_research` (`correlation.unique`), so they always fit; an id
+/// that does not is not announced.
 pub fn announce(id: String, state: State) -> Nil {
-  sinal.emit(
-    state_changed(),
-    Nil,
-    Transition(
-      state:,
-      correlation: option.from_result(correlation.from_string(id)),
-    ),
-  )
+  case correlation.from_string(id) {
+    Ok(correlation) ->
+      sinal.emit(state_changed(), Nil, Transition(state:, correlation:))
+    Error(_) -> Nil
+  }
 }

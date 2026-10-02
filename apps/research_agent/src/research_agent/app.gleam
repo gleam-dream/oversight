@@ -320,7 +320,7 @@ pub fn snapshot(app: App, id: String) -> Result(run.Snapshot, String) {
   use row <- result.try(db.get(app.db, id))
   use run_id <- result.try(option.to_result(row.run_id, "no run yet"))
   let assert Ok(run_id) = run.parse_id(run_id)
-  let context = researcher.context(app.http, None, id)
+  let context = researcher.context(app.http, id)
   use handle <- result.try(
     fabric.open(app.runs, app.deps.agent, context, run_id)
     |> result.map_error(string.inspect),

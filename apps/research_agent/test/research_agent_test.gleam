@@ -117,7 +117,7 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   ) = counts
 
   // Following the request across packages: grind (job id), fabric (run id)
-  // and http_gun (correlation id) join; llm_wire and saga events cannot.
+  // and http_gun (the research's `Correlation`) join; llm_wire and saga events cannot.
   let trace = telemetry.trace(f.telemetry, id)
   let sources = telemetry.sources(trace)
   let assert True = list.contains(sources, "grind")
@@ -430,6 +430,5 @@ pub fn every_research_state_reaches_an_observer_with_its_correlation_test() {
     })
   let assert Ok(Nil) = sinal.detach(attachment)
   let assert True =
-    received
-    == list.map(states, fn(state) { events.Transition(state, Some(id)) })
+    received == list.map(states, fn(state) { events.Transition(state, id) })
 }
