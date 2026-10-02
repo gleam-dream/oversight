@@ -50,18 +50,16 @@ pub fn codec() -> codec.Codec(Invoice) {
   let quantity = codec.integer_between(1, 1_000_000)
   let cents = codec.integer_between(0, 1_000_000_000)
   let line_item = {
-    use description <- codec.field(
-      "description",
-      codec.string(),
-      fn(item: LineItem) { item.description },
-    )
-    use quantity <- codec.field("quantity", quantity, fn(item: LineItem) {
+    use description <- codec.field("description", codec.string(), get: fn(item) {
+      item.description
+    })
+    use quantity <- codec.field("quantity", quantity, get: fn(item) {
       item.quantity
     })
     use unit_price_cents <- codec.field(
       "unit_price_cents",
       cents,
-      fn(item: LineItem) { item.unit_price_cents },
+      get: fn(item) { item.unit_price_cents },
     )
     codec.success(LineItem(description:, quantity:, unit_price_cents:))
   }
@@ -74,27 +72,19 @@ pub fn codec() -> codec.Codec(Invoice) {
     )
     |> codec.describe("Issue date as YYYY-MM-DD")
   {
-    use vendor <- codec.field("vendor", codec.string(), fn(i: Invoice) {
-      i.vendor
-    })
-    use number <- codec.field("number", codec.string(), fn(i: Invoice) {
-      i.number
-    })
-    use issued_on <- codec.field("issued_on", date, fn(i: Invoice) {
-      i.issued_on
-    })
-    use currency <- codec.field("currency", currency, fn(i: Invoice) {
-      i.currency
-    })
+    use vendor <- codec.field("vendor", codec.string(), get: fn(i) { i.vendor })
+    use number <- codec.field("number", codec.string(), get: fn(i) { i.number })
+    use issued_on <- codec.field("issued_on", date, get: fn(i) { i.issued_on })
+    use currency <- codec.field("currency", currency, get: fn(i) { i.currency })
     use line_items <- codec.field(
       "line_items",
       codec.list(line_item),
-      fn(i: Invoice) { i.line_items },
+      get: fn(i) { i.line_items },
     )
     use total_cents <- codec.field(
       "total_cents",
       total_matching(line_items, cents),
-      fn(i: Invoice) { i.total_cents },
+      get: fn(i) { i.total_cents },
     )
     codec.success(Invoice(
       vendor:,
