@@ -45,7 +45,6 @@ Sinal event it collected.
 | `secure_mcp/telemetry`    | Sinal subscriptions for relay, warden, grind and sinal, plus two bridge events      |
 | `secure_mcp/client`       | Scripted browser and a raw JSON-RPC MCP client that can send a bearer token         |
 | `secure_mcp/dev_provider` | Scripted OpenID provider (discovery, JWKS, authorize, token, introspection) on mist |
-| `vendor/gleam_crypto`     | gleam_crypto 1.6.0 source; only its stdlib range is widened (SMCP-1)                |
 
 ## Packages and seams exercised
 
@@ -55,8 +54,8 @@ Sinal event it collected.
 - warden: `config` with `TrustAnchorsPem` and `AllowLoopbackForTesting`,
   `begin_login` with an RFC 8707 extension parameter, `complete_login`,
   `restore_session`, `session_access_token`, `introspect`.
-- grind: worker definition, `submit`, `bind_handle`, `arguments` (owner
-  check), `outcome`, a polling consumer and a manual one.
+- grind: worker definition with an error codec, `submit`, `bind_handle`,
+  `arguments` (owner check), `outcome`, a polling consumer and a manual one.
 - json_blueprint: tool input/output contracts, including a four-field record.
 - sinal: one collector attached to every package's descriptors.
 - wisp, mist: one listener for browser routes and MCP; mist with TLS for the

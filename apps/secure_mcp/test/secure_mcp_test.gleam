@@ -118,8 +118,8 @@ pub fn failed_report_test() {
   let job_id = generate(running, alice.access_token, "never")
   let #(state, summary) = await_status(running, alice.access_token, job_id)
   assert summary == None
-  // Without an error codec (SMCP-7) the worker's own reason is lost.
-  assert state == "failed: worker returned an application error"
+  // The worker's error codec keeps its own reason through `bind_handle`.
+  assert state == "failed: no data for period"
 }
 
 // --- Failure paths -------------------------------------------------------------
@@ -281,36 +281,48 @@ pub fn relay_client_cannot_authenticate_test() {
   assert reason == "server discovery returned HTTP 401"
 }
 
-/// SMCP-7: `bind_handle` rejects a succeeded job of a worker defined with
-/// `define_with_error_codec`, because the success acknowledgement stores
-/// `error_version = NULL`.
-pub fn grind_bind_handle_after_success_defect_test() {
+/// SMCP-7 (fixed by grind 7a04831): a job of a worker defined with
+/// `define_with_error_codec` re-binds by id after it succeeds or fails, and
+/// the re-bound handle reads the typed result or the typed reason.
+pub fn grind_bind_handle_after_terminal_write_test() {
   use running <- with_app
   let assert Ok(text) = worker.codec("text-v1", json.string, decode.string)
   let assert Ok(echo_worker) =
     worker.define_with_error_codec("probe.echo", "v1", text, text, text, fn(s) {
-      Ok(s)
+      case s {
+        "fail" -> Error("refused")
+        _ -> Ok(s)
+      }
     })
+  let echo_worker =
+    worker.with_retry_policy(
+      echo_worker,
+      worker.retry_policy(fn(_failure, _context) { worker.DoNotRetry }),
+    )
   let assert Ok(workers) =
     registry.new("probe") |> result.try(registry.register(_, echo_worker))
   let assert Ok(policy) =
     queue.default_policy() |> queue.with_manual_polling |> queue.validate_policy
   let assert Ok(consumer) = queue.start(running.database, workers, policy)
-  let assert Ok(handle) =
+  let assert Ok(succeeded) =
     postgres.submit(running.database, "probe", echo_worker, "hello")
-  let id = job.id_value(handle)
-  // Before the attempt the id binds.
-  let assert Ok(_) = postgres.bind_handle(running.database, echo_worker, id)
   let assert Ok(True) = queue.process_one(consumer)
-  // The handle from `submit` still reads the result...
-  let assert Ok(job.SucceededWith("hello")) =
-    postgres.outcome(running.database, handle)
-  // ...but a handle re-bound from the id (after a restart) cannot be made.
-  let assert Error(postgres.CodecContractMismatch(
-    worker.ErrorCodec,
-    expected,
-    actual,
-  )) = postgres.bind_handle(running.database, echo_worker, id)
+  let assert Ok(failed) =
+    postgres.submit(running.database, "probe", echo_worker, "fail")
+  let assert Ok(True) = queue.process_one(consumer)
   let _ = queue.stop(consumer)
-  assert #(expected, actual) == #("text-v1", "none")
+  // Handles re-bound from the ids alone (as after a restart) read the results.
+  let assert Ok(rebound) =
+    postgres.bind_handle(running.database, echo_worker, job.id_value(succeeded))
+  let assert Ok(job.SucceededWith("hello")) =
+    postgres.outcome(running.database, rebound)
+  let assert Ok(rebound) =
+    postgres.bind_handle(running.database, echo_worker, job.id_value(failed))
+  let assert Ok(outcome) = postgres.outcome(running.database, rebound)
+  let reason = case outcome {
+    job.BusinessFailedWith(reason) | job.BusinessFailedWithCause(reason, _) ->
+      reason
+    other -> string.inspect(other)
+  }
+  assert reason == "refused"
 }

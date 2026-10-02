@@ -104,6 +104,11 @@ pub fn report_json_codec() -> Result(worker.Codec(Report), worker.CodecError) {
   )
 }
 
+/// The worker's business failure reason, stored so `report_status` can show it.
+pub fn report_error_codec() -> Result(worker.Codec(String), worker.CodecError) {
+  worker.codec("report-error-v1", json.string, decode.string)
+}
+
 // --- Blueprint codecs (Relay tool contracts) ---------------------------------
 
 pub fn request_codec() -> Result(
