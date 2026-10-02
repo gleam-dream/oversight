@@ -12,6 +12,7 @@ import grind/worker
 import pog
 import research_agent/app.{type App}
 import research_agent/db
+import research_agent/jobs
 import research_agent/node
 import research_agent/saga_store
 import research_agent/services.{type Services}
@@ -170,10 +171,12 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   services.set_search_down(f.world, True)
   let assert Ok(id) = app.start_research(f.node, "cobol")
   let assert Ok(outcome) = app.await_outcome(f.node, id, 15_000)
-  // Without an error codec the typed `NoSources` is erased on persistence:
-  // only a fixed description and the cause survive.
-  let assert job.FailedOperationallyWithCause(_, worker.BudgetExhausted) =
-    outcome
+  // The worker's error codec keeps the typed `NoSources` through
+  // persistence, with the cause that ended the job (RA-9, grind 7a04831).
+  let assert job.BusinessFailedWithCause(
+    jobs.NoSources("the search service is unavailable"),
+    worker.BudgetExhausted,
+  ) = outcome
   // Two attempts, each with its own run (search + answer).
   let assert services.Counts(search_calls: 2, llm_calls: 4, published: 0, ..) =
     services.counts(f.world)
