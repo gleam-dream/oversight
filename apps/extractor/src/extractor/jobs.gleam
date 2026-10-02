@@ -51,18 +51,9 @@ pub type Env {
 
 // Worker ------------------------------------------------------------------
 
-/// How a retryable failure is kept with the job.
-pub type ErrorRetention {
-  /// The design intent: `define_with_error_codec`, so an exhausted retry
-  /// reads back as a typed `JobError`. Broken by a Grind defect: a snoozed
-  /// job is re-claimed as a contract mismatch (see FEEDBACK.md, EXT-1).
-  TypedErrors
-  /// The workaround: `define` without an error codec; an exhausted retry
-  /// reads back as a description string only.
-  DescriptionOnly
-}
-
-pub fn define(env: Env, retention: ErrorRetention) -> Worker {
+/// The worker keeps a retryable failure as a typed `JobError` through its
+/// error codec, so an exhausted retry reads back with the app's detail.
+pub fn define(env: Env) -> Worker {
   // Grind requires a plain `Result` handler even though the queue handler
   // below replaces it for every queued attempt.
   let perform = fn(job) {
@@ -75,25 +66,15 @@ pub fn define(env: Env, retention: ErrorRetention) -> Worker {
       }
     })
   }
-  let assert Ok(definition) = case retention {
-    TypedErrors ->
-      worker.define_with_error_codec(
-        "extractor.invoice",
-        "v1",
-        input_codec(),
-        output_codec(),
-        error_codec(),
-        perform,
-      )
-    DescriptionOnly ->
-      worker.define(
-        "extractor.invoice",
-        "v1",
-        input_codec(),
-        output_codec(),
-        perform,
-      )
-  }
+  let assert Ok(definition) =
+    worker.define_with_error_codec(
+      "extractor.invoice",
+      "v1",
+      input_codec(),
+      output_codec(),
+      error_codec(),
+      perform,
+    )
   let assert Ok(definition) = worker.with_max_attempts(definition, 3)
   definition
   |> worker.with_queue_handler(fn(job) {
@@ -206,7 +187,6 @@ fn output_codec() -> worker.Codec(Extracted) {
   codec
 }
 
-/// Only `TypedErrors` uses this codec.
 fn error_codec() -> worker.Codec(outcome.JobError) {
   let assert Ok(codec) =
     worker.codec(
@@ -246,7 +226,6 @@ pub fn start(
   database_url: String,
   queue_name: String,
   env: Env,
-  retention: ErrorRetention,
 ) -> Result(Pipeline, String) {
   use settings <- result.try(
     postgres.settings(database_url)
@@ -260,7 +239,7 @@ pub fn start(
   use Nil <- result.try(
     postgres.migrate(database) |> result.map_error(string.inspect),
   )
-  let definition = define(env, retention)
+  let definition = define(env)
   use workers <- result.try(
     registry.new(queue_name)
     |> result.try(registry.register(_, definition))
