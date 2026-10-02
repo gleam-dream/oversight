@@ -66,23 +66,18 @@ pub type AskError {
 }
 
 pub fn question_codec() -> Codec(Question) {
-  codec.field(
+  use question <- codec.field(
     "question",
     codec.string() |> codec.describe("A question about products or stock"),
+    fn(q: Question) { q.question },
   )
-  |> codec.imap(Question, fn(q) { q.question })
+  codec.success(Question(question:))
 }
 
 pub fn answer_codec() -> Codec(Answer) {
-  let assert Ok(answer) =
-    codec.record2(
-      codec.required("answer", codec.string()),
-      codec.required("run_id", codec.string()),
-      Answer,
-      fn(a) { a.answer },
-      fn(a) { a.run_id },
-    )
-  answer
+  use answer <- codec.field("answer", codec.string(), fn(a: Answer) { a.answer })
+  use run_id <- codec.field("run_id", codec.string(), fn(a: Answer) { a.run_id })
+  codec.success(Answer(answer:, run_id:))
 }
 
 pub fn ask_assistant() -> relay_tool.Definition(Question, Answer) {

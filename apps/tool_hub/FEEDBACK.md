@@ -263,6 +263,18 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `runtime.to_decode_error(ValidationError) -> DecodeError`. Relay could
   also expose the listed schema as a Blueprint `Value` or contract next to
   the `json.Json`.
+- **Status (wave 2):** resolved by json_blueprint `contract.value_codec` (head f55ec09;
+  the proposal, verbatim). `contract.ValidationError` now carries
+  `codec.PathSegment` and `codec.Reason`, the same types decode errors use,
+  so `value_codec` reports `$["limit"]: integer outside range 1 to 10`
+  with no mapping. The app deleted `contract_codec`, `decode_error` and
+  `decode_reason` (48 lines, remote_tools.gleam) and calls
+  `contract.value_codec(remote)` (src/tool_hub/remote_tools.gleam:118).
+  `discovered_tools_work_without_native_types_test` still asserts the model
+  sees that text. Not resolved: Relay's `ToolDeclaration.input_schema` is
+  still `json.Json`, so the app still renders it to text and parses it again
+  (:105-109). The output side of the mount, a pass-through `Codec(Value)`,
+  still needs a hand-built `codec.custom` (:120).
 
 ### TH-7 One question cannot be followed across relay, fabric, llm_wire and http_gun
 
@@ -299,6 +311,17 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
     (`model.Request.run`), so `fabric/llm` can call `with_correlation` per
     turn.
   - http_gun: add `telemetry.correlation_from(String) -> Id`.
+- **Status (wave 2):** unchanged; `sinal/correlation` exists, but no package
+  carries it yet. The app emits no Sinal events of its own, so the only
+  correlation keys it holds are the packages': the fabric run id, http_gun's
+  `Id`, Relay's integers. http_gun's `with_correlation` still takes its own
+  `telemetry.Id` and `Metadata.correlation` is still `Option(Id)`
+  (http_gun/src/http_gun/telemetry.gleam:66-67), so the per-question
+  `new_id()`, the rebuilt agent and `telemetry.link` stay (~35 lines). When
+  http_gun adopts `Correlation` (wave 3, HTTPGUN-R8), the run id (36 bytes,
+  inside the 128-byte limit) can serve as the correlation and `link` and
+  `Link` can go; the agent still has to be rebuilt per question until fabric
+  passes the run id to the model function.
 
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
@@ -314,6 +337,9 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
 - **Proposal** (fabric): make `tool.definition_name`, `definition_description`,
   `definition_input` and `definition_output` public on `tool.Definition`, so
   a library-defined fabric tool can be published over MCP.
+- **Status (wave 2):** not affected. The Blueprint codecs under it moved to
+  the `use` builder (see `## Re-run after wave 2`); the derivation is
+  unchanged.
 
 ### TH-9 An MCP error result can carry only text, so "outcome unknown" is prose
 
@@ -362,6 +388,14 @@ after 4 turns, 4 without usage`;
 - **Proposal** (http_gun): use `forwarder.emit_routed` when
   `observations` is `None`, so routing stays the application's choice as in
   fabric.
+- **Status (wave 2):** partially resolved by sinal 1ff1c18. `forwarder.new`
+  no longer takes a capacity or returns a `Result`, so the two-line
+  `let assert Ok(..) = forwarder.new(.., 1024)` is one line
+  (src/tool_hub/telemetry.gleam:92). The supervisor and the
+  `config.observations` plumbing remain (7 lines instead of 8): http_gun
+  still emits only through its own forwarder, not `sinal.emit`, and
+  `forwarder.emit_routed` is gone, so the proposal now reads "use
+  `sinal.emit` when `observations` is `None`".
 
 ### TH-12 Dependency resolution
 
@@ -383,17 +417,17 @@ after 4 turns, 4 without usage`;
 
 Lines of adapter code per seam, excluding blank lines and comments.
 
-| Seam                                                        | Lines | Location                                                                    |
-| ----------------------------------------------------------- | ----- | --------------------------------------------------------------------------- |
-| MCP call outcome → fabric failure (typed and dynamic)       | 69    | remote_tools.gleam:23-48, :188-250                                          |
-| Dynamic mounting from `tools/list`                          | 89    | remote_tools.gleam:84-184 (of which 48 build `Codec(Value)` and map errors) |
-| Typed mounting from a Relay definition                      | 24    | remote_tools.gleam:55-80                                                    |
-| fabric run → MCP result (`ask_assistant` status and render) | 70    | assistant.gleam:58-66, :124-163, :181-202                                   |
-| Relay cancellation → fabric cancellation                    | 11    | assistant.gleam:167-177                                                     |
-| Cancelling an MCP call (raw wire, Relay client cannot)      | 68    | mcp_wire.gleam (deleted 2 Oct 2026; now `client.close`, see TH-1)           |
-| Telemetry correlation (agent per question, link, follow)    | ~35   | assistant.gleam:100-120, :128-138; telemetry.gleam:146-177                  |
-| http_gun forwarder supervisor for observations              | 8     | telemetry.gleam:92-99                                                       |
-| http_gun loopback client (destination policy)               | 6     | tool_hub.gleam:79-94 (configuration, not adapter code)                      |
+| Seam                                                        | Lines   | Location                                                                                                                         |
+| ----------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| MCP call outcome → fabric failure (typed and dynamic)       | 69      | remote_tools.gleam:23-48, :188-250                                                                                               |
+| Dynamic mounting from `tools/list`                          | 89 → 38 | remote_tools.gleam:81-129 (wave 2: the 48 lines that built `Codec(Value)` and mapped errors are one `contract.value_codec` call) |
+| Typed mounting from a Relay definition                      | 24      | remote_tools.gleam:55-80                                                                                                         |
+| fabric run → MCP result (`ask_assistant` status and render) | 70      | assistant.gleam:58-66, :124-163, :181-202                                                                                        |
+| Relay cancellation → fabric cancellation                    | 11      | assistant.gleam:167-177                                                                                                          |
+| Cancelling an MCP call (raw wire, Relay client cannot)      | 68      | mcp_wire.gleam (deleted 2 Oct 2026; now `client.close`, see TH-1)                                                                |
+| Telemetry correlation (agent per question, link, follow)    | ~35     | assistant.gleam:100-120, :128-138; telemetry.gleam:146-177                                                                       |
+| http_gun forwarder supervisor for observations              | 8 → 7   | telemetry.gleam:90-97                                                                                                            |
+| http_gun loopback client (destination policy)               | 6       | tool_hub.gleam:79-94 (configuration, not adapter code)                                                                           |
 
 The Sinal handlers themselves (about 11 lines per event across 7 relay, 6
 fabric, 1 llm_wire, 1 http_gun and 1 sinal events) and the scripted
@@ -468,3 +502,5 @@ New friction:
   shares one gun connection across calls, and its timeout cancels only the
   gun stream, so the only way for a Relay client to cancel one call is to
   close the client and every other call on it.
+
+Package heads for this section: sinal 5aef827, json_blueprint f55ec09.

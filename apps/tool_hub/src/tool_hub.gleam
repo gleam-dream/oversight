@@ -53,7 +53,7 @@ pub type Hub {
 pub type Settings {
   Settings(
     mounting: Mounting,
-    /// Handler-id prefix for telemetry; unique per hub.
+    /// Names the hub's run store; unique per hub.
     name: String,
     /// The Relay policy of the `ask_assistant` server.
     assistant_policy: http.HttpPolicy,
@@ -92,7 +92,7 @@ pub fn start(
   settings: Settings,
   script: List(scripted_llm.Step),
 ) -> Result(Hub, String) {
-  let telemetry = telemetry.start(settings.name)
+  let telemetry = telemetry.start()
   let catalog = inventory.demo_catalog()
   use inventory_server <- try(inventory.serve(catalog))
   use config <- try(

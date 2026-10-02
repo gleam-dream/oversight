@@ -12,9 +12,7 @@ import gleam/string
 import gleeunit
 import http_gun
 import http_gun/telemetry as http_gun_telemetry
-import json/blueprint/document
-import json/blueprint/parser
-import json/blueprint/runtime
+import json/blueprint/contract
 import json/blueprint/value.{type Value}
 import llm_wire/testing
 import relay/client
@@ -95,7 +93,7 @@ fn events(records: List(telemetry.Record), package: String) -> List(String) {
 /// provider request body.
 fn schema_sent_to_model(body: String, tool: String) -> Value {
   let assert Ok(value.Object(fields)) =
-    parser.parse_value_from_string(parser.default_limits(), body)
+    value.parse(body, value.default_limits())
   let assert Ok(value.Array(tools)) = list.key_find(fields, "tools")
   let assert Ok(value.Object(found)) =
     list.find(tools, fn(item) {
@@ -108,7 +106,7 @@ fn schema_sent_to_model(body: String, tool: String) -> Value {
   schema
 }
 
-fn contract(schema: Value) -> runtime.RuntimeContract {
+fn contract_of(schema: Value) -> contract.Contract {
   let document = case schema {
     value.Object(fields) ->
       case list.key_find(fields, "$schema") {
@@ -124,8 +122,8 @@ fn contract(schema: Value) -> runtime.RuntimeContract {
       }
     _ -> schema
   }
-  let assert Ok(contract) = document.load(document)
-  contract
+  let assert Ok(loaded) = contract.load(document)
+  loaded
 }
 
 /// Holds the inventory server so a script step (in the provider's process)
@@ -222,22 +220,22 @@ pub fn typed_tool_schema_is_identical_in_all_three_places_test() {
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("schemas"), tool_hub.demo_script())
   let assert client.StructuredSuccess(_, _) = ask(hub, tool_hub.demo_question)
-  let assert Ok(native) = runtime.from_codec(inventory.search_query_codec())
+  let assert Ok(native) = contract.from_codec(inventory.search_query_codec())
 
   let assert Ok(listed) = client.list_tools(hub.peer)
   let assert Ok(declaration) =
     list.find(listed, fn(tool) { tool.name == "search_products" })
   let assert Ok(from_relay) =
-    parser.parse_schema_document_from_string(
-      parser.default_limits(),
+    contract.parse(
       json.to_string(declaration.input_schema),
+      value.default_limits(),
     )
-  let assert True = runtime.same_schema(native, from_relay)
+  let assert True = contract.same_schema(native, from_relay)
 
   let assert [first, ..] =
     scripted_llm.requests(scripted_llm.drain(hub.notices))
-  let from_model = contract(schema_sent_to_model(first, "search_products"))
-  let assert True = runtime.same_schema(native, from_model)
+  let from_model = contract_of(schema_sent_to_model(first, "search_products"))
+  let assert True = contract.same_schema(native, from_model)
   // The description survives in both: Relay's metadata feeds fabric's define.
   let assert Some("Find products whose name contains the text.") =
     declaration.description

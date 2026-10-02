@@ -53,83 +53,72 @@ pub type InventoryError {
 // --- codecs: one per wire shape -------------------------------------------
 
 pub fn product_codec() -> Codec(Product) {
-  let assert Ok(product) =
-    codec.record3(
-      codec.required("sku", codec.string()),
-      codec.required("name", codec.string()),
-      codec.required("price_cents", codec.int()),
-      Product,
-      fn(p) { p.sku },
-      fn(p) { p.name },
-      fn(p) { p.price_cents },
-    )
-  product
+  use sku <- codec.field("sku", codec.string(), fn(p: Product) { p.sku })
+  use name <- codec.field("name", codec.string(), fn(p: Product) { p.name })
+  use price_cents <- codec.field("price_cents", codec.int(), fn(p: Product) {
+    p.price_cents
+  })
+  codec.success(Product(sku:, name:, price_cents:))
 }
 
 pub fn search_query_codec() -> Codec(SearchQuery) {
-  let assert Ok(limit) = codec.integer_between(1, 10)
-  let assert Ok(query) =
-    codec.record2(
-      codec.required(
-        "text",
-        codec.string() |> codec.describe("Words to match in product names"),
-      ),
-      codec.required("limit", limit),
-      SearchQuery,
-      fn(q) { q.text },
-      fn(q) { q.limit },
-    )
-  query
+  use text <- codec.field(
+    "text",
+    codec.string() |> codec.describe("Words to match in product names"),
+    fn(q: SearchQuery) { q.text },
+  )
+  use limit <- codec.field(
+    "limit",
+    codec.integer_between(1, 10),
+    fn(q: SearchQuery) { q.limit },
+  )
+  codec.success(SearchQuery(text:, limit:))
 }
 
 pub fn search_result_codec() -> Codec(SearchResult) {
-  codec.field("products", codec.list(product_codec()))
-  |> codec.imap(SearchResult, fn(r) { r.products })
+  use products <- codec.field(
+    "products",
+    codec.list(product_codec()),
+    fn(r: SearchResult) { r.products },
+  )
+  codec.success(SearchResult(products:))
 }
 
 pub fn stock_query_codec() -> Codec(StockQuery) {
-  codec.field("sku", codec.string()) |> codec.imap(StockQuery, fn(q) { q.sku })
+  use sku <- codec.field("sku", codec.string(), fn(q: StockQuery) { q.sku })
+  codec.success(StockQuery(sku:))
 }
 
 pub fn stock_codec() -> Codec(Stock) {
-  let assert Ok(stock) =
-    codec.record3(
-      codec.required("sku", codec.string()),
-      codec.required("on_hand", codec.int()),
-      codec.required("warehouse", codec.string()),
-      Stock,
-      fn(s) { s.sku },
-      fn(s) { s.on_hand },
-      fn(s) { s.warehouse },
-    )
-  stock
+  use sku <- codec.field("sku", codec.string(), fn(s: Stock) { s.sku })
+  use on_hand <- codec.field("on_hand", codec.int(), fn(s: Stock) { s.on_hand })
+  use warehouse <- codec.field("warehouse", codec.string(), fn(s: Stock) {
+    s.warehouse
+  })
+  codec.success(Stock(sku:, on_hand:, warehouse:))
 }
 
 pub fn reserve_request_codec() -> Codec(ReserveRequest) {
-  let assert Ok(quantity) = codec.integer_between(1, 100)
-  let assert Ok(request) =
-    codec.record2(
-      codec.required("sku", codec.string()),
-      codec.required("quantity", quantity),
-      ReserveRequest,
-      fn(r) { r.sku },
-      fn(r) { r.quantity },
-    )
-  request
+  use sku <- codec.field("sku", codec.string(), fn(r: ReserveRequest) { r.sku })
+  use quantity <- codec.field(
+    "quantity",
+    codec.integer_between(1, 100),
+    fn(r: ReserveRequest) { r.quantity },
+  )
+  codec.success(ReserveRequest(sku:, quantity:))
 }
 
 pub fn reservation_codec() -> Codec(Reservation) {
-  let assert Ok(reservation) =
-    codec.record3(
-      codec.required("reservation_id", codec.string()),
-      codec.required("sku", codec.string()),
-      codec.required("quantity", codec.int()),
-      Reservation,
-      fn(r) { r.reservation_id },
-      fn(r) { r.sku },
-      fn(r) { r.quantity },
-    )
-  reservation
+  use reservation_id <- codec.field(
+    "reservation_id",
+    codec.string(),
+    fn(r: Reservation) { r.reservation_id },
+  )
+  use sku <- codec.field("sku", codec.string(), fn(r: Reservation) { r.sku })
+  use quantity <- codec.field("quantity", codec.int(), fn(r: Reservation) {
+    r.quantity
+  })
+  codec.success(Reservation(reservation_id:, sku:, quantity:))
 }
 
 // --- Relay definitions: name, description, annotations, codecs ------------
