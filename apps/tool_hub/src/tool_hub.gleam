@@ -16,7 +16,6 @@ import gleam/option.{Some}
 import gleam/string
 import http_gun
 import http_gun/config as http_config
-import http_gun/destination
 import llm_wire/testing
 import llm_wire/types
 import relay/client
@@ -79,16 +78,12 @@ pub fn settings(name: String) -> Settings {
 pub fn provider_client(
   telemetry: telemetry.Telemetry,
 ) -> Result(http_gun.Client, String) {
-  let defaults = http_config.default()
   http_config.Config(
-    ..defaults,
+    ..http_config.default(),
     deadline_ms: 60_000,
     observations: Some(telemetry.http_forwarder(telemetry)),
-    destination: destination.Policy(
-      ..defaults.destination,
-      allow_loopback: True,
-    ),
   )
+  |> http_config.allow_loopback
   |> http_gun.start
   |> result_string
 }

@@ -1,7 +1,9 @@
 import fabric
 import fabric/run
+import gleam/bit_array
 import gleam/erlang/process
-import gleam/http/response
+import gleam/http as gleam_http
+import gleam/http/request
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -9,7 +11,6 @@ import gleam/otp/actor
 import gleam/string
 import gleeunit
 import http_gun
-import http_gun/body
 import http_gun/telemetry as http_gun_telemetry
 import json/blueprint/document
 import json/blueprint/parser
@@ -22,7 +23,6 @@ import relay/transport/http
 import tool_hub
 import tool_hub/assistant
 import tool_hub/inventory
-import tool_hub/mcp_wire
 import tool_hub/scripted_llm.{After, Hold, Reply, call}
 import tool_hub/telemetry
 
@@ -187,6 +187,17 @@ pub fn common_path_answers_through_both_mcp_servers_test() {
   // Telemetry: fabric and http_gun join on the run; relay and llm_wire do not.
   let followed = telemetry.follow(hub.telemetry, answer.run_id)
   let assert True = telemetry.has(followed.joined, "fabric", "run.stop")
+  // The scripted provider reports no usage: every turn says so, not zero.
+  let turns =
+    events(followed.joined, "fabric")
+    |> list.filter(fn(event) { string.starts_with(event, "model.stop") })
+  let assert 4 = list.length(turns)
+  let assert True =
+    list.all(turns, fn(event) { string.contains(event, "usage not reported") })
+  let assert True =
+    list.any(events(followed.joined, "fabric"), fn(event) {
+      string.contains(event, "4 turns, 4 without usage")
+    })
   let assert True = telemetry.count(followed.joined, "http_gun") >= 24
   let assert 0 = telemetry.count(followed.joined, "relay")
   let assert 0 = telemetry.count(followed.joined, "llm_wire")
@@ -390,45 +401,56 @@ pub fn invalid_model_arguments_never_reach_the_server_test() {
 
 // --- advanced: cancellation --------------------------------------------------------------
 
-fn wire_client(hub: tool_hub.Hub) -> http_gun.Client {
-  let assert Ok(client) = tool_hub.provider_client(hub.telemetry)
-  client
+/// Starts `ask_assistant` on Relay's own client in another process, waits
+/// until the model stream is held open, and returns the client and the
+/// caller's outcome.
+fn ask_in_background(
+  hub: tool_hub.Hub,
+) -> #(client.Client, process.Subject(client.ToolCallOutcome(assistant.Answer))) {
+  let assert Ok(mcp) = tool_hub.assistant_client(hub, 15_000)
+  let caller = process.new_subject()
+  process.spawn(fn() {
+    process.send(
+      caller,
+      client.call_definition(
+        mcp,
+        assistant.ask_assistant(),
+        assistant.Question("Anything in stock?"),
+      ),
+    )
+  })
+  let assert True = wait_for(hub.notices, scripted_llm.StreamHeld, 5000)
+  #(mcp, caller)
 }
 
-/// An MCP client that accepted an SSE response disconnects mid-answer.
-/// Relay kills the invocation's worker, the app's monitor cancels the fabric
-/// run, fabric kills the model call, and the provider's stream closes.
-pub fn disconnecting_mcp_client_cancels_run_and_model_stream_test() {
-  let assert Ok(hub) = tool_hub.start(tool_hub.settings("cancel_sse"), [Hold])
-  let port = http.http_server_port(hub.assistant_server)
-  let wire = wire_client(hub)
-  let request =
-    mcp_wire.tools_call(
-      port,
-      1,
-      "ask_assistant",
-      json.object([#("question", json.string("Anything in stock?"))]),
-      stream: True,
-    )
-  let assert Ok(response.Response(status: 200, body: stream, ..)) =
-    http_gun.open(wire, request)
-  let assert True = wait_for(hub.notices, scripted_llm.StreamHeld, 5000)
-  // The MCP client goes away.
-  let _ = body.close(stream)
-  let _ = http_gun.stop(wire)
-  let assert True = stream_closed_within(hub.notices, 3000)
-
-  process.sleep(100)
-  let records = telemetry.records(hub.telemetry)
-  let assert True = telemetry.has(records, "relay", "invocation.cancelled")
-  let assert True = telemetry.has(records, "fabric", "run.cancel")
-  let assert [id] = run_ids(records)
+fn cancelled_run(hub: tool_hub.Hub) -> run.Status {
+  let assert [id] = run_ids(telemetry.records(hub.telemetry))
   let assert Ok(parsed) = run.parse_id(id)
   let assert Ok(desk) =
     assistant.agent_for(hub.assistant, http_gun_telemetry.new_id())
   let assert Ok(handle) =
     fabric.open(hub.store, desk, hub.assistant.context, parsed)
-  let assert Ok(run.Finished(run.Cancelled)) = fabric.await(handle, 2000)
+  let assert Ok(status) = fabric.await(handle, 2000)
+  status
+}
+
+/// An MCP client on Relay's own client (a buffered `application/json` call)
+/// disconnects mid-answer. Relay kills the invocation's worker, the app's
+/// monitor cancels the fabric run, fabric kills the model call, and the
+/// provider's stream closes.
+pub fn disconnecting_mcp_client_cancels_run_and_model_stream_test() {
+  let assert Ok(hub) = tool_hub.start(tool_hub.settings("cancel_close"), [Hold])
+  let #(mcp, caller) = ask_in_background(hub)
+  // The MCP client goes away.
+  client.close(mcp)
+  let assert True = stream_closed_within(hub.notices, 3000)
+  let assert Ok(client.TransportFailure(_)) = process.receive(caller, 2000)
+
+  process.sleep(100)
+  let records = telemetry.records(hub.telemetry)
+  let assert True = telemetry.has(records, "relay", "invocation.cancelled")
+  let assert True = telemetry.has(records, "fabric", "run.cancel")
+  let assert run.Finished(run.Cancelled) = cancelled_run(hub)
   tool_hub.stop(hub)
 }
 
@@ -441,21 +463,8 @@ pub fn disconnect_without_the_bridge_leaves_the_run_running_test() {
       cancel_with_caller: False,
     )
   let assert Ok(hub) = tool_hub.start(settings, [Hold])
-  let port = http.http_server_port(hub.assistant_server)
-  let wire = wire_client(hub)
-  let request =
-    mcp_wire.tools_call(
-      port,
-      1,
-      "ask_assistant",
-      json.object([#("question", json.string("Anything in stock?"))]),
-      stream: True,
-    )
-  let assert Ok(response.Response(status: 200, body: stream, ..)) =
-    http_gun.open(wire, request)
-  let assert True = wait_for(hub.notices, scripted_llm.StreamHeld, 5000)
-  let _ = body.close(stream)
-  let _ = http_gun.stop(wire)
+  let #(mcp, _caller) = ask_in_background(hub)
+  client.close(mcp)
   let assert False = stream_closed_within(hub.notices, 1000)
   let records = telemetry.records(hub.telemetry)
   let assert True = telemetry.has(records, "relay", "invocation.cancelled")
@@ -467,51 +476,66 @@ pub fn disconnect_without_the_bridge_leaves_the_run_running_test() {
   tool_hub.stop(hub)
 }
 
-/// `notifications/cancelled` is the MCP way to cancel, but over Relay's HTTP
-/// transport it arrives on a new POST with its own runtime, which does not
-/// know the call: the agent and its model stream keep running.
-pub fn cancelled_notification_does_not_reach_the_running_call_test() {
+/// MCP 2026-07-28 cancels a Streamable HTTP request by closing its
+/// connection; `notifications/cancelled` is neither required nor expected
+/// there. Relay answers such a notification 202 and leaves the call alone;
+/// closing the caller's connection cancels it.
+pub fn cancelled_notification_is_ignored_and_disconnect_cancels_test() {
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("cancel_notify"), [Hold])
+  let #(mcp, _caller) = ask_in_background(hub)
+  let assert Ok(wire) = tool_hub.provider_client(hub.telemetry)
   let port = http.http_server_port(hub.assistant_server)
-  let wire = wire_client(hub)
-  let caller = process.new_subject()
-  process.spawn(fn() {
-    let request =
-      mcp_wire.tools_call(
-        port,
-        41,
-        "ask_assistant",
-        json.object([#("question", json.string("Anything in stock?"))]),
-        stream: False,
-      )
-    process.send(caller, http_gun.send(wire, request))
-  })
-  let assert True = wait_for(hub.notices, scripted_llm.StreamHeld, 5000)
   let assert Ok(http_gun.Buffered(response: accepted, ..)) =
-    http_gun.send(wire, mcp_wire.cancelled(port, 41))
+    http_gun.send(wire, cancelled_notification(port, 1))
   let assert 202 = accepted.status
-  // Nothing stops: no Relay cancellation, the model stream stays open.
   let assert False = stream_closed_within(hub.notices, 800)
-  let records = telemetry.records(hub.telemetry)
-  let assert False = telemetry.has(records, "relay", "invocation.cancelled")
-  let assert False = telemetry.has(records, "fabric", "run.cancel")
-  // Only fabric can stop it now.
-  let assert [id] = run_ids(records)
-  let assert Ok(parsed) = run.parse_id(id)
-  let assert Ok(_) = fabric.cancel_stored(hub.store, parsed)
+  let assert False =
+    telemetry.has(
+      telemetry.records(hub.telemetry),
+      "relay",
+      "invocation.cancelled",
+    )
+  // The spec's cancellation: the caller closes its connection.
+  client.close(mcp)
   let assert True = stream_closed_within(hub.notices, 3000)
-  let assert Ok(Ok(http_gun.Buffered(response: answered, ..))) =
-    process.receive(caller, 5000)
-  let assert True =
-    string.contains(string.inspect(answered.body), "the question was cancelled")
+  process.sleep(100)
+  let records = telemetry.records(hub.telemetry)
+  let assert True = telemetry.has(records, "relay", "invocation.cancelled")
+  let assert True = telemetry.has(records, "fabric", "run.cancel")
   let _ = http_gun.stop(wire)
   tool_hub.stop(hub)
 }
 
-/// Relay's own client gives up after its timeout, but the server neither
-/// hears about it nor stops: the run keeps its model stream open.
-pub fn relay_client_timeout_leaves_the_run_going_test() {
+/// A `notifications/cancelled` POST, which Relay's client cannot send.
+fn cancelled_notification(port: Int, id: Int) -> request.Request(BitArray) {
+  let meta =
+    json.object([
+      #("io.modelcontextprotocol/protocolVersion", json.string("2026-07-28")),
+      #("io.modelcontextprotocol/clientCapabilities", json.object([])),
+    ])
+  let body =
+    json.object([
+      #("jsonrpc", json.string("2.0")),
+      #("method", json.string("notifications/cancelled")),
+      #("params", json.object([#("requestId", json.int(id)), #("_meta", meta)])),
+    ])
+  request.new()
+  |> request.set_method(gleam_http.Post)
+  |> request.set_scheme(gleam_http.Http)
+  |> request.set_host("127.0.0.1")
+  |> request.set_port(port)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("accept", "application/json")
+  |> request.set_header("mcp-protocol-version", "2026-07-28")
+  |> request.set_header("mcp-method", "notifications/cancelled")
+  |> request.set_body(bit_array.from_string(json.to_string(body)))
+}
+
+/// Relay's client gives up after its timeout but keeps its connection open
+/// (gun cancels only the stream), so the server keeps working until the
+/// caller closes the whole client.
+pub fn relay_client_timeout_leaves_the_run_going_until_close_test() {
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("cancel_timeout"), [Hold])
   let assert Ok(mcp) = tool_hub.assistant_client(hub, 300)
@@ -521,14 +545,12 @@ pub fn relay_client_timeout_leaves_the_run_going_test() {
       assistant.ask_assistant(),
       assistant.Question("Anything in stock?"),
     )
-  client.close(mcp)
   let assert True = wait_for(hub.notices, scripted_llm.StreamHeld, 2000)
   let assert False = stream_closed_within(hub.notices, 800)
-  let records = telemetry.records(hub.telemetry)
-  let assert False = telemetry.has(records, "fabric", "run.cancel")
-  let assert [id] = run_ids(records)
-  let assert Ok(parsed) = run.parse_id(id)
-  let assert Ok(_) = fabric.cancel_stored(hub.store, parsed)
+  let assert False =
+    telemetry.has(telemetry.records(hub.telemetry), "fabric", "run.cancel")
+  client.close(mcp)
   let assert True = stream_closed_within(hub.notices, 3000)
+  let assert run.Finished(run.Cancelled) = cancelled_run(hub)
   tool_hub.stop(hub)
 }

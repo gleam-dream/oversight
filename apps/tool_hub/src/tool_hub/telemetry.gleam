@@ -13,7 +13,7 @@ import fabric/observation
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import gleam/string
@@ -354,7 +354,9 @@ fn fabric_handlers(
           string.inspect(m.outcome)
             <> " after "
             <> int.to_string(totals.turns)
-            <> " turns",
+            <> " turns, "
+            <> int.to_string(totals.unreported_replies)
+            <> " without usage",
           RunKey(m.run),
         )
       },
@@ -362,6 +364,9 @@ fn fabric_handlers(
   ]
 }
 
-fn usage_text(usage: model.Usage) -> String {
-  " (" <> string.inspect(usage) <> ")"
+fn usage_text(usage: Option(model.Usage)) -> String {
+  case usage {
+    Some(usage) -> " (" <> string.inspect(usage) <> ")"
+    None -> " (usage not reported)"
+  }
 }
