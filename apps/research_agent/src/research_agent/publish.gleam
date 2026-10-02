@@ -11,11 +11,13 @@ import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import http_gun
+import json/blueprint/codec
 import research_agent/domain.{type Article, type Published, Published}
 import research_agent/remote
 import research_agent/saga_store.{type SagaStore}
+import research_agent/wire
 import saga
-import saga/codec
+import saga/codec as saga_codec
 import saga/durable
 import saga/execution
 
@@ -35,7 +37,7 @@ pub fn workflow(
   client: http_gun.Client,
   base: String,
 ) -> saga.Workflow(Article, Published, PublishError, String) {
-  let text = codec.text()
+  let text = saga_codec.text()
   let delete = fn(draft_id: String) {
     remote.call(client, http.Delete, base <> "/drafts/" <> draft_id, [], "")
     |> remote.expect([204, 404])
@@ -142,7 +144,7 @@ pub fn run(
     article_codec(),
     published_codec(),
     error_codec(),
-    codec.text(),
+    saga_codec.text(),
   ))
   let id = execution_id(article.research_id)
   let storage = saga_store.storage(store, id)
@@ -160,58 +162,42 @@ pub fn run(
   )
 }
 
-// Saga codecs: versioned String codecs, written over gleam_json. ---------
+// Saga codecs: the Blueprint codecs of `domain`, versioned for Saga. ------
 
-fn json_codec(
-  version: String,
-  to_json: fn(a) -> json.Json,
-  decoder: decode.Decoder(a),
-) -> codec.Codec(a) {
-  codec.new(version, fn(value) { Ok(json.to_string(to_json(value))) }, fn(text) {
-    json.parse(text, decoder) |> result.map_error(string.inspect)
+pub fn article_codec() -> saga_codec.Codec(Article) {
+  wire.saga("article-1", domain.article_codec())
+}
+
+fn pair_codec() -> saga_codec.Codec(#(Article, String)) {
+  wire.saga("article-draft-1", {
+    use article <- codec.field(
+      "article",
+      domain.article_codec(),
+      fn(pair: #(Article, String)) { pair.0 },
+    )
+    use draft_id <- codec.field(
+      "draft_id",
+      codec.string(),
+      fn(pair: #(Article, String)) { pair.1 },
+    )
+    codec.success(#(article, draft_id))
   })
 }
 
-pub fn article_codec() -> codec.Codec(Article) {
-  json_codec("article-1", domain.article_json, domain.article_decoder())
+pub fn published_codec() -> saga_codec.Codec(Published) {
+  wire.saga("published-1", domain.published_codec())
 }
 
-fn pair_codec() -> codec.Codec(#(Article, String)) {
-  json_codec(
-    "article-draft-1",
-    fn(pair: #(Article, String)) {
-      json.object([
-        #("article", domain.article_json(pair.0)),
-        #("draft_id", json.string(pair.1)),
-      ])
-    },
-    {
-      use article <- decode.field("article", domain.article_decoder())
-      use draft_id <- decode.field("draft_id", decode.string)
-      decode.success(#(article, draft_id))
-    },
-  )
-}
-
-pub fn published_codec() -> codec.Codec(Published) {
-  json_codec("published-1", domain.published_json, domain.published_decoder())
-}
-
-fn error_codec() -> codec.Codec(PublishError) {
-  json_codec(
-    "publish-error-1",
-    fn(e: PublishError) {
-      json.object([
-        #("step", json.string(e.step)),
-        #("detail", json.string(e.detail)),
-      ])
-    },
-    {
-      use step <- decode.field("step", decode.string)
-      use detail <- decode.field("detail", decode.string)
-      decode.success(PublishError(step, detail))
-    },
-  )
+fn error_codec() -> saga_codec.Codec(PublishError) {
+  wire.saga("publish-error-1", {
+    use step <- codec.field("step", codec.string(), fn(e: PublishError) {
+      e.step
+    })
+    use detail <- codec.field("detail", codec.string(), fn(e: PublishError) {
+      e.detail
+    })
+    codec.success(PublishError(step:, detail:))
+  })
 }
 
 /// A one-line account of an outcome, for logs and job results.

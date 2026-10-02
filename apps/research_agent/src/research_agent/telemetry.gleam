@@ -3,6 +3,8 @@
 ////
 //// What each package lets the app key an event on:
 ////
+//// - the app itself (`events`): the research id as a `Correlation`, so no
+////   binding is needed;
 //// - grind: `job_id` (the handler is never told it; the app records job id
 ////   to research id at submission);
 //// - fabric: `run` (issued by `fabric.start`; the app records it);
@@ -14,7 +16,6 @@
 
 import fabric/observation as fabric_events
 import gleam/dict.{type Dict}
-import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
@@ -26,12 +27,16 @@ import gleam/string
 import grind/observation as grind_events
 import http_gun/telemetry as http_events
 import llm_wire/telemetry as llm_events
+import research_agent/events
 import saga/observation as saga_events
 import sinal
+import sinal/correlation
 import sinal/forwarder
 
 /// What an event can be joined on.
 pub type Key {
+  /// The research id itself, from the app's own events (`events`).
+  Research(String)
   Job(Int)
   Run(String)
   Http(http_events.Id)
@@ -84,12 +89,22 @@ pub fn start(echo_events: Bool) -> Telemetry {
   let record = fn(source, name, key, detail) {
     process.send(collector, Record(Observed(source, name, key, detail)))
   }
-  let suffix = int.to_string(int.random(1_000_000_000))
   let attachments = [
+    // the app's own events: the research id is their correlation
+    sinal.observe(events.state_changed(), fn(_, m: events.Transition) {
+      case m.correlation {
+        Some(id) ->
+          record(
+            "research_agent",
+            "research.state",
+            Research(correlation.to_string(id)),
+            events.state_name(m.state),
+          )
+        None -> Nil
+      }
+    }),
     // grind
-    attach(
-      suffix,
-      "grind.admitted",
+    sinal.observe(
       grind_events.admitted(),
       fn(_, m: grind_events.AdmittedMetadata) {
         record(
@@ -100,9 +115,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "grind.claimed",
+    sinal.observe(
       grind_events.claimed(),
       fn(_, m: grind_events.ClaimedMetadata) {
         record(
@@ -113,9 +126,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "grind.acknowledged",
+    sinal.observe(
       grind_events.acknowledged(),
       fn(_, m: grind_events.AcknowledgedMetadata) {
         record(
@@ -126,17 +137,13 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "grind.quarantined",
+    sinal.observe(
       grind_events.quarantined(),
       fn(_, m: grind_events.QuarantinedMetadata) {
         record("grind", "job.quarantined", Job(m.ref.job_id), "lease expired")
       },
     ),
-    attach(
-      suffix,
-      "grind.resolved",
+    sinal.observe(
       grind_events.resolved(),
       fn(_, m: grind_events.ResolvedMetadata) {
         record(
@@ -147,9 +154,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "grind.cancellation",
+    sinal.observe(
       grind_events.cancellation_decided(),
       fn(_, m: grind_events.CancellationMetadata) {
         record(
@@ -160,9 +165,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "grind.released",
+    sinal.observe(
       grind_events.released(),
       fn(_, m: grind_events.ReleasedMetadata) {
         record(
@@ -174,17 +177,13 @@ pub fn start(echo_events: Bool) -> Telemetry {
       },
     ),
     // fabric
-    attach(
-      suffix,
-      "fabric.run.start",
+    sinal.observe(
       fabric_events.run_started(),
       fn(_, m: fabric_events.RunStarted) {
         record("fabric", "run.start", Run(m.run), m.agent)
       },
     ),
-    attach(
-      suffix,
-      "fabric.run.recover",
+    sinal.observe(
       fabric_events.run_recovered(),
       fn(_, m: fabric_events.RunRecovered) {
         record(
@@ -195,9 +194,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "fabric.run.take_over",
+    sinal.observe(
       fabric_events.run_taken_over(),
       fn(_, m: fabric_events.RunTakenOver) {
         record(
@@ -208,30 +205,21 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "fabric.model",
-      fabric_events.model_turn(),
-      fn(_, m: fabric_events.ModelTurn) {
-        record(
-          "fabric",
-          "model.stop",
-          Run(m.run),
-          "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
-        )
-      },
-    ),
-    attach(
-      suffix,
-      "fabric.tool.start",
+    sinal.observe(fabric_events.model_turn(), fn(_, m: fabric_events.ModelTurn) {
+      record(
+        "fabric",
+        "model.stop",
+        Run(m.run),
+        "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
+      )
+    }),
+    sinal.observe(
       fabric_events.tool_dispatched(),
       fn(_, m: fabric_events.ToolDispatched) {
         record("fabric", "tool.start", Run(m.action.run), m.action.tool)
       },
     ),
-    attach(
-      suffix,
-      "fabric.tool.stop",
+    sinal.observe(
       fabric_events.tool_settled(),
       fn(_, m: fabric_events.ToolSettled) {
         record(
@@ -242,47 +230,31 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "fabric.run.cancel",
+    sinal.observe(
       fabric_events.run_cancelled(),
       fn(_, m: fabric_events.RunCancelled) {
         record("fabric", "run.cancel", Run(m.run), "")
       },
     ),
-    attach(
-      suffix,
-      "fabric.run.stop",
+    sinal.observe(
       fabric_events.run_finished(),
       fn(_, m: fabric_events.RunFinished) {
         record("fabric", "run.stop", Run(m.run), string.inspect(m.outcome))
       },
     ),
-    attach(
-      suffix,
-      "fabric.lease.lose",
-      fabric_events.lease_lost(),
-      fn(_, m: fabric_events.LeaseLost) {
-        record("fabric", "lease.lose", Run(m.run), string.inspect(m.reason))
-      },
-    ),
+    sinal.observe(fabric_events.lease_lost(), fn(_, m: fabric_events.LeaseLost) {
+      record("fabric", "lease.lose", Run(m.run), string.inspect(m.reason))
+    }),
     // saga
-    attach(
-      suffix,
-      "saga.run.start",
-      saga_events.run_started(),
-      fn(_, m: saga_events.RunMetadata) {
-        record(
-          "saga",
-          "run.start",
-          Unkeyed,
-          m.workflow <> " run " <> int.to_string(m.run),
-        )
-      },
-    ),
-    attach(
-      suffix,
-      "saga.run.stop",
+    sinal.observe(saga_events.run_started(), fn(_, m: saga_events.RunMetadata) {
+      record(
+        "saga",
+        "run.start",
+        Unkeyed,
+        m.workflow <> " run " <> int.to_string(m.run),
+      )
+    }),
+    sinal.observe(
       saga_events.run_stopped(),
       fn(_, m: saga_events.RunStopMetadata) {
         record(
@@ -293,9 +265,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "saga.step.stop",
+    sinal.observe(
       saga_events.step_stopped(),
       fn(_, m: saga_events.StepStopMetadata) {
         record(
@@ -306,9 +276,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    attach(
-      suffix,
-      "saga.undo.stop",
+    sinal.observe(
       saga_events.undo_stopped(),
       fn(_, m: saga_events.UndoMetadata) {
         record(
@@ -320,37 +288,25 @@ pub fn start(echo_events: Bool) -> Telemetry {
       },
     ),
     // llm_wire
-    attach(
-      suffix,
-      "llm_wire",
-      llm_events.observation_event(),
-      fn(_, m: llm_events.Metadata) {
-        record("llm_wire", m.stage, Unkeyed, m.provider <> " " <> m.outcome)
-      },
-    ),
+    sinal.observe(llm_events.observation_event(), fn(_, m: llm_events.Metadata) {
+      record("llm_wire", m.stage, Unkeyed, m.provider <> " " <> m.outcome)
+    }),
     // http_gun (only clients started with `observations: Some(forwarder)`)
-    attach(
-      suffix,
-      "http_gun",
-      http_events.event(),
-      fn(_, m: http_events.Metadata) {
-        let key = case m.correlation {
-          Some(id) -> Http(id)
-          None -> Unkeyed
-        }
-        case m.milestone {
-          http_events.ResponseHeaders(status) ->
-            record("http_gun", "response_headers", key, int.to_string(status))
-          http_events.HttpTerminated(outcome) ->
-            record("http_gun", "terminated", key, string.inspect(outcome))
-          _ -> Nil
-        }
-      },
-    ),
+    sinal.observe(http_events.event(), fn(_, m: http_events.Metadata) {
+      let key = case m.correlation {
+        Some(id) -> Http(id)
+        None -> Unkeyed
+      }
+      case m.milestone {
+        http_events.ResponseHeaders(status) ->
+          record("http_gun", "response_headers", key, int.to_string(status))
+        http_events.HttpTerminated(outcome) ->
+          record("http_gun", "terminated", key, string.inspect(outcome))
+        _ -> Nil
+      }
+    }),
     // sinal
-    attach(
-      suffix,
-      "sinal.dropped",
+    sinal.observe(
       forwarder.dropped_event(),
       fn(d: forwarder.Dropped, m: forwarder.DroppedMetadata) {
         record("sinal", "forwarder.dropped", Unkeyed, string.inspect(#(d, m)))
@@ -358,17 +314,6 @@ pub fn start(echo_events: Bool) -> Telemetry {
     ),
   ]
   Telemetry(collector:, attachments:)
-}
-
-fn attach(
-  suffix: String,
-  name: String,
-  event: sinal.Event(m, d),
-  run: fn(m, d) -> Nil,
-) -> sinal.Attachment {
-  let assert Ok(id) = sinal.handler_id("research_agent." <> name <> suffix)
-  let assert Ok(attachment) = sinal.observe(id, event, run)
-  attachment
 }
 
 pub fn stop(telemetry: Telemetry) -> Nil {
@@ -422,6 +367,7 @@ pub fn trace(telemetry: Telemetry, research: String) -> Trace {
     process.call(telemetry.collector, 2000, Snapshot)
   let owner = fn(key) {
     case key {
+      Research(id) -> Ok(id)
       Job(id) -> dict.get(jobs, id)
       Run(id) -> dict.get(runs, id)
       Http(id) -> dict.get(http, id)
@@ -482,6 +428,6 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
 
 /// The `[fabric]` prefix routed through the app's forwarder keeps Fabric's
 /// handlers out of its runners (see `fabric/observation`).
-pub fn fabric_prefix() -> List(atom.Atom) {
-  [atom.create("fabric")]
+pub fn fabric_prefix() -> List(String) {
+  ["fabric"]
 }

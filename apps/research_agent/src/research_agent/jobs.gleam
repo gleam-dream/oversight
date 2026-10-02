@@ -17,9 +17,7 @@ import fabric
 import fabric/agent.{type Agent}
 import fabric/run
 import fabric/store.{type Store}
-import gleam/dynamic/decode
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -28,13 +26,16 @@ import grind/job
 import grind/postgres
 import grind/worker.{type Worker}
 import http_gun
+import json/blueprint/codec
 import pog
 import research_agent/db
 import research_agent/domain.{type Published, type Research, Article}
+import research_agent/events
 import research_agent/publish
 import research_agent/researcher.{type Context, type Endpoints}
 import research_agent/saga_store.{type SagaStore}
 import research_agent/telemetry.{type Telemetry}
+import research_agent/wire
 import saga/execution
 
 pub const queue = "research"
@@ -61,41 +62,29 @@ pub type ResearchError {
   Storage(reason: String)
 }
 
-fn research_error_json(error: ResearchError) -> json.Json {
-  let #(kind, reason) = case error {
-    NoSources(reason) -> #("no_sources", reason)
-    AgentStopped(reason) -> #("agent_stopped", reason)
-    Storage(reason) -> #("storage", reason)
-  }
-  json.object([#("kind", json.string(kind)), #("reason", json.string(reason))])
-}
-
-fn research_error_decoder() -> decode.Decoder(ResearchError) {
-  use kind <- decode.field("kind", decode.string)
-  use reason <- decode.field("reason", decode.string)
-  case kind {
-    "no_sources" -> decode.success(NoSources(reason))
-    "agent_stopped" -> decode.success(AgentStopped(reason))
-    "storage" -> decode.success(Storage(reason))
-    _ -> decode.failure(Storage(reason), "ResearchError")
-  }
+fn research_error_codec() -> codec.Codec(ResearchError) {
+  codec.union({
+    use no_sources <- codec.variant("no_sources", codec.string(), NoSources)
+    use agent_stopped <- codec.variant(
+      "agent_stopped",
+      codec.string(),
+      AgentStopped,
+    )
+    use storage <- codec.variant("storage", codec.string(), Storage)
+    codec.match(fn(error) {
+      case error {
+        NoSources(reason) -> no_sources(reason)
+        AgentStopped(reason) -> agent_stopped(reason)
+        Storage(reason) -> storage(reason)
+      }
+    })
+  })
 }
 
 pub fn worker(deps: Deps) -> Worker(Research, Published, ResearchError) {
-  let assert Ok(input) =
-    worker.codec("research-1", domain.research_json, domain.research_decoder())
-  let assert Ok(output) =
-    worker.codec(
-      "published-1",
-      domain.published_json,
-      domain.published_decoder(),
-    )
-  let assert Ok(error) =
-    worker.codec(
-      "research-error-1",
-      research_error_json,
-      research_error_decoder(),
-    )
+  let input = wire.grind("research-1", domain.research_codec())
+  let output = wire.grind("published-1", domain.published_codec())
+  let error = wire.grind("research-error-2", research_error_codec())
   // `define` needs a plain handler even though the queue handler below is
   // the one Grind calls (EXT-8).
   let assert Ok(defined) =
@@ -136,23 +125,24 @@ pub fn handle(
   let context = researcher.context(deps.http, deps.telemetry, research.id)
   case drive_agent(deps, context, research) {
     Ok(domain.Written(title, body)) -> {
-      let _ = db.set_state(deps.db, research.id, "publishing", title)
+      let _ = db.set_state(deps.db, research.id, events.Publishing, title)
       let article = Article(research.id, title, body)
       case publish.run(deps.sagas, context.http, deps.publisher, article) {
         Ok(execution.Completed(published)) -> {
-          let _ = db.set_state(deps.db, research.id, "published", published.url)
+          let _ =
+            db.set_state(deps.db, research.id, events.Published, published.url)
           worker.WorkerSucceeded(published)
         }
         Ok(outcome) -> {
           let detail = publish.describe(outcome)
-          let _ = db.set_state(deps.db, research.id, "failed", detail)
+          let _ = db.set_state(deps.db, research.id, events.Failed, detail)
           // Rolled back (or needs a person): a retry would reconnect to the
           // same finished saga, so the job ends here.
           worker.WorkerDiscarded(detail)
         }
         Error(error) -> {
           let detail = "publication not driven: " <> string.inspect(error)
-          let _ = db.set_state(deps.db, research.id, "failed", detail)
+          let _ = db.set_state(deps.db, research.id, events.Failed, detail)
           worker.WorkerUncertain(detail)
         }
       }
@@ -162,17 +152,17 @@ pub fn handle(
         db.set_state(
           deps.db,
           research.id,
-          "researching",
+          events.Researching,
           "no sources: " <> reason,
         )
       worker.WorkerFailed(NoSources(reason))
     }
     Error(Cancelled) -> {
-      let _ = db.set_state(deps.db, research.id, "cancelled", "")
+      let _ = db.set_state(deps.db, research.id, events.Cancelled, "")
       worker.WorkerCancelled("research cancelled")
     }
     Error(Stopped(reason)) -> {
-      let _ = db.set_state(deps.db, research.id, "failed", reason)
+      let _ = db.set_state(deps.db, research.id, events.Failed, reason)
       worker.WorkerFailed(AgentStopped(reason))
     }
   }

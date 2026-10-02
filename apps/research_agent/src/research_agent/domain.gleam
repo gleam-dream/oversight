@@ -2,8 +2,6 @@
 //// what gets published. Codecs live next to the types so that one value has
 //// one wire shape everywhere it is stored or sent.
 
-import gleam/dynamic/decode
-import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
@@ -49,87 +47,72 @@ pub type Page {
 }
 
 pub fn search_query_codec() -> codec.Codec(SearchQuery) {
-  codec.field("query", codec.string() |> codec.describe("Search terms"))
-  |> codec.imap(SearchQuery, fn(q) { q.query })
+  use query <- codec.field(
+    "query",
+    codec.string() |> codec.describe("Search terms"),
+    fn(q: SearchQuery) { q.query },
+  )
+  codec.success(SearchQuery(query:))
 }
 
 pub fn hit_codec() -> codec.Codec(Hit) {
-  let assert Ok(hit) =
-    codec.record2(
-      codec.required("title", codec.string()),
-      codec.required("url", codec.string()),
-      Hit,
-      fn(hit) { hit.title },
-      fn(hit) { hit.url },
-    )
-  hit
+  use title <- codec.field("title", codec.string(), fn(hit: Hit) { hit.title })
+  use url <- codec.field("url", codec.string(), fn(hit: Hit) { hit.url })
+  codec.success(Hit(title:, url:))
 }
 
 /// Also decodes the search API's response body: one codec for the HTTP
 /// payload and the tool output the model reads.
 pub fn search_results_codec() -> codec.Codec(SearchResults) {
-  codec.field("results", codec.list(hit_codec()))
-  |> codec.imap(SearchResults, fn(r) { r.hits })
+  use hits <- codec.field(
+    "results",
+    codec.list(hit_codec()),
+    fn(r: SearchResults) { r.hits },
+  )
+  codec.success(SearchResults(hits:))
 }
 
 pub fn page_request_codec() -> codec.Codec(PageRequest) {
-  codec.field("url", codec.string() |> codec.describe("A URL from search"))
-  |> codec.imap(PageRequest, fn(p) { p.url })
+  use url <- codec.field(
+    "url",
+    codec.string() |> codec.describe("A URL from search"),
+    fn(p: PageRequest) { p.url },
+  )
+  codec.success(PageRequest(url:))
 }
 
 pub fn page_codec() -> codec.Codec(Page) {
-  let assert Ok(page) =
-    codec.record2(
-      codec.required("url", codec.string()),
-      codec.required("text", codec.string()),
-      Page,
-      fn(page) { page.url },
-      fn(page) { page.text },
-    )
-  page
+  use url <- codec.field("url", codec.string(), fn(page: Page) { page.url })
+  use text <- codec.field("text", codec.string(), fn(page: Page) { page.text })
+  codec.success(Page(url:, text:))
 }
 
-// Grind codecs (gleam_json + decode) -------------------------------------
+// Job and saga payloads ---------------------------------------------------
+//
+// One Blueprint codec per value. `research_agent/wire` adapts it to Grind's
+// and Saga's codec types.
 
-pub fn research_json(research: Research) -> json.Json {
-  json.object([
-    #("id", json.string(research.id)),
-    #("topic", json.string(research.topic)),
-  ])
+pub fn research_codec() -> codec.Codec(Research) {
+  use id <- codec.field("id", codec.string(), fn(r: Research) { r.id })
+  use topic <- codec.field("topic", codec.string(), fn(r: Research) { r.topic })
+  codec.success(Research(id:, topic:))
 }
 
-pub fn research_decoder() -> decode.Decoder(Research) {
-  use id <- decode.field("id", decode.string)
-  use topic <- decode.field("topic", decode.string)
-  decode.success(Research(id:, topic:))
+pub fn published_codec() -> codec.Codec(Published) {
+  use draft_id <- codec.field("draft_id", codec.string(), fn(p: Published) {
+    p.draft_id
+  })
+  use url <- codec.field("url", codec.string(), fn(p: Published) { p.url })
+  codec.success(Published(draft_id:, url:))
 }
 
-pub fn published_json(published: Published) -> json.Json {
-  json.object([
-    #("draft_id", json.string(published.draft_id)),
-    #("url", json.string(published.url)),
-  ])
-}
-
-pub fn published_decoder() -> decode.Decoder(Published) {
-  use draft_id <- decode.field("draft_id", decode.string)
-  use url <- decode.field("url", decode.string)
-  decode.success(Published(draft_id:, url:))
-}
-
-pub fn article_json(article: Article) -> json.Json {
-  json.object([
-    #("research_id", json.string(article.research_id)),
-    #("title", json.string(article.title)),
-    #("body", json.string(article.body)),
-  ])
-}
-
-pub fn article_decoder() -> decode.Decoder(Article) {
-  use research_id <- decode.field("research_id", decode.string)
-  use title <- decode.field("title", decode.string)
-  use body <- decode.field("body", decode.string)
-  decode.success(Article(research_id:, title:, body:))
+pub fn article_codec() -> codec.Codec(Article) {
+  use research_id <- codec.field("research_id", codec.string(), fn(a: Article) {
+    a.research_id
+  })
+  use title <- codec.field("title", codec.string(), fn(a: Article) { a.title })
+  use body <- codec.field("body", codec.string(), fn(a: Article) { a.body })
+  codec.success(Article(research_id:, title:, body:))
 }
 
 // The agent's answer ------------------------------------------------------

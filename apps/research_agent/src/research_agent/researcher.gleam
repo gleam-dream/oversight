@@ -72,7 +72,7 @@ pub fn search(
   )
   codec.decode_json(domain.search_results_codec(), body)
   |> result.map_error(fn(e) {
-    remote.Status(200, codec.render_json_decode_error(e))
+    remote.Status(200, codec.describe_decode_error(e))
   })
 }
 
@@ -189,9 +189,10 @@ fn find_action(
 }
 
 fn decode(c: codec.Codec(a), text: String) -> Result(a, String) {
-  codec.decode_json(c, text) |> result.map_error(codec.render_json_decode_error)
+  codec.decode_json(c, text) |> result.map_error(codec.describe_decode_error)
 }
 
 fn encode(c: codec.Codec(a), value: a) -> Result(String, String) {
-  codec.encode_json(c, value) |> result.map_error(string.inspect)
+  codec.encode_json(c, value)
+  |> result.map_error(codec.describe_encode_error)
 }

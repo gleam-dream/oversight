@@ -27,6 +27,7 @@ import research_agent/jobs.{type ResearchError}
 import research_agent/researcher
 import research_agent/saga_store
 import research_agent/telemetry.{type Telemetry}
+import sinal/correlation
 import sinal/forwarder
 
 pub type Settings {
@@ -91,7 +92,9 @@ pub fn start(settings: Settings) -> Result(App, String) {
   // routed events) and the app's pog pool (Fabric's store, the saga
   // checkpoints, the research index). Grind opens its own pool.
   let pool_name = process.new_name("research_pool")
-  let assert Ok(fwd) = forwarder.new(process.new_name("research_events"), 4096)
+  let fwd =
+    forwarder.new(process.new_name("research_events"))
+    |> forwarder.with_capacity(4096)
   use pool_config <- result.try(
     pog.url_config(pool_name, settings.database_url)
     |> result.replace_error("invalid DATABASE_URL"),
@@ -232,7 +235,7 @@ fn shutdown(supervisor: Pid) -> Nil
 
 /// Records the request and enqueues its job. Returns the research id.
 pub fn start_research(app: App, topic: String) -> Result(String, String) {
-  let id = "r" <> int.to_string(int.random(1_000_000_000))
+  let id = correlation.to_string(correlation.unique())
   use Nil <- result.try(db.insert(app.db, id, topic))
   use handle <- result.try(
     postgres.submit(app.grind, jobs.queue, app.worker, Research(id, topic))

@@ -21,7 +21,7 @@ the client closes it.
 Inside the oversight dev shell, from this directory:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 8 tests
+../scripts/with-postgres.sh gleam test   # 9 tests
 ../scripts/with-postgres.sh gleam run    # the four-scenario narrative
 ```
 
@@ -31,17 +31,18 @@ mid-model call or mid-tool. Then they recover on a node in the test VM.
 
 ## Packages and seams
 
-| Seam                               | Where                                                     | What it exercises                                                                                    |
-| ---------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| grind job → fabric run             | `jobs.gleam` (`drive_agent`, `follow`)                    | Starting or recovering a run from a job, waiting on it, mapping its end to a `WorkerResponse`        |
-| fabric ↔ PostgreSQL                | `app.gleam` (`fabric_postgres.store`, `store.supervised`) | A leased store on the app's pog pool: the conversation persisted between turns                       |
-| fabric ↔ llm_wire ↔ http_gun       | `researcher.gleam` (`llm.model`)                          | The provider adapter on a caller-owned loopback client                                               |
-| fabric tools ↔ http_gun, Blueprint | `researcher.gleam`, `domain.gleam`                        | Typed tools whose output codec also decodes the HTTP payload; a policy gate on `read`                |
-| crash → grind → fabric             | `jobs.recover_abandoned`, `researcher.replay_read_only`   | Quarantined jobs replayed by the app; uncertain read-only tools reconciled by the app                |
-| cancellation API → grind → fabric  | `app.cancel_research`                                     | `postgres.cancel` plus `fabric.cancel_stored`; the model task dies and the stream closes             |
-| fabric answer → saga               | `jobs.handle`, `publish.gleam`                            | A durable, compensating workflow over http_gun, checkpointed in PostgreSQL                           |
-| saga ↔ PostgreSQL                  | `saga_store.gleam`                                        | An app-written `saga/storage.Storage`, checked by `saga/storage/conformance`                         |
-| telemetry                          | `telemetry.gleam`                                         | Sinal events of grind, fabric, saga, llm_wire, http_gun and sinal, joined per request where possible |
+| Seam                               | Where                                                     | What it exercises                                                                                                                                |
+| ---------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| grind job → fabric run             | `jobs.gleam` (`drive_agent`, `follow`)                    | Starting or recovering a run from a job, waiting on it, mapping its end to a `WorkerResponse`                                                    |
+| fabric ↔ PostgreSQL                | `app.gleam` (`fabric_postgres.store`, `store.supervised`) | A leased store on the app's pog pool: the conversation persisted between turns                                                                   |
+| fabric ↔ llm_wire ↔ http_gun       | `researcher.gleam` (`llm.model`)                          | The provider adapter on a caller-owned loopback client                                                                                           |
+| fabric tools ↔ http_gun, Blueprint | `researcher.gleam`, `domain.gleam`                        | Typed tools whose output codec also decodes the HTTP payload; a policy gate on `read`                                                            |
+| crash → grind → fabric             | `jobs.recover_abandoned`, `researcher.replay_read_only`   | Quarantined jobs replayed by the app; uncertain read-only tools reconciled by the app                                                            |
+| cancellation API → grind → fabric  | `app.cancel_research`                                     | `postgres.cancel` plus `fabric.cancel_stored`; the model task dies and the stream closes                                                         |
+| fabric answer → saga               | `jobs.handle`, `publish.gleam`                            | A durable, compensating workflow over http_gun, checkpointed in PostgreSQL                                                                       |
+| saga ↔ PostgreSQL                  | `saga_store.gleam`                                        | An app-written `saga/storage.Storage`, checked by `saga/storage/conformance`                                                                     |
+| one codec for grind and saga       | `domain.gleam`, `wire.gleam`                              | One Blueprint codec per value, adapted to Grind's `worker.codec` and Saga's `codec.new`                                                          |
+| telemetry                          | `telemetry.gleam`, `events.gleam`                         | Sinal events of grind, fabric, saga, llm_wire, http_gun and sinal, joined per request where possible; the app's own events carry a `Correlation` |
 
 Packages: fabric, fabric_postgres, grind, saga, llm_wire, http_gun,
 json_blueprint and sinal, plus pog and mist. The findings are in
