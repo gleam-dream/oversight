@@ -118,6 +118,45 @@ and every correlation and handler-id finding on the application side.
 | json_blueprint        | `gleam.toml` still says version 1.7.1. Bump to 2.0.0 when publishing.                                                                                                                                                          | publish |
 | relay                 | Tool declarations expose `input_schema` as `json.Json`, so consumers render and reparse it. Expose the contract or the schema value (RELAY-R4).                                                                                | 4       |
 
+### Follow-up round results (2 October 2026)
+
+The owner asked to fix four criticisms from the wave 2 re-runs, and added a
+fifth: one builder style across sinal and json_blueprint. Each fix landed in
+its package. Every dependent package and all eight apps were then migrated and
+validated before anything was pushed.
+
+| Criticism                                                              | Fix                                                                                                                                                                                                                                                 | Commits                |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Record builder needs a getter annotation per field                     | Getter moved after the callback as a labelled `get:`, so Gleam infers it: `use sku <- codec.field("sku", codec.string(), get: fn(q) { q.sku })`. The 6-field `Invoice` went from 50 to 40 lines and 9 annotations to 0. Wire output byte-identical. | json_blueprint bb4da39 |
+| Sinal builder binds by position (silent swaps) and needs an annotation | Same shape as json_blueprint: `use route <- fields.include(fields.string("route"), get: fn(m) { m.route })` … `fields.success(..)`. Fields bind by name; no swap found in 73 existing sites. Wire output byte-identical.                            | sinal 5e8bee3, 6de2b69 |
+| `correlation.field()` is always `Option`                               | `correlation.required_field()`, same key and encoding, readable by `field()` handlers and the reverse.                                                                                                                                              | sinal f9cca37          |
+| grind's encoder cannot fail                                            | `worker.codec` takes a fallible encoder; `worker.infallible` wraps a plain one. Every submit path returns `InvalidInput` before writing; an unencodable output ends the job `runtime_failed` without retry.                                         | grind c44e4be          |
+| http_gun's `correlation` key clashes                                   | `with_correlation` takes `sinal/correlation.Correlation`, carried under `correlation`; http_gun's own id is the opaque `RequestId` under `request_id`. Only apps used the old `Id`.                                                                 | http_gun c45adfe       |
+
+Package migrations: saga d4eef94, grind 2d66835, http_gun 056536b, warden
+6c06de5, llm_wire ea7c90b, relay 5f3c183, fabric 310c184. Each kept its
+public API and its wire and stored formats.
+
+Effect on the apps, net lines of glue removed: support_desk 62, research_agent
+61, extractor 28, webhooks 29, secure_mcp 27, checkout 23, tool_hub 6,
+sso_portal 0. Every app that called http_gun deleted its table mapping
+http_gun ids to its own key. The wave 2 follow-up rows for the grind encoder,
+the http_gun key clash, the `Option` correlation and the getter annotations
+are resolved.
+
+**Follow-ups found during the follow-up round:**
+
+| Package | Item                                                                                                                                                                                                                                                    | Wave |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| sinal   | A correlation is 1–128 bytes. Two apps derive it from external ids that can be longer or empty, and silently fall back to `unique()`. Add `correlation.from_key(String) -> Correlation`, a stable hash that always succeeds.                            | 3    |
+| sinal   | A `required_field()` handler skips and reports an event that another emitter sent without a correlation. Intended; document it next to `required_field()`.                                                                                              | 3    |
+| sinal   | A `fields.include` block runs once with placeholder values at definition, so it must stay free of side effects. Documented; nothing enforces it.                                                                                                        | —    |
+| grind   | `worker.codec` still returns `Result` only to reject an empty version string, so apps keep a `let assert`. Make it total, like sinal's and json_blueprint's constructors (decision 4).                                                                  | 3    |
+| grind   | No app test reaches `InvalidInput`, because no app codec has a refinement. Add one app-level rejection test when an app gains a refined codec.                                                                                                          | 3    |
+| fabric  | Correlation stops at fabric: the run id exists only after `fabric.start` (FABRIC-R2), model calls receive no run id (FABRIC-R8), and fabric_saga drops the run context (SD-2). These block zero join glue in support_desk, tool_hub and research_agent. | 5    |
+| warden  | `restore_session` and `refresh_session` take no correlation, so the `/token` call cannot be tagged (sso_portal).                                                                                                                                        | 4    |
+| grind   | The bench L3 open-loop scenario crashed once with `noproc` on its drain pool while nine package gates ran in parallel, and passed when run alone. Check the bench harness for a load-dependent race before the bench is used as release evidence.       | 3    |
+
 ## sinal
 
 | Id        | Change                                                                                              | Breaks              | Effort | Wave | Status                                                              |
