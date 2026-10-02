@@ -376,17 +376,6 @@ fn pow2(n: Int) -> Int {
   }
 }
 
-pub fn disposition_name(d: Disposition) -> String {
-  case d {
-    Delivered(_) -> "delivered"
-    Retry(_) -> "retry"
-    Snooze(_, _) -> "snooze"
-    Gone(_) -> "gone"
-    Refused(_) -> "refused"
-    Reject(_) -> "reject"
-  }
-}
-
 pub fn status_of(result: Result(Reply, error.Failure)) -> Option(Int) {
   case result {
     Ok(reply) -> Some(reply.status)

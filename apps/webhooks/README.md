@@ -54,7 +54,8 @@ packages.
   client, and a real manual-mode grind consumer runs the attempts
   (`test/webhooks/cassette_test.gleam`).
 - A response body over the collect limit, with the status kept (http_gun `Truncate` collect policy).
-- Telemetry from grind, http_gun, sinal and the app, joined by delivery id.
+- Telemetry from grind, http_gun, sinal and the app, joined by delivery id
+  (the app's own event carries it as the Sinal `correlation` key).
 
 ## Tests
 

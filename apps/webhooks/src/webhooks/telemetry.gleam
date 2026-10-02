@@ -1,15 +1,16 @@
 //// Collects the Sinal events of every package in the app and joins them per
 //// delivery.
 ////
-//// No shared key crosses the packages: grind events carry `job_id`, http_gun
-//// events carry an opaque `request_id` and an optional opaque correlation
-//// `Id`, and the delivery worker learns neither its job id nor anything it
-//// can put into http_gun's correlation. The collector therefore keeps two
-//// join tables the app fills in by hand: job id -> delivery id (at submit
-//// time) and http correlation Id -> delivery id (inside the worker).
+//// The app's own event carries the delivery id as the shared Sinal
+//// `correlation` key. grind and http_gun do not carry a correlation yet:
+//// grind events carry `job_id`, http_gun events carry an opaque `request_id`
+//// and an optional opaque correlation `Id`, and the delivery worker learns
+//// neither its job id nor anything it can put into http_gun's correlation.
+//// The collector therefore keeps two join tables the app fills in by hand:
+//// job id -> delivery id (at submit time) and http correlation Id ->
+//// delivery id (inside the worker).
 
 import gleam/dict.{type Dict}
-import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
@@ -20,6 +21,7 @@ import grind/diagnostic
 import grind/observation
 import http_gun/telemetry as http_telemetry
 import sinal
+import sinal/correlation.{type Correlation}
 import sinal/fields
 import sinal/forwarder
 
@@ -33,47 +35,73 @@ pub type AttemptMeasurements {
 
 pub type AttemptMetadata {
   AttemptMetadata(
-    delivery_id: String,
+    /// The delivery id, as the shared `correlation` key; `None` when the id
+    /// is longer than `correlation.max_bytes`.
+    correlation: Option(Correlation),
     tenant: String,
-    disposition: String,
+    outcome: Outcome,
     status: Option(Int),
   )
+}
+
+/// What one attempt decided, without the decision's payload.
+pub type Outcome {
+  Delivered
+  Retried
+  Snoozed
+  Gone
+  Refused
+  Rejected
 }
 
 /// `[webhooks, delivery, attempted]`, emitted synchronously by the worker.
 pub fn delivery_attempted() -> sinal.Event(AttemptMeasurements, AttemptMetadata) {
   let measurements =
-    fields.imap(
-      fields.int(atom.create("duration_ms")),
-      AttemptMeasurements,
-      fn(m) { m.duration_ms },
-    )
-  let assert Ok(status) = fields.optional(fields.int(atom.create("status")))
-  let assert Ok(left) =
-    fields.pair(
-      fields.string(atom.create("delivery_id")),
-      fields.string(atom.create("tenant")),
-    )
-  let assert Ok(right) =
-    fields.pair(fields.string(atom.create("disposition")), status)
-  let assert Ok(all) = fields.pair(left, right)
+    fields.record({
+      use duration_ms <- fields.parameter
+      AttemptMeasurements(duration_ms:)
+    })
+    |> fields.and(fields.int("duration_ms"), fn(m: AttemptMeasurements) {
+      m.duration_ms
+    })
+    |> fields.build
   let metadata =
-    fields.imap(
-      all,
-      fn(v) { AttemptMetadata(v.0.0, v.0.1, v.1.0, v.1.1) },
-      fn(m) { #(#(m.delivery_id, m.tenant), #(m.disposition, m.status)) },
+    fields.record({
+      use correlation <- fields.parameter
+      use tenant <- fields.parameter
+      use outcome <- fields.parameter
+      use status <- fields.parameter
+      AttemptMetadata(correlation:, tenant:, outcome:, status:)
+    })
+    |> fields.and(correlation.field(), fn(m: AttemptMetadata) { m.correlation })
+    |> fields.and(fields.string("tenant"), fn(m) { m.tenant })
+    |> fields.and(
+      fields.enum(
+        "outcome",
+        [Delivered, Retried, Snoozed, Gone, Refused, Rejected],
+        outcome_name,
+      ),
+      fn(m) { m.outcome },
     )
-  let assert Ok(event) =
-    sinal.event(
-      [
-        atom.create("webhooks"),
-        atom.create("delivery"),
-        atom.create("attempted"),
-      ],
-      measurements,
-      metadata,
-    )
-  event
+    |> fields.and(fields.optional(fields.int("status")), fn(m) { m.status })
+    |> fields.build
+  sinal.event(["webhooks", "delivery", "attempted"], measurements, metadata)
+}
+
+pub fn outcome_name(outcome: Outcome) -> String {
+  case outcome {
+    Delivered -> "delivered"
+    Retried -> "retry"
+    Snoozed -> "snooze"
+    Gone -> "gone"
+    Refused -> "refused"
+    Rejected -> "reject"
+  }
+}
+
+/// The delivery's correlation: its id, when the id fits.
+pub fn delivery_correlation(delivery_id: String) -> Option(Correlation) {
+  correlation.from_string(delivery_id) |> option.from_result
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +111,7 @@ pub fn delivery_attempted() -> sinal.Event(AttemptMeasurements, AttemptMetadata)
 pub type Key {
   Job(Int)
   Http(http_telemetry.Id)
-  Delivery(String)
+  Correlated(Correlation)
   Unkeyed
 }
 
@@ -92,7 +120,7 @@ pub type Line {
 }
 
 pub opaque type Collector {
-  Collector(subject: Subject(Message), suffix: String)
+  Collector(subject: Subject(Message))
 }
 
 pub opaque type Message {
@@ -138,7 +166,7 @@ pub fn start() -> Collector {
       }
     })
     |> actor.start
-  Collector(started.data, int.to_string(unique_int()))
+  Collector(started.data)
 }
 
 pub fn note_job(collector: Collector, job_id: Int, delivery_id: String) -> Nil {
@@ -167,7 +195,7 @@ pub fn trace(collector: Collector, delivery_id: String) -> List(Line) {
     case line.key {
       Job(job) -> dict.get(state.jobs, job) == Ok(delivery_id)
       Http(id) -> dict.get(state.https, id) == Ok(delivery_id)
-      Delivery(d) -> d == delivery_id
+      Correlated(c) -> correlation.to_string(c) == delivery_id
       Unkeyed -> False
     }
   })
@@ -273,8 +301,8 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
     // the app's own attempt event
     watch(c, delivery_attempted(), "webhooks.delivery.attempted", fn(ms, m) {
       #(
-        Delivery(m.delivery_id),
-        m.disposition
+        option.map(m.correlation, Correlated) |> option.unwrap(Unkeyed),
+        outcome_name(m.outcome)
           <> " status="
           <> option.map(m.status, int.to_string) |> option.unwrap("-")
           <> " in "
@@ -302,14 +330,10 @@ fn watch(
     Ok(#(head, _)) -> head
     Error(Nil) -> name
   }
-  let assert Ok(id) =
-    sinal.handler_id("webhooks-" <> collector.suffix <> "-" <> name)
-  let assert Ok(attachment) =
-    sinal.observe(id, event, fn(m, d) {
-      let #(key, detail) = describe(m, d)
-      process.send(collector.subject, Record(source, name, key, detail))
-    })
-  attachment
+  sinal.observe(event, fn(m, d) {
+    let #(key, detail) = describe(m, d)
+    process.send(collector.subject, Record(source, name, key, detail))
+  })
 }
 
 fn milestone(m: http_telemetry.Milestone) -> String {
@@ -324,6 +348,3 @@ fn milestone(m: http_telemetry.Milestone) -> String {
       "terminated " <> string.inspect(outcome)
   }
 }
-
-@external(erlang, "webhooks_ffi", "unique_int")
-fn unique_int() -> Int
