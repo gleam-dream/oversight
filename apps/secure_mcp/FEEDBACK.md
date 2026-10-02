@@ -316,6 +316,11 @@ tool handlers receive the authenticated principal, and `generate_report` /
   is now 12 lines with no arity limit. `ReportJob` and the error string, which
   had only gleam_json codecs, now use the same bridge, so the app has no
   `gleam/decode` field lists left.
+- **Status (follow-up):** partially resolved by grind c44e4be and json_blueprint
+  bb4da39; the bridge no longer stores `null` for an unencodable value (see the
+  new-friction item below). Its getters need no annotation: 15 `fn(x: Type)`
+  annotations are gone and `reports.gleam` is 10 lines shorter. The bridge is
+  still needed (13 lines, +2); the two codec systems are joined only by it.
 
 ### SMCP-9 Telemetry: one request is followable only through app bridge events
 
@@ -354,6 +359,14 @@ tool handlers receive the authenticated principal, and `generate_report` /
   (packages adopt it in their own waves), so the 60-line bridge (68 before)
   remains and the join is still `correlation -> exchange_id` and
   `correlation -> job_id` through the app events.
+- **Status (follow-up):** partially resolved by sinal f9cca37 and 5e8bee3. The
+  app events hold a plain `Correlation` (`correlation.required_field()`), so
+  the `Some(..)` wrappers, the `Option` import and the collector's
+  `correlation_text` unwrap are gone, and the builder no longer needs
+  parameter/`and`/`build` or an annotation: the bridge definitions are 53
+  lines (66 before). The bridge events themselves stay: relay and warden carry
+  no `Correlation`, so the join is still `correlation -> exchange_id` and
+  `correlation -> job_id`.
 
 ### SMCP-10 Small gaps found on the way
 
@@ -508,6 +521,11 @@ app's tools use only records, so the `tools/list` test is unaffected.
   variant, or a way to annotate once (`codec.record(fn(r: ReportStatus) { .. })`),
   would remove the repetition.
 
+  **Status (follow-up):** resolved by json_blueprint bb4da39. Getters are
+  passed as `get: fn(r) { r.x }` after the block, with no annotation; all 15
+  getters in reports.gleam are one line except `report`, which `gleam format`
+  wraps (5 were wrapped before).
+
 - **The Grind bridge swallows an encode failure.** `codec.to_json` returns
   `Result`, Grind's encoder returns `json.Json`, so the guide's own recipe is
   `result.unwrap(json.null())`: an unencodable value is stored as `null` and
@@ -516,6 +534,14 @@ app's tools use only records, so the `tools/list` test is unaffected.
   `Result(_, CodecError)` for an empty version, so each of the three worker
   codecs keeps a `use ... result.try` in tools.gleam. A Grind-side
   `worker.blueprint_codec(version, codec)` would own both.
+
+  **Status (follow-up):** resolved for the encode failure by grind c44e4be:
+  the bridge is `codec.to_json(codec, value) |> result.map_error(codec.describe_encode_error)`
+  and `submit` returns `submission.InvalidInput` instead of storing `null`.
+  The `Result(_, CodecError)` return and the three `use ... result.try`
+  lines in tools.gleam are unchanged, so a `worker.blueprint_codec` is still
+  open.
+
 - **`correlation.field()` forces `Option` onto an always-present key.** The
   app creates the id before any event, but the metadata field is
   `Option(Correlation)`, so both app events hold `Option(Correlation)`, both
@@ -523,12 +549,22 @@ app's tools use only records, so the `tools/list` test is unaffected.
   `option.map(..) |> option.unwrap("-")`. This is right for libraries that
   may run uncorrelated; an application that always has one pays three small
   conversions (about 6 lines).
+
+  **Status (follow-up):** resolved by sinal f9cca37 (`correlation.required_field()`):
+  both events hold `Correlation`, the two `Some` wrappers, the `Option`
+  import and `correlation_text` (3 lines) are deleted.
+
 - **A one-field record is not a one-line `fields.field`.** `ReportSubmitted`
   and `McpRequest` use the record builder with a mandatory annotation on the
   first getter only; that works, but the nesting under `sinal.event(..)`
   after `gleam format` puts the builder chain inside the call and indents it
   two extra levels. Defining the metadata codec in its own function (as the
   packages do) reads better.
+
+  **Status (follow-up):** resolved by sinal 5e8bee3: the `use` block replaces
+  the chain, needs no annotation and sits in `{ }` as the last argument of
+  `sinal.event`, with no extra nesting.
+
 - Nothing from relay 23e4063: the buffered-handler gap in SMCP-2 is
   unchanged and unaddressed, and the changelog's "signatures are unchanged"
   held for everything this app calls.
@@ -545,3 +581,56 @@ does not mention that `worker.codec` still returns a `Result`; (3) the sinal
 guide shows `sinal/correlation` only for library metadata, with no
 application recipe for an inbound id, which this app wrote as
 `correlation.from_string` plus `lazy_unwrap(correlation.unique)`.
+
+## Re-run after the follow-up fixes
+
+Against sinal 6de2b69, json_blueprint bb4da39 and grind 2d66835 (relay and
+warden unchanged). `../scripts/with-postgres.sh gleam test`: 11 passed, no
+failures. `gleam run` exits 0 with the same narration. `gleam format` is
+clean and the build has no warnings. The edits were mechanical: add `get:`
+to 15 `codec.field` sites, rewrite two record builders as `use` blocks,
+swap `correlation.field()` for `required_field()`, change one bridge, and
+wrap the test's `json.string` in `worker.infallible`.
+
+| Seam                                                      | Before                                               | After                                                     |
+| --------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------- |
+| Blueprint getter annotations (reports.gleam)              | 15 `fn(x: Type)` annotations; 5 getters wrapped      | 0 annotations; 1 getter wrapped by `gleam format`         |
+| Sinal bridge events (telemetry.gleam, definitions + emit) | 66 lines; 2 annotations; 2 `Some(..)`; 1 `Option`    | 53 lines; 0 annotations, 0 `Some`, 0 `Option`             |
+| Collector unwrap of the correlation                       | 3-line `correlation_text`, 2 call sites              | 0; `correlation.to_string(m.correlation)` directly        |
+| Grind bridge (reports.gleam `grind`)                      | 11 lines; failed encode stored as `null`             | 13 lines; failed encode is `InvalidInput`/`RuntimeFailed` |
+| `worker.codec` in the app's probe test                    | `json.string`                                        | `worker.infallible(json.string)` (+1 call)                |
+| http_gun correlation join tables                          | not applicable (the app builds no http_gun `Config`) | not applicable                                            |
+
+Net `git diff --numstat` for the app: 47 lines added and 74 removed (reports
++22/-32, telemetry +23/-41, test +2/-1). SMCP-9's relay and warden bridge
+(`correlation -> exchange_id`, `correlation -> job_id`) is unchanged: neither
+package carries a `Correlation` yet.
+
+### New friction
+
+- **The new Grind path is untested by this app.** Every wire type here has
+  string and int fields, so `codec.to_json` cannot fail and nothing exercises
+  `InvalidInput` or `ExecutedUnencodable`. The bridge is now honest, but the
+  app proves only that the happy path still works. A refinement
+  (`integer_between` on a job field) would be needed to test it.
+- **Grind's bridge is still hand-written.** The recipe is a 7-line closure
+  that every Blueprint user copies; it needs `gleam/result` and a Blueprint
+  import in the app and is two lines longer than the `null` version. A
+  `worker.codec` that accepts a `Result`-returning encoder cannot own it
+  without depending on json_blueprint; a bridge in json_blueprint
+  (`codec.to_worker_codec`) would, but only if Grind's `Codec` type moved or
+  the two packages shared an interface.
+- **`required_field()` stays silent on an uncorrelated emitter.** A handler
+  that uses `required_field()` skips an event whose `correlation` is missing
+  as `MalformedMetadata`, per the guide. Here every emitter is the app, so it
+  cannot happen, but a second emitter using `field()` with `None` would drop
+  the app's collector line without a visible error beyond the skipped call.
+- **The `use` block runs with placeholder values.** The sinal guide warns that
+  the block runs once with zero values and again on decode, so a block must not
+  branch on a bound field. The two blocks here do not, but nothing in the type
+  system enforces it; a review comment is the only guard.
+- **Migration guides.** Sufficient: the getter rule and the `required_field`
+  snippet applied one-to-one. Gap: the sinal guide's `required_field`
+  section names this app's two events but not that the collector's
+  `option.map(..) |> option.unwrap("-")` helper becomes dead code, which only
+  the unused-function and import warnings revealed.

@@ -327,7 +327,8 @@ pub fn relay_client_cannot_authenticate_test() {
 /// the re-bound handle reads the typed result or the typed reason.
 pub fn grind_bind_handle_after_terminal_write_test() {
   use running <- with_app
-  let assert Ok(text) = worker.codec("text-v1", json.string, decode.string)
+  let assert Ok(text) =
+    worker.codec("text-v1", worker.infallible(json.string), decode.string)
   let assert Ok(echo_worker) =
     worker.define_with_error_codec("probe.echo", "v1", text, text, text, fn(s) {
       case s {
