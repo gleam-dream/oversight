@@ -1,0 +1,22 @@
+name = "support_desk"
+version = "0.1.0"
+target = "erlang"
+description = "Composition app: a customer-support agent whose refunds need approval and run as a compensating saga, built from fabric, fabric_saga, llm_wire, http_gun, json_blueprint, saga and sinal."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+mist = ">= 6.0.2 and < 7.0.0"
+fabric = { path = "../../../fabric" }
+fabric_saga = { path = "../../../fabric/integrations/fabric_saga" }
+saga = { path = "../../../saga" }
+llm_wire = { path = "../../../llm_wire" }
+http_gun = { path = "../../../http_gun" }
+json_blueprint = { path = "../../../json_blueprint" }
+sinal = { path = "../../../sinal" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
