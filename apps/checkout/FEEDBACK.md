@@ -211,6 +211,22 @@ the runner, so `Emitter(process.self())`
 (apps/checkout/src/checkout/telemetry.gleam:181) would name the forwarder and
 every durable saga event would become unattributed, with no error.
 
+**Status (follow-up):** partially resolved by http_gun 056536b (and sinal
+f9cca37 for the shared type); the http_gun clash is gone, the saga and grind
+halves are open. `http_gun.with_correlation` takes the order's `Correlation`
+(apps/checkout/src/checkout/app.gleam:124), and each http_gun lifecycle event
+carries it, so the order → `telemetry.Id` map, the `HttpId` message, the
+`http_id` call and the `HttpCorrelation` key are deleted. A new `Order`
+key attributes an http_gun event directly
+(apps/checkout/src/checkout/telemetry.gleam:40, :143-146, :207-208). The seam goes
+from ~85 to ~62 lines (-36 code lines, +13 across `src`, mostly the
+registry). Still open: saga attribution by `process.self()` and grind
+attribution by parsing `"receipt:<order>"`. The registry keeps three
+link kinds (`SagaRun`, `Emitter`, `GrindJob`) plus the new `Order`, so
+the proposal's http_gun item (`telemetry.id`) is superseded and its saga
+and grind items stand. The wave-2 warning about `forwarder.route` still
+applies to `Emitter`.
+
 ### CHK-6 A crashed grind attempt leaves the saga runner alive, and recovery needs an operator
 
 - **Packages**: grind, saga. **Kind**: composition. **Severity**: major.
@@ -267,6 +283,14 @@ bridge would keep `to_grind` and `to_saga`. Rewriting the `Failure` codec as a
 `LimitExceeded`, a `codec.custom` for the lossy `FixtureIo`, and the same two
 `string_enum` tables. That is not shorter than the current encoder and
 decoder, and it adds a dependency. The cure stays in http_gun.
+
+**Status (follow-up):** the grind half of the bridge changed by grind
+c44e4be, but nothing shrank. `worker.codec` now takes a fallible encoder, so
+`to_grind` wraps the app's plain gleam_json encoder in `worker.infallible`
+(apps/checkout/src/checkout/codecs.gleam:32): +1 line, -0. The app never had a
+panicking or `null`-storing Blueprint bridge to delete, because it does not use
+json_blueprint. The 129-line `Failure` codec and the 18-line (now 18, longer
+line) bridge stay, so CHK-7 remains open.
 
 ### CHK-8 Saga effect keys cannot serve as provider idempotency keys
 
@@ -332,6 +356,53 @@ or `Cancelled`, and the receipt failure carries nothing worth keeping.
   below the deadline (apps/checkout/src/checkout/app.gleam:84-86).
 - **Proposal** (grind): carry the numbers in the error,
   `UniqueLockWaitTooCloseToDeadline(lock_wait_ms, margin_ms, deadline_ms)`.
+
+## Re-run after the follow-up fixes
+
+The heads are grind 2d66835, http_gun 056536b and sinal 6de2b69. All 9 tests
+pass, `gleam format` is clean, and `gleam run` narrates the six orders, prints
+both traces and reports 0 unattributed events. Compile errors came from two
+places: `codecs.gleam` (`worker.codec` encoder type) and `telemetry.gleam`
+(`telemetry.Id`, `new_id`, removed by http_gun).
+
+| Seam                                    | Before | After | Change                                                                                                                              |
+| --------------------------------------- | -----: | ----: | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Telemetry correlation (CHK-5)           |    ~85 |   ~62 | `http_ids` map, `HttpId` message and handler arm, `http_id`, `HttpCorrelation` key and `client_for` call deleted; `Order` key added |
+| Saga ↔ grind codec bridge (CHK-7)       |     18 |    18 | `worker.infallible(c.encode)`: one expression longer, no line change; no panic or `null` to delete                                  |
+| Sinal record builder                    |      0 |     0 | The app only reads events (`sinal.observe`); it defines no `fields` records, so there is no builder or getter to move               |
+| `Option` correlation (`required_field`) |      0 |     0 | The app defines no events; it reads http_gun's, which use `field()`                                                                 |
+
+Code lines across `apps/checkout/src` (excluding blanks and comments):
+-36 / +13, net -23. About 28 of the removed lines are the http_gun id join
+table; the rest is reflow by `gleam format`.
+
+New friction:
+
+- **The reader still handles `Option(Correlation)` for http_gun** (http_gun,
+  nit). `metadata.correlation` is optional because the client may have no
+  correlation. The app sets one on every request through `client_for`, but the
+  handler still carries a `Some`/`None` arm
+  (apps/checkout/src/checkout/telemetry.gleam:207-208). The `None` arm is
+  reachable only for a request made without `client_for`, which the app does
+  not do. `required_field()` cannot help, because the field belongs to
+  http_gun's metadata type, not the app's.
+- **`telemetry.order` still asserts** (sinal, minor). `correlation.from_string`
+  returns a `Result`, so the app keeps its `let assert` plus the web-layer
+  check (apps/checkout/src/checkout/telemetry.gleam:66). Passing the
+  `Correlation` to http_gun removed the join table but not this precondition.
+- **Correlation now crosses one package of three** (saga, grind, nit). The
+  `Order` key makes the http_gun half trivial and the saga and grind halves
+  look worse in comparison: they still need `Emitter(Pid)` and a parser for
+  the submission id. The app now has two attribution styles in one collector.
+- **The `worker.infallible` wrap is mandatory churn for plain encoders**
+  (grind, nit). An app that never rejects a value gets a one-word migration
+  and no new capability; `JsonCodec.encode` could hold a `Result` encoder, but
+  that would add noise to the app's encoders for no failure they can raise.
+
+Positive: the migration guides named the exact before and after for both
+changes, and the http_gun guide's "match `metadata.correlation` against it"
+advice worked as written. The wave-2 guide gap (present-tense `Correlation`
+in `with_correlation` before it existed) is closed.
 
 ## Glue measure
 

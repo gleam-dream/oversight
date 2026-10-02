@@ -1,7 +1,7 @@
 //// Payment and shipping API clients over one shared http_gun `Client`.
 ////
 //// Every call takes the client view to use, so the caller can pass
-//// `http_gun.with_correlation(client, id)` for per-order observation.
+//// `http_gun.with_correlation(client, order)` for per-order observation.
 //// Transport failures stay typed: `ProviderUnreachable(provider, failure)`
 //// keeps http_gun's `Failure`, including its `MayHaveBeenSent` evidence.
 

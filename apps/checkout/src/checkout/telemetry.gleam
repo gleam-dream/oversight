@@ -4,8 +4,8 @@
 ////
 //// An order's correlation is a `sinal/correlation` value made from its
 //// order id. No package carries it yet, so each event is linked to it here:
-//// - http_gun: an opaque `telemetry.Id` per order, created by this module
-////   and attached to the client with `http_gun.with_correlation`;
+//// - http_gun: the order's correlation is attached to the client with
+////   `http_gun.with_correlation` and arrives in every lifecycle event;
 //// - saga: local runs are linked by `execution.run_id`; durable runs expose
 ////   no run id at all, so they are linked by the *emitting process*, which
 ////   the Postgres saga storage reports when a runner claims an execution;
@@ -37,7 +37,7 @@ pub type Source {
 pub type Key {
   SagaRun(Int)
   Emitter(Pid)
-  HttpCorrelation(http_telemetry.Id)
+  Order(Correlation)
   GrindJob(Int)
 }
 
@@ -50,17 +50,12 @@ pub opaque type Collector {
 }
 
 type State {
-  State(
-    entries: List(Entry),
-    links: Dict(Key, Correlation),
-    http_ids: Dict(Correlation, http_telemetry.Id),
-  )
+  State(entries: List(Entry), links: Dict(Key, Correlation))
 }
 
 type Message {
   Record(Entry)
   Link(Key, Correlation)
-  HttpId(order: Correlation, reply: Subject(http_telemetry.Id))
   Trace(order: Correlation, reply: Subject(List(Entry)))
   Unattributed(reply: Subject(List(Entry)))
 }
@@ -82,7 +77,7 @@ pub fn from_tagged_id(id: String) -> Result(Correlation, Nil) {
 /// Starts the collector and attaches one handler per event descriptor.
 pub fn start() -> Collector {
   let assert Ok(started) =
-    actor.new(State([], dict.new(), dict.new()))
+    actor.new(State([], dict.new()))
     |> actor.on_message(handle)
     |> actor.start
   let subject = started.data
@@ -94,11 +89,6 @@ pub fn stop(collector: Collector) -> Nil {
     let _ = sinal.detach(a)
     Nil
   })
-}
-
-/// The http_gun correlation id for an order, created on first use.
-pub fn http_id(collector: Collector, order: Correlation) -> http_telemetry.Id {
-  actor.call(collector.subject, 1000, HttpId(order, _))
 }
 
 pub fn link(collector: Collector, key: Key, order: Correlation) -> Nil {
@@ -134,24 +124,6 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
       actor.continue(
         State(..state, links: dict.insert(state.links, key, order)),
       )
-    HttpId(order, reply) ->
-      case dict.get(state.http_ids, order) {
-        Ok(id) -> {
-          process.send(reply, id)
-          actor.continue(state)
-        }
-        Error(Nil) -> {
-          let id = http_telemetry.new_id()
-          process.send(reply, id)
-          actor.continue(
-            State(
-              ..state,
-              http_ids: dict.insert(state.http_ids, order, id),
-              links: dict.insert(state.links, HttpCorrelation(id), order),
-            ),
-          )
-        }
-      }
     Trace(order, reply) -> {
       list.reverse(state.entries)
       |> list.filter(fn(e) { owner(state, e) == Some(order) })
@@ -168,7 +140,12 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
 }
 
 fn owner(state: State, entry: Entry) -> Option(Correlation) {
-  list.find_map(entry.keys, fn(key) { dict.get(state.links, key) })
+  list.find_map(entry.keys, fn(key) {
+    case key {
+      Order(order) -> Ok(order)
+      _ -> dict.get(state.links, key)
+    }
+  })
   |> option.from_result
 }
 
@@ -228,7 +205,7 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
     }),
     sinal.observe(http_telemetry.event(), fn(_m, d) {
       let keys = case d.correlation {
-        Some(id) -> [HttpCorrelation(id)]
+        Some(order) -> [Order(order)]
         None -> []
       }
       record(Http, keys, "request " <> string.inspect(d.milestone))
