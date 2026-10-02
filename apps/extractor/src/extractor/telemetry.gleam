@@ -1,10 +1,11 @@
 //// Collects the Sinal events of every package the app uses and joins them
 //// per document.
 ////
-//// The packages share no correlation key. Grind events carry `job_id`; the
-//// worker never learns its job id, so the app maps job id to document id at
-//// submission. http_gun events carry an opaque correlation `Id` the worker
-//// attaches to its client views. llm_wire events carry only
+//// The packages share one correlation key only where they carry it. Grind
+//// events carry `job_id`; the worker never learns its job id, so the app maps
+//// job id to document id at submission. http_gun events carry the
+//// `Correlation` the worker attaches to its client views: the document id
+//// itself, so no table is needed. llm_wire events carry only
 //// `stage/provider/outcome`, so the collector attributes them through the
 //// emitting process, which works only when llm_wire emits in a process the
 //// worker registered.
@@ -23,6 +24,7 @@ import grind/observation
 import http_gun/telemetry as http_telemetry
 import llm_wire/telemetry as llm_telemetry
 import sinal
+import sinal/correlation.{type Correlation}
 import sinal/forwarder
 
 pub type Source {
@@ -38,14 +40,13 @@ pub type Record {
 /// What the event offers for correlation.
 pub type Key {
   JobId(Int)
-  HttpCorrelation(Option(http_telemetry.Id))
+  HttpCorrelation(Option(Correlation))
   EmitterPid(Pid)
 }
 
 pub opaque type Message {
   Observed(Record)
   JobSubmitted(job_id: Int, document_id: String)
-  Correlated(id: http_telemetry.Id, document_id: String)
   WorkerProcess(pid: Pid, document_id: String)
   Snapshot(reply: Subject(State))
 }
@@ -54,7 +55,6 @@ pub type State {
   State(
     records: List(Record),
     jobs: Dict(Int, String),
-    correlations: List(#(http_telemetry.Id, String)),
     processes: Dict(Pid, String),
   )
 }
@@ -71,7 +71,7 @@ pub type Collector {
 /// one Sinal handler per observed event.
 pub fn start() -> Result(Collector, String) {
   use subject <- result.try(
-    actor.new(State([], dict.new(), [], dict.new()))
+    actor.new(State([], dict.new(), dict.new()))
     |> actor.on_message(handle)
     |> actor.start
     |> result.map(fn(started) { started.data })
@@ -142,16 +142,15 @@ pub fn job_submitted(
   process.send(collector.subject, JobSubmitted(job_id, document_id))
 }
 
-/// Called by the worker: a fresh http_gun correlation for this attempt, and
-/// the worker process itself for llm_wire attribution.
-pub fn begin_attempt(
-  collector: Collector,
-  document_id: String,
-) -> http_telemetry.Id {
-  let id = http_telemetry.new_id()
-  process.send(collector.subject, Correlated(id, document_id))
+/// Called by the worker: the correlation for this attempt's http_gun client
+/// views, and the worker process itself for llm_wire attribution. The
+/// correlation is the document id, so every attempt of a document shares it.
+/// An id that is empty or longer than 128 bytes cannot be a correlation;
+/// that attempt's http_gun events get a fresh one and stay unattributed.
+pub fn begin_attempt(collector: Collector, document_id: String) -> Correlation {
   process.send(collector.subject, WorkerProcess(process.self(), document_id))
-  id
+  correlation.from_string(document_id)
+  |> result.lazy_unwrap(correlation.unique)
 }
 
 pub fn snapshot(collector: Collector) -> State {
@@ -181,8 +180,7 @@ pub fn trace(collector: Collector, document_id: String) -> Trace {
 fn owner(state: State, key: Key) -> Option(String) {
   case key {
     JobId(id) -> dict.get(state.jobs, id) |> option.from_result
-    HttpCorrelation(Some(id)) ->
-      list.key_find(state.correlations, id) |> option.from_result
+    HttpCorrelation(Some(id)) -> Some(correlation.to_string(id))
     HttpCorrelation(None) -> None
     EmitterPid(pid) -> dict.get(state.processes, pid) |> option.from_result
   }
@@ -208,10 +206,6 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
     JobSubmitted(job_id, document_id) ->
       actor.continue(
         State(..state, jobs: dict.insert(state.jobs, job_id, document_id)),
-      )
-    Correlated(id, document_id) ->
-      actor.continue(
-        State(..state, correlations: [#(id, document_id), ..state.correlations]),
       )
     WorkerProcess(pid, document_id) ->
       actor.continue(

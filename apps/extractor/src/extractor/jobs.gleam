@@ -126,15 +126,15 @@ pub fn attempt(
 // Codecs ------------------------------------------------------------------
 
 /// One Blueprint codec serves as the Grind codec: `to_json` and `decoder`
-/// replace a hand-written gleam_json twin.
+/// replace a hand-written gleam_json twin. A value the codec rejects fails
+/// `submit` with `InvalidInput` instead of panicking.
 fn grind_codec(version: String, blueprint: codec.Codec(a)) -> worker.Codec(a) {
   let assert Ok(wire) =
     worker.codec(
       version,
       fn(value) {
-        let assert Ok(encoded) = codec.to_json(blueprint, value)
-          as "a codec built from total conversions encodes every value"
-        encoded
+        codec.to_json(blueprint, value)
+        |> result.map_error(codec.describe_encode_error)
       },
       codec.decoder(blueprint),
     )
@@ -143,29 +143,21 @@ fn grind_codec(version: String, blueprint: codec.Codec(a)) -> worker.Codec(a) {
 
 fn input_codec() -> worker.Codec(DocumentJob) {
   grind_codec("document-job-v1", {
-    use document_id <- codec.field(
-      "document_id",
-      codec.string(),
-      fn(job: DocumentJob) { job.document_id },
-    )
-    use url <- codec.field("url", codec.string(), fn(job: DocumentJob) {
-      job.url
+    use document_id <- codec.field("document_id", codec.string(), get: fn(job) {
+      job.document_id
     })
-    use provider <- codec.field(
-      "provider",
-      llm.provider_codec(),
-      fn(job: DocumentJob) { job.provider },
-    )
+    use url <- codec.field("url", codec.string(), get: fn(job) { job.url })
+    use provider <- codec.field("provider", llm.provider_codec(), get: fn(job) {
+      job.provider
+    })
     codec.success(DocumentJob(document_id:, url:, provider:))
   })
 }
 
 fn output_codec() -> worker.Codec(Extracted) {
   grind_codec("extracted-v2", {
-    use row_id <- codec.field("row_id", codec.int(), fn(e: Extracted) {
-      e.row_id
-    })
-    use invoice <- codec.field("invoice", invoice.codec(), fn(e: Extracted) {
+    use row_id <- codec.field("row_id", codec.int(), get: fn(e) { e.row_id })
+    use invoice <- codec.field("invoice", invoice.codec(), get: fn(e) {
       e.invoice
     })
     codec.success(Extracted(row_id:, invoice:))
@@ -180,10 +172,8 @@ fn error_codec() -> worker.Codec(outcome.JobError) {
       #("store", outcome.Store),
     ])
   grind_codec("job-error-v1", {
-    use stage <- codec.field("stage", stage, fn(e: outcome.JobError) { e.stage })
-    use detail <- codec.field("detail", codec.string(), fn(e: outcome.JobError) {
-      e.detail
-    })
+    use stage <- codec.field("stage", stage, get: fn(e) { e.stage })
+    use detail <- codec.field("detail", codec.string(), get: fn(e) { e.detail })
     codec.success(outcome.Transient(stage:, detail:))
   })
 }

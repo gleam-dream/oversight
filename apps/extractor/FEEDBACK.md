@@ -193,6 +193,22 @@ prints the demo batch.
   replace. `one_job_is_followed_across_packages_test` still sees 1 of 5
   llm_wire events attributed and `gleam run` still reports 23 unattributed.
 
+- **Status (follow-up):** partially resolved by http_gun c45adfe; the
+  http_gun half is resolved, the llm_wire half and the job-id half are not.
+  `with_correlation` takes a `sinal/correlation.Correlation` and the
+  `correlation` metadata key carries the caller's value, so the worker passes
+  the document id as the correlation (`correlation.from_string(document_id)`,
+  telemetry.gleam:150-154). The `Correlated` message, the
+  `correlations: List(#(Id, String))` state field, its `handle` arm and the
+  `list.key_find` lookup are deleted, and `owner` reads the document id from
+  the event (`correlation.to_string`). The registry went from about 60 to
+  about 50 lines (11 removed, 2 added); what remains is job id to document id
+  (grind) and emitting pid to document id (llm_wire). The test still sees 1
+  of 5 llm_wire events attributed and `gleam run` still reports 23 llm_wire
+  events unattributed (http_gun 0): llm_wire carries no correlation of its
+  own, so passing the correlation to the client view does not reach its
+  events.
+
 ### EXT-5 One Blueprint codec cannot serve as a Grind codec or a pog row decoder
 
 - **Packages**: json_blueprint, grind. **Kind**: ecosystem-interop. **Severity**: major.
@@ -225,6 +241,15 @@ prints the demo batch.
   placeholder): the row arrives as `payload::text`, so the decoder still goes
   through `decode_json` and `decode.failure` needs a placeholder `Invoice`.
   `codec.decoder` reads a parsed `Dynamic` and cannot read a column of text.
+
+- **Status (follow-up):** partially resolved by grind c44e4be; the Grind bridge half is resolved.
+  `worker.codec` takes a fallible encoder, so `grind_codec` no longer holds
+  the `let assert Ok(encoded) = codec.to_json(..) as "..."`: the encoder is
+  `codec.to_json(blueprint, value) |> result.map_error(codec.describe_encode_error)`
+  and a rejected value fails `submit` with `submission.InvalidInput`. The
+  helper is 11 lines instead of 13 and the three Grind codecs went from 57
+  to 46 together with the getter change (EXT-6). The pog half is unchanged
+  (jsonb still arrives as text).
 
 ### EXT-6 A six-field record codec needs combine chains and nested tuples
 
@@ -336,6 +361,15 @@ prints the demo batch.
   handle; the app polls `postgres.outcome` every 50 ms (jobs.gleam:309-322),
   as the grind card's common path already notes.
 - **Proposal** (grind): a public `job.state_name(State) -> String`.
+
+- **Status (follow-up):** partially resolved by json_blueprint bb4da39 (`get:`
+  after the callback). The annotation friction recorded in the wave 2 re-run
+  is gone: all 17 `fn(x: Type)` getter annotations in `invoice.gleam`,
+  `jobs.gleam` and the test are now `get: fn(x) { x.field }`.
+  `invoice.codec()` went from 62 to 52 lines (invoice.gleam:47-98), which is
+  below the 57 of the pre-wave `combine` version, and `LineItem` and the
+  Grind input and error codecs fit on one or two lines per field. The cross-field
+  total check is unchanged.
 
 ## Glue measure
 
@@ -451,6 +485,7 @@ New friction:
   `gleam format` wraps most `use` lines to three. The result is no shorter
   than the old `combine` chain (62 lines against 57), though it has no tuples,
   no `let assert` and no arity limit.
+  **Status (follow-up):** resolved by json_blueprint bb4da39; see EXT-6.
 - **`codec.try_map` has no field location for a cross-field check, and
   `describe_decode_error` drops `Custom` messages.** A `try_map` over the whole
   record fails at path `[]`. With the first draft, `gleam run` printed
@@ -479,6 +514,7 @@ New friction:
   `grind_codec`, which is one more assert on a definition that cannot fail for
   these codecs. A total `codec.to_json_or_panic`, or `to_json` documented as
   infallible for codecs without `custom`, would remove it.
+  **Status (follow-up):** resolved by grind c44e4be; see EXT-5.
 - **Wire format change.** The invoice stored by Grind is now an object, not a
   JSON string, so the output codec version moved to `extracted-v2`. Jobs
   already stored under `extracted-v1` would no longer read back, and a
@@ -489,6 +525,8 @@ New friction:
 - **Correlation remains the app's own.** Nothing in wave 2 reduced the
   registry: reaching "following one job" needs http_gun and llm_wire to carry
   `Correlation` and grind to give a handler its job id.
+  **Status (follow-up):** the http_gun part is resolved by http_gun c45adfe;
+  llm_wire and grind are not; see EXT-4.
 
 Migration guides: sufficient for compiling. Every symbol this app imports is
 in the json_blueprint index, and the sinal guide covered `observe`,
@@ -510,3 +548,77 @@ in the json_blueprint index, and the sinal guide covered `observe`,
 caller's `try_map` message, so the discard reason reads
 `$["total_cents"]: total 9999 differs from line sum 4490`. The lost-message
 friction above is resolved; the test asserts the full message.
+
+## Re-run after the follow-up fixes (2 Oct 2026)
+
+Package heads: json_blueprint bb4da39, grind c44e4be (with 2d66835), http_gun
+c45adfe (with 056536b), sinal f9cca37 and 5e8bee3. 11 tests pass
+(`../scripts/with-postgres.sh gleam test`) and `gleam run` prints the same
+demo batch: two stored invoices and one rate-limited retry for `globex`
+(two provider calls), four discards, and 23 unattributed events (llm_wire
+23, http_gun 0). The migration touched four files: 44 lines added and 70
+removed (net -26), including the test.
+
+| Seam                                             | Before | After | Change                                                                                  |
+| ------------------------------------------------ | ------ | ----- | --------------------------------------------------------------------------------------- |
+| Six-field Invoice codec (EXT-6)                  | 62     | 52    | `get:` removes 9 getter annotations; the formatter wraps fewer `use` lines              |
+| Grind codecs: input, output, error (EXT-5)       | 57     | 46    | 7 getter annotations gone; `grind_codec` 13 → 11 lines, no `let assert` on `to_json`    |
+| Telemetry correlation registry (EXT-4)           | ~60    | ~50   | `Correlated`, the `Id` table, its `handle` arm and lookup gone; `owner` reads the event |
+| `with_correlation` call sites (jobs.gleam:97-99) | 3      | 3     | Same calls; the argument is now the document id's `Correlation`                         |
+
+Glue and codec lines removed: about 30 (10 Invoice codec, 11 Grind codecs, 9
+registry). Lines added: 2, the `result.lazy_unwrap(correlation.unique)`
+fallback in `begin_attempt`. What remains of the registry is job id to
+document id (grind has no job context) and emitting pid to document id
+(llm_wire carries no correlation).
+
+The sinal record builder and `correlation.required_field()` do not apply:
+the app defines no Sinal events, it only observes them, and http_gun's
+`Metadata.correlation` stays an `Option` because the library may run without
+one. The handler matches `Some(correlation)` once (telemetry.gleam:183).
+
+New friction:
+
+- **A correlation has to be 1 to 128 bytes, and the app's document id has no
+  such bound.** `correlation.from_string` returns a `Result`, so
+  `begin_attempt` falls back to `correlation.unique()`, and the http_gun
+  events of that attempt then belong to no document. `owner` returns
+  `Some(text)` for them, so `trace` counts them as neither attributed nor
+  unattributed. The sinal doc suggests a SHA-256 digest of the id, which
+  would need `gleam_crypto` here and a reverse table to get the document
+  back, which is the registry again. The app relies on document ids that fit;
+  a validated id type at submission would be the honest fix, and the packages
+  cannot remove it.
+- **One correlation per document hides the attempts.** The correlation used to
+  be one `Id` per attempt, so a retry's http_gun events were separable from the
+  first attempt's. Now the two attempts of `globex` share a correlation, and
+  only order and the Grind `claimed` events tell them apart; http_gun's
+  per-request `RequestId` is opaque and groups only one invocation's
+  milestones. For this app the document is the right unit, but an app that
+  wants per-attempt traces must put the attempt number into the correlation
+  text itself and then needs a table to get back to the document.
+- **The correlation-to-key mapping is the identity only because the app chose
+  the key.** `owner` is `correlation.to_string` since the correlation text is
+  the document id. An app that derives correlations from something else still
+  needs the lookup.
+- **llm_wire is now the only package that forces the registry.** Passing the
+  correlation to the client llm_wire runs on changes none of its events; all 23
+  unattributed events are llm_wire's, and the emitting-pid table is the only
+  way to attribute 1 of 5 per job. A `correlation` taken from the
+  `http_gun.Client` view would remove it.
+- **`InvalidInput` is unreachable here and has no test.** All three codecs
+  are total in practice: the input and error codecs hold only strings and
+  enums, and the output's `Invoice` already passed the same codec when the
+  model's answer was decoded. `submit` maps every error with `string.inspect`,
+  so a rejected value would read as the text of `InvalidInput(..)` rather than
+  a typed case. The change removes a panic that could not fire, not a failure
+  the app can show. `worker.codec` still returns a `Result` for an empty
+  version, so `grind_codec` keeps one `let assert Ok(wire)` on a constant.
+
+Migration guides: sufficient. The grind guide's dependents table named this
+app's `jobs.gleam` bridge, the http_gun table named the exact lines in
+`jobs.gleam` and `telemetry.gleam`, and the json_blueprint rule (put `get:`
+before the third argument) was mechanical. Gaps: the http_gun guide says an
+app can drop its join table but does not mention the 128-byte bound, which an
+app with free-form ids meets first, and the sinal `required_field` section
+does not say that an observer-only app has nothing to switch.

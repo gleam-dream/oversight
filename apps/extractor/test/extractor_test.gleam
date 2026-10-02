@@ -10,7 +10,7 @@ import extractor/scripted
 import extractor/store
 import extractor/telemetry
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -184,7 +184,7 @@ pub fn nullable_output_field_is_not_portable_to_google_test() {
     use po_number <- codec.field(
       "po_number",
       codec.nullable(codec.string()),
-      fn(po_number: Option(String)) { po_number },
+      get: fn(po_number) { po_number },
     )
     codec.success(po_number)
   }
