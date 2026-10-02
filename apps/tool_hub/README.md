@@ -30,7 +30,6 @@ gleam test   # 11 scenarios
 | `tool_hub/remote_tools` | Glue: Relay tools as fabric tools (typed from definitions, dynamic from `tools/list`) and error mapping |
 | `tool_hub/assistant`    | The fabric agent, `ask_assistant` on a second Relay server, and the cancellation bridge                 |
 | `tool_hub/scripted_llm` | Loopback LLM provider for the scripted wire format, with a "hold the stream open" step                  |
-| `tool_hub/mcp_wire`     | Glue: raw MCP `tools/call` and `notifications/cancelled` over http_gun (Relay's client cannot cancel)   |
 | `tool_hub/telemetry`    | Sinal handlers for relay, fabric, llm_wire, http_gun and sinal events; joins one run across packages    |
 | `tool_hub`              | Wiring (`start`/`stop`), the demo script and `main`                                                     |
 
@@ -43,7 +42,7 @@ gleam test   # 11 scenarios
 | MCP `isError` → fabric `Explain`         | `remote_tools.classify`                                      | `remote_tool_error_is_shown_to_the_model_test`                                                                              |
 | Lost MCP call → fabric `Uncertain` → MCP | `remote_tools.classify`, `assistant.render`                  | `unreachable_server_mid_run_makes_a_reservation_uncertain_test`, `unreachable_server_on_a_read_only_tool_is_explained_test` |
 | Invalid model arguments                  | fabric's argument check on the shared codec                  | `invalid_model_arguments_never_reach_the_server_test`                                                                       |
-| Cancellation MCP → agent → LLM stream    | `assistant.cancel_when_caller_dies`, `mcp_wire`              | `disconnecting_mcp_client_cancels_run_and_model_stream_test` and three negative tests                                       |
+| Cancellation MCP → agent → LLM stream    | `assistant.cancel_when_caller_dies`, Relay `client.close`    | `disconnecting_mcp_client_cancels_run_and_model_stream_test` and three negative tests                                       |
 | Telemetry correlation                    | `telemetry.follow`, `http_gun.with_correlation` per question | `common_path_answers_through_both_mcp_servers_test`                                                                         |
 | http_gun loopback policy                 | `tool_hub.provider_client`                                   | every test                                                                                                                  |
 

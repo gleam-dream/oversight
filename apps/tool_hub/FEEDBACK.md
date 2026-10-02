@@ -89,6 +89,21 @@ prints the demo question, its answer and the run's telemetry trail.
   hub, keyed by request id (and by session once sessions exist), and route
   `notifications/cancelled` to the runtime that owns the call. Add a test
   that cancels a `tools/call` from a second POST.
+- **Status (2 Oct 2026):** resolved by relay 5caff50, with the proposal
+  withdrawn. MCP 2026-07-28 makes closing the connection the Streamable HTTP
+  cancellation signal and says no `notifications/cancelled` message is
+  required or expected there; request ids are not session-scoped either, so
+  a second POST cannot name the caller's own call. The defect was that a
+  buffered (`application/json`) call ignored its client's disconnect. Relay
+  now cancels it: the worker is killed and `invocation.cancelled` is
+  emitted. The app deleted `src/tool_hub/mcp_wire.gleam` (68 glue lines, 87
+  in the file). The test is now
+  `cancelled_notification_is_ignored_and_disconnect_cancels_test`
+  (test/tool_hub_test.gleam:483): the notification gets 202 and changes
+  nothing, then `client.close` on Relay's own client cancels the
+  invocation, the fabric run and the model stream. The notification is
+  built in a 23-line test probe (:511-533), because no MCP client needs to
+  send it over HTTP.
 
 ### TH-2 Relay's client cannot cancel, and its timeout leaves the server working
 
@@ -114,6 +129,21 @@ input, CallOptions(cancellation: Option(Token), deadline: Option(Int)))`.
   closes the stream. Alternatively, ask for SSE responses so that a closed
   connection cancels the call. The relay card already recommends moving the
   client to http_gun, whose `cancellation.Token` would fit this directly.
+- **Status (2 Oct 2026):** partially resolved by relay 5caff50. Relay's
+  client no longer needs SSE for cancellation: closing it cancels a buffered
+  call, so every cancellation test now uses `client.call_definition` and
+  `client.close` instead of raw http_gun requests (`mcp_wire.tools_call`
+  removed with the module). What remains: the client still has no per-call
+  cancel, and its timeout does not disconnect. On timeout it calls
+  `gun:cancel` on the stream (relay/src/relay_gun_ffi.erl:84-86, :108-110),
+  which on HTTP/1.1 keeps the connection open, so the server keeps working.
+  `relay_client_timeout_leaves_the_run_going_until_close_test`
+  (test/tool_hub_test.gleam:538) shows the model stream still open 800 ms
+  after `RequestTimedOut`, and closing only after `client.close`, which also
+  drops every other call on that client. Revised proposal (relay): on
+  timeout or a per-call cancellation token, close that call's connection
+  (one connection per in-flight call, or close and reconnect), since the
+  spec's only HTTP cancellation is the disconnect.
 
 ### TH-3 A cancelled Relay invocation does not cancel work the handler started elsewhere
 
@@ -311,6 +341,14 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `unreported_replies` (fabric/src/fabric/run.gleam:233-235).
 - **Proposal** (fabric): make the measurement `Option(Usage)` or add an
   `unreported` flag to `ModelTurn`.
+- **Status (2 Oct 2026):** resolved by fabric db81b79 (c60bc1c).
+  `observation.model_turn()` is now `Event(Option(Usage), ModelTurn)`. The
+  app's `usage_text` handles `None` (src/tool_hub/telemetry.gleam:367-372,
+  +4 lines), and `run.stop` prints `RunTotals.unreported_replies`. `gleam
+run` now shows `turn 1 ToolRequest (usage not reported)` and `Completed
+after 4 turns, 4 without usage`;
+  `common_path_answers_through_both_mcp_servers_test` asserts both
+  (test/tool_hub_test.gleam:189-199).
 
 ### TH-11 http_gun's observations require a supervised forwarder
 
@@ -334,6 +372,12 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   resolved to 6.0.2 only because of Relay's exact pin, so any app on a
   newer mist 6.x (or wisp pulling one) will conflict.
 - **Proposal** (relay): widen to `mist >= 6.0.2 and < 7.0.0`.
+- **Status (2 Oct 2026):** resolved by relay c62bc29 (head 5caff50). Relay
+  now allows `mist >= 6.0.2 and < 7.0.0`, `gun >= 2.6.0 and < 3.0.0` and
+  `gleam_stdlib < 2.0.0`. After widening the app's own `gleam_stdlib` range
+  to `< 2.0.0` (gleam.toml:7), `gleam update` resolved gleam_stdlib 1.0.5,
+  mist 6.0.3, glisten 9.0.1, gramps 6.0.1 and gleeunit 1.11.0; gun stays at
+  2.6.0.
 
 ## Glue measure
 
@@ -346,7 +390,7 @@ Lines of adapter code per seam, excluding blank lines and comments.
 | Typed mounting from a Relay definition                      | 24    | remote_tools.gleam:55-80                                                    |
 | fabric run → MCP result (`ask_assistant` status and render) | 70    | assistant.gleam:58-66, :124-163, :181-202                                   |
 | Relay cancellation → fabric cancellation                    | 11    | assistant.gleam:167-177                                                     |
-| Cancelling an MCP call (raw wire, Relay client cannot)      | 68    | mcp_wire.gleam                                                              |
+| Cancelling an MCP call (raw wire, Relay client cannot)      | 68    | mcp_wire.gleam (deleted 2 Oct 2026; now `client.close`, see TH-1)           |
 | Telemetry correlation (agent per question, link, follow)    | ~35   | assistant.gleam:100-120, :128-138; telemetry.gleam:146-177                  |
 | http_gun forwarder supervisor for observations              | 8     | telemetry.gleam:92-99                                                       |
 | http_gun loopback client (destination policy)               | 6     | tool_hub.gleam:79-94 (configuration, not adapter code)                      |
@@ -385,6 +429,42 @@ Relay use.
   views (`http_gun.with_correlation`) with no adapter.
 - **http_gun's loopback policy** was a four-line record update. Its default
   refusal is explicit (`DestinationRejected`) and easy to diagnose.
+  **Status (2 Oct 2026):** http_gun a2869b7's `config.allow_loopback`
+  replaced it: `provider_client` (src/tool_hub.gleam:78-89) now pipes the
+  config through one call. The helper keeps every other destination rule,
+  so the provider client still refuses private and reserved addresses.
 - **llm_wire's scripted provider** (`testing.config()` plus the reply
   builders) let a 205-line mist server stand in for a real provider,
   including a held stream for cancellation tests.
+
+## Re-run after fixes (2 Oct 2026)
+
+Package heads: relay 5caff50, fabric db81b79, http_gun a2869b7,
+json_blueprint and llm_wire at their current heads. Resolved gleam_stdlib
+1.0.5 (after widening the app's own range to `< 2.0.0`), mist 6.0.3.
+11 tests pass, three runs in a row; `gleam run` prints the answer and the
+telemetry trail, now with `usage not reported` on every model turn.
+
+| Seam                                            | Before | After | Change                                                                                   |
+| ----------------------------------------------- | ------ | ----- | ---------------------------------------------------------------------------------------- |
+| Cancelling an MCP call (raw wire)               | 68     | 0     | `mcp_wire.gleam` deleted; Relay's client plus `client.close` (TH-1, TH-2)                |
+| http_gun loopback client (destination policy)   | 6      | 1     | `config.allow_loopback` replaces the nested `destination.Policy` update                  |
+| fabric usage in telemetry                       | 3      | 7     | `Option(Usage)` handled, unreported replies printed (TH-10; correctness, not glue)       |
+| Relay cancellation → fabric cancellation (TH-3) | 11     | 11    | unchanged: a disconnect kills Relay's worker, but the fabric run needs the app's monitor |
+
+The four cancellation tests were rewritten on Relay's own client:
+`disconnecting_mcp_client_cancels_run_and_model_stream_test` (a buffered
+call, cancelled by `client.close`), `disconnect_without_the_bridge_leaves_the_run_running_test`
+(TH-3 still holds), `cancelled_notification_is_ignored_and_disconnect_cancels_test`
+(TH-1, spec behavior) and `relay_client_timeout_leaves_the_run_going_until_close_test`
+(TH-2 remainder).
+
+New friction:
+
+- fabric's `model_turn()` change broke the app's build (one type mismatch
+  in telemetry.gleam). The fix was 4 lines and the new type is the right
+  one.
+- Cancellation by disconnect makes TH-2's remainder sharper. Relay's client
+  shares one gun connection across calls, and its timeout cancels only the
+  gun stream, so the only way for a Relay client to cancel one call is to
+  close the client and every other call on it.
