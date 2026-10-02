@@ -121,10 +121,7 @@ pub fn start(config: Config) -> Result(App, String) {
       shipping_deadline_ms: config.shipping_deadline_ms,
     )
   let client_for = fn(order_id) {
-    http_gun.with_correlation(
-      http,
-      telemetry.http_id(collector, telemetry.order(order_id)),
-    )
+    http_gun.with_correlation(http, telemetry.order(order_id))
   }
   let store =
     saga_store.start(pool, config.saga_lease_ms, fn(id, pid) {

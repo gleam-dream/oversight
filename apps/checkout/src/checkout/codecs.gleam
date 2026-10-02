@@ -29,7 +29,8 @@ pub type JsonCodec(a) {
 }
 
 pub fn to_grind(c: JsonCodec(a)) -> worker.Codec(a) {
-  let assert Ok(grind_codec) = worker.codec(c.version, c.encode, c.decoder)
+  let assert Ok(grind_codec) =
+    worker.codec(c.version, worker.infallible(c.encode), c.decoder)
   grind_codec
 }
 
