@@ -39,6 +39,11 @@ Dependency resolution: there were no conflicts. The resolver picked wisp
 `kryptos == 1.5.0`, `telemetry == 1.4.2`). The only resolution errors were
 Hex API rate limits from the parallel builds.
 
+**Status (2 Oct 2026):** warden 845b75e replaced the exact pins with
+major-bounded ranges. `gleam update` resolved the same versions (the manifest
+is byte-identical: gleam_stdlib 1.0.5, gleam_crypto 1.6.0, gleam_time 1.11.0,
+gose 2.2.0, kryptos 1.5.0, telemetry 1.4.2).
+
 ## Findings
 
 ### SSO-1 Session custody cannot be made durable; the app's Postgres row is only an index
@@ -158,6 +163,13 @@ revoke: RevokeRefreshToken | RevokeAll | NoRevocation)` with a
   Removal is idempotent and the user's intent does not depend on the
   revision. If revision checking must remain, add
   `logout_reference(client, reference, options)`.
+- **Status (2 Oct 2026):** resolved by warden 47e49d8 (in 845b75e); `logout`
+  removes custody by reference and never returns `SessionStale`. The app's
+  `end_custody` retry (19 lines, `web.gleam:214-232`) is gone; `end_session`
+  calls `warden.logout` directly (`web.gleam:209-213`). The reproduction is now
+  `logout_with_a_stale_session_revision_ends_custody_test`
+  (`test/sso_portal_test.gleam:235-258`): logout with the pre-refresh revision
+  returns `Ok`, and `restore_session` then returns `SessionNotFound`.
 
 ### SSO-5 Refresh outcomes need a 40-line map to reach three decisions
 
@@ -281,6 +293,13 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
 - **Proposal** (warden): document the mapping from `DestinationPolicy` to
   `destination.Policy` in `config.gleam`. If Warden ever accepts a client
   (SSO-6), take a `destination.Policy` directly.
+- **Status (2 Oct 2026):** partially resolved by http_gun a2869b7
+  (`config.allow_loopback`). The browser client drops its nested
+  `destination.Policy` update and the `http_gun/destination` import
+  (`browser.gleam:27-37`, 16 → 8 lines). The billing client uses
+  `allow_loopback` too, but it is loopback-only, and denying public hosts still
+  needs the nested record update (`app.gleam:198-211`), so it did not get
+  shorter. The two vocabularies (Warden's enum, http_gun's record) remain.
 
 ### SSO-10 `redirect_uri` must be known before Warden starts, and `start` needs the provider up
 
@@ -332,3 +351,31 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `static_supervisor` with no extra wiring.
 - **pog fit.** The session table, `returning` decoders and the shared pool
   had no friction with Warden's pinned dependencies.
+
+## Re-run after fixes (2 Oct 2026)
+
+Packages: warden 845b75e, http_gun a2869b7, sinal at head. `gleam update`
+changed nothing in `manifest.toml`; gleam_stdlib resolves to 1.0.5. All 10
+tests pass under `../scripts/with-postgres.sh gleam test`, and `gleam run`
+prints the full narrative (step 4 still reports one provider refresh token
+active after logout: SSO-2 is unchanged).
+
+| Seam                    | Before                                    | After                                                    |
+| ----------------------- | ----------------------------------------- | -------------------------------------------------------- |
+| Logout race (SSO-4)     | 19 (`web.gleam:214-232`)                  | 0; `end_session` calls `warden.logout` once              |
+| Browser http_gun client | 16 (`browser.gleam:28-43`), nested policy | 8 (`browser.gleam:28-35`), `config.allow_loopback`       |
+| Billing http_gun client | 13 (`app.gleam:198-210`), nested policy   | 14 (`app.gleam:198-211`), `allow_loopback` + nested deny |
+
+Net: 49 lines removed, 25 added across `web.gleam`, `browser.gleam`,
+`app.gleam` and the test.
+
+New friction:
+
+- **`allow_loopback` only widens.** A loopback-only client (the billing API)
+  must still write `destination.Policy(..settings.destination, allow_public: False)`,
+  so the helper covers half the intent. Proposal (http_gun): a
+  `config.loopback_only(config)` helper, or a `destination.loopback_only()`
+  constructor.
+- No breaking change had to be absorbed: the app does not build
+  `request_options.Options` or call `send_with_options`, and `logout`'s
+  signature is unchanged.

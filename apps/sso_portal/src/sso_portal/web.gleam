@@ -207,29 +207,9 @@ fn require_session(
 
 /// End the session everywhere the app can: Warden custody and the row.
 fn end_session(context: Context, current: Current) -> Nil {
-  let _ = end_custody(context, current, no_redirect())
+  let _ = warden.logout(context.warden, current.session, no_redirect())
   let _ = session_store.delete(context.db, current.stored.id)
   Nil
-}
-
-/// `warden.logout` refuses a session value whose revision is stale (a
-/// concurrent request refreshed it) and then leaves custody in place, so
-/// restore by reference and try once more.
-fn end_custody(
-  context: Context,
-  current: Current,
-  options: warden.LogoutOptions,
-) -> Result(warden.LogoutOutcome, warden.LogoutError) {
-  case warden.logout(context.warden, current.session, options) {
-    Error(warden.LogoutSession(warden.SessionStale)) ->
-      case
-        warden.restore_session(context.warden, current.stored.warden_reference)
-      {
-        Ok(latest) -> warden.logout(context.warden, latest, options)
-        Error(error) -> Error(warden.LogoutSession(error))
-      }
-    other -> other
-  }
 }
 
 // --- Dashboard --------------------------------------------------------------
