@@ -262,6 +262,17 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `revoke_refresh_tokens` and `requests` cover the knobs the tests used. Not
   covered, so the app still carries glue (see "Re-run after wave 4"): no HTTP
   `/authorize`, no access-token revocation, a PEM-only trust anchor.
+- **Status (round 5):** the `/authorize` gap is closed by warden b9d799f/1e507d4.
+  `warden/testing`'s provider serves `GET/POST /authorize` with
+  `with_login(SignIn(subject))`, so the scripted browser follows the portal's
+  own `/login` redirect over TLS to the provider and back to `/callback`.
+  `Context.login_response` and `provider_login_page` are deleted (33 lines
+  removed from `app.gleam` and `web.gleam`, 4 added: the `with_login` call and
+  the plain `warden.login_response`). Access-token revocation exists
+  (`testing.revoke_access_token`), but the billing API validates JWTs locally
+  with `warden/resource`, which cannot see it until `exp`, so the deny list
+  stays (documented in `billing_api.gleam`). The PEM-only trust anchor is
+  unchanged.
 
 ### SSO-7 One request cannot be followed across Warden and http_gun without pid bookkeeping
 
@@ -426,6 +437,11 @@ request, options)` takes the wisp request, `login_response` writes the 303
   `warden.supervised` starts without the provider, which covers the outage
   half of the finding, but the app starts Warden directly with `warden.start`
   and has not exercised that path.
+- **Status (round 5):** half offered. `config.with_allowed_redirect_uris` and
+  `LoginOptions.redirect_uri` choose among registered callbacks per login, but
+  the redirect URI is still fixed at `warden.new` (warden D37), and the
+  portal registers exactly one. `server.free_port` and the port reservation
+  stay (18 lines, unchanged), so the portal does not use the new options.
 
 ## What worked well
 
@@ -735,6 +751,13 @@ Seams that still need glue:
   The hook is test scaffolding in production code, and the scripted browser never
   visits the provider's login page. Proposal: `testing.authorize_url(provider,
 url, subject:)`, or serve `/authorize` for a configured subject.
+  **Status (round 5):** resolved by warden b9d799f/1e507d4. The provider
+  serves `/authorize` and the subject is `with_login(SignIn(subject))` at
+  start. `Context.login_response` (a field with 3 doc lines, and the 18-line
+  `provider_login_page`) is deleted: 33 lines removed, 4 added. The scripted
+  browser now visits the provider's login endpoint. One test,
+  `tampered_callback_state_is_rejected_test`, had read the callback from
+  `/login`'s `Location`; it follows one more hop to `/authorize` (+5, -3).
 - **Access-token revocation (warden, `warden/testing`).** `resource.verify` is
   local, so nothing the provider does to a live token reaches the billing API.
   The 401 → refresh path needs a revocation the validator can see, so

@@ -1,7 +1,13 @@
 //// The scripted downstream "billing API": a plain-HTTP loopback service that
 //// accepts only bearer tokens that `warden/resource` validates locally
-//// against the provider's keys, minus a deny list the test can fill (an
-//// incident response that revokes tokens the provider still considers live).
+//// against the provider's keys, minus a deny list the test can fill.
+////
+//// The deny list stays because validation is local: a JWT access token has
+//// no revocation channel, so `testing.revoke_access_token` is seen by
+//// introspection and userinfo but not by `resource.verify` until `exp`. The
+//// list models an incident response (the API refuses a token the provider
+//// and `exp` still call live). Introspection would replace it only if the
+//// API called the provider per request, which is a different API.
 
 import gleam/erlang/process.{type Subject}
 import gleam/http

@@ -5,14 +5,11 @@
 import envoy
 import gleam/crypto
 import gleam/erlang/process
-import gleam/http/request
-import gleam/http/response
 import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration.{type Duration}
-import gleam/uri
 import http_gun
 import http_gun/config as gun_config
 import http_gun/destination
@@ -82,7 +79,9 @@ pub type App {
 pub fn start(options: Options) -> Result(App, String) {
   use telemetry <- result.try(telemetry.start(options.print_telemetry))
   use provider <- result.try(
-    testing.start_provider(options.provider)
+    options.provider
+    |> testing.with_login(testing.SignIn(options.subject))
+    |> testing.start_provider
     |> result.replace_error("test provider did not start"),
   )
   use db <- result.try(connect_database())
@@ -164,7 +163,6 @@ fn serve_portal(app: App) -> Result(App, String) {
       billing: app.billing_client,
       billing_url: app.billing_api.base_url,
       telemetry: app.telemetry,
-      login_response: provider_login_page(app.provider, app.options.subject),
     )
   // The OS may hold the port briefly after the old listener closes.
   use portal <- result.try(
@@ -233,29 +231,6 @@ fn start_billing_api(
     |> result.map_error(fn(e) { "billing: " <> warden.describe_start_error(e) }),
   )
   billing_api.start(client, audience: billing_audience)
-}
-
-/// The provider's login page, played by the test provider: it approves the
-/// authorization request for the configured subject and sends the browser
-/// straight back to the portal's callback.
-/// `warden/testing` serves no `/authorize`, so the portal's redirect is
-/// taken here, where the opaque `LoginRedirect` is still in hand.
-fn provider_login_page(
-  provider: Provider,
-  subject: String,
-) -> fn(wisp.Response, warden.LoginRedirect) -> wisp.Response {
-  fn(res, redirect) {
-    let res = warden.login_response(res, redirect)
-    case testing.authorize(provider, redirect, subject:) {
-      Ok(callback) ->
-        response.set_header(
-          res,
-          "location",
-          uri.to_string(request.to_uri(callback)),
-        )
-      Error(_) -> res
-    }
-  }
 }
 
 /// The billing API's own http_gun client. Warden cannot share it (Warden
