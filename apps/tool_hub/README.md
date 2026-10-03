@@ -19,7 +19,7 @@ From this directory, inside the oversight dev shell:
 
 ```sh
 gleam run    # one question, end to end, with the telemetry trail of the run
-gleam test   # 11 scenarios
+gleam test   # 12 scenarios
 ```
 
 ## Modules
@@ -44,7 +44,7 @@ gleam test   # 11 scenarios
 | Invalid model arguments                  | fabric's argument check on the shared codec                  | `invalid_model_arguments_never_reach_the_server_test`                                                                       |
 | Cancellation MCP → agent → LLM stream    | `assistant.cancel_when_caller_dies`, Relay `client.close`    | `disconnecting_mcp_client_cancels_run_and_model_stream_test` and three negative tests                                       |
 | Telemetry correlation                    | `telemetry.follow`, `http_gun.with_correlation` per question | `common_path_answers_through_both_mcp_servers_test`                                                                         |
-| http_gun loopback policy                 | `tool_hub.provider_client`                                   | every test                                                                                                                  |
+| http_gun loopback policy, client label   | `tool_hub.provider_client`                                   | every test                                                                                                                  |
 
 Builds on the [ecosystem pilot](../../playground/ecosystem_pilot/), which
 covered Relay → LLM Wire directly; this app puts fabric between them and

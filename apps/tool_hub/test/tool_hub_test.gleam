@@ -11,6 +11,7 @@ import gleam/otp/actor
 import gleam/string
 import gleeunit
 import http_gun
+import http_gun/error
 import json/blueprint/contract
 import json/blueprint/value.{type Value}
 import llm_wire/testing
@@ -197,6 +198,13 @@ pub fn common_path_answers_through_both_mcp_servers_test() {
       string.contains(event, "4 turns, 4 without usage")
     })
   let assert True = telemetry.count(followed.joined, "http_gun") >= 24
+  // The provider client's label says which client the HTTP events came from.
+  let assert True =
+    followed.joined
+    |> list.filter(fn(record) { record.package == "http_gun" })
+    |> list.all(fn(record) {
+      string.starts_with(record.detail, "tool_hub_provider: ")
+    })
   let assert 0 = telemetry.count(followed.joined, "relay")
   let assert 0 = telemetry.count(followed.joined, "llm_wire")
   let assert True = telemetry.count(followed.unjoined, "llm_wire") >= 16
@@ -481,7 +489,7 @@ pub fn cancelled_notification_is_ignored_and_disconnect_cancels_test() {
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("cancel_notify"), [Hold])
   let #(mcp, _caller) = ask_in_background(hub)
-  let assert Ok(wire) = tool_hub.provider_client(hub.telemetry)
+  let assert Ok(wire) = tool_hub.provider_client("mcp_wire")
   let port = http.http_server_port(hub.assistant_server)
   let assert Ok(http_gun.Buffered(response: accepted, ..)) =
     http_gun.send(wire, cancelled_notification(port, 1))
@@ -500,8 +508,31 @@ pub fn cancelled_notification_is_ignored_and_disconnect_cancels_test() {
   let records = telemetry.records(hub.telemetry)
   let assert True = telemetry.has(records, "relay", "invocation.cancelled")
   let assert True = telemetry.has(records, "fabric", "run.cancel")
-  let _ = http_gun.stop(wire)
+  // The test's own client has its own label, so its HTTP events are not
+  // mistaken for the provider's.
+  let assert True =
+    list.any(telemetry.records(hub.telemetry), fn(record) {
+      record.package == "http_gun"
+      && string.starts_with(record.detail, "mcp_wire: ")
+    })
+  http_gun.stop(wire)
   tool_hub.stop(hub)
+}
+
+/// The provider client admits loopback only: a public address is refused
+/// before anything is sent, and the failure kind says so.
+pub fn provider_client_refuses_public_hosts_test() {
+  let assert Ok(client) = tool_hub.provider_client("policy_check")
+  let assert Error(failure) =
+    request.new()
+    |> request.set_host("203.0.113.9")
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_body(<<>>)
+    |> http_gun.send(client, _)
+  let assert error.Refused = error.kind(failure)
+  let assert error.NotSent = error.evidence(failure)
+  let assert False = error.is_retryable(failure, idempotent: True)
+  http_gun.stop(client)
 }
 
 /// A `notifications/cancelled` POST, which Relay's client cannot send.
