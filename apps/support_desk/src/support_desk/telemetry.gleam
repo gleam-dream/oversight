@@ -6,21 +6,17 @@
 ////
 //// - the desk itself: its own `Correlation` for the ticket, with the fabric
 ////   run id, in `ticket.opened` and `ticket.answered`.
-//// - fabric: the run id, plus turn and call id for tool and approval
-////   events.
-//// - saga: its own run counter, the workflow name and an optional
-////   `Correlation` from `execution.with_correlation`. `fabric_saga.tool`
-////   takes one `Config` at build time, so no per-ticket value reaches it.
+//// - fabric: the run id and the run's `Correlation`, which the desk sets to
+////   the ticket's when it starts the run.
+//// - saga: its own run counter, the workflow name and the `Correlation`
+////   that `fabric_saga.tool` sets from the tool call's.
 //// - http_gun: a per-request id and the caller's `Correlation`
-////   (`http_gun.with_correlation`), which is the ticket's own.
+////   (`http_gun.with_correlation`): the tools set the call's.
 //// - llm_wire: a call id and the `Correlation` of the http_gun client view
-////   the call ran on. The desk builds each ticket's agent over a view
-////   correlated with the ticket, so its model calls carry it.
+////   the call ran on: `fabric/llm` sets the run's per turn.
 ////
-//// HTTP and llm_wire events of calls made with a ticket-correlated client
-//// carry the ticket's `Correlation` and need no join. Fabric events are attributed
-//// through the run id that `ticket.opened` pairs with the ticket's
-//// correlation.
+//// Every event of a ticket therefore carries the ticket's `Correlation`
+//// and needs no join.
 
 import fabric/observation as fabric_obs
 import gleam/erlang/process.{type Subject}
@@ -47,12 +43,12 @@ pub type Source {
 
 /// What an event can be joined on.
 pub type Key {
-  /// A fabric run id.
-  FabricRun(String)
+  /// A fabric run id, with the ticket the run was started under.
+  FabricRun(run: String, ticket: Correlation)
   /// One of the desk's own ticket events: the ticket and its fabric run.
   TicketRun(ticket: Correlation, run: String)
-  /// Saga's own run number; no per-ticket id reaches saga's events.
-  SagaRun(workflow: String, run: Int)
+  /// Saga's own run number, with the ticket its run was configured with.
+  SagaRun(workflow: String, run: Int, ticket: Option(Correlation))
   /// An HTTP request, with the ticket its client was correlated with.
   HttpRequest(ticket: Option(Correlation))
   /// A model call, with the ticket its client view was correlated with.
@@ -91,27 +87,28 @@ pub fn stop(telemetry: Telemetry) -> Nil {
   })
 }
 
-/// The events attributable to one ticket: its own events, its fabric
-/// run's events, and the HTTP requests and model calls made on its
-/// correlated client views. Saga events never qualify.
+/// The ticket an event belongs to: the correlation it carries.
+pub fn ticket_of(observation: Observation) -> Option(Correlation) {
+  case observation.key {
+    TicketRun(owner, _) -> Some(owner)
+    FabricRun(_, owner) -> Some(owner)
+    SagaRun(_, _, owner) -> owner
+    HttpRequest(owner) -> owner
+    ModelCall(owner) -> owner
+  }
+}
+
+/// The events attributable to one ticket: every event whose correlation
+/// is the ticket's.
 pub fn trail(telemetry: Telemetry, ticket: Correlation) -> List(Observation) {
-  let all = observations(telemetry)
-  let runs =
-    list.filter_map(all, fn(observation) {
-      case observation.key {
-        TicketRun(owner, run) if owner == ticket -> Ok(run)
-        _ -> Error(Nil)
-      }
-    })
-  list.filter(all, fn(observation) {
-    case observation.key {
-      TicketRun(owner, _) -> owner == ticket
-      FabricRun(id) -> list.contains(runs, id)
-      HttpRequest(Some(owner)) -> owner == ticket
-      ModelCall(Some(owner)) -> owner == ticket
-      _ -> False
-    }
+  list.filter(observations(telemetry), fn(observation) {
+    ticket_of(observation) == Some(ticket)
   })
+}
+
+/// The events that carry no ticket.
+pub fn unattributed(observations: List(Observation)) -> List(Observation) {
+  list.filter(observations, fn(observation) { ticket_of(observation) == None })
 }
 
 /// Events seen per source, attributable or not.
@@ -128,10 +125,10 @@ pub fn render(observation: Observation) -> String {
     LlmWire -> "llm_wire"
   }
   let key = case observation.key {
-    FabricRun(id) -> "run " <> id
+    FabricRun(id, _) -> "run " <> id
     TicketRun(ticket, run) ->
       "ticket " <> correlation.to_string(ticket) <> ", run " <> run
-    SagaRun(workflow, run) -> workflow <> "#" <> int.to_string(run)
+    SagaRun(workflow, run, _) -> workflow <> "#" <> int.to_string(run)
     HttpRequest(Some(ticket)) -> "ticket " <> correlation.to_string(ticket)
     HttpRequest(None) -> "uncorrelated"
     ModelCall(Some(ticket)) -> "ticket " <> correlation.to_string(ticket)
@@ -146,10 +143,10 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
   let fabric = fn(name, key, detail) {
     process.send(collector, Observed(Observation(Fabric, name, key, detail)))
   }
-  let saga = fn(name, workflow, run, detail) {
+  let saga = fn(name, workflow, run, ticket, detail) {
     process.send(
       collector,
-      Observed(Observation(Saga, name, SagaRun(workflow, run), detail)),
+      Observed(Observation(Saga, name, SagaRun(workflow, run, ticket), detail)),
     )
   }
   let ticket = fn(name, ticket, run, detail) {
@@ -166,49 +163,57 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
       ticket("ticket.answered", m.ticket, m.run, string.inspect(m.answer))
     }),
     sinal.observe(fabric_obs.run_started(), fn(_, m) {
-      fabric("run.start", FabricRun(m.run), m.agent)
+      fabric("run.start", FabricRun(m.run, m.correlation), m.agent)
     }),
     sinal.observe(fabric_obs.model_turn(), fn(_, m) {
       fabric(
         "model.stop",
-        FabricRun(m.run),
+        FabricRun(m.run, m.correlation),
         "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
       )
     }),
     sinal.observe(fabric_obs.approval_requested(), fn(_, m) {
-      fabric("approval.request", FabricRun(m.action.run), m.action.tool)
+      fabric(
+        "approval.request",
+        FabricRun(m.action.run, m.correlation),
+        m.action.tool,
+      )
     }),
     sinal.observe(fabric_obs.approval_answered(), fn(_, m) {
       fabric(
         "approval.answer",
-        FabricRun(m.action.run),
+        FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> string.inspect(m.answer),
       )
     }),
     sinal.observe(fabric_obs.tool_dispatched(), fn(_, m) {
       fabric(
         "tool.start",
-        FabricRun(m.action.run),
+        FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> m.action.call_id,
       )
     }),
     sinal.observe(fabric_obs.tool_settled(), fn(_, m) {
       fabric(
         "tool.stop",
-        FabricRun(m.action.run),
+        FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> string.inspect(m.disposition),
       )
     }),
     sinal.observe(fabric_obs.settlement_refused(), fn(_, m) {
-      fabric("tool.settlement.refuse", FabricRun(m.action.run), m.summary)
+      fabric(
+        "tool.settlement.refuse",
+        FabricRun(m.action.run, m.correlation),
+        m.summary,
+      )
     }),
     sinal.observe(fabric_obs.run_cancelled(), fn(_, m) {
-      fabric("run.cancel", FabricRun(m.run), "")
+      fabric("run.cancel", FabricRun(m.run, m.correlation), "")
     }),
     sinal.observe(fabric_obs.run_finished(), fn(totals, m) {
       fabric(
         "run.stop",
-        FabricRun(m.run),
+        FabricRun(m.run, m.correlation),
         string.inspect(m.outcome)
           <> " after "
           <> int.to_string(totals.turns)
@@ -216,19 +221,26 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
       )
     }),
     sinal.observe(saga_obs.run_started(), fn(_, m) {
-      saga("run.start", m.workflow, m.run, "")
+      saga("run.start", m.workflow, m.run, m.correlation, "")
     }),
     sinal.observe(saga_obs.run_stopped(), fn(_, m) {
-      saga("run.stop", m.workflow, m.run, string.inspect(m.outcome))
+      saga(
+        "run.stop",
+        m.workflow,
+        m.run,
+        m.correlation,
+        string.inspect(m.outcome),
+      )
     }),
     sinal.observe(saga_obs.step_started(), fn(_, m) {
-      saga("step.start", m.workflow, m.run, m.step)
+      saga("step.start", m.workflow, m.run, m.correlation, m.step)
     }),
     sinal.observe(saga_obs.step_stopped(), fn(_, m) {
       saga(
         "step.stop",
         m.workflow,
         m.run,
+        m.correlation,
         m.step <> " " <> string.inspect(m.result),
       )
     }),
@@ -237,6 +249,7 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         "step.compensate",
         m.workflow,
         m.run,
+        m.correlation,
         m.step <> " " <> string.inspect(m.decision),
       )
     }),
@@ -245,6 +258,7 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         "step.undo",
         m.workflow,
         m.run,
+        m.correlation,
         m.step <> " " <> string.inspect(m.result),
       )
     }),

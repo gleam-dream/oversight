@@ -104,6 +104,8 @@ telemetry trail.
   argument to `fabric_saga.tool`, so the workflow input can carry what the
   context owns. Callers that need nothing from the context pass `fn(_, input) { input }`.
 
+- **Status (round 5):** resolved by fabric fd60851/409f1a7: `fabric_saga.tool` takes `input: fn(context, call, input)`. `desk.build` passes `fn(session, call, request) { refund.Refund(shop.correlated(session.shop, call.correlation), request) }`, so the workflow input carries a per-ticket shop and `refund.workflow` no longer captures one (`workflow(shop, ledger)` becomes `workflow(ledger)`). The cost is a wrapper type: `Refund(shop, request)` (7 lines) and each step reads `refund.shop`; the void step reaches it through `undo.input`. The approver is still not on the ledger entry, because the app does not use it.
+
 ### SD-3 One ticket cannot be followed from the tool into the saga or into model calls
 
 - **Packages**: fabric, saga, http_gun, llm_wire, sinal. **Kind**: composition. **Severity**: major.
@@ -145,6 +147,8 @@ telemetry trail.
 - **Status (wave 3):** partially resolved by saga 89c1aec: saga events now carry `correlation` and `execution` metadata, and `execution.with_correlation` puts a `Correlation` in them. The app cannot use it: `fabric_saga.tool` takes one `Config` when the agent is built, not one per call (SD-2), so no ticket reaches the saga. The demo still prints 22 saga events, 100 llm_wire events and every refund, notify and model HTTP event as unattributable. No app line changed for this finding.
 
 - **Status (wave 4):** partially resolved by llm_wire 9f35183 and http_gun 4a6eeb0: llm_wire reads the correlation from the `http_gun.Client` view, so the 100 unattributed llm_wire events drop to 0 and the model's HTTP events join as well (the T-1 trail grows from 20 to 52 events; `telemetry.trail` now keys `ModelCall(ticket)`). It needed one app change that the guide does not predict: `fabric/llm.model` binds its client when the agent is built, and an agent is built once, so one correlated view per ticket meant one agent per ticket (`desk.open_ticket` calls `build` with `http_gun.with_correlation(llm_client, ticket)`; `Desk` keeps `Settings` instead of an `Agent`, +7 lines). The cause is untouched upstream: `model.Request` still has no run or correlation, so a durable run recovered from the store would need the app to rebuild the same view. Saga and the refund, notify and void HTTP calls stay unattributable (22 saga events), because `fabric_saga.tool` still takes one `Config` for all tickets (SD-2).
+
+- **Status (round 5):** resolved by fabric fd60851/409f1a7 (`fabric.start(.., correlation: Some(ticket))`, `model.Request.correlation`, `tool.Call.correlation`, and saga events configured per call). The demo prints `not attributable to any ticket: 0 of 267 events`, where wave 4 left 22 saga events plus the refund, notify and void HTTP events unattributed. The T-1 trail is 60 events (fabric 14, llm_wire 20, http_gun 16, saga 8, desk 2), and `telemetry.trail` is one filter on the event's correlation: the `ticket.opened` run-id join is deleted from it. `desk.open_ticket` builds no agent; `Desk` keeps one `Agent(Session)` again. Test `telemetry_follows_the_ticket_through_every_package_test` asserts `unattributed == []` and a trail equal to all events, and `one_agent_serves_two_tickets_and_keeps_their_events_apart_test` runs two tickets at once on the one agent.
 
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
@@ -631,7 +635,7 @@ Source lines (`src/`): about 115 deleted, 55 added. The test file changed by
 
 ### New friction
 
-- **An agent per ticket is the honest consequence of a bound client.** The
+- **An agent per ticket is the honest consequence of a bound client.** **Status (round 5):** resolved by fabric fd60851 (`model.Request.correlation`; `fabric/llm` tags the view per turn); `Desk` holds one agent again. Original finding: The
   wave 4 correlation rule ("set it once, on the view") assumes the caller
   chooses the view per call. `fabric/llm.model` takes the view when the model
   is built, so the only way to correlate model calls with a ticket is to build
@@ -640,7 +644,7 @@ Source lines (`src/`): about 115 deleted, 55 added. The test file changed by
   one agent only to reject bad settings. A per-request view
   (`model.Request.correlation`, or a `fn(Request) -> Client`) would keep one
   agent for all tickets.
-- **The ecosystem rule stops at fabric.** `fabric.await(handle, 10_000)`,
+- **The ecosystem rule stops at fabric.** **Status (round 5):** resolved by fabric fd60851: `fabric.await(handle, within: duration.seconds(10))` and `rollback_within: duration.seconds(5)`; no millisecond literal is left in the app (src or tests). Original finding: `fabric.await(handle, 10_000)`,
   `fabric_saga.tool(.., rollback_within: 5000)` and the test timeouts are
   still `Int` milliseconds, next to `Duration` for the shop view and the
   client. 556abc3's CHANGELOG moves fabric onto the wave 4 APIs but does not
@@ -672,3 +676,75 @@ view when the agent is built, which is why a per-ticket agent is needed;
 the replacement needs `llm_wire/testing` and `llm_wire/message`, so the app
 gains an llm_wire dependency in its test server, which it already had in
 `gleam.toml`.
+
+### After round 5
+
+Package heads: fabric fd60851/409f1a7 (local), the others as above. 14 tests
+pass (12 before: the telemetry test was rewritten, and two were added);
+`gleam run` prints the five tickets, the ledger and the T-1 trail; `gleam
+format` is clean and the app builds with no warning of its own.
+
+| Seam                                    | Before                                                   | After                                                                      | Change                                           |
+| --------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
+| Agents built                            | one per ticket (plus one at start)                       | one, at `desk.start`                                                       | `Desk.settings` becomes `Desk.agent`             |
+| Model-call correlation                  | per-ticket `http_gun.with_correlation` view, 7 lines     | `correlation: Some(session.ticket)` in `fabric.start`                      | -7 lines, `build` loses its client parameter     |
+| Tool and saga HTTP correlation          | `desk.correlated(session)`, lookups only (6 lines)       | `shop.correlated(shop, call.correlation)` in 3 handlers, saga included     | helper moves to `shop.gleam` (+8), `desk` -6     |
+| Saga workflow input                     | `RefundRequest`, shop captured at build                  | `Refund(shop, request)` from `fabric_saga.tool`'s `input:`                 | +9 lines in `refund.gleam`                       |
+| Ticket to run join in `telemetry.trail` | 19 lines: collect `TicketRun` run ids, match `FabricRun` | 1 filter on `ticket_of` (fabric and saga events now carry the correlation) | `trail` 19 to 5; `ticket_of`, `unattributed` +16 |
+| Millisecond literals                    | 3 in src, 9 in tests (`10_000`, `5000`)                  | 0                                                                          | `Duration` everywhere                            |
+| Waiter processes                        | 0                                                        | 0                                                                          | the app never had one; `await_with` not needed   |
+| Idempotent open                         | none: a second `open_ticket` started a second run        | run id `ticket-<ticket>`; `AlreadyStarted` opens the stored run            | +20 lines in `desk.open_ticket`, new behavior    |
+
+Source lines (`src/`): 110 removed, 157 added, net 47 more. The deletions are
+the per-ticket agent, `correlated`, the run join and the millisecond
+literals, about 35 lines of glue. The additions are mostly behavior the
+brief asked for or the measure needs: the idempotent open (about 25 lines),
+the `Refund` wrapper (9), `shop.correlated` (8) and `ticket_of` plus
+`unattributed` (16). Tests: +65, -27 (two tests added).
+
+- **Unattributed events per run: 0 of 267** in the demo (was 22 saga events and
+  every refund, notify, void and model HTTP event). The bound is weak: it
+  holds because every path the desk takes passes `session.ticket` into
+  `fabric.start`. With `correlation: None`, fabric derives the correlation
+  from the run id, so the events would carry a correlation that is not the
+  ticket's and drop out of the trail, while `unattributed` (which counts
+  events with no correlation) would still report 0. The measure cannot see
+  that failure; the trail-equals-all assertions in the tests can.
+
+### New friction
+
+- **Two sources for one ticket id.** `Session.ticket` and `tool.Call.correlation`
+  are equal only because `open_ticket` passes `Some(session.ticket)`. Tools
+  now read the call's, but `close`, `events.opened` and `events.answered`
+  still read the session's. Nothing ties them; a caller who opens a run
+  elsewhere with another correlation would split the trail. Dropping
+  `Session.ticket` would mean `close` reads the correlation back from the run
+  (`fabric.snapshot`?), which the app did not try.
+- **A saga step cannot read the run's correlation.** `fabric_saga` puts
+  `call.correlation` on the Saga run's events, but a step gets only its input.
+  The HTTP calls join the ticket only because the app also builds a correlated
+  `Shop` into the workflow input, so the same value reaches saga twice by two
+  routes. `Refund(shop, request)` and the `shop.refund`, `shop.void` and
+  `shop.notify` calls are the app's cost for that. A step-level accessor
+  (`saga.correlation(context)`) would let the workflow keep a plain client.
+- **`AlreadyStarted` is a start error but the idempotent answer is a run.**
+  `open_ticket` handles it with `fabric.open(store, agent, session, id)` and
+  maps `RecordError` back into `StartRefused` (8 lines). A
+  `fabric.start_or_open` would be one call. Also, the second prompt is
+  dropped without notice, which is right for a retried job and surprising for
+  a customer who wrote again; the desk cannot tell the two apart.
+- **A ticket must be a valid run id.** `correlation.from_string` admits 1 to
+  128 arbitrary bytes, while `run.parse_id` admits letters, digits, `-` and
+  `_` up to 128 including the `ticket-` prefix. A ticket id with a space or a
+  `.` is refused as `StartRefused`. Hashing with `correlation.from_key` would
+  avoid that, but then the run id is not readable in the trail.
+- **The saga's run counter is process-global.** T-1's saga run is `refund#6`,
+  not `#1`: saga numbers its runs per process, so it is not a join key and the
+  trail needs the correlation, which is what it now has.
+
+### Migration guide
+
+Sufficient. The round 5 guide's support_desk row named every compile error
+(`start`, `_call`, `input:`, `Duration`) and predicted the single agent. It
+says "the ticket's saga events now join it" but not that the saga's HTTP
+calls still need the app to put a correlated client in the workflow input.

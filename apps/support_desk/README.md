@@ -33,7 +33,7 @@ Seams under test:
 - The approval gate: approve, reject, and cancel while waiting.
 - A typed final answer decoded from the agent's text (`desk.answer`).
 - Telemetry correlation from agent to tool to saga to HTTP: the desk's own
-  `sinal/correlation` ticket id joins fabric runs, the lookup HTTP calls and, through a per-ticket agent over a correlated client view, the model calls and their llm_wire events; saga still carries no ticket (`fabric_saga.tool` takes one configuration for all tickets).
+  `sinal/correlation` ticket id is the fabric run's correlation (`fabric.start(.., correlation: Some(ticket))`), so one agent serves every ticket and each fabric, llm_wire, http_gun and saga event carries the ticket: the model calls through `fabric/llm`, the tools' and the refund saga's HTTP calls through `tool.Call.correlation`. The run id is derived from the ticket, so opening a ticket twice returns its one run.
 
 ## Layout
 
@@ -52,7 +52,7 @@ Seams under test:
 From this directory, inside the oversight dev shell:
 
 ```sh
-gleam test   # 12 tests
+gleam test   # 14 tests
 gleam run    # prints each ticket, the ledger, and one ticket's telemetry trail
 ```
 

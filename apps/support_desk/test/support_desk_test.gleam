@@ -42,14 +42,16 @@ fn open(
 fn awaiting_refund_approval(
   handle: fabric.Run(desk.Session),
 ) -> run.PendingApproval {
-  let assert Ok(run.Suspended([pending], [])) = fabric.await(handle, 10_000)
+  let assert Ok(run.Suspended([pending], [])) =
+    fabric.await(handle, within: duration.seconds(10))
   assert pending.tool == "issue_refund"
   assert pending.reference.requirement == desk.approver
   pending
 }
 
 fn finish(handle: fabric.Run(desk.Session)) -> domain.Resolution {
-  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert Ok(run.Finished(outcome)) =
+    fabric.await(handle, within: duration.seconds(10))
   let assert desk.Resolved(resolution) = desk.answer(outcome)
   resolution
 }
@@ -114,7 +116,8 @@ pub fn a_turn_limit_ends_the_run_without_a_typed_answer_test() {
   let assert Ok(app) =
     app.start_with(limits, shop_deadline: duration.seconds(1))
   let #(_, handle) = open(app, "T-3", "Refund order A-100.", 0)
-  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert Ok(run.Finished(outcome)) =
+    fabric.await(handle, within: duration.seconds(10))
   assert desk.answer(outcome)
     == desk.Ended(run.BudgetExhausted(run.TurnLimit(2)))
   app.stop(app)
@@ -170,7 +173,8 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   // http_gun's deadline fired after the request may have been sent; the
   // step marks that error with `saga.unknown_when`, and fabric_saga turns
   // the unknown effect into an uncertain one: no model turn until reconciled.
-  let assert Ok(run.Suspended([], [uncertain])) = fabric.await(handle, 10_000)
+  let assert Ok(run.Suspended([], [uncertain])) =
+    fabric.await(handle, within: duration.seconds(10))
   assert uncertain.tool == "issue_refund"
   assert string.contains(uncertain.evidence, "refund_payment")
   assert ledger.entries(app.ledger) == []
@@ -221,40 +225,68 @@ pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
 
 // Telemetry -----------------------------------------------------------------
 
-pub fn telemetry_follows_agent_tools_and_model_but_not_the_saga_test() {
+pub fn telemetry_follows_the_ticket_through_every_package_test() {
   let assert Ok(app) = app.start()
   let #(session, handle) = open(app, "T-9", "Please refund order A-100.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
     fabric.approve(handle, pending.reference, reviewer: None, context: session)
-  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert Ok(run.Finished(outcome)) =
+    fabric.await(handle, within: duration.seconds(10))
   let assert desk.Resolved(_) = desk.close(session, handle, outcome)
   let trail = telemetry.trail(app.telemetry, session.ticket)
   let names = list.map(trail, fn(o) { o.name })
-  // The desk's own events carry the ticket's correlation and the run id,
-  // which attributes fabric's events. The lookups' HTTP calls carry the
-  // ticket because the tool handler receives the session, and the model
-  // calls carry it because the ticket's agent runs on a correlated client
-  // view: four turns, two HTTP events each, plus the llm_wire events.
   assert list.contains(names, "ticket.opened")
   assert list.contains(names, "ticket.answered")
   assert list.contains(names, "approval.request")
   assert list.contains(names, "run.stop")
-  assert telemetry.count(trail, telemetry.HttpGun) == 12
-  assert telemetry.count(trail, telemetry.LlmWire) > 0
+  // The ticket is the run's correlation, so every package that takes one
+  // carries it: fabric's events, the model's four turns (two HTTP events
+  // each), the two lookups (two each) and, from the saga, the refund and
+  // notify calls (two each).
+  assert telemetry.count(trail, telemetry.HttpGun) == 16
+  assert telemetry.count(trail, telemetry.Saga) > 0
 
+  // Nothing is left over: the one ticket's trail is every event.
   let all = telemetry.observations(app.telemetry)
-  // Every llm_wire event belongs to the ticket. The saga ran (3 steps),
-  // but nothing in its events names the ticket (`fabric_saga` takes one
-  // configuration for all tickets), and its HTTP calls (refund, notify)
-  // are uncorrelated.
-  assert telemetry.count(trail, telemetry.LlmWire)
-    == telemetry.count(all, telemetry.LlmWire)
-  assert telemetry.count(all, telemetry.Saga) > 0
-  assert telemetry.count(trail, telemetry.Saga) == 0
-  let uncorrelated =
-    list.count(all, fn(o) { o.key == telemetry.HttpRequest(None) })
-  assert uncorrelated > 0
+  assert telemetry.unattributed(all) == []
+  assert list.length(trail) == list.length(all)
+  app.stop(app)
+}
+
+pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
+  let assert Ok(app) = app.start()
+  let #(first, one) = open(app, "T-11", "Please refund order A-100.", 0)
+  let #(second, two) = open(app, "T-12", "Order A-300 never worked.", 0)
+  let one_pending = awaiting_refund_approval(one)
+  let two_pending = awaiting_refund_approval(two)
+  let assert Ok(_) =
+    fabric.approve(one, one_pending.reference, reviewer: None, context: first)
+  let assert Ok(_) =
+    fabric.approve(two, two_pending.reference, reviewer: None, context: second)
+  let _ = finish(one)
+  let _ = finish(two)
+  let all = telemetry.observations(app.telemetry)
+  assert telemetry.unattributed(all) == []
+  let first_trail = telemetry.trail(app.telemetry, first.ticket)
+  let second_trail = telemetry.trail(app.telemetry, second.ticket)
+  assert list.length(first_trail) + list.length(second_trail)
+    == list.length(all)
+  // The refund and notify calls of each ticket carry that ticket.
+  assert list.any(first_trail, fn(o) { string.contains(o.detail, "201") })
+  assert list.any(second_trail, fn(o) { string.contains(o.detail, "201") })
+  app.stop(app)
+}
+
+pub fn opening_a_ticket_twice_returns_its_one_run_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-13", "Please refund order A-100.", 0)
+  let assert Ok(again) = desk.open_ticket(app.desk, session, "a second try")
+  assert fabric.id(again) == fabric.id(handle)
+  let opened =
+    telemetry.trail(app.telemetry, session.ticket)
+    |> list.count(fn(o) { o.name == "ticket.opened" })
+  assert opened == 1
   app.stop(app)
 }
 
@@ -275,7 +307,8 @@ pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
   let assert Ok(app) =
     app.start_with(limits, shop_deadline: duration.seconds(1))
   let #(session, handle) = open(app, "T-10", "Refund order A-100.", 0)
-  let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
+  let assert Ok(run.Finished(outcome)) =
+    fabric.await(handle, within: duration.seconds(10))
   let assert desk.Ended(_) = desk.close(session, handle, outcome)
   let trail = telemetry.trail(app.telemetry, session.ticket)
   let assert Ok(answered) =
@@ -289,8 +322,13 @@ pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
 pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   let assert Ok(app) = app.start()
   let request = domain.RefundRequest("A-400", 3000, "late provider")
-  let workflow = refund.workflow(app.desk.shop, app.ledger)
-  let assert Ok(outcome) = execution.run(workflow, request, refund.config())
+  let workflow = refund.workflow(app.ledger)
+  let assert Ok(outcome) =
+    execution.run(
+      workflow,
+      refund.Refund(app.desk.shop, request),
+      refund.config(),
+    )
   // The provider took the refund and answered after the client deadline.
   // The step marks that error with `saga.unknown_when`, so saga records the
   // attempt as an unknown effect and, with no decider and no `on_unknown`,
