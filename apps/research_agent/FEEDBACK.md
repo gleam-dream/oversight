@@ -331,6 +331,18 @@ cancellation to another, so the app owns the joins (RA-1).
   15 llm_wire events per request stay unattributed, and Fabric events still
   join through `bind_run`.
 
+  **Status (wave 4):** resolved for llm_wire and http_gun by llm_wire
+  177ad50 / 9f35183 (the call reads `http_gun.correlation` from its view and
+  puts it in `telemetry.Metadata.correlation`) and the app, not by fabric.
+  Fabric's `model.Request` still carries no run or context, and the model is
+  built over one client (`llm.model(client, ..)`), so the app builds the agent
+  per research over that research's correlated client
+  (`researcher.agent_for`, 12 lines; `Deps.agent` is now a function of the
+  `Context`). `gleam run` joins 51 events (was 30) and prints
+  `events no request id could claim: []`; the test asserts that no llm_wire,
+  saga or http_gun event is left over (it was 15 llm_wire and 6 http_gun).
+  Fabric events still join through `bind_run` (FABRIC-R8, wave 5).
+
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
 - **Packages**: grind, saga, json_blueprint. **Kind**: ergonomics.
@@ -949,3 +961,63 @@ was already 1 s and stays, because the lease is the fallback when the
 runner's node is lost. No `Admission` branch or `unknown_when` step exists in
 this app. Source and tests: about 55 lines removed, 105 added (`migrate_app`,
 `pool_config` and the settings helpers account for most of the additions).
+
+## Re-run after wave 4
+
+Package heads: llm_wire 9f35183, http_gun 4a6eeb0, saga af644b0, fabric
+556abc3.
+
+- **Tests**: 9 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests. `gleam run` prints the four
+  scenarios; `gleam format --check` and `gleam build --warnings-as-errors`
+  pass. One test changed intent: the common-path test now expects llm_wire
+  events in the request's trace and none of llm_wire, saga or http_gun
+  unattributed. Stored formats: the app writes no turn envelope of its own.
+  The Fabric transcript is stored by fabric through llm_wire's
+  `turn_replay_*` codecs, whose read compatibility with earlier
+  `llm_wire.turn.v1` records is fabric's claim (fabric 556abc3 tests); this
+  app has no old-format fixture of its own, so I did not prove it here.
+
+- **Glue measure, before → after**:
+
+  | Seam                                 | Before                                                     | After                               | Change                                                                                            |
+  | ------------------------------------ | ---------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------- |
+  | scripted OpenAI SSE (services.gleam) | 70 (`event`, `tool_call`, `answer`, `completed`)           | 24 (`reply`, `tool_call`, `answer`) | `testing.events_for(message.OpenAI, ..)` with the usage; file 671 → 604 lines                     |
+  | llm_wire config (researcher.gleam)   | 3 `let assert` (key, model id, endpoint) + 2 pipes         | 4, no assert                        | `openai.new \|> openai.config \|> with_endpoint`; the endpoint is checked by `prepare`            |
+  | millisecond conversions              | 6 literals and 1 wrapper (`duration.milliseconds(within)`) | 0                                   | `Duration` in `publish.run`, `await_outcome`, saga lease, step timeout, http timeout, conformance |
+  | llm_wire events joined (RA-7)        | 0 of 15                                                    | 15 of 15                            | `+12` for `agent_for`; telemetry observer keys on `m.correlation`                                 |
+  | agent construction                   | once at start                                              | once to validate + once per context | `Deps.agent: fn(Context) -> Agent(Context)`; `app.snapshot` builds one too                        |
+
+  Source: 2588 lines in `src/research_agent/` (was 2624), tests unchanged in count.
+
+- **Seams still needing glue, and owner**:
+  - **Model correlation by agent rebuild** (fabric, FABRIC-R8, wave 5):
+    correlation reaches llm_wire only because the app builds an agent over the
+    correlated client for each context. A `model.Request` that carried the run
+    or a context would remove `agent_for`, the `let assert` in it and the
+    start-time validation build.
+  - **Lease and wait integers** (fabric, fabric_postgres): `with_lease` takes
+    `Int` milliseconds, `fabric.await(handle, 250)` takes `Int`, and the app's
+    `Settings.fabric_lease_ms` mirrors it. The app's own `await_outcome` is a
+    `Duration`, so the `Int` stops at fabric's border.
+  - **RA-1, RA-4, RA-10**, the `Model failures as strings` item (fabric,
+    wave 5) and **RA-8 bridges** (grind, saga): unchanged.
+
+- **New friction**:
+  - `researcher.agent_for` hides a `let assert` behind a start-time check, a
+    pattern the app would not need if the model took per-run context.
+  - `testing.events_for` yields `Events(chunks)`, and the app has to
+    `let assert` that shape to join the chunks into one response body; a
+    `testing.body(reply)` returning the concatenated SSE would fit a fake
+    server directly.
+  - `testing.tool_calls("", ..)` takes the assistant text as a required
+    string; `""` reads as a magic value.
+  - `saga.step` timeouts now need `execution.After(duration.seconds(5))`:
+    longer than `5000`, and the wrapper only matters where `Infinity` is
+    meant.
+
+- **Migration guides**: accurate. The saga guide named all four research_agent
+  sites, and the http_gun table named the `Milliseconds(5000)` site. The
+  llm_wire guide named `researcher.gleam`, `telemetry.gleam`, `services.gleam`
+  and the test. It did not say that correlation needs the agent built per
+  research for fabric's model; that is the one step the guide left to the app.

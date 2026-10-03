@@ -13,9 +13,8 @@ import gleam/string
 import gleam/uri
 import http_gun
 import json/blueprint/codec
-import llm_wire/config
-import llm_wire/provider/openai
-import llm_wire/types
+import llm_wire
+import llm_wire/openai
 import research_agent/domain.{
   type Page, type PageRequest, type SearchQuery, type SearchResults, Page,
 }
@@ -108,12 +107,11 @@ pub fn build(
   llm_client: http_gun.Client,
   endpoints: Endpoints,
 ) -> Result(Agent(Context), List(agent.ConfigError)) {
-  let assert Ok(key) = types.api_key("sk-scripted")
-  let assert Ok(model_id) = types.model_id("gpt-scripted")
-  let assert Ok(endpoint) = types.endpoint(endpoints.llm)
   let settings =
-    config.openai(openai.options(key)) |> config.with_endpoint(endpoint)
-  let model = llm.model(llm_client, settings, model_id)
+    openai.new("sk-scripted")
+    |> openai.config
+    |> llm_wire.with_endpoint(endpoints.llm)
+  let model = llm.model(llm_client, settings, "gpt-scripted")
   let tools = [
     tool.bind(
       search_definition(),
@@ -132,6 +130,18 @@ pub fn build(
     agent.Limits(..agent.default_limits(), max_turns: 8, model_retry_delay: 50),
   )
   |> agent.build
+}
+
+/// The agent of one research. llm_wire reads the correlation from the client
+/// a model call is sent on, and a Fabric model sees no run context, so the
+/// model is built over the research's correlated client (RA-7). `start`
+/// builds the agent once to validate its configuration.
+pub fn agent_for(endpoints: Endpoints) -> fn(Context) -> Agent(Context) {
+  fn(context: Context) {
+    let assert Ok(agent) = build(context.http, endpoints)
+      as "the agent was validated when the node started"
+    agent
+  }
 }
 
 /// Recovery glue. After a crash, Fabric turns every tool that had started

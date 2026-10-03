@@ -10,6 +10,7 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
 import http_gun
 import json/blueprint/codec
 import research_agent/domain.{type Article, type Published, Published}
@@ -142,14 +143,14 @@ fn failed(step: String) -> fn(remote.Failure) -> PublishError {
 
 /// Starts the publication of `article`, or reconnects to the one already
 /// stored for its research id, and drives it to an outcome for at most
-/// `timeout` milliseconds. Its saga events carry `correlation`.
+/// `timeout`. Its saga events carry `correlation`.
 pub fn run(
   storage: Storage,
   client: http_gun.Client,
   base: String,
   article: Article,
   correlation: correlation.Correlation,
-  timeout timeout: Int,
+  timeout timeout: Duration,
 ) -> Result(Outcome, durable.Error) {
   let persistence =
     durable.new(
@@ -160,7 +161,8 @@ pub fn run(
       undo_error: saga_codec.text(),
     )
     |> durable.with_config(
-      execution.config() |> execution.with_step_timeout(5000),
+      execution.config()
+      |> execution.with_step_timeout(execution.After(duration.seconds(5))),
     )
   use run <- result.try(durable.start_or_reconnect(
     persistence,

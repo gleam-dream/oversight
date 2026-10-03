@@ -5,6 +5,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleam/time/duration
 import gleeunit
 import grind
 import grind/admin
@@ -93,7 +94,7 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   services.script(f.world, "otp", services.happy_script(f.world, "otp"))
   let assert Ok(id) = app.start_research(f.node, "otp")
   let assert Ok(grind.Succeeded(published)) =
-    app.await_outcome(f.node, id, 15_000)
+    app.await_outcome(f.node, id, duration.seconds(15))
   let assert True = string.starts_with(published.url, "https://blog.example/")
   let assert Ok(row) = app.row(f.node, id)
   let assert "published" = row.state
@@ -123,9 +124,9 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
     published: 1,
   ) = counts
 
-  // Following the request across packages: grind, saga and http_gun carry
-  // the research's `Correlation`, fabric joins through its run id, and
-  // llm_wire events cannot be joined.
+  // Following the request across packages: grind, saga, http_gun and
+  // llm_wire carry the research's `Correlation`; fabric joins through its
+  // run id.
   let trace = telemetry.trace(f.telemetry, id)
   let sources = telemetry.sources(trace)
   let assert True = list.contains(sources, "grind")
@@ -142,15 +143,12 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   // The durable saga carries the job's correlation (saga wave 3): its run
   // and step events join the request, and none is left over.
   let assert True = list.contains(sources, "saga")
-  let assert False = list.contains(sources, "llm_wire")
-  let unattributed = trace.unattributed
-  let assert Ok(llm_events) = list.key_find(unattributed, "llm_wire")
-  let assert True = llm_events > 0
-  let assert Error(Nil) = list.key_find(unattributed, "saga")
-  // The model's HTTP calls run on the client fixed at agent build time, so
-  // they carry no correlation either.
-  let assert Ok(http_unkeyed) = list.key_find(unattributed, "http_gun")
-  let assert True = http_unkeyed > 0
+  // The model runs on the research's correlated client view, and llm_wire
+  // reads the correlation from it: its events join, and none is left over.
+  let assert True = list.contains(sources, "llm_wire")
+  let assert Error(Nil) = list.key_find(trace.unattributed, "llm_wire")
+  let assert Error(Nil) = list.key_find(trace.unattributed, "saga")
+  let assert Error(Nil) = list.key_find(trace.unattributed, "http_gun")
 }
 
 // Failure: search API down during a turn --------------------------------------
@@ -165,7 +163,8 @@ pub fn search_down_once_is_explained_to_the_model_which_retries_test() {
   ])
   services.fail_searches(f.world, 1)
   let assert Ok(id) = app.start_research(f.node, "beam")
-  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 15_000)
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
   // The failed search reached the model as a tool result, not a crash.
   let assert Ok(snapshot) = app.snapshot(f.node, id)
   let assert Ok(failed) =
@@ -190,7 +189,7 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   ])
   services.set_search_down(f.world, True)
   let assert Ok(id) = app.start_research(f.node, "cobol")
-  let assert Ok(outcome) = app.await_outcome(f.node, id, 15_000)
+  let assert Ok(outcome) = app.await_outcome(f.node, id, duration.seconds(15))
   // The worker's error codec keeps the typed `NoSources` through
   // persistence, with the cause that ended the job (RA-9, grind 7a04831).
   let assert grind.Failed(
@@ -210,7 +209,8 @@ pub fn publish_failure_after_upload_deletes_the_draft_test() {
   services.script(f.world, "lisp", services.happy_script(f.world, "lisp"))
   services.set_publish_fails(f.world, True)
   let assert Ok(id) = app.start_research(f.node, "lisp")
-  let assert Ok(grind.Discarded(reason)) = app.await_outcome(f.node, id, 15_000)
+  let assert Ok(grind.Discarded(reason)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
   let assert True = string.contains(reason, "publish")
   let assert [#(_, services.Deleted)] = services.drafts(f.world)
   let assert services.Counts(
@@ -259,7 +259,8 @@ pub fn cancelling_the_job_reaches_the_run_and_closes_the_llm_stream_test() {
       },
       5000,
     )
-  let assert Ok(grind.Cancelled(reason)) = app.await_outcome(f.node, id, 10_000)
+  let assert Ok(grind.Cancelled(reason)) =
+    app.await_outcome(f.node, id, duration.seconds(10))
   let assert Ok(snapshot) = app.snapshot(f.node, id)
   let assert run.Finished(run.Cancelled) = snapshot.status
   let assert Ok(row) = app.row(f.node, id)
@@ -345,7 +346,8 @@ pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
       }
     },
   )
-  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 30_000)
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(30))
   // Resumed, not restarted: the search done before the crash is not repeated,
   // and the model call lost with the VM is issued again (3 + 1 calls).
   let assert services.Counts(
@@ -375,7 +377,8 @@ pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
       }
     },
   )
-  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 30_000)
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(30))
   // The read became an uncertain effect; the app read the page again and
   // reconciled the action with that result.
   let assert Ok(snapshot) = app.snapshot(f.node, id)
@@ -395,7 +398,7 @@ pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
 /// suite there.
 pub fn saga_postgres_on_the_shared_pool_passes_saga_conformance_test() {
   use f <- with_node("t_saga_conformance")
-  let lease = 1000
+  let lease = duration.seconds(1)
   let assert Ok(Nil) =
     conformance.run(
       fn() {
@@ -414,8 +417,8 @@ pub fn saga_postgres_on_the_shared_pool_passes_saga_conformance_test() {
           }),
         )
       },
-      timeout: 5000,
-      owner_loss_within: lease + 500,
+      timeout: duration.seconds(5),
+      owner_loss_within: duration.add(lease, duration.milliseconds(500)),
     )
 }
 

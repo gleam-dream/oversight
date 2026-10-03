@@ -8,6 +8,7 @@ import gleam/io
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
+import gleam/time/duration
 import research_agent/app
 import research_agent/services
 import research_agent/telemetry
@@ -44,7 +45,7 @@ fn story(url: String) -> Nil {
   services.script(world, "otp", services.happy_script(world, "otp"))
   let assert Ok(first) = app.start_research(node, "otp")
   io.println("1. start_research(\"otp\") -> " <> first)
-  let outcome = app.await_outcome(node, first, 10_000)
+  let outcome = app.await_outcome(node, first, duration.seconds(10))
   io.println("   job outcome: " <> string.inspect(outcome))
   let assert Ok(snapshot) = app.snapshot(node, first)
   io.println(
@@ -81,7 +82,7 @@ fn story(url: String) -> Nil {
   io.println("\n2. search answers 503 once -> " <> second)
   io.println(
     "   job outcome: "
-    <> string.inspect(app.await_outcome(node, second, 10_000)),
+    <> string.inspect(app.await_outcome(node, second, duration.seconds(10))),
   )
 
   // 3. Publishing fails after the body was uploaded: the saga deletes the
@@ -91,7 +92,8 @@ fn story(url: String) -> Nil {
   let assert Ok(third) = app.start_research(node, "lisp")
   io.println("\n3. the publisher rejects the publish step -> " <> third)
   io.println(
-    "   job outcome: " <> string.inspect(app.await_outcome(node, third, 10_000)),
+    "   job outcome: "
+    <> string.inspect(app.await_outcome(node, third, duration.seconds(10))),
   )
   io.println(
     "   drafts at the publisher: " <> string.inspect(services.drafts(world)),
@@ -111,7 +113,7 @@ fn story(url: String) -> Nil {
   io.println("   provider saw: " <> string.inspect(wait_notice(notices, 5000)))
   io.println(
     "   job outcome: "
-    <> string.inspect(app.await_outcome(node, fourth, 10_000)),
+    <> string.inspect(app.await_outcome(node, fourth, duration.seconds(10))),
   )
 
   io.println(
