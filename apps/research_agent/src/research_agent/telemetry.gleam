@@ -12,7 +12,8 @@
 //// - http_gun: the research id as a `Correlation`, attached with
 ////   `with_correlation` (the tool handlers do that per call);
 //// - fabric: `run` (issued by `fabric.start`; the app records it);
-//// - llm_wire: nothing (stage, provider, outcome).
+//// - llm_wire: the correlation of the HTTP client view the model call runs
+////   on, which is the research id (`researcher.agent_for`).
 
 import fabric/observation as fabric_events
 import gleam/dict.{type Dict}
@@ -264,8 +265,14 @@ pub fn start(echo_events: Bool) -> Telemetry {
       },
     ),
     // llm_wire
-    sinal.observe(llm_events.observation_event(), fn(_, m: llm_events.Metadata) {
-      record("llm_wire", m.stage, Unkeyed, m.provider <> " " <> m.outcome)
+    // llm_wire reads the correlation from the model call's client view.
+    sinal.observe(llm_events.event(), fn(_, m: llm_events.Metadata) {
+      record(
+        "llm_wire",
+        llm_events.stage_name(m.stage),
+        keyed(m.correlation),
+        m.provider <> " " <> llm_events.outcome_name(m.outcome),
+      )
     }),
     // http_gun (routed through the app's forwarder, `http_prefix`)
     sinal.observe(http_events.event(), fn(_, m: http_events.Metadata) {

@@ -46,7 +46,7 @@ pub const queue = "research"
 pub type Deps {
   Deps(
     runs: Store,
-    agent: Agent(Context),
+    agent: fn(Context) -> Agent(Context),
     http: http_gun.Client,
     sagas: Storage,
     endpoints: Endpoints,
@@ -125,7 +125,7 @@ pub fn handle(
           deps.publisher,
           article,
           worker.correlation(job),
-          timeout: 60_000,
+          timeout: duration.seconds(60),
         )
       case published {
         Ok(execution.Completed(published)) -> {
@@ -200,7 +200,7 @@ fn drive_agent(
       // On a leased store `recover` is safe at any time: it takes over only
       // a free or expired lease, or a lease of this store whose runner is
       // gone, and otherwise just opens the run.
-      fabric.recover(deps.runs, deps.agent, context, id)
+      fabric.recover(deps.runs, deps.agent(context), context, id)
       |> result.map_error(fn(e) { Stopped("recover: " <> string.inspect(e)) })
       |> result.try(fn(handle) {
         // A previous attempt that found no sources ends a run; a retry
@@ -227,7 +227,12 @@ fn start_run(
   research: Research,
 ) -> Result(fabric.Run(Context), Ending) {
   use handle <- result.try(
-    fabric.start(deps.runs, deps.agent, context, domain.prompt(research))
+    fabric.start(
+      deps.runs,
+      deps.agent(context),
+      context,
+      domain.prompt(research),
+    )
     |> result.map_error(fn(e) { Stopped("start: " <> string.inspect(e)) }),
   )
   // Fabric issues the run id, so it is recorded only after the run's first
@@ -262,7 +267,14 @@ fn follow(
         Error(Nil) -> next(handle)
       }
     Ok(run.Unattended) ->
-      case fabric.recover(deps.runs, deps.agent, context, fabric.id(handle)) {
+      case
+        fabric.recover(
+          deps.runs,
+          deps.agent(context),
+          context,
+          fabric.id(handle),
+        )
+      {
         Ok(handle) -> next(handle)
         Error(e) -> Error(Stopped("recover: " <> string.inspect(e)))
       }

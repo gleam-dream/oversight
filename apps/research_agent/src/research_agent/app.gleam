@@ -83,7 +83,7 @@ fn http_settings(services: String) -> Result(http_config.Config, String) {
   |> http_config.with_destination(
     destination.loopback_only() |> destination.only_hosts([authority]),
   )
-  |> http_config.with_request_timeout(http_config.Milliseconds(5000))
+  |> http_config.with_request_timeout(http_config.After(duration.seconds(5)))
   |> Ok
 }
 
@@ -120,7 +120,7 @@ fn saga_settings(
   database: pog.Connection,
 ) -> Result(saga_postgres.Config, String) {
   saga_postgres.config(database)
-  |> saga_postgres.with_lease(10_000)
+  |> saga_postgres.with_lease(duration.seconds(10))
   |> saga_postgres.with_schema(settings.schema)
   |> result.map_error(string.inspect)
 }
@@ -173,13 +173,13 @@ pub fn start(settings: Settings) -> Result(App, String) {
   use http_settings <- result.try(http_settings(settings.services))
   let http = http_gun.named(http_name)
   let endpoints = endpoints(settings.services)
-  use agent <- result.try(
+  use _validated <- result.try(
     researcher.build(http, endpoints) |> result.map_error(string.inspect),
   )
   let deps =
     jobs.Deps(
       runs:,
-      agent:,
+      agent: researcher.agent_for(endpoints),
       http:,
       sagas: saga_postgres.storage(saga_settings),
       endpoints:,
@@ -300,14 +300,14 @@ pub fn handle(
   |> result.map_error(grind.describe_read_error)
 }
 
-/// Waits up to `within` milliseconds for the job's outcome.
+/// Waits up to `within` for the job's outcome.
 pub fn await_outcome(
   app: App,
   id: String,
-  within: Int,
+  within: duration.Duration,
 ) -> Result(grind.Outcome(Published, ResearchError), String) {
   use handle <- result.try(handle(app, id))
-  grind.await(app.jobs, handle, within: duration.milliseconds(within))
+  grind.await(app.jobs, handle, within:)
   |> result.map_error(grind.describe_read_error)
 }
 
@@ -323,7 +323,7 @@ pub fn snapshot(app: App, id: String) -> Result(run.Snapshot, String) {
   let assert Ok(run_id) = run.parse_id(run_id)
   let context = researcher.context(app.http, id)
   use handle <- result.try(
-    fabric.open(app.runs, app.deps.agent, context, run_id)
+    fabric.open(app.runs, app.deps.agent(context), context, run_id)
     |> result.map_error(string.inspect),
   )
   fabric.snapshot(handle) |> result.map_error(string.inspect)

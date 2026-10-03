@@ -27,6 +27,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import llm_wire/message
+import llm_wire/testing
 import mist
 
 pub type Step {
@@ -518,100 +520,31 @@ fn count(haystack: String, needle: String) -> Int {
   list.length(string.split(haystack, needle)) - 1
 }
 
-fn event(name: String, data: json.Json) -> String {
-  "event: " <> name <> "\ndata: " <> json.to_string(data) <> "\n\n"
+/// One scripted reply on the OpenAI Responses wire, with the usage the
+/// scripted provider always reports.
+fn reply(scripted: testing.Reply) -> String {
+  let assert testing.Events(chunks) =
+    testing.events_for(
+      message.OpenAI,
+      scripted |> testing.with_usage(message.Usage(120, 40, 160)),
+    )
+  string.concat(chunks)
 }
 
 fn tool_call(step: Int, name: String, arguments: json.Json) -> String {
-  let item = "item_" <> int.to_string(step)
-  let call = "call_" <> int.to_string(step)
-  event(
-    "response.output_item.added",
-    json.object([
-      #("output_index", json.int(0)),
-      #(
-        "item",
-        json.object([
-          #("id", json.string(item)),
-          #("type", json.string("function_call")),
-          #("call_id", json.string(call)),
-          #("name", json.string(name)),
-        ]),
+  reply(
+    testing.tool_calls("", [
+      testing.ScriptedCall(
+        id: "call_" <> int.to_string(step),
+        name:,
+        arguments_json: json.to_string(arguments),
       ),
     ]),
   )
-  <> event(
-    "response.function_call_arguments.delta",
-    json.object([
-      #("output_index", json.int(0)),
-      #("item_id", json.string(item)),
-      #("delta", json.string(json.to_string(arguments))),
-    ]),
-  )
-  <> event(
-    "response.output_item.done",
-    json.object([
-      #("output_index", json.int(0)),
-      #("item", json.object([#("id", json.string(item))])),
-    ]),
-  )
-  <> completed()
 }
 
 fn answer(text: String) -> String {
-  event(
-    "response.output_item.added",
-    json.object([
-      #("output_index", json.int(0)),
-      #(
-        "item",
-        json.object([
-          #("id", json.string("msg_1")),
-          #("type", json.string("message")),
-          #("role", json.string("assistant")),
-        ]),
-      ),
-    ]),
-  )
-  <> event(
-    "response.output_text.delta",
-    json.object([
-      #("output_index", json.int(0)),
-      #("item_id", json.string("msg_1")),
-      #("delta", json.string(text)),
-    ]),
-  )
-  <> event(
-    "response.output_item.done",
-    json.object([
-      #("output_index", json.int(0)),
-      #("item", json.object([#("id", json.string("msg_1"))])),
-    ]),
-  )
-  <> completed()
-}
-
-fn completed() -> String {
-  event(
-    "response.completed",
-    json.object([
-      #(
-        "response",
-        json.object([
-          #("id", json.string("resp_1")),
-          #("status", json.string("completed")),
-          #(
-            "usage",
-            json.object([
-              #("input_tokens", json.int(120)),
-              #("output_tokens", json.int(40)),
-              #("total_tokens", json.int(160)),
-            ]),
-          ),
-        ]),
-      ),
-    ]),
-  )
+  reply(testing.text(text))
 }
 
 fn sse(events: List(String)) -> Response(mist.ResponseData) {
