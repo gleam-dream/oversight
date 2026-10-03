@@ -105,6 +105,13 @@ prints the demo question, its answer and the run's telemetry trail.
   built in a 23-line test probe (:511-533), because no MCP client needs to
   send it over HTTP.
 
+- **Status (wave 4):** the probe is gone. The 23-line hand-built
+  `notifications/cancelled` POST and the test's second http_gun client
+  (`mcp_wire`) are one `http.handle` call on the running handler with a
+  `relay_testing.request("notifications/cancelled", ..)`
+  (test/tool_hub_test.gleam:577-582). Relay still answers 202 and changes
+  nothing, which is the spec behavior.
+
 ### TH-2 Relay's client cannot cancel, and its timeout leaves the server working
 
 - **Packages**: relay. **Kind**: composition. **Severity**: major.
@@ -145,6 +152,21 @@ input, CallOptions(cancellation: Option(Token), deadline: Option(Int)))`.
   (one connection per in-flight call, or close and reconnect), since the
   spec's only HTTP cancellation is the disconnect.
 
+- **Status (wave 4):** resolved by relay ffb6d37. A client timeout closes
+  that call's connection, so the server cancels the run without
+  `client.close`: `relay_client_timeout_cancels_the_run_test`
+  (test/tool_hub_test.gleam:640) gets `Error(TimedOut(MaybeSent))` after
+  300 ms, then sees the model stream close and the run end `Cancelled`. A
+  per-call `client.with_cancellation(token)` cancels one call and leaves the
+  client usable: `cancelling_one_call_keeps_the_client_open_test` (:603)
+  gets `Error(Cancelled(MaybeSent))`, the run is cancelled, and the same
+  client then answers `tools/list`. No glue was needed. New friction:
+  `client.close` on a client with a call in flight blocks for about 5 s
+  before the call fails, because an owned client closes through
+  `http_gun.stop`, which drains for its default 5 s shutdown timeout
+  (relay/src/relay/client.gleam:854-858). The doc says it closes "every
+  request and stream on it"; it should cancel them.
+
 ### TH-3 A cancelled Relay invocation does not cancel work the handler started elsewhere
 
 - **Packages**: relay, fabric. **Kind**: composition. **Severity**: major.
@@ -170,6 +192,24 @@ input, CallOptions(cancellation: Option(Token), deadline: Option(Int)))`.
   owner option to start (`fabric.start_owned(.., owner: Pid)` cancels the
   run when `owner` exits), mirroring llm_wire's stream owner, which already
   closes HTTP when its consumer dies.
+
+- **Status (wave 4):** not resolved; relay defect. `tool.cancelled(call)`
+  fires, but over HTTP the worker is killed in the same step. On a client
+  disconnect the buffered path calls `runtime.exchange_closed` and then
+  `finish`, which stops the request's runtime
+  (relay/src/relay/http.gleam:1336-1340); `Stop` kills every cancelling
+  worker at once instead of waiting out the 5 s grace
+  (relay/src/relay/runtime.gleam:521-527). A trial handler that selected on
+  `tool.cancelled` and then called `fabric.cancel` was killed before the
+  call returned: the run kept going and the provider stream stayed open. The
+  same cancel from a `spawn_unlinked` process succeeded. So the 11-line
+  monitor bridge stays (src/tool_hub/assistant.gleam:168-178), and the
+  selector cannot replace it. A second gap would remain even with the grace:
+  `fabric.await` blocks and offers no selector, so a handler must start a
+  waiter process to select on both the run and `tool.cancelled` (about 12
+  lines). Proposals: relay keeps the runtime until cancelled workers exit or
+  their grace ends; fabric adds a selector for a run's status (owners: relay,
+  fabric).
 
 ### TH-4 Relay transport failures carry no submission evidence
 
@@ -202,6 +242,21 @@ input, CallOptions(cancellation: Option(Token), deadline: Option(Int)))`.
   moves to http_gun. Reconnect on the next call instead of keeping a dead
   connection.
 
+- **Status (wave 4):** resolved by relay ffb6d37. `client.Error` carries
+  `Evidence`, and the client reconnects on the next call. The server stopped
+  before `reserve_stock` now fails with `ConnectFailed` (`NotSent`), so the
+  reservation is a definite failure the model sees:
+  `unreachable_server_before_a_reservation_is_explained_test`
+  (test/tool_hub_test.gleam:351) replaces the old "uncertain" test, and the
+  model reads `the inventory is unavailable: … (connect_failed)`. The
+  uncertain path is now shown by a call that may have arrived:
+  `timed_out_reservation_is_uncertain_test` (:387) stalls the catalog past a
+  300 ms client timeout and gets `timed_out.maybe_sent`. The mapping is
+  `evidence × effect` with one `Uncertain` arm (`MaybeSent`, may change),
+  instead of seven transport and protocol arms
+  (src/tool_hub/remote_tools.gleam:127-178, 63 → 58 lines).
+  `readOnlyHint` is still needed for a `MaybeSent` read-only call.
+
 ### TH-5 No package adapts Relay tools to fabric tools; fabric_mcp cannot serve this app
 
 - **Packages**: fabric (fabric_mcp), relay. **Kind**: composition.
@@ -232,6 +287,10 @@ peer: fn(context) -> client.Client)` and `discover(client, peer)` for agent
   tools, plus the existing graph binding. It should own the isError →
   `Explain` and lost-call → `Uncertain` mapping (after TH-4) and fix
   fabric_mcp's isError mapping.
+
+- **Status (wave 4):** open. FABRIC-R10 replaces fabric_mcp with a Relay
+  adapter in wave 5. The app's adapter is 123 lines (typed 24, dynamic 41,
+  failure mapping 58).
 
 ### TH-6 Mounting a discovered schema needs a hand-built `Codec(Value)` and an error-vocabulary map
 
@@ -284,6 +343,13 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   longer the app's concern. The `Json` to text to contract round trip on the
   input side remains (Relay's `ToolDeclaration.input_schema` is still
   `json.Json`; relay is unchanged in wave 3).
+
+- **Status (wave 4):** resolved by relay ffb6d37. `tool.Declaration` holds
+  `input_schema: Value`, and `tool.input_contract(declaration)` loads it
+  (src/tool_hub/remote_tools.gleam:100). The `json.to_string` then
+  `contract.parse` round trip and the `gleam/json` import are gone from
+  remote_tools, and the schema test uses the same call. The line count does
+  not change (41) because `gleam format` wraps the new error mapping.
 
 ### TH-7 One question cannot be followed across relay, fabric, llm_wire and http_gun
 
@@ -360,6 +426,23 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `Link`, `link` and `follow` (~35 lines, no change). The same 24 http_gun
   events join and the same 18 relay and 17 llm_wire events do not.
 
+- **Status (wave 4):** mostly resolved by relay ffb6d37 and llm_wire
+  177ad50. The assistant server gives each request a correlation
+  (`http.with_correlation(fn(_) { Some(correlation.unique()) })`,
+  src/tool_hub/assistant.gleam:251). The handler reads it with
+  `tool.correlation(call)` (:243) and puts it on the provider's HTTP Gun
+  view, which llm_wire now reads, and on the inventory client's Relay view
+  (:131). For the demo question `gleam run` now joins 42 http_gun, 20
+  llm_wire and 6 relay events to the run (before: 24, 0 and 0). All
+  llm_wire events join. Relay events name the tool (`tool=ask_assistant`)
+  and the server (`http.with_label("assistant")`/`"inventory"`). Still
+  unjoined: 17 relay events. A Relay client's correlation stays local; it
+  does not reach the server, so the inventory server's own events carry
+  none, and `ExchangeClosedMeta` has no correlation field (owner: relay).
+  The `Link` and the per-question agent stay (~35 lines): fabric events
+  carry only the run id, and `llm.model` binds its client before the run
+  exists (owner: fabric).
+
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
 - **Packages**: fabric, relay. **Kind**: ergonomics. **Severity**: minor.
@@ -378,6 +461,11 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   the `use` builder (see `## Re-run after wave 2`); the derivation is
   unchanged.
 
+- **Status (wave 4):** unchanged in substance. `tool.output_codec` now
+  returns `Option(Codec(o))` (`None` for a content tool), so the derivation
+  needs `let assert Some(output)` for a structured definition
+  (src/tool_hub/remote_tools.gleam:50).
+
 ### TH-9 An MCP error result can carry only text, so "outcome unknown" is prose
 
 - **Packages**: relay. **Kind**: flexibility. **Severity**: minor.
@@ -392,6 +480,16 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `ToolError(content: List(ContentBlock), structured: Option(Value))`, or
   add a `HandlerResult.Failed(content, structured)` variant for advanced
   handlers.
+
+- **Status (wave 4):** resolved by relay ffb6d37. The renderer returns
+  `tool.ToolError`. `assistant.tool_error` (src/tool_hub/assistant.gleam:203)
+  sends the same text plus `structuredContent` such as
+  `{"error":"outcome_unknown","run_id":…,"uncertain":[{"tool":…,"evidence":…}]}`.
+  The client receives `ToolFailed(content, Some(structured))`, and
+  `timed_out_reservation_is_uncertain_test` reads the run id from the data.
+  `Uncertain` now carries the run id, so `render` no longer takes it from the
+  first effect, with a `"?"` fallback. The data costs about 30 lines; this
+  is a new capability, not glue.
 
 ### TH-10 fabric's `model.stop` event reports unreported usage as zero
 
@@ -656,3 +754,125 @@ New friction:
   hub still stops it by hand. `supervised(config, name)` and `named(name)`
   would remove that, but the hub has no supervisor of its own to put it
   under, and adding one only for that is more code than the `stop` call.
+
+## Re-run after wave 4
+
+Package heads: relay 3f88ef1 (API at ffb6d37), fabric 556abc3, llm_wire
+9f35183 (API at 177ad50), http_gun 4a6eeb0, json_blueprint 74a9a7d, sinal
+44c5395. The app adds `gleam_time >= 1.11.0 and < 2.0.0`. 14 tests pass,
+three runs in a row, each in about 29 s. Before there were 12: the uncertain
+reservation test became two (one `NotSent`, one `MaybeSent`), and the
+per-call cancellation test is new. `gleam run` prints the answer and joins
+42 http_gun, 20 llm_wire and 6 relay events to the run. Before, it joined 24
+http_gun and 0 of the other two. 17 relay events stay unjoined.
+
+Relay was the heavy break: every call site and every telemetry handler
+changed. llm_wire and fabric changed only types (`llm_wire.Config`,
+`String` model ids, `with_endpoint(String)`, `telemetry.event()`). The
+public API of the app now takes `Duration`: `Settings.budget`,
+`Settings.inventory_timeout` (new; it was a hard-coded 2000) and
+`assistant_client(hub, timeout)`. `Settings.assistant_policy`
+(`http.HttpPolicy`, removed) is now
+`assistant_http: fn(http.Config(Nil)) -> http.Config(Nil)`. Nothing is
+stored durably (the run store is in memory), and the `ask_assistant`
+input and output codecs are unchanged. So no fixture needed re-decoding,
+and the `isError` text for every failure is the same as before.
+
+| Seam                                                        | Before | After | Change                                                                                                    |
+| ----------------------------------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------------------------- |
+| MCP call outcome → fabric failure                           | 63     | 58    | seven transport/protocol arms become `evidence × effect`; a never-sent reservation is `Explain` (TH-4)    |
+| Dynamic mounting from `tools/list`                          | 41     | 41    | `tool.input_contract` replaces render-to-text and re-parse; same count after `gleam format` (TH-6)        |
+| Typed mounting from a Relay definition                      | 24     | 24    | `tool.name`/`input_codec`/`declaration`; `let assert Some` on the now-optional output codec               |
+| Relay cancellation → fabric cancellation                    | 11     | 11    | unchanged: `tool.cancelled` fires, but the HTTP worker is killed in the same step (TH-3)                  |
+| Cancelling one MCP call / on timeout                        | n/a    | 0     | `client.with_cancellation` and the client timeout close that call's connection (TH-2)                     |
+| `notifications/cancelled` test probe                        | 23     | 6     | `relay/testing.request` plus `http.handle`; the test's second http_gun client is gone                     |
+| fabric run → MCP result                                     | 22     | 48    | `render` drops the run-id lookup; `tool_error` adds the outcome as `structuredContent` (TH-9, capability) |
+| Telemetry correlation (agent per question, link, follow)    | ~35    | ~35   | the same code now joins http_gun, llm_wire and relay; the correlation comes from Relay's request (TH-7)   |
+| Relay telemetry handlers                                    | 7      | 8     | new `client_call_event`; each record names the server (`listener`) and the tool                           |
+| `src/tool_hub_ffi.erl` (stop the scripted provider quietly) | 0      | 10    | restored: wave 3 deleted it while `scripted_llm.stop` still called it (see below)                         |
+
+Net source diff: src +328 −224 plus the restored 10-line FFI file, and
+test +208 −134. The relay call sites are
+about as long as before. What wave 4 bought is correct behavior with less
+reasoning: `client.call` returns `Result` with an `Evidence`, `tool.define`
+needs no `let assert`, and both servers are `server.new(..) |> http.new |>
+http.with_label(..) |> http.start`.
+
+Seams that still need glue, and who owns them:
+
+- The Relay ↔ fabric adapter (123 lines): fabric, in wave 5 (FABRIC-R10,
+  TH-5).
+- The cancellation bridge (11 lines): relay must keep a disconnected
+  request's runtime alive until its cancelled workers exit or their grace
+  ends; fabric must offer a selector for a run's status, so a handler can
+  wait on the run and on `tool.cancelled` without a second process (TH-3).
+- The per-question agent and the run ↔ correlation `Link` (~35 lines):
+  fabric, which has to carry a correlation on its events or pass the run to
+  the model function (TH-7).
+- The inventory server's relay events (17 unjoined): relay. The client's
+  correlation does not cross the wire, and `ExchangeClosedMeta` has no
+  correlation field (TH-7).
+
+`testing.events_for` does not apply. The app's provider speaks llm_wire's
+scripted wire (`testing.config()`), which `events_for` returns unchanged,
+and no SSE in the app was ever hand-written. `scripted_llm.respond` still
+re-implements the now-private `testing.http_reply` (8 lines) to serve a
+`Reply` from mist; a public `testing.body(reply) -> #(Int, String)` would
+remove that.
+
+New friction:
+
+- **`tool.cancelled` is useless over HTTP (relay, major).** This is the
+  TH-3 defect: the selector fires and the worker dies at once, so the
+  documented "stop work you started elsewhere" path does not work for the
+  transport most apps use. Before the trial run showed it, nothing
+  suggested this. The guide's example
+  (`process.selector_receive(tool.cancelled(call) |> await(run), ..)`) would
+  silently leak the run.
+
+  **Status (wave 4 fixes):** resolved in relay 6a75b6b and 0b7dfea (local,
+  not pushed). The 11-line monitor bridge is gone. `ask` takes
+  `relay_tool.cancelled(call)`, and `await_or_cancel`
+  (src/tool_hub/assistant.gleam:167-195) selects on it and on the run's
+  answer. On the signal it calls `fabric.cancel` inside the grace and the
+  handler returns `Cancelled`. The test
+  `disconnecting_mcp_client_cancels_run_and_model_stream_test` is unchanged
+  and passes without the bridge: the run ends `Cancelled` and the provider
+  stream closes. So do the other three cancellation tests; the negative
+  test (`cancel_with_caller: False`) still leaves the run going. `fabric.await`
+  still has no selector, so a waiter process is still needed: the handler
+  cannot select on `tool.cancelled` while blocked in `await`. That makes
+  `await_or_cancel` 29 lines (9 are the waiter), plus 4 to gate it on
+  `cancel_with_caller`, against 11 for the bridge, so the glue grew in
+  lines though it no longer works around a defect. A selector for a run's
+  status in fabric would cut it to about 12 (owner: fabric). One trap: the
+  waiter must be `spawn_unlinked`. A linked waiter that the handler kills
+  after the signal takes the handler down with it (exit reason `killed`),
+  before `fabric.cancel` runs. The suite is faster: 14 tests in about 15 s
+  (15.4, 14.9, 15.0 s) against about 29 s, because `client.close` no longer
+  drains for 5 s per in-flight call.
+
+- **`client.close` waits about 5 s per in-flight call (relay).** The three
+  tests that close a client mid-call spend 15 s of the 29 s suite in
+  `http_gun.stop`'s drain. The `[relay, client, call]` event then reports
+  `CallFailed in 5497 ms`, which counts the drain as the call's duration.
+- **The Relay client's correlation is local (relay).** `with_correlation`
+  tags the client's events and its HTTP Gun view, but no header or `_meta`
+  key carries it. The receiving server must invent its own correlation
+  (`http.with_correlation`), so a call cannot be followed across two Relay
+  peers even inside one VM.
+- **A latent wave 3 bug surfaced.** Wave 3 deleted `src/tool_hub_ffi.erl`
+  ("nothing else used it"), but `scripted_llm.stop` calls
+  `tool_hub_ffi:stop_process`. The suite kept passing only because the old
+  `.beam` stayed in `build/`. A clean build would have crashed every
+  `tool_hub.stop`. Gleam does not check `@external` targets at compile
+  time, so no tool caught it. The file is restored.
+- **Relay's HTTP Gun events now join without effort, but read as noise.**
+  The agent's Relay client runs on HTTP Gun under the client's label
+  (`inventory_peer`). Its lifecycle events join the run through the view
+  correlation, so http_gun's joined count rose from 24 to 42. That is
+  correct, but a reader of the trail now needs the label to tell model
+  traffic from MCP traffic.
+- **fabric still takes milliseconds.** `fabric.await(run, within: Int)` is
+  the only millisecond conversion left in the app
+  (`duration.to_milliseconds(assistant.budget)`); fabric owns it.

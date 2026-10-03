@@ -10,17 +10,19 @@ import fabric/tool as fabric_tool
 import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
 import http_gun
 import json/blueprint/codec.{type Codec}
-import llm_wire/config
-import llm_wire/types
+import json/blueprint/value
+import llm_wire
 import relay/client
+import relay/content
+import relay/http
 import relay/server
 import relay/tool as relay_tool
-import relay/transport/http
 import sinal/correlation.{type Correlation}
 
 /// What every tool call of a run receives.
@@ -33,16 +35,16 @@ pub type Assistant {
     store: Store,
     /// The application's HTTP client for the model provider.
     http: http_gun.Client,
-    settings: config.Config,
-    model_id: types.ModelId,
+    settings: llm_wire.Config,
+    model_id: String,
     tools: List(fabric_tool.Tool(Context)),
     context: Context,
-    /// How long one question may take, in milliseconds.
-    budget_ms: Int,
-    /// Called once a run exists, with the HTTP correlation id its model
-    /// calls carry, so telemetry can join the two.
+    /// How long one question may take.
+    budget: Duration,
+    /// Called once a run exists, with the correlation its model, inventory
+    /// and Relay events carry, so telemetry can join fabric's run id to it.
     on_run: fn(run.RunId, Correlation) -> Nil,
-    /// Cancel the run when the asking process dies (see `ask`).
+    /// Cancel the run when Relay cancels the `ask_assistant` call.
     cancel_with_caller: Bool,
   )
 }
@@ -58,7 +60,7 @@ pub type Answer {
 pub type AskError {
   StartFailed(reason: String)
   /// The run stopped on effects of unknown status; a person must reconcile.
-  Uncertain(effects: List(run.UncertainAction))
+  Uncertain(run_id: String, effects: List(run.UncertainAction))
   ModelRefused(reason: String)
   Cancelled
   Failed(reason: String)
@@ -81,17 +83,15 @@ pub fn answer_codec() -> Codec(Answer) {
 }
 
 pub fn ask_assistant() -> relay_tool.Definition(Question, Answer) {
-  let assert Ok(name) = relay_tool.tool_name("ask_assistant")
-  let assert Ok(definition) =
-    relay_tool.definition(name, question_codec(), answer_codec())
-  definition
+  relay_tool.define("ask_assistant", question_codec(), answer_codec())
   |> relay_tool.with_description(
     "Ask the inventory assistant; it searches, checks stock and reserves.",
   )
 }
 
 /// The agent for one question. It is rebuilt per question only so that its
-/// model calls carry a per-question HTTP correlation id.
+/// model calls carry the question's correlation: `llm.model` binds its HTTP
+/// client when the agent is built, before the run id exists.
 pub fn agent_for(
   assistant: Assistant,
   correlation: Correlation,
@@ -114,69 +114,92 @@ pub fn agent_for(
   |> agent.build
 }
 
-/// Asks one question and waits for the answer. If the calling process dies
-/// (Relay kills a cancelled invocation's worker), the run is cancelled.
+/// Asks one question under `correlation` and waits for the answer. When
+/// `cancelled` fires (Relay's `tool.cancelled` for this call), the run is
+/// cancelled before the handler returns, inside Relay's cancellation grace.
 pub fn ask(
   assistant: Assistant,
   question: Question,
+  correlation: Correlation,
+  cancelled: process.Selector(Nil),
 ) -> Result(Answer, AskError) {
-  let correlation = correlation.unique()
   use desk <- result.try(
     agent_for(assistant, correlation)
     |> result.map_error(fn(errors) { StartFailed(string.inspect(errors)) }),
   )
+  // The inventory calls of this question carry its correlation too.
+  let context =
+    Context(client.with_correlation(assistant.context.inventory, correlation))
   use running <- result.try(
-    fabric.start(assistant.store, desk, assistant.context, question.question)
+    fabric.start(assistant.store, desk, context, question.question)
     |> result.map_error(fn(error) { StartFailed(string.inspect(error)) }),
   )
   let id = fabric.id(running)
+  let run_id = run.id_to_string(id)
   assistant.on_run(id, correlation)
-  let watcher = case assistant.cancel_with_caller {
-    True -> Some(cancel_when_caller_dies(running))
-    False -> None
+  let cancelled = case assistant.cancel_with_caller {
+    True -> cancelled
+    False -> process.new_selector()
   }
-  let status = fabric.await(running, assistant.budget_ms)
-  option.map(watcher, process.kill)
-  case status {
-    Ok(run.Finished(run.Completed(text))) ->
-      Ok(Answer(text, run.id_to_string(id)))
-    Ok(run.Finished(run.Refused(reason))) -> Error(ModelRefused(reason))
-    Ok(run.Finished(run.Cancelled)) -> Error(Cancelled)
-    Ok(run.Finished(other)) -> Error(Failed(string.inspect(other)))
-    Ok(run.Suspended(_approvals, [_, ..] as uncertain)) ->
-      Error(Uncertain(uncertain))
-    Ok(run.Suspended(approvals, [])) ->
+  case await_or_cancel(running, assistant.budget, cancelled) {
+    Error(Nil) -> Error(Cancelled)
+    Ok(Ok(run.Finished(run.Completed(text)))) -> Ok(Answer(text, run_id))
+    Ok(Ok(run.Finished(run.Refused(reason)))) -> Error(ModelRefused(reason))
+    Ok(Ok(run.Finished(run.Cancelled))) -> Error(Cancelled)
+    Ok(Ok(run.Finished(other))) -> Error(Failed(string.inspect(other)))
+    Ok(Ok(run.Suspended(_approvals, [_, ..] as uncertain))) ->
+      Error(Uncertain(run_id, uncertain))
+    Ok(Ok(run.Suspended(approvals, []))) ->
       Error(Failed(
         int.to_string(list.length(approvals)) <> " approvals pending",
       ))
-    Ok(run.Working) | Ok(run.Unattended) -> {
+    Ok(Ok(run.Working)) | Ok(Ok(run.Unattended)) -> {
       let _ = fabric.cancel(running)
-      Error(TimedOut(run.id_to_string(id)))
+      Error(TimedOut(run_id))
     }
-    Error(error) -> Error(Failed(string.inspect(error)))
+    Ok(Error(error)) -> Error(Failed(string.inspect(error)))
   }
 }
 
-/// Glue: Relay stops a cancelled invocation by killing its worker process,
-/// but a fabric run lives in its own runner. A monitor bridges the two.
-fn cancel_when_caller_dies(running: fabric.Run(Context)) -> process.Pid {
-  let caller = process.self()
-  process.spawn_unlinked(fn() {
-    let monitor = process.monitor(caller)
-    let selector =
-      process.new_selector()
-      |> process.select_specific_monitor(monitor, fn(down) { down })
-    let _down = process.selector_receive_forever(selector)
-    fabric.cancel(running)
-  })
+/// `fabric.await` blocks and offers no selector, so a waiter process
+/// awaits the run and this handler selects on its answer and on `cancelled`.
+/// A cancellation cancels the run, which is the point of the signal.
+fn await_or_cancel(
+  running: fabric.Run(Context),
+  budget: Duration,
+  cancelled: process.Selector(Nil),
+) -> Result(Result(run.Status, fabric.RecordError), Nil) {
+  let answer = process.new_subject()
+  // Unlinked: killing a linked waiter would kill this handler too.
+  let waiter =
+    process.spawn_unlinked(fn() {
+      process.send(
+        answer,
+        fabric.await(running, duration.to_milliseconds(budget)),
+      )
+    })
+  let outcome =
+    process.new_selector()
+    |> process.select_map(answer, Ok)
+    |> process.merge_selector(
+      process.map_selector(cancelled, fn(_) { Error(Nil) }),
+    )
+    |> process.selector_receive_forever
+  process.kill(waiter)
+  case outcome {
+    Ok(status) -> Ok(status)
+    Error(Nil) -> {
+      let _ = fabric.cancel(running)
+      Error(Nil)
+    }
+  }
 }
 
-/// What the MCP client sees for each failure (`isError: true` text). MCP has
-/// no "outcome unknown"; the text is the only place to say so.
+/// The text an MCP client sees for each failure.
 pub fn render(error: AskError) -> String {
   case error {
     StartFailed(reason) -> "the assistant could not start: " <> reason
-    Uncertain(effects) ->
+    Uncertain(run_id, effects) ->
       "outcome unknown: "
       <> string.join(
         list.map(effects, fn(effect) {
@@ -185,10 +208,7 @@ pub fn render(error: AskError) -> String {
         "; ",
       )
       <> "; a person must reconcile run "
-      <> case effects {
-        [first, ..] -> run.id_to_string(first.reference.run)
-        [] -> "?"
-      }
+      <> run_id
     ModelRefused(reason) -> "the model refused: " <> reason
     Cancelled -> "the question was cancelled"
     Failed(reason) -> "the assistant failed: " <> reason
@@ -196,22 +216,58 @@ pub fn render(error: AskError) -> String {
   }
 }
 
-/// The second MCP server, which exposes the agent as one tool.
+/// The `isError` result for a failure: the text, and the same facts as data,
+/// so a client finds the run to reconcile without parsing the text.
+pub fn tool_error(error: AskError) -> relay_tool.ToolError {
+  let field = fn(name, text) { #(name, value.String(text)) }
+  let facts = case error {
+    StartFailed(_) -> [field("error", "start_failed")]
+    Uncertain(run_id, effects) -> [
+      field("error", "outcome_unknown"),
+      field("run_id", run_id),
+      #(
+        "uncertain",
+        value.Array(
+          list.map(effects, fn(effect) {
+            value.Object([
+              field("tool", effect.tool),
+              field("evidence", effect.evidence),
+            ])
+          }),
+        ),
+      ),
+    ]
+    ModelRefused(_) -> [field("error", "model_refused")]
+    Cancelled -> [field("error", "cancelled")]
+    Failed(_) -> [field("error", "failed")]
+    TimedOut(run_id) -> [field("error", "timed_out"), field("run_id", run_id)]
+  }
+  relay_tool.error_with(
+    [content.text(render(error))],
+    Some(value.Object(facts)),
+  )
+}
+
+/// The second MCP server, which exposes the agent as one tool. Each request
+/// gets a fresh correlation, which Relay's events for it carry and the
+/// question reuses for its model and inventory calls.
 pub fn serve(
   assistant: Assistant,
-  policy: http.HttpPolicy,
-) -> Result(http.HttpServer(Nil), String) {
+  configure: fn(http.Config(Nil)) -> http.Config(Nil),
+) -> Result(http.Handler(Nil), String) {
   let bound =
-    relay_tool.handle_with_error_renderer(
-      ask_assistant(),
-      fn(question) { ask(assistant, question) },
-      render,
-    )
-  use registry <- result.try(
-    relay_tool.registry([bound]) |> result.replace_error("registry"),
-  )
-  server.server(registry)
-  |> http.listener(fn() { Nil })
-  |> http.with_policy(policy)
+    relay_tool.handle_call(ask_assistant(), fn(call, question) {
+      let correlation =
+        option.lazy_unwrap(relay_tool.correlation(call), correlation.unique)
+      ask(assistant, question, correlation, relay_tool.cancelled(call))
+      |> result.map(relay_tool.complete)
+      |> result.map_error(tool_error)
+    })
+  server.new([bound])
+  |> http.new
+  |> http.with_label("assistant")
+  |> http.with_correlation(fn(_request) { Some(correlation.unique()) })
+  |> configure
   |> http.start
+  |> result.map_error(http.describe_start_error)
 }

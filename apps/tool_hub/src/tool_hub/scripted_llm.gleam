@@ -13,9 +13,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import llm_wire/config
+import llm_wire
 import llm_wire/testing
-import llm_wire/types
 import mist
 
 pub type Step {
@@ -93,11 +92,11 @@ pub fn stop(provider: Provider) -> Nil {
 fn stop_process(pid: process.Pid) -> Nil
 
 /// llm_wire settings for this provider: the scripted adapter pointed at the
-/// loopback endpoint. llm_wire admits plain `http://` only for loopback.
-pub fn settings(provider: Provider) -> config.Config {
-  let assert Ok(endpoint) =
-    types.endpoint("http://127.0.0.1:" <> int.to_string(provider.port))
-  testing.config() |> config.with_endpoint(endpoint)
+/// loopback endpoint. llm_wire limits plain `http://` to loopback addresses
+/// through the HTTP Gun view of each call.
+pub fn settings(provider: Provider) -> llm_wire.Config {
+  testing.config()
+  |> llm_wire.with_endpoint("http://127.0.0.1:" <> int.to_string(provider.port))
 }
 
 /// A scripted tool call; `arguments` is the raw JSON text the model "sent".

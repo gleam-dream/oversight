@@ -3,18 +3,16 @@
 //// Typed path: a Relay `Definition` already owns the name, description and
 //// codecs, so the fabric definition is derived from it, and the handler calls
 //// the remote tool with the same definition. Dynamic path: a declaration
-//// listed at runtime has only a JSON Schema, which becomes a Blueprint
-//// contract and a `Codec(Value)` that validates against it.
+//// listed at runtime carries its input schema as a Blueprint `Value`, which
+//// `input_contract` loads and `contract.value_codec` validates against.
 
 import fabric/tool as fabric_tool
-import gleam/json
 import gleam/list
-import gleam/option.{type Option, Some}
+import gleam/option
 import gleam/result
 import gleam/string
 import json/blueprint/codec
 import json/blueprint/contract
-import json/blueprint/value
 import relay/client
 import relay/content
 import relay/tool as relay_tool
@@ -23,15 +21,10 @@ import relay/tool as relay_tool
 pub type RemoteFailure {
   /// The remote tool ran and answered `isError: true` with this text.
   RemoteToolError(message: String)
-  /// The peer could not be reached, or its reply was lost. Relay does not
-  /// say whether the request was sent.
-  RemoteUnreachable(client.TransportError)
-  /// The peer answered with something this client could not read.
-  RemoteProtocol(reason: String)
-  /// The arguments could not be encoded (a local defect).
-  NotEncodable
   /// The remote tool asked for client input, which this agent cannot give.
   InputNotSupported
+  /// The call failed; the error says whether it may have reached the peer.
+  CallFailed(client.Error)
 }
 
 /// Whether a tool's effect can safely be treated as absent on failure.
@@ -54,12 +47,13 @@ pub type Peer(context) =
 pub fn fabric_definition(
   definition: relay_tool.Definition(input, output),
 ) -> fabric_tool.Definition(input, output) {
-  let metadata = relay_tool.definition_metadata(definition)
+  // Every definition this app mounts is structured.
+  let assert option.Some(output) = relay_tool.output_codec(definition)
   fabric_tool.define(
-    relay_tool.definition_name(definition) |> relay_tool.tool_name_to_string,
-    option.unwrap(metadata.description, ""),
-    relay_tool.definition_input_codec(definition),
-    relay_tool.definition_output_codec(definition),
+    relay_tool.name(definition),
+    option.unwrap(relay_tool.declaration(definition).description, ""),
+    relay_tool.input_codec(definition),
+    output,
   )
 }
 
@@ -68,11 +62,11 @@ pub fn mount(
   definition: relay_tool.Definition(input, output),
   peer: Peer(context),
 ) -> fabric_tool.Tool(context) {
-  let effect = effect_of(relay_tool.definition_metadata(definition).annotations)
+  let effect = effect_of(relay_tool.declaration(definition))
   fabric_tool.bind(
     fabric_definition(definition),
     fn(context, input) {
-      client.call_definition(peer(context), definition, input) |> outcome
+      client.call(peer(context), definition, input) |> outcome
     },
     classify(effect, _),
   )
@@ -81,7 +75,7 @@ pub fn mount(
 // --- dynamic path ------------------------------------------------------------
 
 pub type DiscoveryError {
-  ListingFailed(reason: String)
+  ListingFailed(client.Error)
   /// Blueprint cannot admit the advertised input schema.
   UnsupportedSchema(tool: String, reason: String)
 }
@@ -99,16 +93,16 @@ pub fn discover(
 }
 
 pub fn mount_discovered(
-  declaration: client.ToolDeclaration,
+  declaration: relay_tool.Declaration,
   peer: Peer(context),
 ) -> Result(fabric_tool.Tool(context), DiscoveryError) {
   use remote <- result.map(
-    contract.parse(
-      json.to_string(declaration.input_schema),
-      value.default_limits(),
-    )
+    relay_tool.input_contract(declaration)
     |> result.map_error(fn(error) {
-      UnsupportedSchema(declaration.name, contract.describe_load_error(error))
+      UnsupportedSchema(
+        declaration.name,
+        contract.describe_document_error(error),
+      )
     }),
   )
   let definition =
@@ -124,63 +118,63 @@ pub fn mount_discovered(
     fn(context, arguments) {
       client.call_discovered(peer(context), declaration, arguments) |> outcome
     },
-    classify(effect_of(declaration.annotations), _),
+    classify(effect_of(declaration), _),
   )
 }
 
 // --- outcome mapping -----------------------------------------------------------
 
 fn outcome(
-  result: client.ToolCallOutcome(output),
+  result: Result(client.ToolResult(output), client.Error),
 ) -> Result(output, RemoteFailure) {
   case result {
-    client.StructuredSuccess(output, _content) -> Ok(output)
-    client.ToolFailure(blocks) -> Error(RemoteToolError(text_of(blocks)))
-    client.TransportFailure(reason) -> Error(RemoteUnreachable(reason))
-    client.ProtocolFailure(reason) -> Error(RemoteProtocol(reason))
-    client.ContentOnlySuccess(_) ->
-      Error(RemoteProtocol("structured content missing"))
-    client.InputEncodingFailure -> Error(NotEncodable)
-    client.InputRequired(..) | client.InvalidInputResponses ->
-      Error(InputNotSupported)
+    Ok(client.Succeeded(output, _content)) -> Ok(output)
+    Ok(client.ToolFailed(blocks, _structured)) ->
+      Error(RemoteToolError(text_of(blocks)))
+    Ok(client.InputRequired(..)) -> Error(InputNotSupported)
+    Error(error) -> Error(CallFailed(error))
   }
 }
 
-fn effect_of(annotations: Option(relay_tool.ToolAnnotations)) -> Effect {
-  case annotations {
-    Some(relay_tool.ToolAnnotations(read_only_hint: Some(True), ..)) -> ReadOnly
+fn effect_of(declaration: relay_tool.Declaration) -> Effect {
+  case declaration.annotations.read_only_hint {
+    option.Some(True) -> ReadOnly
     _ -> MayChange
   }
 }
 
-/// MCP failures in fabric's vocabulary. A definite remote error is shown to
-/// the model. A lost call to a tool that may change state is uncertain: the
-/// run waits for a person instead of letting the model retry it.
+/// MCP failures in fabric's vocabulary. A definite remote error, and a call
+/// that never reached the peer, are shown to the model. A call that may have
+/// reached the peer is uncertain for a tool that may change state: the run
+/// waits for a person instead of letting the model retry it.
 pub fn classify(effect: Effect, failure: RemoteFailure) -> fabric_tool.Failure {
-  case failure, effect {
-    RemoteToolError(message), _ -> fabric_tool.Explain(message)
-    NotEncodable, _ -> fabric_tool.Explain("the arguments could not be sent")
-    InputNotSupported, _ ->
+  case failure {
+    RemoteToolError(message) -> fabric_tool.Explain(message)
+    InputNotSupported ->
       fabric_tool.Explain("the tool needs input this assistant cannot give")
-    RemoteUnreachable(reason), ReadOnly ->
-      fabric_tool.Explain("the inventory is unavailable: " <> describe(reason))
-    RemoteUnreachable(reason), MayChange ->
-      fabric_tool.Uncertain("call lost: " <> describe(reason))
-    RemoteProtocol(reason), ReadOnly ->
-      fabric_tool.Explain("unreadable reply: " <> reason)
-    RemoteProtocol(reason), MayChange ->
-      fabric_tool.Uncertain("unreadable reply: " <> reason)
+    CallFailed(error) ->
+      case client.evidence(error), effect {
+        client.MaybeSent, MayChange ->
+          fabric_tool.Uncertain("call lost: " <> describe(error))
+        _, _ ->
+          case client.kind(error) {
+            client.Unreachable | client.Timeout ->
+              fabric_tool.Explain(
+                "the inventory is unavailable: " <> describe(error),
+              )
+            _ ->
+              fabric_tool.Explain(
+                "the inventory call failed: " <> describe(error),
+              )
+          }
+      }
   }
 }
 
-pub fn describe(reason: client.TransportError) -> String {
-  case reason {
-    client.ConnectionClosed -> "connection closed"
-    client.RequestCancelled -> "request cancelled"
-    client.RequestTimedOut -> "request timed out"
-    client.ResponseLimitExceeded -> "response too large"
-    client.TransportFault(detail) -> "transport fault (" <> detail <> ")"
-  }
+/// The error's description and its stable name, such as
+/// `the MCP request timed out (timed_out.maybe_sent)`.
+pub fn describe(error: client.Error) -> String {
+  client.describe_error(error) <> " (" <> client.name(error) <> ")"
 }
 
 fn text_of(blocks: List(content.ContentBlock)) -> String {

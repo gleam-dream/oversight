@@ -3,11 +3,13 @@
 ////
 //// Join keys available today:
 //// - fabric: the run id on every agent event.
-//// - http_gun: the `Correlation` the app passed to `with_correlation`, and the
-////   client's label, which tells the provider client from any other client.
-//// - relay: an exchange or invocation integer, with no server name and no
-////   link to the tool handler that ran.
-//// - llm_wire: none; only stage, provider and outcome.
+//// - http_gun, llm_wire and relay: the question's `Correlation`. The assistant
+////   server gives each request one (`http.with_correlation`), the handler
+////   reads it (`tool.correlation`) and puts it on the provider's HTTP Gun view
+////   (which llm_wire reads) and on the inventory client's Relay view.
+//// - relay events of the inventory server: an exchange or invocation integer
+////   only, because a Relay client's correlation does not cross the wire.
+//// The app links the run id to the correlation once the run exists.
 
 import fabric/model
 import fabric/observation
@@ -26,8 +28,8 @@ import sinal/correlation.{type Correlation}
 pub type Key {
   /// A fabric run id.
   RunKey(String)
-  /// The `Correlation` the app gave http_gun for one question.
-  HttpKey(Correlation)
+  /// The `Correlation` of one question.
+  CorrelationKey(Correlation)
   /// A Relay exchange id (per HTTP POST).
   ExchangeKey(Int)
   /// A Relay invocation id.
@@ -54,7 +56,7 @@ type State {
 
 type Message {
   Add(Record)
-  Link(run: String, http: Correlation)
+  Link(run: String, correlation: Correlation)
   Snapshot(Subject(State))
 }
 
@@ -67,8 +69,10 @@ pub fn start() -> Telemetry {
       case message {
         Add(record) ->
           actor.continue(State(..state, records: [record, ..state.records]))
-        Link(run, http) ->
-          actor.continue(State(..state, links: [#(run, http), ..state.links]))
+        Link(run, correlation) ->
+          actor.continue(
+            State(..state, links: [#(run, correlation), ..state.links]),
+          )
         Snapshot(reply) -> {
           process.send(
             reply,
@@ -89,15 +93,18 @@ pub fn start() -> Telemetry {
       fabric_handlers(add),
       [
         sinal.observe_labelled(
-          llm_telemetry.observation_event(),
-          "tool_hub_llm_wire_observation_event",
+          llm_telemetry.event(),
+          "tool_hub_llm_wire_event",
           fn(_, m) {
-            let llm_telemetry.Metadata(stage:, provider:, outcome:) = m
             add(
               "llm_wire",
               "observation",
-              stage <> " " <> provider <> " " <> outcome,
-              NoKey,
+              llm_telemetry.stage_name(m.stage)
+                <> " "
+                <> m.provider
+                <> " "
+                <> llm_telemetry.outcome_name(m.outcome),
+              key_of(m.correlation, NoKey),
             )
           },
         ),
@@ -112,10 +119,6 @@ pub fn start() -> Telemetry {
               client:,
               ..,
             ) = m
-            let key = case correlation {
-              Some(id) -> HttpKey(id)
-              None -> NoKey
-            }
             add(
               "http_gun",
               "lifecycle",
@@ -124,7 +127,7 @@ pub fn start() -> Telemetry {
                 <> string.inspect(mode)
                 <> " "
                 <> string.inspect(milestone),
-              key,
+              key_of(correlation, NoKey),
             )
           },
         ),
@@ -133,9 +136,20 @@ pub fn start() -> Telemetry {
   Telemetry(sink, attachments)
 }
 
-/// Records which HTTP correlation a run's model calls carry.
-pub fn link(telemetry: Telemetry, run: String, http: Correlation) -> Nil {
-  process.send(telemetry.collector, Link(run, http))
+/// Records which correlation a run's question carries.
+pub fn link(
+  telemetry: Telemetry,
+  run: String,
+  correlation: Correlation,
+) -> Nil {
+  process.send(telemetry.collector, Link(run, correlation))
+}
+
+fn key_of(correlation: Option(Correlation), otherwise: Key) -> Key {
+  case correlation {
+    Some(correlation) -> CorrelationKey(correlation)
+    None -> otherwise
+  }
 }
 
 pub fn records(telemetry: Telemetry) -> List(Record) {
@@ -149,7 +163,7 @@ fn snapshot(telemetry: Telemetry) -> State {
 /// Every record that a key joins to `run`, and every other record.
 pub fn follow(telemetry: Telemetry, run: String) -> Followed {
   let State(records:, links:) = snapshot(telemetry)
-  let http_ids =
+  let correlations =
     list.filter_map(links, fn(link) {
       case link.0 == run {
         True -> Ok(link.1)
@@ -160,7 +174,7 @@ pub fn follow(telemetry: Telemetry, run: String) -> Followed {
     list.partition(records, fn(record) {
       case record.key {
         RunKey(id) -> id == run
-        HttpKey(id) -> list.contains(http_ids, id)
+        CorrelationKey(id) -> list.contains(correlations, id)
         _ -> False
       }
     })
@@ -180,7 +194,7 @@ pub fn has(records: List(Record), package: String, event: String) -> Bool {
 pub fn render(record: Record) -> String {
   let key = case record.key {
     RunKey(_) -> " [run]"
-    HttpKey(_) -> " [http correlation]"
+    CorrelationKey(_) -> " [correlation]"
     ExchangeKey(id) -> " [exchange " <> int.to_string(id) <> "]"
     InvocationKey(id) -> " [invocation " <> int.to_string(id) <> "]"
     NoKey -> ""
@@ -198,19 +212,31 @@ pub fn stop(telemetry: Telemetry) -> Nil {
 fn relay_handlers(
   add: fn(String, String, String, Key) -> Nil,
 ) -> List(sinal.Attachment) {
+  let server = fn(listener) { option.unwrap(listener, "unlabelled") <> ": " }
+  let tool = fn(tool) { option.unwrap(tool, "-") }
   [
     sinal.observe_labelled(
       relay_telemetry.frame_rejected_event(),
       "tool_hub_relay_frame_rejected_event",
       fn(_, m) {
-        add("relay", "frame.rejected", m.reason, ExchangeKey(m.exchange_id))
+        add(
+          "relay",
+          "frame.rejected",
+          server(m.listener) <> string.inspect(m.problem),
+          ExchangeKey(m.exchange_id),
+        )
       },
     ),
     sinal.observe_labelled(
       relay_telemetry.request_admitted_event(),
       "tool_hub_relay_request_admitted_event",
       fn(_, m) {
-        add("relay", "request.admitted", m.method, ExchangeKey(m.exchange_id))
+        add(
+          "relay",
+          "request.admitted",
+          server(m.listener) <> m.method,
+          key_of(m.correlation, ExchangeKey(m.exchange_id)),
+        )
       },
     ),
     sinal.observe_labelled(
@@ -220,11 +246,8 @@ fn relay_handlers(
         add(
           "relay",
           "invocation.started",
-          "tool_name="
-            <> m.tool_name
-            <> " exchange="
-            <> int.to_string(m.exchange_id),
-          InvocationKey(m.invocation_id),
+          server(m.listener) <> m.method <> " tool=" <> tool(m.tool),
+          key_of(m.correlation, InvocationKey(m.invocation_id)),
         )
       },
     ),
@@ -235,8 +258,14 @@ fn relay_handlers(
         add(
           "relay",
           "invocation.completed",
-          m.status <> " in " <> int.to_string(measured.duration_ms) <> " ms",
-          InvocationKey(m.invocation_id),
+          server(m.listener)
+            <> tool(m.tool)
+            <> " "
+            <> string.inspect(m.status)
+            <> " in "
+            <> int.to_string(measured.duration_ms)
+            <> " ms",
+          key_of(m.correlation, InvocationKey(m.invocation_id)),
         )
       },
     ),
@@ -244,7 +273,12 @@ fn relay_handlers(
       relay_telemetry.invocation_cancelled_event(),
       "tool_hub_relay_invocation_cancelled_event",
       fn(_, m) {
-        add("relay", "invocation.cancelled", "", InvocationKey(m.invocation_id))
+        add(
+          "relay",
+          "invocation.cancelled",
+          server(m.listener) <> tool(m.tool),
+          key_of(m.correlation, InvocationKey(m.invocation_id)),
+        )
       },
     ),
     sinal.observe_labelled(
@@ -254,8 +288,8 @@ fn relay_handlers(
         add(
           "relay",
           "invocation.crashed",
-          m.reason,
-          InvocationKey(m.invocation_id),
+          server(m.listener) <> tool(m.tool) <> " " <> string.inspect(m.reason),
+          key_of(m.correlation, InvocationKey(m.invocation_id)),
         )
       },
     ),
@@ -263,7 +297,33 @@ fn relay_handlers(
       relay_telemetry.exchange_closed_event(),
       "tool_hub_relay_exchange_closed_event",
       fn(_, m) {
-        add("relay", "exchange.closed", "", ExchangeKey(m.exchange_id))
+        add(
+          "relay",
+          "exchange.closed",
+          server(m.listener),
+          ExchangeKey(m.exchange_id),
+        )
+      },
+    ),
+    sinal.observe_labelled(
+      relay_telemetry.client_call_event(),
+      "tool_hub_relay_client_call_event",
+      fn(measured, m) {
+        add(
+          "relay",
+          "client.call",
+          option.unwrap(m.client, "unlabelled")
+            <> ": "
+            <> m.method
+            <> " tool="
+            <> tool(m.tool)
+            <> " "
+            <> string.inspect(m.outcome)
+            <> " in "
+            <> int.to_string(measured.duration_ms)
+            <> " ms",
+          key_of(m.correlation, NoKey),
+        )
       },
     ),
   ]

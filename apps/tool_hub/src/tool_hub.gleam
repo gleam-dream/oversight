@@ -13,13 +13,13 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/string
+import gleam/time/duration.{type Duration}
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
 import llm_wire/testing
-import llm_wire/types
 import relay/client
-import relay/transport/http
+import relay/http
 import tool_hub/assistant.{type Assistant}
 import tool_hub/inventory
 import tool_hub/remote_tools
@@ -37,7 +37,7 @@ pub type Mounting {
 pub type Hub {
   Hub(
     catalog: inventory.Catalog,
-    inventory: http.HttpServer(Nil),
+    inventory: http.Handler(Nil),
     /// The agent's MCP client for the inventory server.
     peer: client.Client,
     provider: scripted_llm.Provider,
@@ -46,7 +46,7 @@ pub type Hub {
     store: store.Store,
     telemetry: telemetry.Telemetry,
     assistant: Assistant,
-    assistant_server: http.HttpServer(Nil),
+    assistant_server: http.Handler(Nil),
   )
 }
 
@@ -55,9 +55,12 @@ pub type Settings {
     mounting: Mounting,
     /// Names the hub's run store; unique per hub.
     name: String,
-    /// The Relay policy of the `ask_assistant` server.
-    assistant_policy: http.HttpPolicy,
-    budget_ms: Int,
+    /// Relay settings of the `ask_assistant` server, over its defaults.
+    assistant_http: fn(http.Config(Nil)) -> http.Config(Nil),
+    /// How long one question may take.
+    budget: Duration,
+    /// How long the agent's client waits for one inventory call.
+    inventory_timeout: Duration,
     /// Bridge Relay cancellation to the fabric run.
     cancel_with_caller: Bool,
   )
@@ -67,8 +70,9 @@ pub fn settings(name: String) -> Settings {
   Settings(
     mounting: Typed,
     name:,
-    assistant_policy: http.local_http_policy("127.0.0.1"),
-    budget_ms: 10_000,
+    assistant_http: fn(config) { config },
+    budget: duration.seconds(10),
+    inventory_timeout: duration.seconds(2),
     cancel_with_caller: True,
   )
 }
@@ -95,10 +99,14 @@ pub fn start(
   let catalog = inventory.demo_catalog()
   use inventory_server <- try(inventory.serve(catalog))
   use config <- try(
-    client.http_config(inventory.url(inventory_server)) |> result_string,
+    client.http(inventory.url(inventory_server)) |> result_string,
   )
   use peer <- try(
-    config |> client.with_timeout(2000) |> client.connect_http |> result_string,
+    config
+    |> client.with_timeout(settings.inventory_timeout)
+    |> client.with_label("inventory_peer")
+    |> client.connect
+    |> result_string,
   )
   let notices = process.new_subject()
   use provider <- try(scripted_llm.start(script, notices))
@@ -110,16 +118,15 @@ pub fn start(
     Typed -> Ok(typed_tools(inventory_peer))
     Discovered -> remote_tools.discover(peer, inventory_peer) |> result_string
   })
-  let assert Ok(model_id) = types.model_id("scripted-1")
   let assistant =
     assistant.Assistant(
       store: runs,
       http:,
       settings: scripted_llm.settings(provider),
-      model_id:,
+      model_id: "scripted-1",
       tools:,
       context: assistant.Context(peer),
-      budget_ms: settings.budget_ms,
+      budget: settings.budget,
       cancel_with_caller: settings.cancel_with_caller,
       on_run: fn(id, correlation) {
         telemetry.link(telemetry, run.id_to_string(id), correlation)
@@ -127,7 +134,7 @@ pub fn start(
     )
   use assistant_server <- try(assistant.serve(
     assistant,
-    settings.assistant_policy,
+    settings.assistant_http,
   ))
   Ok(Hub(
     catalog:,
@@ -154,9 +161,9 @@ pub fn typed_tools(
 }
 
 pub fn stop(hub: Hub) -> Nil {
-  http.stop_http_server(hub.assistant_server)
+  http.stop(hub.assistant_server)
   client.close(hub.peer)
-  http.stop_http_server(hub.inventory)
+  http.stop(hub.inventory)
   scripted_llm.stop(hub.provider)
   http_gun.stop(hub.http)
   telemetry.stop(hub.telemetry)
@@ -165,14 +172,15 @@ pub fn stop(hub: Hub) -> Nil {
 /// An MCP client for the `ask_assistant` server.
 pub fn assistant_client(
   hub: Hub,
-  timeout_ms: Int,
+  timeout: Duration,
 ) -> Result(client.Client, String) {
   use config <- try(
-    client.http_config(inventory.url(hub.assistant_server)) |> result_string,
+    client.http(inventory.url(hub.assistant_server)) |> result_string,
   )
   config
-  |> client.with_timeout(timeout_ms)
-  |> client.connect_http
+  |> client.with_timeout(timeout)
+  |> client.with_label("assistant_caller")
+  |> client.connect
   |> result_string
 }
 
@@ -223,7 +231,7 @@ pub fn main() -> Nil {
     <> inventory.url(hub.assistant_server)
     <> " exposes ask_assistant (a fabric agent)",
   )
-  let assert Ok(mcp) = assistant_client(hub, 15_000)
+  let assert Ok(mcp) = assistant_client(hub, duration.seconds(15))
   let assert Ok(listed) = client.list_tools(mcp)
   io.println(
     "- an MCP client lists: "
@@ -231,23 +239,30 @@ pub fn main() -> Nil {
   )
   io.println("- it asks: " <> demo_question)
   case
-    client.call_definition(
+    client.call(
       mcp,
       assistant.ask_assistant(),
       assistant.Question(demo_question),
     )
   {
-    client.StructuredSuccess(answer, _) -> {
+    Ok(client.Succeeded(answer, _)) -> {
       io.println("- answer: " <> answer.answer)
       io.println("- run " <> answer.run_id <> ", followed across packages:")
       let followed = telemetry.follow(hub.telemetry, answer.run_id)
       followed.joined
       |> list.filter(fn(record) { record.package == "fabric" })
       |> list.each(fn(record) { io.println("    " <> telemetry.render(record)) })
+      let joined = fn(package) {
+        int.to_string(telemetry.count(followed.joined, package))
+      }
       io.println(
         "    + "
-        <> int.to_string(telemetry.count(followed.joined, "http_gun"))
-        <> " http_gun events joined through the per-question correlation id",
+        <> joined("http_gun")
+        <> " http_gun, "
+        <> joined("llm_wire")
+        <> " llm_wire and "
+        <> joined("relay")
+        <> " relay events joined through the question's correlation",
       )
       io.println(
         "  not joinable to the run (no shared key): "
@@ -257,9 +272,12 @@ pub fn main() -> Nil {
         <> " llm_wire events",
       )
     }
-    client.ToolFailure(content) ->
-      io.println("- ask_assistant failed: " <> string.inspect(content))
-    other -> io.println("- unexpected outcome: " <> string.inspect(other))
+    Ok(client.ToolFailed(_, structured)) ->
+      io.println("- ask_assistant failed: " <> string.inspect(structured))
+    Ok(client.InputRequired(..)) ->
+      io.println("- ask_assistant asked for input")
+    Error(error) ->
+      io.println("- ask_assistant failed: " <> client.describe_error(error))
   }
   let requests = scripted_llm.requests(scripted_llm.drain(hub.notices))
   io.println(

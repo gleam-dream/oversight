@@ -8,14 +8,14 @@ import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
 import json/blueprint/codec.{type Codec}
+import relay/http
 import relay/server
 import relay/tool
-import relay/transport/http
 
 pub type Product {
   Product(sku: String, name: String, price_cents: Int)
@@ -120,38 +120,22 @@ pub fn reservation_codec() -> Codec(Reservation) {
 // --- Relay definitions: name, description, annotations, codecs ------------
 
 pub fn search_products() -> tool.Definition(SearchQuery, SearchResult) {
-  let assert Ok(name) = tool.tool_name("search_products")
-  let assert Ok(definition) =
-    tool.definition(name, search_query_codec(), search_result_codec())
-  definition
+  tool.define("search_products", search_query_codec(), search_result_codec())
   |> tool.with_description("Find products whose name contains the text.")
-  |> tool.with_annotations(read_only())
+  |> tool.with_read_only_hint(True)
 }
 
 pub fn get_stock() -> tool.Definition(StockQuery, Stock) {
-  let assert Ok(name) = tool.tool_name("get_stock")
-  let assert Ok(definition) =
-    tool.definition(name, stock_query_codec(), stock_codec())
-  definition
+  tool.define("get_stock", stock_query_codec(), stock_codec())
   |> tool.with_description("Units on hand for one SKU.")
-  |> tool.with_annotations(read_only())
+  |> tool.with_read_only_hint(True)
 }
 
 pub fn reserve_stock() -> tool.Definition(ReserveRequest, Reservation) {
-  let assert Ok(name) = tool.tool_name("reserve_stock")
-  let assert Ok(definition) =
-    tool.definition(name, reserve_request_codec(), reservation_codec())
-  definition
+  tool.define("reserve_stock", reserve_request_codec(), reservation_codec())
   |> tool.with_description("Hold units of one SKU for an order.")
-  |> tool.with_annotations(
-    tool.empty_annotations()
-    |> tool.with_read_only_hint(Some(False))
-    |> tool.with_idempotent_hint(Some(False)),
-  )
-}
-
-fn read_only() -> tool.ToolAnnotations {
-  tool.empty_annotations() |> tool.with_read_only_hint(Some(True))
+  |> tool.with_read_only_hint(False)
+  |> tool.with_idempotent_hint(False)
 }
 
 // --- the catalog -----------------------------------------------------------
@@ -165,6 +149,7 @@ type CatalogMessage {
   Search(SearchQuery, Subject(SearchResult))
   Lookup(String, Subject(Result(Stock, InventoryError)))
   Reserve(ReserveRequest, Subject(Result(Reservation, InventoryError)))
+  Stall(Duration)
 }
 
 type Entry {
@@ -232,7 +217,17 @@ fn handle_catalog(
           actor.continue(#(dict.insert(entries, sku, entry), issued + 1))
         }
       }
+    Stall(pause) -> {
+      process.sleep(duration.to_milliseconds(pause))
+      actor.continue(state)
+    }
   }
+}
+
+/// Makes the catalog stop answering for `pause`, so a call in flight outlives
+/// its client's timeout.
+pub fn stall(catalog: Catalog, pause: Duration) -> Nil {
+  process.send(catalog.subject, Stall(pause))
 }
 
 pub fn render_error(error: InventoryError) -> String {
@@ -247,8 +242,9 @@ pub fn render_error(error: InventoryError) -> String {
 
 /// The bound handlers. Application errors are rendered before Relay erases
 /// their type, so the MCP client sees `isError: true` with this text.
-pub fn tools(catalog: Catalog) -> List(tool.ContextTool(Nil)) {
+pub fn tools(catalog: Catalog) -> List(tool.Tool(Nil)) {
   let Catalog(subject) = catalog
+  let render = fn(error) { tool.error_message(render_error(error)) }
   [
     tool.handle(search_products(), fn(query) {
       Ok(process.call(subject, 1000, Search(query, _)))
@@ -256,27 +252,26 @@ pub fn tools(catalog: Catalog) -> List(tool.ContextTool(Nil)) {
     tool.handle_with_error_renderer(
       get_stock(),
       fn(query) { process.call(subject, 1000, Lookup(query.sku, _)) },
-      render_error,
+      render,
     ),
     tool.handle_with_error_renderer(
       reserve_stock(),
       fn(request) { process.call(subject, 1000, Reserve(request, _)) },
-      render_error,
+      render,
     ),
   ]
 }
 
-/// Starts the inventory MCP server on an ephemeral loopback port.
-pub fn serve(catalog: Catalog) -> Result(http.HttpServer(Nil), String) {
-  use registry <- result.try(
-    tool.registry(tools(catalog))
-    |> result.replace_error("duplicate inventory tool"),
-  )
-  server.server(registry)
-  |> http.listener(fn() { Nil })
+/// Starts the inventory MCP server on an ephemeral loopback port. The label
+/// names it in Relay's telemetry.
+pub fn serve(catalog: Catalog) -> Result(http.Handler(Nil), String) {
+  server.new(tools(catalog))
+  |> http.new
+  |> http.with_label("inventory")
   |> http.start
+  |> result.map_error(http.describe_start_error)
 }
 
-pub fn url(running: http.HttpServer(context)) -> String {
-  "http://127.0.0.1:" <> int.to_string(http.http_server_port(running)) <> "/"
+pub fn url(running: http.Handler(context)) -> String {
+  "http://127.0.0.1:" <> int.to_string(http.port(running)) <> "/"
 }
