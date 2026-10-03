@@ -17,16 +17,25 @@ import support_desk/shop.{
   NotificationFailed, PaymentDeclined, PaymentOutcomeUnknown, PaymentUnavailable,
 }
 
-pub type Workflow =
-  saga.Workflow(RefundRequest, RefundReceipt, RefundError, UndoError)
+/// One refund: the request, and the shop whose HTTP calls carry the
+/// ticket (`shop.correlated`), which the tool builds from the run context
+/// and the call.
+pub type Refund {
+  Refund(shop: Shop, request: RefundRequest)
+}
 
-pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
+pub type Workflow =
+  saga.Workflow(Refund, RefundReceipt, RefundError, UndoError)
+
+pub fn workflow(ledger: Ledger) -> Workflow {
   saga.define("refund", fn(input) {
     let payment =
       input
       |> saga.perform(
-        saga.step("refund_payment", fn(request) { shop.refund(shop, request) })
-        |> saga.undo(fn(undo) { shop.void(shop, undo.output) })
+        saga.step("refund_payment", fn(refund: Refund) {
+          shop.refund(refund.shop, refund.request)
+        })
+        |> saga.undo(fn(undo) { shop.void(undo.input.shop, undo.output) })
         // A payment that "may have been sent" may exist: saga names it an
         // unknown effect and holds the run (`Unresolved`, no rollback), and
         // fabric_saga hands the model an uncertain one.
@@ -40,8 +49,8 @@ pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
     let entry =
       saga.both(input, payment)
       |> saga.perform(
-        saga.step("write_ledger", fn(paid: #(RefundRequest, String)) {
-          let #(request, refund_id) = paid
+        saga.step("write_ledger", fn(paid: #(Refund, String)) {
+          let #(Refund(request:, ..), refund_id) = paid
           Ok(ledger.append(
             ledger,
             request.order_id,
@@ -59,8 +68,8 @@ pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
     let notified =
       saga.both(input, entry)
       |> saga.perform(
-        saga.step("notify_customer", fn(recorded: #(RefundRequest, Int)) {
-          let #(request, _entry) = recorded
+        saga.step("notify_customer", fn(recorded: #(Refund, Int)) {
+          let #(Refund(shop:, request:), _entry) = recorded
           shop.notify(
             shop,
             request.order_id,
@@ -72,7 +81,7 @@ pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
       )
     saga.both(saga.both(input, payment), saga.both(entry, notified))
     |> saga.map(fn(done) {
-      let #(#(request, refund_id), #(entry, Nil)) = done
+      let #(#(Refund(request:, ..), refund_id), #(entry, Nil)) = done
       RefundReceipt(refund_id, request.order_id, request.amount_cents, entry)
     })
   })

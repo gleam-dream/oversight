@@ -13,10 +13,18 @@ import gleam/result
 import http_gun
 import http_gun/error as http_error
 import json/blueprint/codec
+import sinal/correlation.{type Correlation}
 import support_desk/domain.{type Order, type RefundRequest}
 
 pub type Shop {
   Shop(client: http_gun.Client, base_url: String)
+}
+
+/// The shop with its HTTP calls tagged with `correlation`: a tool passes
+/// its call's, so the lookups, refund, notify and void requests of one
+/// ticket carry the ticket.
+pub fn correlated(shop: Shop, correlation: Correlation) -> Shop {
+  Shop(..shop, client: http_gun.with_correlation(shop.client, correlation))
 }
 
 pub type LookupError {

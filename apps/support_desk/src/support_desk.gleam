@@ -6,8 +6,9 @@ import fabric/run
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/string
+import gleam/time/duration
 import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
 import support_desk/desk
@@ -79,18 +80,13 @@ pub fn main() -> Nil {
   telemetry.trail(app.telemetry, ticket)
   |> list.each(fn(o) { io.println("  " <> telemetry.render(o)) })
   let all = telemetry.observations(app.telemetry)
-  let unattributed_llm =
-    list.count(all, fn(o) {
-      o.source == telemetry.LlmWire && o.key == telemetry.ModelCall(None)
-    })
+  let orphans = telemetry.unattributed(all)
   io.println(
     "not attributable to any ticket: "
-    <> int.to_string(telemetry.count(all, telemetry.Saga))
-    <> " saga events, "
-    <> int.to_string(unattributed_llm)
+    <> int.to_string(list.length(orphans))
     <> " of "
-    <> int.to_string(telemetry.count(all, telemetry.LlmWire))
-    <> " llm_wire events, and every uncorrelated http_gun event",
+    <> int.to_string(list.length(all))
+    <> " events",
   )
   app.stop(app)
 }
@@ -117,7 +113,7 @@ fn drive(
   session: desk.Session,
   approver: Approver,
 ) -> Nil {
-  case fabric.await(handle, 10_000) {
+  case fabric.await(handle, within: duration.seconds(10)) {
     Ok(run.Suspended([pending, ..], _)) -> {
       io.println(
         "  approval needed: " <> pending.tool <> " " <> pending.arguments_json,

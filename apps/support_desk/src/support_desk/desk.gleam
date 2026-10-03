@@ -20,6 +20,7 @@ import gleam/int
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import http_gun
 import json/blueprint/codec
 import llm_wire
@@ -38,7 +39,9 @@ import support_desk/shop.{
 /// The per-ticket context every tool and policy decision receives.
 pub type Session {
   Session(
-    /// The desk's own correlation for this ticket, in its `ticket.*` events.
+    /// The ticket's correlation: the desk's `ticket.*` events carry it, and
+    /// `open_ticket` starts the ticket's run with it, so fabric, the model
+    /// calls, the tools' HTTP calls and the refund saga join it too.
     ticket: Correlation,
     /// Refunds of at least this many cents need a human approver; 0 means
     /// every refund does.
@@ -48,7 +51,7 @@ pub type Session {
 }
 
 pub type Desk {
-  Desk(store: Store, settings: Settings, shop: Shop, ledger: Ledger)
+  Desk(store: Store, agent: Agent(Session), shop: Shop, ledger: Ledger)
 }
 
 /// The requirement a refund approver answers.
@@ -72,44 +75,47 @@ pub fn start(settings: Settings) -> Result(Desk, String) {
     store.start(runs)
     |> result.map_error(fn(error) { "store: " <> string.inspect(error) }),
   )
-  // Build once to refuse bad settings at start; each ticket builds its own.
-  use _ <- result.map(build(settings, settings.llm_client))
-  Desk(runs, settings, settings.shop, settings.ledger)
+  use agent <- result.map(build(settings))
+  Desk(runs, agent, settings.shop, settings.ledger)
 }
 
-/// An agent whose model calls go through `llm_client`. `fabric/llm.model`
-/// binds one client, and llm_wire reads the correlation from that client's
-/// view, so a ticket's model calls join the ticket only when the ticket has
-/// its own agent over its own view.
-pub fn build(
-  settings: Settings,
-  llm_client: http_gun.Client,
-) -> Result(Agent(Session), String) {
+/// The one agent every ticket runs on. Each turn's request names its run's
+/// correlation, and `fabric/llm.model` tags the client view with it.
+pub fn build(settings: Settings) -> Result(Agent(Session), String) {
   let config =
     openai.new("sk-scripted")
     |> openai.config
     |> llm_wire.with_endpoint(settings.provider_url)
-  let model = llm.model(llm_client, config, "gpt-4.1-mini")
+  let model = llm.model(settings.llm_client, config, "gpt-4.1-mini")
   let issue_refund =
     fabric_saga.tool(
       domain.issue_refund(),
-      refund.workflow(settings.shop, settings.ledger),
+      refund.workflow(settings.ledger),
       refund.config(),
+      input: fn(session: Session, call, request) {
+        refund.Refund(shop.correlated(session.shop, call.correlation), request)
+      },
       explain: refund.explain,
-      rollback_within: 5000,
+      rollback_within: duration.seconds(5),
     )
   let tools = [
     tool.bind(
       domain.lookup_order(),
-      fn(session: Session, query: OrderQuery) {
-        shop.get_order(correlated(session), query.order_id)
+      fn(session: Session, call, query: OrderQuery) {
+        shop.get_order(
+          shop.correlated(session.shop, call.correlation),
+          query.order_id,
+        )
       },
       explain_lookup,
     ),
     tool.bind(
       domain.check_refund_eligibility(),
-      fn(session: Session, query: OrderQuery) {
-        shop.get_order(correlated(session), query.order_id)
+      fn(session: Session, call, query: OrderQuery) {
+        shop.get_order(
+          shop.correlated(session.shop, call.correlation),
+          query.order_id,
+        )
         |> result.map(eligibility)
       },
       explain_lookup,
@@ -123,9 +129,7 @@ pub fn build(
   |> result.map_error(fn(errors) { "agent: " <> string.inspect(errors) })
 }
 
-/// A new ticket's session. The ticket's correlation also tags its HTTP
-/// calls (`correlated`) and, through `open_ticket`, its model calls, so
-/// there is nothing to register with telemetry.
+/// A new ticket's session.
 pub fn session(
   desk: Desk,
   ticket: Correlation,
@@ -134,21 +138,44 @@ pub fn session(
   Session(ticket, approval_from_cents, desk.shop)
 }
 
+/// Starts the ticket's run under an id derived from the ticket, with the
+/// ticket as its correlation. Opening a ticket twice returns the one run:
+/// the second start is `AlreadyStarted` and stores nothing.
 pub fn open_ticket(
   desk: Desk,
   session: Session,
   message: String,
 ) -> Result(fabric.Run(Session), fabric.StartError) {
-  use agent <- result.try(
-    build(
-      desk.settings,
-      http_gun.with_correlation(desk.settings.llm_client, session.ticket),
-    )
-    |> result.map_error(fabric.StartRefused),
+  let key = "ticket-" <> correlation.to_string(session.ticket)
+  use id <- result.try(
+    run.parse_id(key)
+    |> result.replace_error(fabric.StartRefused(
+      "the ticket id is not a valid run id: " <> key,
+    )),
   )
-  use handle <- result.map(fabric.start(desk.store, agent, session, message))
-  events.opened(session.ticket, run.id_to_string(fabric.id(handle)))
-  handle
+  case
+    fabric.start(
+      desk.store,
+      desk.agent,
+      id:,
+      context: session,
+      prompt: message,
+      correlation: Some(session.ticket),
+    )
+  {
+    Ok(handle) -> {
+      events.opened(session.ticket, run.id_to_string(id))
+      Ok(handle)
+    }
+    Error(fabric.AlreadyStarted(id)) ->
+      fabric.open(desk.store, desk.agent, session, id)
+      |> result.map_error(fn(error) {
+        fabric.StartRefused(
+          "the ticket's run cannot be opened: " <> string.inspect(error),
+        )
+      })
+    Error(error) -> Error(error)
+  }
 }
 
 /// The run's final answer, decoded with `answer`, recorded as the ticket's
@@ -179,13 +206,6 @@ pub fn refund_policy(
       policy.RequireApproval(approver)
     _ -> policy.Allow
   }
-}
-
-fn correlated(session: Session) -> Shop {
-  shop.Shop(
-    ..session.shop,
-    client: http_gun.with_correlation(session.shop.client, session.ticket),
-  )
 }
 
 fn eligibility(order: domain.Order) -> Eligibility {
