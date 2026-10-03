@@ -3,7 +3,7 @@
 //// Every call takes the client view to use, so the caller can pass
 //// `http_gun.with_correlation(client, order)` for per-order observation.
 //// Transport failures stay typed: `ProviderUnreachable(provider, failure)`
-//// keeps http_gun's `Failure`, including its `MayHaveBeenSent` evidence.
+//// keeps http_gun's `Failure`, including its `MaybeSent` evidence.
 
 import checkout/domain.{
   type CheckoutError, type OrderRequest, type Provider, Declined, Payments,
@@ -13,14 +13,15 @@ import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/http.{type Method, Get, Post}
 import gleam/http/request
+import gleam/int
 import gleam/json
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/uri
 import http_gun
 import http_gun/config
 import http_gun/deadline
 import http_gun/destination
-import http_gun/request_options
 import sinal/forwarder
 
 pub type Gateway {
@@ -33,24 +34,34 @@ pub type Gateway {
   )
 }
 
-/// http_gun's default destination policy refuses loopback; the scripted
-/// providers live on 127.0.0.1, so the app must opt in, and pins the
-/// allowlist to that one host while it is at it.
+/// The provider client: loopback only, pinned to the providers' exact
+/// `host:port` entries, so it cannot reach a public host or another local
+/// port. Its lifecycle events go to the app's forwarder.
 pub fn client_config(
-  observations: Option(forwarder.Forwarder),
+  observations: forwarder.Forwarder,
+  hosts: List(String),
 ) -> config.Config {
-  let defaults = config.default()
-  config.Config(
-    ..defaults,
-    deadline_ms: 5000,
-    observations:,
-    destination: destination.Policy(
-      ..defaults.destination,
-      allow_public: False,
-      allow_loopback: True,
-      allowed_hosts: Some(["127.0.0.1"]),
-    ),
+  config.default()
+  |> config.with_request_timeout(config.Milliseconds(5000))
+  |> config.with_destination(
+    destination.loopback_only() |> destination.only_hosts(hosts),
   )
+  |> config.with_observations(observations)
+}
+
+/// A local client that emits nothing (the demo's and tests' customer).
+pub fn customer_config() -> config.Config {
+  config.default()
+  |> config.with_destination(destination.loopback_only())
+  |> config.without_observations
+}
+
+/// The `host:port` of a provider base URL, for `client_config`.
+pub fn authority(url: String) -> String {
+  let assert Ok(parsed) = uri.parse(url)
+  let assert Some(host) = parsed.host
+  let assert Some(port) = parsed.port
+  host <> ":" <> int.to_string(port)
 }
 
 pub type ChargeLookup {
@@ -226,17 +237,13 @@ fn call(
     Some(key) -> request.set_header(req, "idempotency-key", key)
     None -> req
   }
-  let unreachable = fn(failure) { ProviderUnreachable(provider, failure) }
-  use budget <- result.try(
-    deadline.after(deadline_ms) |> result.map_error(unreachable),
-  )
-  let options =
-    request_options.Options(..request_options.default(), deadline: Some(budget))
-  http_gun.send_with_options(client, req, options)
+  client
+  |> http_gun.with_deadline(deadline.after(deadline_ms))
+  |> http_gun.send(req)
   |> result.map(fn(buffered) {
     #(buffered.response.status, buffered.response.body)
   })
-  |> result.map_error(unreachable)
+  |> result.map_error(ProviderUnreachable(provider, _))
 }
 
 fn decode_id(

@@ -20,7 +20,6 @@ import gleam/result
 import gleam/string
 import http_gun/error
 import mist
-import sinal/correlation
 import wisp
 import wisp/wisp_mist
 
@@ -94,13 +93,7 @@ fn show(app: App, order_id: String) -> wisp.Response {
 }
 
 fn decode_order(body: decode.Dynamic) -> Result(domain.OrderRequest, Nil) {
-  use order <- result.try(
-    decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil),
-  )
-  // The order id is the order's telemetry correlation.
-  correlation.from_string(order.order_id)
-  |> result.replace(order)
-  |> result.replace_error(Nil)
+  decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil)
 }
 
 fn report_json(order_id: String, report: Report) -> json.Json {
@@ -114,7 +107,7 @@ fn report_json(order_id: String, report: Report) -> json.Json {
 }
 
 /// The HTTP status follows the typed error, including http_gun's failure
-/// class: a provider deadline is a 504, any other transport failure a 502.
+/// kind: a provider timeout is a 504, any other transport failure a 502.
 pub fn status_code(report: Report) -> Int {
   case report.status, report.error {
     domain.Confirmed, _ -> 201
@@ -128,11 +121,12 @@ fn error_status(error: CheckoutError) -> Int {
   case error {
     domain.Declined(_) -> 402
     domain.OutOfStock(..) -> 409
-    domain.ProviderUnreachable(
-      failure: error.Failure(error.DeadlineExceeded, _),
-      ..,
-    ) -> 504
-    domain.ProviderUnreachable(..) | domain.ProviderRejected(..) -> 502
+    domain.ProviderUnreachable(failure:, ..) ->
+      case error.kind(failure) {
+        error.TimedOut -> 504
+        _ -> 502
+      }
+    domain.ProviderRejected(..) -> 502
     domain.StockStoreFailed(_) | domain.Interrupted(_) -> 503
   }
 }

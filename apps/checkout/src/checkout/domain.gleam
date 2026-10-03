@@ -85,10 +85,8 @@ pub fn status_from_string(text: String) -> Result(OrderStatus, Nil) {
 /// True when the provider may have acted although we saw no answer.
 pub fn effect_uncertain(error: CheckoutError) -> Bool {
   case error {
-    ProviderUnreachable(
-      failure: error.Failure(evidence: error.MayHaveBeenSent, ..),
-      ..,
-    ) -> True
+    ProviderUnreachable(failure:, ..) ->
+      error.evidence(failure) == error.MaybeSent
     _ -> False
   }
 }

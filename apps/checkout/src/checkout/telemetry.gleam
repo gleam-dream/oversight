@@ -3,27 +3,22 @@
 //// packages.
 ////
 //// An order's correlation is a `sinal/correlation` value made from its
-//// order id. No package carries it yet, so each event is linked to it here:
-//// - http_gun: the order's correlation is attached to the client with
-////   `http_gun.with_correlation` and arrives in every lifecycle event;
-//// - saga: local runs are linked by `execution.run_id`; durable runs expose
-////   no run id at all, so they are linked by the *emitting process*, which
-////   the Postgres saga storage reports when a runner claims an execution;
-//// - grind: jobs are linked through `admitted.submission_id`, because the
-////   app submits with a `SubmissionId` derived from the order id.
+//// order id, and every package carries it in its own metadata:
+//// - saga: `execution.with_correlation` (local runs) and
+////   `durable.with_correlation` (durable runs);
+//// - http_gun: `http_gun.with_correlation` on the client view;
+//// - grind: `job.with_correlation` at submit, in every job event's `ref`.
 
-import gleam/dict.{type Dict}
-import gleam/erlang/process.{type Pid, type Subject}
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/result
 import gleam/string
 import grind/job
-import grind/observation as grind_obs
+import grind/telemetry as grind_telemetry
 import http_gun/telemetry as http_telemetry
-import saga/observation as saga_obs
+import saga/telemetry as saga_telemetry
 import sinal
 import sinal/correlation.{type Correlation}
 
@@ -33,52 +28,39 @@ pub type Source {
   Grind
 }
 
-/// What an event can be correlated by.
-pub type Key {
-  SagaRun(Int)
-  Emitter(Pid)
-  Order(Correlation)
-  GrindJob(Int)
-}
-
 pub type Entry {
-  Entry(source: Source, keys: List(Key), line: String)
+  Entry(source: Source, order: Option(Correlation), line: String)
 }
 
 pub opaque type Collector {
   Collector(subject: Subject(Message), attachments: List(sinal.Attachment))
 }
 
-type State {
-  State(entries: List(Entry), links: Dict(Key, Correlation))
-}
-
 type Message {
   Record(Entry)
-  Link(Key, Correlation)
-  Trace(order: Correlation, reply: Subject(List(Entry)))
-  Unattributed(reply: Subject(List(Entry)))
+  Trace(order: Option(Correlation), reply: Subject(List(Entry)))
 }
 
-/// The correlation of an order. The web layer refuses an order id that is
-/// not a valid correlation (empty, or longer than 128 bytes).
+/// The correlation of an order.
 pub fn order(order_id: String) -> Correlation {
-  let assert Ok(order) = correlation.from_string(order_id)
-  order
-}
-
-/// The order behind an id of the form `"<kind>:<order id>"`, as used for
-/// saga execution ids and grind submission ids.
-pub fn from_tagged_id(id: String) -> Result(Correlation, Nil) {
-  use #(_, order_id) <- result.try(string.split_once(id, ":"))
-  correlation.from_string(order_id) |> result.replace_error(Nil)
+  correlation.from_key(order_id)
 }
 
 /// Starts the collector and attaches one handler per event descriptor.
 pub fn start() -> Collector {
   let assert Ok(started) =
-    actor.new(State([], dict.new()))
-    |> actor.on_message(handle)
+    actor.new([])
+    |> actor.on_message(fn(entries, message) {
+      case message {
+        Record(entry) -> actor.continue([entry, ..entries])
+        Trace(order, reply) -> {
+          list.reverse(entries)
+          |> list.filter(fn(e) { e.order == order })
+          |> process.send(reply, _)
+          actor.continue(entries)
+        }
+      }
+    })
     |> actor.start
   let subject = started.data
   Collector(subject:, attachments: attach_all(subject))
@@ -91,20 +73,16 @@ pub fn stop(collector: Collector) -> Nil {
   })
 }
 
-pub fn link(collector: Collector, key: Key, order: Correlation) -> Nil {
-  actor.send(collector.subject, Link(key, order))
-}
-
 /// Every collected event attributed to `order`, in arrival order.
 pub fn trace(collector: Collector, order: Correlation) -> List(Entry) {
   // Forwarded events (http_gun, grind) arrive asynchronously.
   process.sleep(50)
-  actor.call(collector.subject, 1000, Trace(order, _))
+  actor.call(collector.subject, 1000, Trace(Some(order), _))
 }
 
-/// Events that could not be attributed to any order.
+/// Events that carried no correlation.
 pub fn unattributed(collector: Collector) -> List(Entry) {
-  actor.call(collector.subject, 1000, Unattributed)
+  actor.call(collector.subject, 1000, Trace(None, _))
 }
 
 pub fn render(entry: Entry) -> String {
@@ -116,71 +94,51 @@ pub fn render(entry: Entry) -> String {
   source <> " " <> entry.line
 }
 
-fn handle(state: State, message: Message) -> actor.Next(State, Message) {
-  case message {
-    Record(entry) ->
-      actor.continue(State(..state, entries: [entry, ..state.entries]))
-    Link(key, order) ->
-      actor.continue(
-        State(..state, links: dict.insert(state.links, key, order)),
-      )
-    Trace(order, reply) -> {
-      list.reverse(state.entries)
-      |> list.filter(fn(e) { owner(state, e) == Some(order) })
-      |> process.send(reply, _)
-      actor.continue(state)
-    }
-    Unattributed(reply) -> {
-      list.reverse(state.entries)
-      |> list.filter(fn(e) { owner(state, e) == None })
-      |> process.send(reply, _)
-      actor.continue(state)
-    }
-  }
-}
-
-fn owner(state: State, entry: Entry) -> Option(Correlation) {
-  list.find_map(entry.keys, fn(key) {
-    case key {
-      Order(order) -> Ok(order)
-      _ -> dict.get(state.links, key)
-    }
-  })
-  |> option.from_result
-}
-
 // --- attachments ----------------------------------------------------------
 
 fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
-  let record = fn(source, keys, line) {
-    process.send(subject, Record(Entry(source, keys, line)))
+  let record = fn(source, order, line) {
+    process.send(subject, Record(Entry(source, order, line)))
   }
-  let saga_keys = fn(run) { [SagaRun(run), Emitter(process.self())] }
+  let job = fn(ref: grind_telemetry.JobRef, line) {
+    record(
+      Grind,
+      Some(ref.correlation),
+      "job "
+        <> line
+        <> " "
+        <> ref.worker_id
+        <> "#"
+        <> int.to_string(ref.job_id)
+        <> " queue="
+        <> ref.queue,
+    )
+  }
   [
-    sinal.observe(saga_obs.run_started(), fn(_m, d) {
-      record(Saga, saga_keys(d.run), "run start " <> d.workflow)
+    sinal.observe(saga_telemetry.run_started(), fn(_m, d) {
+      record(Saga, d.correlation, "run start " <> d.workflow)
     }),
-    sinal.observe(saga_obs.run_stopped(), fn(m, d) {
+    sinal.observe(saga_telemetry.run_stopped(), fn(m, d) {
       record(
         Saga,
-        saga_keys(d.run),
+        d.correlation,
         "run stop "
-          <> string.inspect(d.outcome)
+          <> saga_telemetry.outcome_kind_name(d.outcome)
           <> " undone="
           <> int.to_string(m.undone),
       )
     }),
-    sinal.observe(saga_obs.step_started(), fn(_m, d) {
+    sinal.observe(saga_telemetry.step_started(), fn(_m, d) {
       record(
         Saga,
-        saga_keys(d.run),
+        d.correlation,
         "step start " <> d.step <> " attempt=" <> int.to_string(d.attempt),
       )
     }),
-    sinal.observe(saga_obs.step_stopped(), fn(_m, d) {
+    sinal.observe(saga_telemetry.step_stopped(), fn(_m, d) {
       record(
         Saga,
-        saga_keys(d.run),
+        d.correlation,
         "step stop "
           <> d.step
           <> " attempt="
@@ -189,81 +147,37 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
           <> string.inspect(d.result),
       )
     }),
-    sinal.observe(saga_obs.compensation_stopped(), fn(_m, d) {
+    sinal.observe(saga_telemetry.compensation_stopped(), fn(_m, d) {
       record(
         Saga,
-        saga_keys(d.run),
+        d.correlation,
         "compensate " <> d.step <> " " <> string.inspect(d.decision),
       )
     }),
-    sinal.observe(saga_obs.undo_stopped(), fn(_m, d) {
+    sinal.observe(saga_telemetry.undo_stopped(), fn(_m, d) {
       record(
         Saga,
-        saga_keys(d.run),
+        d.correlation,
         "undo " <> d.step <> " " <> string.inspect(d.result),
       )
     }),
     sinal.observe(http_telemetry.event(), fn(_m, d) {
-      let keys = case d.correlation {
-        Some(order) -> [Order(order)]
-        None -> []
-      }
-      record(Http, keys, "request " <> string.inspect(d.milestone))
+      record(Http, d.correlation, "request " <> string.inspect(d.milestone))
     }),
-    sinal.observe(grind_obs.admitted(), fn(_m, d) {
-      // The submission id is "<kind>:<order id>"; nothing else in grind's
-      // metadata identifies the application's order.
-      case option.map(d.submission_id, from_tagged_id) {
-        Some(Ok(order)) ->
-          process.send(subject, Link(GrindJob(d.ref.job_id), order))
-        _ -> Nil
-      }
-      record(
-        Grind,
-        [GrindJob(d.ref.job_id)],
-        "job admitted "
-          <> job_line(d.ref)
-          <> " state="
-          <> job.state_to_stored(d.committed_state),
-      )
+    sinal.observe(grind_telemetry.admitted(), fn(_m, d) {
+      job(d.ref, "admitted state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_obs.claimed(), fn(_m, d) {
-      record(
-        Grind,
-        [GrindJob(d.ref.job_id)],
-        "job claimed "
-          <> job_line(d.ref)
-          <> " attempt="
-          <> int.to_string(d.attempt.attempt),
-      )
+    sinal.observe(grind_telemetry.claimed(), fn(_m, d) {
+      job(d.ref, "claimed attempt=" <> int.to_string(d.attempt.attempt))
     }),
-    sinal.observe(grind_obs.acknowledged(), fn(_m, d) {
-      record(
-        Grind,
-        [GrindJob(d.ref.job_id)],
-        "job acknowledged "
-          <> job_line(d.ref)
-          <> " state="
-          <> job.state_to_stored(d.committed_state),
-      )
+    sinal.observe(grind_telemetry.acknowledged(), fn(_m, d) {
+      job(d.ref, "acknowledged state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_obs.quarantined(), fn(_m, d) {
-      record(
-        Grind,
-        [GrindJob(d.ref.job_id)],
-        "job quarantined " <> job_line(d.ref),
-      )
+    sinal.observe(grind_telemetry.quarantined(), fn(_m, d) {
+      job(d.ref, "quarantined replayed=" <> string.inspect(d.replayed))
     }),
-    sinal.observe(grind_obs.resolved(), fn(_m, d) {
-      record(
-        Grind,
-        [GrindJob(d.ref.job_id)],
-        "job resolved " <> job_line(d.ref) <> " " <> string.inspect(d.decision),
-      )
+    sinal.observe(grind_telemetry.resolved(), fn(_m, d) {
+      job(d.ref, "resolved " <> string.inspect(d.decision))
     }),
   ]
-}
-
-fn job_line(ref: grind_obs.JobRef) -> String {
-  ref.worker_id <> "#" <> int.to_string(ref.job_id) <> " queue=" <> ref.queue
 }

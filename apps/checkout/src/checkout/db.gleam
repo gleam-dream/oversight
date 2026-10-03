@@ -1,31 +1,17 @@
-//// The application's own Postgres tables and queries, on the app's pog pool.
-//// The same pool also backs the saga storage (`checkout/saga_store`).
+//// The application's own Postgres tables and queries. They run on the one
+//// pog pool that grind builds from the app's `pog.Config`; saga_postgres
+//// and grind keep their own tables on the same pool.
 
 import checkout/domain.{
   type CheckoutError, type OrderRequest, type OrderStatus, OutOfStock,
   StockStoreFailed,
 }
 import gleam/dynamic/decode
-import gleam/erlang/process
 import gleam/list
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import pog
-
-pub fn start_pool(
-  database_url: String,
-  size: Int,
-) -> Result(#(process.Pid, pog.Connection), String) {
-  let name = process.new_name("checkout_pool")
-  use config <- result.try(
-    pog.url_config(name, database_url)
-    |> result.replace_error("invalid DATABASE_URL"),
-  )
-  pog.start(pog.pool_size(config, size))
-  |> result.map(fn(started) { #(started.pid, started.data) })
-  |> result.map_error(string.inspect)
-}
 
 const schema = [
   "CREATE TABLE IF NOT EXISTS stock (
@@ -41,22 +27,9 @@ const schema = [
      status text NOT NULL,
      detail text NOT NULL DEFAULT '',
      updated_at timestamptz NOT NULL DEFAULT now())",
-  "CREATE TABLE IF NOT EXISTS receipt_outbox (
-     order_id text PRIMARY KEY,
-     email text NOT NULL,
-     amount_cents integer NOT NULL,
-     submitted boolean NOT NULL DEFAULT false)",
   "CREATE TABLE IF NOT EXISTS receipts_sent (
      order_id text PRIMARY KEY,
      message_id text NOT NULL)",
-  "CREATE TABLE IF NOT EXISTS saga_executions (
-     id text PRIMARY KEY,
-     revision bigint NOT NULL,
-     generation bigint NOT NULL,
-     cancelled boolean NOT NULL DEFAULT false,
-     data bytea NOT NULL,
-     owner_vm text,
-     lease_until timestamptz)",
 ]
 
 pub fn migrate(conn: pog.Connection) -> Result(Nil, pog.QueryError) {
@@ -215,59 +188,6 @@ pub fn set_status(
   |> pog.parameter(pog.text(order_id))
   |> pog.parameter(pog.text(domain.status_to_string(status)))
   |> pog.parameter(pog.text(detail))
-  |> pog.execute(conn)
-  |> result.replace(Nil)
-}
-
-/// Confirms the order and records the receipt in an outbox row, atomically.
-/// Grind cannot join this transaction, so the job is submitted afterwards
-/// from the outbox (see `checkout/receipts`).
-pub fn confirm_with_receipt(
-  conn: pog.Connection,
-  order: OrderRequest,
-  detail: String,
-) -> Result(Nil, pog.TransactionError(pog.QueryError)) {
-  pog.transaction(conn, fn(tx) {
-    use _ <- result.try(set_status(tx, order.order_id, domain.Confirmed, detail))
-    pog.query(
-      "INSERT INTO receipt_outbox (order_id, email, amount_cents)
-       VALUES ($1, $2, $3) ON CONFLICT (order_id) DO NOTHING",
-    )
-    |> pog.parameter(pog.text(order.order_id))
-    |> pog.parameter(pog.text(order.email))
-    |> pog.parameter(pog.int(order.amount_cents))
-    |> pog.execute(tx)
-    |> result.replace(Nil)
-  })
-}
-
-pub type OutboxRow {
-  OutboxRow(order_id: String, email: String, amount_cents: Int)
-}
-
-pub fn pending_receipts(
-  conn: pog.Connection,
-) -> Result(List(OutboxRow), pog.QueryError) {
-  pog.query(
-    "SELECT order_id, email, amount_cents FROM receipt_outbox
-     WHERE NOT submitted ORDER BY order_id",
-  )
-  |> pog.returning({
-    use order_id <- decode.field(0, decode.string)
-    use email <- decode.field(1, decode.string)
-    use amount <- decode.field(2, decode.int)
-    decode.success(OutboxRow(order_id, email, amount))
-  })
-  |> pog.execute(conn)
-  |> result.map(fn(r) { r.rows })
-}
-
-pub fn mark_submitted(
-  conn: pog.Connection,
-  order_id: String,
-) -> Result(Nil, pog.QueryError) {
-  pog.query("UPDATE receipt_outbox SET submitted = true WHERE order_id = $1")
-  |> pog.parameter(pog.text(order_id))
   |> pog.execute(conn)
   |> result.replace(Nil)
 }

@@ -1,75 +1,164 @@
 //// The durable checkout: a grind job whose handler drives the checkout saga
-//// through `saga/durable`, on the Postgres saga storage.
+//// through `saga/durable`, on saga_postgres.
 ////
 //// Grind owns delivery and redelivery; saga owns progress and compensation.
-//// The handler maps saga's durable results onto grind's queue responses:
-//// a lost runner or a busy execution snoozes the job (redelivery resumes
-//// from the last checkpoint), and a saga that needs reconciliation becomes a
-//// grind `Uncertain` job, which needs an audited operator resolution.
+//// The handler maps saga's durable results onto grind's responses: a busy
+//// execution or a lost runner snoozes the job (redelivery resumes from the
+//// last checkpoint; a killed runner releases its claim, so that resume is
+//// immediate), and a saga that needs reconciliation becomes a grind
+//// `Uncertain` job, which needs an audited operator resolution.
+////
+//// The handler is idempotent by construction (the saga checkpoint decides
+//// what runs), so an abandoned attempt is replayed after its lease expires
+//// instead of waiting for an operator. `drive` is bounded by the handler's
+//// own deadline and stops its runner when the handler process dies.
 
 import checkout/codecs
-import checkout/domain.{type OrderRequest}
+import checkout/domain.{
+  type Booked, type CheckoutError, type OrderRequest, type UndoError,
+}
 import checkout/orders.{type Services}
-import checkout/saga_store
+import checkout/telemetry
 import gleam/dynamic/decode
+import gleam/erlang/process
+import gleam/int
 import gleam/json
-import gleam/string
+import gleam/option.{None, Some}
+import gleam/result
+import gleam/time/duration.{type Duration}
+import gleam/time/timestamp
 import grind/worker.{type Worker}
 import saga/durable
 import saga/execution
-import saga/storage
+
+/// How long one attempt may drive the saga. The worker's timeout is a
+/// little longer, so `drive` returns before grind stops the handler.
+const attempt_budget_ms = 60_000
 
 pub fn execution_id(order: OrderRequest) -> String {
   "checkout:" <> order.order_id
 }
 
+/// `redelivery` is the snooze after a lost runner or a storage failure;
+/// `busy` the snooze while another runner's claim holds the execution. A
+/// killed runner releases its claim, so only a lost node leaves one behind,
+/// and the claim lasts saga_postgres's lease: `busy` should be at least that,
+/// or grind's snooze cap ends the job before the lease does.
 pub fn checkout_worker(
   s: Services,
-  redelivery_ms: Int,
+  redelivery redelivery: Duration,
+  busy busy: Duration,
 ) -> Worker(OrderRequest, String, Nil) {
   let summary = codecs.JsonCodec("summary-1", json.string, decode.string)
-  let assert Ok(w) =
-    worker.define(
-      "checkout.run",
-      "1",
-      codecs.to_grind(codecs.order()),
-      codecs.to_grind(summary),
-      fn(_order) { Error(Nil) },
-    )
-  let assert Ok(redeliver) = worker.retry_delay(redelivery_ms)
-  worker.with_queue_handler(w, fn(order) { drive(s, order, redeliver) })
+  worker.responding(
+    "checkout.run",
+    input: codecs.to_grind(codecs.order()),
+    output: codecs.to_grind(summary),
+    handle: fn(context, order) { drive(s, context, order, redelivery, busy) },
+  )
+  |> worker.with_queue(orders.checkouts_queue)
+  |> worker.with_timeout(
+    worker.After(duration.milliseconds(attempt_budget_ms + 5000)),
+  )
+  |> worker.with_abandonment(worker.ReplayAfterLeaseExpiry(max_replays: 3))
 }
 
 fn drive(
   s: Services,
+  context: worker.Context,
   order: OrderRequest,
-  redeliver: worker.RetryDelay,
-) -> worker.WorkerResponse(String, Nil) {
-  let id = execution_id(order)
-  let store = saga_store.storage(s.store, id)
-  let driven = {
-    case durable.start_or_reconnect(store, id, s.persistence, order) {
-      Error(error) -> Error(error)
-      Ok(reference) ->
-        durable.drive(store, reference, s.persistence, s.saga_config)
-    }
+  redelivery: Duration,
+  busy: Duration,
+) -> worker.Response(String, Nil) {
+  let driven = case
+    durable.start_or_reconnect(
+      s.persistence,
+      s.storage,
+      id: execution_id(order),
+      input: order,
+    )
+  {
+    Error(error) -> Error(error)
+    Ok(run) ->
+      run
+      |> durable.with_correlation(telemetry.order(order.order_id))
+      |> drive_until_cancelled(context, budget(context))
   }
   case driven {
     Ok(outcome) -> {
       let report = orders.finalize(s, order, outcome)
       case outcome {
-        execution.Unresolved(..) -> worker.WorkerUncertain(report.detail)
-        execution.Cancelled(..) -> worker.WorkerCancelled(report.detail)
+        execution.Unresolved(..) -> worker.Uncertain(report.detail)
+        execution.Cancelled(..) -> worker.Cancelled(report.detail)
         _ ->
-          worker.WorkerSucceeded(
+          worker.Succeeded(
             domain.status_to_string(report.status) <> ": " <> report.detail,
           )
       }
     }
-    Error(durable.RunnerLost) ->
-      worker.WorkerSnoozed(redeliver, "saga runner lost; resume on redelivery")
-    Error(durable.StorageError(storage.Busy)) ->
-      worker.WorkerSnoozed(redeliver, "saga execution owned by another runner")
-    Error(error) -> worker.WorkerUncertain(string.inspect(error))
+    Error(error) ->
+      case durable.error_kind(error) {
+        durable.Busy ->
+          worker.Snoozed(after: busy, reason: durable.describe_error(error))
+        durable.Transient ->
+          worker.Snoozed(
+            after: redelivery,
+            reason: durable.describe_error(error),
+          )
+        durable.NeedsReconciliation | durable.Incompatible | durable.Defect ->
+          worker.Uncertain(durable.describe_error(error))
+      }
+  }
+}
+
+type Driving {
+  Driven(
+    Result(execution.Outcome(Booked, CheckoutError, UndoError), durable.Error),
+  )
+  CancelRequested
+}
+
+/// `durable.drive` blocks its caller, and grind delivers a cancellation to
+/// the handler's own mailbox, so the drive runs in a linked process while
+/// the handler waits for either. A cancellation is recorded with
+/// `durable.cancel`; the runner rolls back at its next checkpoint. The
+/// runner still stops when the handler dies, through the link.
+fn drive_until_cancelled(
+  run: durable.Run(OrderRequest, Booked, CheckoutError, UndoError),
+  context: worker.Context,
+  timeout: Int,
+) -> Result(execution.Outcome(Booked, CheckoutError, UndoError), durable.Error) {
+  let reply = process.new_subject()
+  process.spawn(fn() { process.send(reply, durable.drive(run, timeout:)) })
+  let driving =
+    process.new_selector()
+    |> process.select_map(reply, Driven)
+    |> process.merge_selector(
+      process.map_selector(worker.cancellation(context), fn(_) {
+        CancelRequested
+      }),
+    )
+  case process.selector_receive(driving, timeout + 1000) {
+    Ok(Driven(result)) -> result
+    Ok(CancelRequested) -> {
+      let _ = durable.cancel(run)
+      process.receive(reply, timeout + 1000)
+      |> result.unwrap(Error(durable.DriveTimedOut))
+    }
+    Error(Nil) -> Error(durable.DriveTimedOut)
+  }
+}
+
+/// The time left before grind stops the handler, less a margin to save the
+/// outcome and acknowledge.
+fn budget(context: worker.Context) -> Int {
+  case worker.deadline(context) {
+    None -> attempt_budget_ms
+    Some(deadline) -> {
+      let left =
+        timestamp.difference(timestamp.system_time(), deadline)
+        |> duration.to_milliseconds
+      int.max(left - 5000, 1)
+    }
   }
 }
