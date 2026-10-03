@@ -20,6 +20,7 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import grind
 import grind/job
 import http_gun
@@ -64,10 +65,7 @@ pub fn run(database_url: String) -> Result(Nil, String) {
   let env =
     jobs.Env(
       clients: http,
-      model: fn(provider) {
-        llm.model(provider, scripted.providers_base(services), "sk-scripted")
-      },
-      collector:,
+      model: llm.model(_, scripted.providers_base(services), "sk-scripted"),
       limits: document.default_limits(),
     )
   use pipeline <- result.try(jobs.start(database_url, "extraction", env))
@@ -87,7 +85,7 @@ pub fn run(database_url: String) -> Result(Nil, String) {
         )
       jobs.submit(pipeline, job) |> result.map(fn(handle) { #(job, handle) })
     })
-  let finished = jobs.await_all(pipeline, handles, 15_000)
+  let finished = jobs.await_all(pipeline, handles, duration.seconds(15))
   list.each(finished, fn(pair) {
     let #(job, result) = pair
     io.println(

@@ -11,6 +11,7 @@
 import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/time/duration
 import http_gun
 import http_gun/config
 import http_gun/destination
@@ -32,15 +33,15 @@ pub fn fetcher_config(
 ) -> config.Config {
   let Loopback(document_hosts:, ..) = network
   config.default()
-  |> config.with_request_timeout(config.Milliseconds(5000))
-  |> config.with_connect_timeout(1000)
+  |> config.with_request_timeout(config.After(duration.seconds(5)))
+  |> config.with_connect_timeout(duration.seconds(1))
   |> config.with_max_connections(8)
   |> config.with_max_connections_per_origin(2)
   |> config.with_max_response_body_bytes(1_048_576)
   |> config.with_destination(
     destination.loopback_only() |> destination.only_hosts(document_hosts),
   )
-  |> config.with_resolver(fn(_host, _remaining_ms) {
+  |> config.with_resolver(fn(_host, _remaining) {
     Ok([destination.Ipv4(127, 0, 0, 1)])
   })
   |> config.with_label("fetcher")

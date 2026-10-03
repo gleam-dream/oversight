@@ -21,11 +21,14 @@ import grind
 import grind/job
 import grind/testing
 import grind/worker
+import http_gun
+import http_gun/config as http_config
 import http_gun/destination
 import http_gun/error as http_error
 import json/blueprint/codec
-import llm_wire/session
-import llm_wire/types
+import llm_wire
+import llm_wire/error
+import llm_wire/message
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -69,8 +72,7 @@ fn with_pipeline(
   let env =
     jobs.Env(
       clients: http,
-      model: fn(provider) { llm.model(provider, base, "sk-scripted") },
-      collector:,
+      model: llm.model(_, base, "sk-scripted"),
       limits: document.default_limits(),
     )
   let assert Ok(pipeline) = jobs.start(database_url(), queue, env)
@@ -101,7 +103,8 @@ fn submit(
 }
 
 fn finish(context: Context, submitted: #(jobs.DocumentJob, jobs.Handle)) {
-  let assert Ok(finished) = jobs.await(context.pipeline, submitted.1, 10_000)
+  let assert Ok(finished) =
+    jobs.await(context.pipeline, submitted.1, duration.seconds(10))
   finished
 }
 
@@ -161,7 +164,7 @@ pub fn same_extraction_runs_on_three_providers_test() {
   let text = fixtures.render(fixtures.acme())
   let results =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
-      let assert Ok(model) =
+      let model =
         llm.model(provider, scripted.providers_base(services), "sk-scripted")
       llm.extract(http.llm, model, "acme", text)
     })
@@ -171,14 +174,17 @@ pub fn same_extraction_runs_on_three_providers_test() {
   // A 429 from each provider wire becomes the same Grind decision.
   let decisions =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
-      let assert Ok(model) =
+      let model =
         llm.model(provider, scripted.providers_base(services), "sk-scripted")
       let assert Error(failure) =
         llm.extract(http.llm, model, "throttled", text)
       outcome.decide(outcome.ExtractFailed(failure))
     })
   assert decisions
-    == list.repeat(outcome.Snooze(2000, "provider answered 429"), 3)
+    == list.repeat(
+      outcome.Snooze(duration.seconds(2), "provider answered 429"),
+      3,
+    )
   clients.stop(http)
 }
 
@@ -194,13 +200,11 @@ pub fn nullable_output_field_is_not_portable_to_google_test() {
   }
   let prepared =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
-      let assert Ok(model) =
-        llm.model(provider, "http://127.0.0.1:9", "sk-scripted")
-      session.prepare_structured(
+      let model = llm.model(provider, "http://127.0.0.1:9", "sk-scripted")
+      llm_wire.prepare(
         model.settings,
-        llm.request(model, "acme", "text"),
-        "po",
-        with_po,
+        llm.request(model, "acme", "text")
+          |> llm_wire.with_output("po", with_po),
       )
       |> result.is_ok
     })
@@ -212,20 +216,21 @@ pub fn nullable_output_field_is_not_portable_to_google_test() {
 pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
   // The pure mapping: llm_wire's typed hint becomes a Grind snooze.
   let rate_limited =
-    llm.CallFailed(
-      provider: types.Anthropic,
-      error: types.HttpStatusError(429, "{}", Some(types.RetryDelaySeconds(1))),
-      evidence: types.RetryEvidence(
-        types.RequestMayHaveReachedProvider,
-        True,
-        False,
-      ),
-    )
+    llm.CallFailed(llm_wire.Failure(
+      error: error.Status(429, "{}", Some(duration.seconds(1))),
+      sent: llm_wire.Completed,
+      partial_output: False,
+      provider: message.Anthropic,
+      usage: None,
+    ))
   assert outcome.decide(outcome.ExtractFailed(rate_limited))
-    == outcome.Snooze(1000, "provider answered 429")
+    == outcome.Snooze(duration.seconds(1), "provider answered 429")
   let assert worker.Snoozed(after:, ..) =
-    outcome.to_response(outcome.Snooze(1000, "provider answered 429"))
-  assert after == duration.milliseconds(1000)
+    outcome.to_response(outcome.Snooze(
+      duration.seconds(1),
+      "provider answered 429",
+    ))
+  assert after == duration.seconds(1)
 
   // End to end: the first call is refused, the job is snoozed, the second
   // call succeeds.
@@ -254,12 +259,55 @@ pub fn invalid_structured_output_is_discarded_test() {
       ],
       finish(context, _),
     )
-  // Schema validation rejects the enum; the codec's own check rejects the total.
-  assert currency
-    == "invalid structured output: Structured output failed schema validation: $[\"currency\"]: unknown enum label"
-  assert total
-    == "invalid structured output: Structured output failed codec decode: $[\"total_cents\"]: total 9999 differs from line sum 4490"
+  // Schema validation rejects the enum; the codec's own check rejects the
+  // total. The reason names the stage and keeps the start of the model output.
+  assert string.starts_with(
+    currency,
+    "invalid structured output: schema validation failed: $[\"currency\"]: unknown enum label; output: {\"vendor\":",
+  )
+  assert string.starts_with(
+    total,
+    "invalid structured output: decode failed: $[\"total_cents\"]",
+  )
   assert store.find(jobs.connection(context.pipeline), "bad-currency") == Ok([])
+}
+
+/// EXT-3: the failure is typed and keeps the model's raw output, so a caller
+/// tells a schema rejection from a codec rejection without parsing text.
+pub fn invalid_output_keeps_the_raw_output_and_a_typed_reason_test() {
+  let assert Ok(services) = scripted.start(fixtures.batch())
+  let assert Ok(http) =
+    clients.start(
+      clients.Loopback([fixtures.document_host], services.providers_port),
+      None,
+    )
+  let extract = fn(id, provider) {
+    let model =
+      llm.model(provider, scripted.providers_base(services), "sk-scripted")
+    llm.extract(http.llm, model, id, fixtures.render(fixtures.acme()))
+  }
+  let assert Error(llm.CallFailed(llm_wire.Failure(
+    error: error.InvalidOutput(raw_output:, failure: error.SchemaRejected(_)),
+    sent: llm_wire.Completed,
+    partial_output: True,
+    provider: message.OpenAI,
+    ..,
+  ))) = extract("bad-currency", llm.OpenAi)
+  assert string.contains(raw_output, "\"currency\":\"YEN\"")
+  let assert Error(llm.CallFailed(llm_wire.Failure(
+    error: error.InvalidOutput(
+      raw_output:,
+      failure: error.DecodeRejected(codec.DecodeError(
+        path: [codec.Field("total_cents")],
+        reason: codec.Custom(message),
+      )),
+    ),
+    provider: message.Anthropic,
+    ..,
+  ))) = extract("bad-total", llm.Anthropic)
+  assert string.contains(raw_output, "\"total_cents\":9999")
+  assert string.contains(message, "differs from line sum")
+  clients.stop(http)
 }
 
 pub fn oversized_and_unsupported_documents_are_discarded_test() {
@@ -313,7 +361,7 @@ pub fn provider_transport_failure_retries_until_budget_test() {
     Some(job.BudgetExhausted),
     _,
   ) = finish(context, submitted)
-  assert string.starts_with(detail, "Connection failed")
+  assert string.starts_with(detail, "HTTP failure: Connection failed")
   let trace = telemetry.trace(context.collector, "acme")
   assert list.count(trace.attributed, fn(record) {
       string.starts_with(record.summary, "claimed attempt")
@@ -365,6 +413,49 @@ pub fn fetcher_cannot_reach_the_provider_origin_test() {
   clients.stop(http)
 }
 
+/// EXT-7: llm_wire no longer matches the endpoint's host string. http_gun
+/// applies the plaintext rule to the resolved address, so a host name that
+/// resolves to loopback is admitted and one that resolves elsewhere is refused
+/// before anything is sent.
+pub fn plaintext_rule_follows_the_resolved_address_test() {
+  let assert Ok(services) = scripted.start(fixtures.batch())
+  let host = "llm.example.test:" <> int.to_string(services.providers_port)
+  let start = fn(address) {
+    let assert Ok(client) =
+      http_config.default()
+      |> http_config.with_destination(
+        destination.default()
+        |> destination.allow_loopback
+        |> destination.only_hosts([host]),
+      )
+      |> http_config.with_resolver(fn(_host, _remaining) { Ok([address]) })
+      |> http_gun.start
+    client
+  }
+  let model = llm.model(llm.OpenAi, "http://" <> host, "sk-scripted")
+  let text = fixtures.render(fixtures.acme())
+  // The name resolves to loopback: the call runs.
+  let loopback = start(destination.Ipv4(127, 0, 0, 1))
+  assert llm.extract(loopback, model, "acme", text) == Ok(fixtures.acme())
+  http_gun.stop(loopback)
+  // The name resolves to a public address: plaintext is refused, unsent, and
+  // the failure class decides the job without a string match.
+  let public = start(destination.Ipv4(93, 184, 216, 34))
+  let assert Error(
+    llm.CallFailed(llm_wire.Failure(
+      error: error.Http(failure),
+      sent: llm_wire.NotSent,
+      ..,
+    )) as refused,
+  ) = llm.extract(public, model, "acme", text)
+  assert http_error.reason(failure)
+    == http_error.DestinationRejected(destination.PlaintextRefused(
+      destination.Public,
+    ))
+  let assert outcome.Discard(_) = outcome.decide(outcome.ExtractFailed(refused))
+  http_gun.stop(public)
+}
+
 // Telemetry ---------------------------------------------------------------
 
 pub fn one_job_is_followed_across_packages_test() {
@@ -380,10 +471,10 @@ pub fn one_job_is_followed_across_packages_test() {
   assert grind == 3
   // Two requests (document and provider), each with several milestones.
   assert http >= 8
-  // Only `prepared` runs in the worker process; request_sent, first_progress,
-  // terminal and cleanup run in llm_wire's stream owner and carry no key.
-  assert llm_attributed == 1
-  assert llm_lost >= 4
+  // started, request_sent, first_progress, terminal and cleanup: llm_wire reads
+  // the correlation from the client view, so none is lost.
+  assert llm_attributed >= 5
+  assert llm_lost == 0
 }
 
 /// EXT-1 regression: with an error codec, a snoozed job is re-claimed and
@@ -435,21 +526,25 @@ pub fn http_failures_are_decided_by_kind_test() {
       http_error.NotSent,
     )
   // The same classes through an llm_wire failure.
-  let extract = fn(reason, classification) {
+  let extract = fn(reason, evidence) {
     outcome.decide(
-      outcome.ExtractFailed(llm.CallFailed(
-        provider: types.OpenAI,
-        error: types.HttpFailure(reason),
-        evidence: types.RetryEvidence(classification, False, False),
-      )),
+      outcome.ExtractFailed(
+        llm.CallFailed(llm_wire.Failure(
+          error: error.Http(http_error.new(reason, evidence)),
+          sent: llm_wire.NotSent,
+          partial_output: False,
+          provider: message.OpenAI,
+          usage: None,
+        )),
+      ),
     )
   }
   let assert outcome.Retry(outcome.Transient(outcome.Extract, _)) =
-    extract(refused, types.NoRequestSent)
+    extract(refused, http_error.NotSent)
   let assert outcome.Discard(_) =
     extract(
       http_error.DestinationRejected(destination.HostNotAllowed),
-      types.NoRequestSent,
+      http_error.NotSent,
     )
 }
 

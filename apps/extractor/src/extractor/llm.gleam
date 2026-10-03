@@ -1,20 +1,19 @@
 //// Structured invoice extraction through llm_wire.
 ////
-//// The provider-specific code is the `settings` case below: one options
-//// builder, one config constructor and one endpoint each. Everything after
-//// `settings` is shared by the three providers.
+//// The provider-specific code is the `config` case below: one options
+//// builder, one config constructor and one path each. Everything after
+//// it is shared by the three providers.
 
 import extractor/invoice.{type Invoice}
 import gleam/result
+import gleam/time/duration
 import http_gun
 import json/blueprint/codec
-import llm_wire/config
-import llm_wire/provider
-import llm_wire/provider/anthropic
-import llm_wire/provider/google
-import llm_wire/provider/openai
-import llm_wire/session
-import llm_wire/types
+import llm_wire
+import llm_wire/anthropic
+import llm_wire/error
+import llm_wire/google
+import llm_wire/openai
 
 pub type Provider {
   OpenAi
@@ -38,62 +37,52 @@ pub fn provider_codec() -> codec.Codec(Provider) {
   ])
 }
 
-/// A prepared provider choice: settings plus the model to ask.
+/// A provider choice: its configuration plus the model to ask.
 pub type Model {
-  Model(provider: Provider, settings: config.Config, model: types.ModelId)
+  Model(provider: Provider, settings: llm_wire.Config, model: String)
 }
 
-/// Builds the settings for one provider behind `base_url`, the root of a
-/// scripted loopback server. Production would keep the built-in endpoints and
-/// read the key from the environment.
-pub fn model(
-  provider: Provider,
-  base_url: String,
-  api_key: String,
-) -> Result(Model, types.WireError) {
-  use key <- result.try(types.api_key(api_key))
+/// Builds the configuration for one provider behind `base_url`, the root of
+/// a scripted loopback server. Production would keep the built-in endpoints
+/// and read the key from the environment. Nothing is checked until
+/// `prepare`.
+pub fn model(provider: Provider, base_url: String, api_key: String) -> Model {
   let #(settings, path, model_name) = case provider {
-    OpenAi -> #(config.openai(openai.options(key)), "/openai/v1", "gpt-5-mini")
+    OpenAi -> #(
+      openai.new(api_key) |> openai.config,
+      "/openai/v1",
+      "gpt-5-mini",
+    )
     Anthropic -> #(
-      config.anthropic(
-        anthropic.options(key) |> anthropic.with_version("2023-06-01"),
-      ),
+      anthropic.new(api_key)
+        |> anthropic.with_version("2023-06-01")
+        |> anthropic.config,
       "/anthropic/v1",
       "claude-sonnet-4-5",
     )
     Google -> #(
-      config.google(google.options(key)),
+      google.new(api_key) |> google.config,
       "/google/v1beta",
       "gemini-2.5-flash",
     )
   }
-  use endpoint <- result.try(types.endpoint(base_url <> path))
-  use model <- result.try(types.model_id(model_name))
-  let deadlines =
-    types.Deadlines(
-      overall_timeout_ms: 10_000,
-      idle_timeout_ms: 5000,
-      read_timeout_ms: 1000,
-    )
-  Ok(Model(
+  Model(
     provider:,
     settings: settings
-      |> config.with_endpoint(endpoint)
-      |> config.with_deadlines(deadlines),
-    model:,
-  ))
+      |> llm_wire.with_endpoint(base_url <> path)
+      |> llm_wire.with_call_timeout(llm_wire.After(duration.seconds(10)))
+      |> llm_wire.with_first_token_timeout(llm_wire.After(duration.seconds(5)))
+      |> llm_wire.with_idle_timeout(llm_wire.After(duration.seconds(5))),
+    model: model_name,
+  )
 }
 
 pub type ExtractError {
   /// Preparation failed before any I/O: schema projection, limits, config.
-  NotPrepared(types.WireError)
-  /// The provider call failed. `provider` is carried because retry
-  /// assessment needs it and `RunFailure` does not include it.
-  CallFailed(
-    provider: types.Provider,
-    error: types.WireError,
-    evidence: types.RetryEvidence,
-  )
+  NotPrepared(error.PrepareError)
+  /// The provider call failed. The `Failure` carries the provider, whether
+  /// the request was sent, and the typed error.
+  CallFailed(llm_wire.Failure)
   Refused(reason: String)
   Truncated
   UnexpectedToolCall
@@ -105,25 +94,24 @@ pub fn request(
   model: Model,
   document_id: String,
   text: String,
-) -> types.Request {
-  types.new_request(model.model, [
-    types.SystemMessage(instructions),
-    types.UserMessage("[[doc:" <> document_id <> "]]\n" <> text),
+) -> llm_wire.Request(String) {
+  llm_wire.request(model.model, [
+    llm_wire.system(instructions),
+    llm_wire.user("[[doc:" <> document_id <> "]]\n" <> text),
   ])
-  |> types.with_max_tokens(2048)
-  |> types.with_temperature(0.0)
+  |> llm_wire.with_max_tokens(2048)
+  |> llm_wire.with_temperature(0.0)
 }
 
 pub fn prepare(
   model: Model,
   document_id: String,
   text: String,
-) -> Result(session.PreparedStructuredCall(Invoice), types.WireError) {
-  session.prepare_structured(
+) -> Result(llm_wire.Prepared(Invoice), error.PrepareError) {
+  llm_wire.prepare(
     model.settings,
-    request(model, document_id, text),
-    "invoice",
-    invoice.codec(),
+    request(model, document_id, text)
+      |> llm_wire.with_output("invoice", invoice.codec()),
   )
 }
 
@@ -136,16 +124,11 @@ pub fn extract(
   use prepared <- result.try(
     prepare(model, document_id, text) |> result.map_error(NotPrepared),
   )
-  case session.run_structured(client, prepared) {
-    Ok(session.StructuredValue(value:, ..)) -> Ok(value)
-    Ok(session.StructuredRefusal(reason:, ..)) -> Error(Refused(reason))
-    Ok(session.StructuredOutputLimited(..)) -> Error(Truncated)
-    Ok(session.StructuredNeedsTools(..)) -> Error(UnexpectedToolCall)
-    Error(session.RunFailure(error:, retry:)) ->
-      Error(CallFailed(
-        provider: provider.identity(config.adapter(model.settings)),
-        error:,
-        evidence: retry,
-      ))
+  case llm_wire.run(client, prepared) {
+    Ok(llm_wire.Answer(output:, ..)) -> Ok(output)
+    Ok(llm_wire.Refused(reason:, ..)) -> Error(Refused(reason))
+    Ok(llm_wire.OutputLimited(..)) -> Error(Truncated)
+    Ok(llm_wire.NeedsTools(..)) -> Error(UnexpectedToolCall)
+    Error(failure) -> Error(CallFailed(failure))
   }
 }
