@@ -6,7 +6,7 @@ import fabric/run
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/string
 import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
@@ -79,10 +79,16 @@ pub fn main() -> Nil {
   telemetry.trail(app.telemetry, ticket)
   |> list.each(fn(o) { io.println("  " <> telemetry.render(o)) })
   let all = telemetry.observations(app.telemetry)
+  let unattributed_llm =
+    list.count(all, fn(o) {
+      o.source == telemetry.LlmWire && o.key == telemetry.ModelCall(None)
+    })
   io.println(
     "not attributable to any ticket: "
     <> int.to_string(telemetry.count(all, telemetry.Saga))
     <> " saga events, "
+    <> int.to_string(unattributed_llm)
+    <> " of "
     <> int.to_string(telemetry.count(all, telemetry.LlmWire))
     <> " llm_wire events, and every uncorrelated http_gun event",
   )

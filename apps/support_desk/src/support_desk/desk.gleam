@@ -22,9 +22,8 @@ import gleam/result
 import gleam/string
 import http_gun
 import json/blueprint/codec
-import llm_wire/config
-import llm_wire/provider/openai
-import llm_wire/types
+import llm_wire
+import llm_wire/openai
 import sinal/correlation.{type Correlation}
 import support_desk/domain.{
   type Eligibility, type OrderQuery, type Resolution, Eligibility,
@@ -49,7 +48,7 @@ pub type Session {
 }
 
 pub type Desk {
-  Desk(store: Store, agent: Agent(Session), shop: Shop, ledger: Ledger)
+  Desk(store: Store, settings: Settings, shop: Shop, ledger: Ledger)
 }
 
 /// The requirement a refund approver answers.
@@ -73,23 +72,24 @@ pub fn start(settings: Settings) -> Result(Desk, String) {
     store.start(runs)
     |> result.map_error(fn(error) { "store: " <> string.inspect(error) }),
   )
-  use agent <- result.map(build(settings))
-  Desk(runs, agent, settings.shop, settings.ledger)
+  // Build once to refuse bad settings at start; each ticket builds its own.
+  use _ <- result.map(build(settings, settings.llm_client))
+  Desk(runs, settings, settings.shop, settings.ledger)
 }
 
-pub fn build(settings: Settings) -> Result(Agent(Session), String) {
-  let assert Ok(key) = types.api_key("sk-scripted")
-  let assert Ok(model_id) = types.model_id("gpt-4.1-mini")
-  use endpoint <- result.try(
-    types.endpoint(settings.provider_url)
-    |> result.map_error(string.inspect),
-  )
-  let model =
-    llm.model(
-      settings.llm_client,
-      config.openai(openai.options(key)) |> config.with_endpoint(endpoint),
-      model_id,
-    )
+/// An agent whose model calls go through `llm_client`. `fabric/llm.model`
+/// binds one client, and llm_wire reads the correlation from that client's
+/// view, so a ticket's model calls join the ticket only when the ticket has
+/// its own agent over its own view.
+pub fn build(
+  settings: Settings,
+  llm_client: http_gun.Client,
+) -> Result(Agent(Session), String) {
+  let config =
+    openai.new("sk-scripted")
+    |> openai.config
+    |> llm_wire.with_endpoint(settings.provider_url)
+  let model = llm.model(llm_client, config, "gpt-4.1-mini")
   let issue_refund =
     fabric_saga.tool(
       domain.issue_refund(),
@@ -124,7 +124,8 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
 }
 
 /// A new ticket's session. The ticket's correlation also tags its HTTP
-/// calls (`correlated`), so there is nothing to register with telemetry.
+/// calls (`correlated`) and, through `open_ticket`, its model calls, so
+/// there is nothing to register with telemetry.
 pub fn session(
   desk: Desk,
   ticket: Correlation,
@@ -138,12 +139,14 @@ pub fn open_ticket(
   session: Session,
   message: String,
 ) -> Result(fabric.Run(Session), fabric.StartError) {
-  use handle <- result.map(fabric.start(
-    desk.store,
-    desk.agent,
-    session,
-    message,
-  ))
+  use agent <- result.try(
+    build(
+      desk.settings,
+      http_gun.with_correlation(desk.settings.llm_client, session.ticket),
+    )
+    |> result.map_error(fabric.StartRefused),
+  )
+  use handle <- result.map(fabric.start(desk.store, agent, session, message))
   events.opened(session.ticket, run.id_to_string(fabric.id(handle)))
   handle
 }

@@ -4,6 +4,7 @@ import fabric/run
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import gleam/time/duration
 import gleeunit
 import saga/execution
 import sinal/correlation
@@ -98,7 +99,8 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
 
 pub fn refunds_below_the_threshold_skip_approval_test() {
   let limits = agent.Limits(..agent.default_limits(), max_turns: 6)
-  let assert Ok(app) = app.start_with(limits, shop_deadline_ms: 1000)
+  let assert Ok(app) =
+    app.start_with(limits, shop_deadline: duration.seconds(1))
   let #(_, handle) =
     open(app, "T-2", "Please refund order A-100, it arrived broken.", 5000)
   let resolved = finish(handle)
@@ -109,7 +111,8 @@ pub fn refunds_below_the_threshold_skip_approval_test() {
 
 pub fn a_turn_limit_ends_the_run_without_a_typed_answer_test() {
   let limits = agent.Limits(..agent.default_limits(), max_turns: 2)
-  let assert Ok(app) = app.start_with(limits, shop_deadline_ms: 1000)
+  let assert Ok(app) =
+    app.start_with(limits, shop_deadline: duration.seconds(1))
   let #(_, handle) = open(app, "T-3", "Refund order A-100.", 0)
   let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
   assert desk.answer(outcome)
@@ -218,7 +221,7 @@ pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
 
 // Telemetry -----------------------------------------------------------------
 
-pub fn telemetry_follows_agent_and_tool_http_but_not_the_saga_test() {
+pub fn telemetry_follows_agent_tools_and_model_but_not_the_saga_test() {
   let assert Ok(app) = app.start()
   let #(session, handle) = open(app, "T-9", "Please refund order A-100.", 0)
   let pending = awaiting_refund_approval(handle)
@@ -229,21 +232,26 @@ pub fn telemetry_follows_agent_and_tool_http_but_not_the_saga_test() {
   let trail = telemetry.trail(app.telemetry, session.ticket)
   let names = list.map(trail, fn(o) { o.name })
   // The desk's own events carry the ticket's correlation and the run id,
-  // which attributes fabric's events; the lookups' HTTP calls carry the
-  // ticket's http_gun id because the tool handler receives the session.
+  // which attributes fabric's events. The lookups' HTTP calls carry the
+  // ticket because the tool handler receives the session, and the model
+  // calls carry it because the ticket's agent runs on a correlated client
+  // view: four turns, two HTTP events each, plus the llm_wire events.
   assert list.contains(names, "ticket.opened")
   assert list.contains(names, "ticket.answered")
   assert list.contains(names, "approval.request")
   assert list.contains(names, "run.stop")
-  assert telemetry.count(trail, telemetry.HttpGun) == 4
+  assert telemetry.count(trail, telemetry.HttpGun) == 12
+  assert telemetry.count(trail, telemetry.LlmWire) > 0
 
   let all = telemetry.observations(app.telemetry)
-  // The saga ran (3 steps), but nothing in its events names the ticket or
-  // run, and its HTTP calls (refund, notify) are uncorrelated, like every
-  // model call.
+  // Every llm_wire event belongs to the ticket. The saga ran (3 steps),
+  // but nothing in its events names the ticket (`fabric_saga` takes one
+  // configuration for all tickets), and its HTTP calls (refund, notify)
+  // are uncorrelated.
+  assert telemetry.count(trail, telemetry.LlmWire)
+    == telemetry.count(all, telemetry.LlmWire)
   assert telemetry.count(all, telemetry.Saga) > 0
   assert telemetry.count(trail, telemetry.Saga) == 0
-  assert telemetry.count(trail, telemetry.LlmWire) == 0
   let uncorrelated =
     list.count(all, fn(o) { o.key == telemetry.HttpRequest(None) })
   assert uncorrelated > 0
@@ -264,7 +272,8 @@ pub fn every_answer_kind_round_trips_through_the_event_fields_test() {
 
 pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
   let limits = agent.Limits(..agent.default_limits(), max_turns: 2)
-  let assert Ok(app) = app.start_with(limits, shop_deadline_ms: 1000)
+  let assert Ok(app) =
+    app.start_with(limits, shop_deadline: duration.seconds(1))
   let #(session, handle) = open(app, "T-10", "Refund order A-100.", 0)
   let assert Ok(run.Finished(outcome)) = fabric.await(handle, 10_000)
   let assert desk.Ended(_) = desk.close(session, handle, outcome)

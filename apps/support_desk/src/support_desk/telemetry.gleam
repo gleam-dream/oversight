@@ -13,10 +13,12 @@
 ////   takes one `Config` at build time, so no per-ticket value reaches it.
 //// - http_gun: a per-request id and the caller's `Correlation`
 ////   (`http_gun.with_correlation`), which is the ticket's own.
-//// - llm_wire: stage, provider and outcome only; no id of any kind.
+//// - llm_wire: a call id and the `Correlation` of the http_gun client view
+////   the call ran on. The desk builds each ticket's agent over a view
+////   correlated with the ticket, so its model calls carry it.
 ////
-//// HTTP events of calls made with a ticket-correlated client carry the
-//// ticket's `Correlation` and need no join. Fabric events are attributed
+//// HTTP and llm_wire events of calls made with a ticket-correlated client
+//// carry the ticket's `Correlation` and need no join. Fabric events are attributed
 //// through the run id that `ticket.opened` pairs with the ticket's
 //// correlation.
 
@@ -53,8 +55,8 @@ pub type Key {
   SagaRun(workflow: String, run: Int)
   /// An HTTP request, with the ticket its client was correlated with.
   HttpRequest(ticket: Option(Correlation))
-  /// Nothing to join on.
-  Unkeyed
+  /// A model call, with the ticket its client view was correlated with.
+  ModelCall(ticket: Option(Correlation))
 }
 
 pub type Observation {
@@ -90,8 +92,8 @@ pub fn stop(telemetry: Telemetry) -> Nil {
 }
 
 /// The events attributable to one ticket: its own events, its fabric
-/// run's events and its correlated HTTP requests. Saga and llm_wire events
-/// never qualify.
+/// run's events, and the HTTP requests and model calls made on its
+/// correlated client views. Saga events never qualify.
 pub fn trail(telemetry: Telemetry, ticket: Correlation) -> List(Observation) {
   let all = observations(telemetry)
   let runs =
@@ -106,6 +108,7 @@ pub fn trail(telemetry: Telemetry, ticket: Correlation) -> List(Observation) {
       TicketRun(owner, _) -> owner == ticket
       FabricRun(id) -> list.contains(runs, id)
       HttpRequest(Some(owner)) -> owner == ticket
+      ModelCall(Some(owner)) -> owner == ticket
       _ -> False
     }
   })
@@ -131,7 +134,8 @@ pub fn render(observation: Observation) -> String {
     SagaRun(workflow, run) -> workflow <> "#" <> int.to_string(run)
     HttpRequest(Some(ticket)) -> "ticket " <> correlation.to_string(ticket)
     HttpRequest(None) -> "uncorrelated"
-    Unkeyed -> "-"
+    ModelCall(Some(ticket)) -> "ticket " <> correlation.to_string(ticket)
+    ModelCall(None) -> "uncorrelated"
   }
   source <> " " <> observation.name <> " [" <> key <> "] " <> observation.detail
 }
@@ -265,14 +269,14 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         _ -> Nil
       }
     }),
-    sinal.observe(llm_obs.observation_event(), fn(_, m) {
+    sinal.observe(llm_obs.event(), fn(_, m) {
       process.send(
         collector,
         Observed(Observation(
           LlmWire,
-          m.stage,
-          Unkeyed,
-          m.provider <> " " <> m.outcome,
+          llm_obs.stage_name(m.stage),
+          ModelCall(m.correlation),
+          m.provider <> " " <> llm_obs.outcome_name(m.outcome),
         )),
       )
     }),

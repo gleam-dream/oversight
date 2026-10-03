@@ -144,6 +144,8 @@ telemetry trail.
 
 - **Status (wave 3):** partially resolved by saga 89c1aec: saga events now carry `correlation` and `execution` metadata, and `execution.with_correlation` puts a `Correlation` in them. The app cannot use it: `fabric_saga.tool` takes one `Config` when the agent is built, not one per call (SD-2), so no ticket reaches the saga. The demo still prints 22 saga events, 100 llm_wire events and every refund, notify and model HTTP event as unattributable. No app line changed for this finding.
 
+- **Status (wave 4):** partially resolved by llm_wire 9f35183 and http_gun 4a6eeb0: llm_wire reads the correlation from the `http_gun.Client` view, so the 100 unattributed llm_wire events drop to 0 and the model's HTTP events join as well (the T-1 trail grows from 20 to 52 events; `telemetry.trail` now keys `ModelCall(ticket)`). It needed one app change that the guide does not predict: `fabric/llm.model` binds its client when the agent is built, and an agent is built once, so one correlated view per ticket meant one agent per ticket (`desk.open_ticket` calls `build` with `http_gun.with_correlation(llm_client, ticket)`; `Desk` keeps `Settings` instead of an `Agent`, +7 lines). The cause is untouched upstream: `model.Request` still has no run or correlation, so a durable run recovered from the store would need the app to rebuild the same view. Saga and the refund, notify and void HTTP calls stay unattributable (22 saga events), because `fabric_saga.tool` still takes one `Config` for all tickets (SD-2).
+
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
 - **Packages**: fabric, llm_wire, json_blueprint. **Kind**: composition. **Severity**: major (known: fabric card concern 5).
@@ -213,6 +215,8 @@ telemetry trail.
   wire for the same reason.
 - **Proposal** (llm_wire): `testing.events_for(types.Provider, Reply) -> Reply`,
   which lowers a semantic reply into each built-in wire's SSE chunks.
+
+- **Status (wave 4):** resolved by llm_wire 177ad50 (`testing.events_for`). `provider.gleam` goes from 382 to 305 lines (345 to 269 non-blank, non-comment): `tool_call_events`, `text_events`, `completed` and `event` (about 100 lines) become `testing.tool_calls`, `testing.text` and a 4-line `wire` that adds the old usage with `testing.with_usage` and lowers with `events_for(message.OpenAI, _)`. The 12 tests pass unchanged against the generated wire, so the provider still accepts what llm_wire emits and fabric still reads what it sends. `events_for` gives `Interrupted` and `Status` replies back unchanged, so `sse` keeps a catch-all arm that answers 500 for them; the app uses neither.
 
 ### SD-8 fabric, fabric_saga and saga cap gleam_stdlib below 1.0
 
@@ -584,3 +588,87 @@ test now asserts `Unresolved(_, PaymentOutcomeUnknown(_), settlement)` with
 7 lines removed, 6 added (refund.gleam 107 to 106, all in docs and `define`).
 Test: 7 removed, 7 added. grind, `durable`, `describe_cause` and
 `http_gun` additions are not used by this app.
+
+## Re-run after wave 4
+
+Package heads: fabric 556abc3, llm_wire 9f35183, http_gun 4a6eeb0, saga af644b0,
+sinal 44c5395, json_blueprint 74a9a7d. 12 tests pass (unchanged count; the
+telemetry test was rewritten, see below) and `gleam run` prints the five
+tickets, the ledger and the T-1 trail (52 events, was 20). `gleam format` is
+clean and the build has no warnings. The Hex rate limit hit the first
+`gleam run` once; a retry after 60 s cleared it.
+
+| Seam                                                           | Before | After | Change                                                                                                                                                                                             |
+| -------------------------------------------------------------- | ------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scripted OpenAI wire (SD-7)                                    | ~100   | ~12   | `testing.events_for(message.OpenAI, ..)` with `testing.text` and `tool_calls`; provider.gleam 382 to 305 lines                                                                                     |
+| llm_wire configuration (key, model id, endpoint)               | 12     | 4     | `openai.new(key) \|> openai.config \|> llm_wire.with_endpoint(url)` and `llm.model(client, config, "gpt-4.1-mini")`; no `types.api_key`, `model_id` or `endpoint` asserts and no endpoint `Result` |
+| llm_wire telemetry handler                                     | 10     | 10    | `event()`, `stage_name`, `outcome_name`; the key changes from `Unkeyed` to `ModelCall(m.correlation)`, and the `Unkeyed` variant is deleted                                                        |
+| Millisecond conversions                                        | 3      | 0     | `shop_deadline_ms: Int` becomes `shop_deadline: Duration`; `Milliseconds(10_000)` becomes `After(duration.seconds(10))`; the view timeout takes `After(shop_deadline)`                             |
+| Model calls joined to the ticket (SD-3)                        | 0      | 7     | one agent per ticket over `http_gun.with_correlation(llm_client, ticket)`; `Desk.agent` becomes `Desk.settings`                                                                                    |
+| Rebuilt `Failure`s, private turn envelope, `_structured` twins | 0      | 0     | none in this app; there are no stored turns or fixtures (the store is in-memory), no structured output and no `Failure` construction                                                               |
+
+Source lines (`src/`): about 115 deleted, 55 added. The test file changed by
++20 and -11 (`gleam_time` import, `Duration` argument, the telemetry test).
+
+- **Telemetry test rewritten.** `telemetry_follows_agent_and_tool_http_but_not_the_saga_test`
+  is now `telemetry_follows_agent_tools_and_model_but_not_the_saga_test`.
+  It asserts 12 http_gun events in the trail (4 lookups plus 4 model turns
+  at 2 each, was 4), that the trail holds every llm_wire event, and that
+  saga events and the refund and notify HTTP calls are still outside it.
+- **Seams that still need glue.**
+  - Per-ticket saga correlation and input: fabric (`fabric_saga.tool`, SD-2).
+  - Per-ticket model view: fabric (`model.Request` has no run), now 7 lines
+    plus a rebuilt agent per ticket.
+  - The `PaymentOutcomeUnknown` mapping (7 lines in shop.gleam) and the
+    `unknown_when` repeat: the app.
+  - The typed final answer (SD-4) and the reconciliation JSON string
+    (SD-5): fabric.
+- **Old fixtures.** The app stores nothing across runs and keeps no
+  cassette or turn fixture, so there is nothing to prove decodes. The
+  nearest evidence is that the generated OpenAI stream drove all four model
+  turns of every scenario with the same call ids (`call_n`), arguments and
+  `"minimum":1` in the request body that the hand-written stream produced.
+
+### New friction
+
+- **An agent per ticket is the honest consequence of a bound client.** The
+  wave 4 correlation rule ("set it once, on the view") assumes the caller
+  chooses the view per call. `fabric/llm.model` takes the view when the model
+  is built, so the only way to correlate model calls with a ticket is to build
+  the model, and therefore the agent and its tools, per ticket. It is cheap
+  here, but `Desk` lost its single built `Agent`, and `desk.start` now builds
+  one agent only to reject bad settings. A per-request view
+  (`model.Request.correlation`, or a `fn(Request) -> Client`) would keep one
+  agent for all tickets.
+- **The ecosystem rule stops at fabric.** `fabric.await(handle, 10_000)`,
+  `fabric_saga.tool(.., rollback_within: 5000)` and the test timeouts are
+  still `Int` milliseconds, next to `Duration` for the shop view and the
+  client. 556abc3's CHANGELOG moves fabric onto the wave 4 APIs but does not
+  apply the rule to fabric's own public API.
+- **`events_for` is a three-line win with a quiet caveat.** It lowers
+  `Interrupted` and `Status` replies back unchanged, so a server that turns a
+  reply into an HTTP response must still handle all three constructors
+  (`sse` answers 500 for the two it never receives). Nothing wrong with the
+  function; the type simply does not say "a reply that produces a stream".
+- **Third-party warnings.** Not new: the `Header` deprecation warnings from
+  mist and glisten remain.
+
+### What worked well (wave 4)
+
+- The llm_wire guide's `support_desk` entry named every file and line, and the
+  "After" snippet for `events_for` was the code that compiled.
+- Correlation on the view is the right shape: one `http_gun.with_correlation`
+  tagged the llm_wire events, the model's HTTP events and the lookups, with no
+  llm_wire-level setter and no join table.
+- `Duration` in the client configuration removed a class of unit doubts; the
+  `shop_deadline` argument reads at the call site (`duration.seconds(1)`).
+
+### Migration guides
+
+Sufficient for the compile errors. Two gaps: (1) the llm_wire guide says the
+correlation is read from the view but not that `fabric/llm.model` fixes the
+view when the agent is built, which is why a per-ticket agent is needed;
+(2) the support_desk entry lists `provider.gleam` as "no llm_wire import" but
+the replacement needs `llm_wire/testing` and `llm_wire/message`, so the app
+gains an llm_wire dependency in its test server, which it already had in
+`gleam.toml`.
