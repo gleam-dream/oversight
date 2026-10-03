@@ -8,8 +8,9 @@
 ////   run id, in `ticket.opened` and `ticket.answered`.
 //// - fabric: the run id, plus turn and call id for tool and approval
 ////   events.
-//// - saga: its own run counter and the workflow name; nothing a caller
-////   chose.
+//// - saga: its own run counter, the workflow name and an optional
+////   `Correlation` from `execution.with_correlation`. `fabric_saga.tool`
+////   takes one `Config` at build time, so no per-ticket value reaches it.
 //// - http_gun: a per-request id and the caller's `Correlation`
 ////   (`http_gun.with_correlation`), which is the ticket's own.
 //// - llm_wire: stage, provider and outcome only; no id of any kind.
@@ -25,15 +26,13 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
-import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import http_gun/telemetry as http_obs
 import llm_wire/telemetry as llm_obs
-import saga/observation as saga_obs
+import saga/telemetry as saga_obs
 import sinal
 import sinal/correlation.{type Correlation}
-import sinal/forwarder
 import support_desk/events
 
 pub type Source {
@@ -50,7 +49,7 @@ pub type Key {
   FabricRun(String)
   /// One of the desk's own ticket events: the ticket and its fabric run.
   TicketRun(ticket: Correlation, run: String)
-  /// Saga's own run number; no caller id reaches saga's events.
+  /// Saga's own run number; no per-ticket id reaches saga's events.
   SagaRun(workflow: String, run: Int)
   /// An HTTP request, with the ticket its client was correlated with.
   HttpRequest(ticket: Option(Correlation))
@@ -63,11 +62,7 @@ pub type Observation {
 }
 
 pub opaque type Telemetry {
-  Telemetry(
-    collector: Subject(Message),
-    forwarder: forwarder.Forwarder,
-    attachments: List(sinal.Attachment),
-  )
+  Telemetry(collector: Subject(Message), attachments: List(sinal.Attachment))
 }
 
 pub opaque type Message {
@@ -75,28 +70,15 @@ pub opaque type Message {
   Read(reply: Subject(List(Observation)))
 }
 
-/// Starts the collector and a supervised forwarder for http_gun's
-/// observations, and attaches to every event.
+/// Starts the collector and attaches to every event. http_gun emits
+/// through `sinal.emit` like the other packages, so no forwarder is needed:
+/// the handler only sends a message.
 pub fn start() -> Result(Telemetry, String) {
-  use collector <- result.try(start_collector())
-  let fwd = forwarder.new(process.new_name("support_desk_http_events"))
-  use _ <- result.map(
-    supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(forwarder.supervised(fwd))
-    |> supervisor.start
-    |> result.replace_error("could not start the event forwarder"),
-  )
-  Telemetry(collector, fwd, handlers(collector))
-}
-
-/// The forwarder to put in `http_gun/config.Config.observations`.
-pub fn forwarder(telemetry: Telemetry) -> forwarder.Forwarder {
-  telemetry.forwarder
+  use collector <- result.map(start_collector())
+  Telemetry(collector, handlers(collector))
 }
 
 pub fn observations(telemetry: Telemetry) -> List(Observation) {
-  // http_gun delivers through the forwarder: let it drain first.
-  process.sleep(50)
   process.call(telemetry.collector, 1000, Read)
 }
 

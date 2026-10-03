@@ -17,9 +17,9 @@ network access and no keys are used.
 | ----------------------- | ------------------------------------------------------------------------------------------ |
 | fabric                  | Agent runtime: three typed tools, the refund policy and approvals, cancellation, reconcile |
 | fabric_saga (in fabric) | The refund saga as one fabric tool; maps the saga outcome onto the tool result             |
-| saga                    | The three-step refund workflow with undo and a `Hold` for an unknown payment outcome       |
+| saga                    | The three-step refund workflow with undo and `unknown_when` for an unknown payment outcome |
 | llm_wire                | OpenAI Responses adapter, reached through `fabric/llm.model` with a caller-owned client    |
-| http_gun                | Two loopback clients (model and shop APIs) with observations through a Sinal forwarder     |
+| http_gun                | One loopback-only client; the shop API is a shorter-timeout view; Sinal events by default  |
 | json_blueprint          | One codec per record: tool schemas, argument checks, policy match, typed final answer      |
 | sinal                   | `src/support_desk/telemetry.gleam` attaches to fabric, saga, http_gun and llm_wire events  |
 
@@ -27,8 +27,9 @@ Seams under test:
 
 - One tool definition (`domain.gleam`) serves fabric, llm_wire and the
   policy; no llm_wire declaration is written.
-- An http_gun failure with `MayHaveBeenSent` becomes a saga `Hold`, then a
-  fabric `Uncertain` effect, then an operator reconciliation (`refund.gleam`).
+- An http_gun failure with `MaybeSent` becomes a step error marked with
+  `saga.unknown_when`, then a fabric `Uncertain` effect, then an operator
+  reconciliation (`refund.gleam`).
 - The approval gate: approve, reject, and cancel while waiting.
 - A typed final answer decoded from the agent's text (`desk.answer`).
 - Telemetry correlation from agent to tool to saga to HTTP: the desk's own

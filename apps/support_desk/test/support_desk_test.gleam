@@ -165,8 +165,8 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   let assert Ok(_) =
     fabric.approve(handle, pending.reference, reviewer: None, context: session)
   // http_gun's deadline fired after the request may have been sent; the
-  // saga held the step instead of compensating, and fabric_saga turned
-  // `Unresolved` into an uncertain effect: no model turn until reconciled.
+  // step marks that error with `saga.unknown_when`, and fabric_saga turns
+  // the unknown effect into an uncertain one: no model turn until reconciled.
   let assert Ok(run.Suspended([], [uncertain])) = fabric.await(handle, 10_000)
   assert uncertain.tool == "issue_refund"
   assert string.contains(uncertain.evidence, "refund_payment")
@@ -275,25 +275,28 @@ pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
   app.stop(app)
 }
 
-// Seam evidence: saga calls a returned "may have happened" error known ------
+// Seam evidence: saga names a returned "may have happened" error ------------
 
-pub fn saga_reports_a_returned_unknown_payment_as_known_unless_held_test() {
+pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   let assert Ok(app) = app.start()
-  let shop = app.desk.shop
   let request = domain.RefundRequest("A-400", 3000, "late provider")
-  let aborting = refund.workflow_with(shop, app.ledger, refund.AbortUnknown)
-  let assert Ok(outcome) = execution.run(aborting, request, refund.config())
-  // The provider did take the refund, yet saga reports a clean, fully
-  // known failure: fabric_saga would hand the model a definite `Explain`.
-  let assert execution.Failed(
-    execution.StepFailed(_, shop.PaymentOutcomeUnknown(_)),
-    _,
-  ) = outcome
-  assert execution.unknown_effects(outcome) == []
-
-  let holding = refund.workflow_with(shop, app.ledger, refund.HoldUnknown)
-  let assert Ok(execution.Unresolved(..) as held) =
-    execution.run(holding, request, refund.config())
-  assert execution.unknown_effects(held) == []
+  let workflow = refund.workflow(app.desk.shop, app.ledger)
+  let assert Ok(outcome) = execution.run(workflow, request, refund.config())
+  // The provider took the refund and answered after the client deadline.
+  // The step marks that error with `saga.unknown_when`, so saga records the
+  // attempt as an unknown effect and, with no decider and no `on_unknown`,
+  // ends the run `Unresolved` and undoes nothing; fabric_saga reports it as
+  // uncertain rather than as a failure the model may retry.
+  let assert execution.Unresolved(_, shop.PaymentOutcomeUnknown(_), settlement) =
+    outcome
+  assert settlement.undone == []
+  let assert [
+    execution.UnknownEffect(
+      action: execution.StepAttempt(1),
+      ending: execution.ActionReturnedUnknown,
+      ..,
+    ),
+  ] = execution.unknown_effects(outcome)
+  assert ledger.entries(app.ledger) == []
   app.stop(app)
 }

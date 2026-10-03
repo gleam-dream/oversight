@@ -83,6 +83,8 @@ telemetry trail.
   Until then, `fabric_saga`'s module doc should say that such errors must
   be held.
 
+- **Status (wave 3):** resolved by saga f27b628 (`saga.unknown_when`, `execution.ActionReturnedUnknown`) and fabric d10635f (`fabric_saga` maps a marked error to `Uncertain`). The `Hold` decider is deleted: `refund.gleam` goes from 124 to 107 lines, the `OnUnknown` type, the `workflow_with` wrapper and the 10-line `compensate` are gone, and the step carries a 6-line `unknown_when`. The "refund the provider may have taken" test (`unknown_payment_outcome_pauses_the_run_until_reconciled_test`) passes with the honest outcome and no app trick. The seam test is now `saga_names_a_returned_unknown_payment_as_an_unknown_effect_test`: the run is `Failed(StepFailed(_, PaymentOutcomeUnknown(_)))` and `unknown_effects` is `[StepAttempt(1) ActionReturnedUnknown]`, where it used to be `[]`. One difference from `Hold`: the run ends `Failed`, not `Unresolved`, and saga still rolls back earlier steps, which `Hold` prevented. That is harmless here (the payment is the first step) but see the re-run.
+
 ### SD-2 fabric_saga discards the run context
 
 - **Packages**: fabric (fabric_saga), saga. **Kind**: flexibility. **Severity**: major.
@@ -140,6 +142,8 @@ telemetry trail.
 
 - **Status (follow-up):** partially resolved by http_gun c45adfe and 056536b; `desk.correlated` passes `session.ticket` to `http_gun.with_correlation`, so the ticket has one identity. `Session.http_id`, `telemetry.register`, the `Register` message, the collector's id-to-ticket list and `http_obs.new_id()` are deleted (about 45 lines), and the HTTP handler reads `m.correlation` as the ticket directly. The trail stays at 20 events and the four lookup HTTP events still join the ticket. The refund, notify and model calls are still unattributable: saga, fabric_saga (SD-2) and `fabric/llm.model` (no run on `model.Request`) give no way to put the ticket on their clients, and llm_wire and saga events carry no correlation.
 
+- **Status (wave 3):** partially resolved by saga 89c1aec: saga events now carry `correlation` and `execution` metadata, and `execution.with_correlation` puts a `Correlation` in them. The app cannot use it: `fabric_saga.tool` takes one `Config` when the agent is built, not one per call (SD-2), so no ticket reaches the saga. The demo still prints 22 saga events, 100 llm_wire events and every refund, notify and model HTTP event as unattributable. No app line changed for this finding.
+
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
 - **Packages**: fabric, llm_wire, json_blueprint. **Kind**: composition. **Severity**: major (known: fabric card concern 5).
@@ -180,6 +184,8 @@ telemetry trail.
   `explain` callback, or with an optional `evidence: fn(error) -> String`.
   (fabric) A `tool.reconciliation(definition, Result(output, tool.Failure)) -> Result(String, codec.EncodeError)`
   helper would render reconcile content through the tool's codec.
+
+- **Status (wave 3):** partially resolved by fabric d10635f. With `unknown_when` the operator's evidence now reads "attempt 1 of step refund_payment returned an error after which its effect is unknown", where a held step gave only "the workflow held the effects of step refund_payment unresolved". It still omits the application's reason (a deadline after the request was sent), and the reconciliation is still a hand-written JSON string (`support_desk.gleam`, `unconfirmed`).
 
 ### SD-6 Four of six records need a hand-written `record4`
 
@@ -234,6 +240,8 @@ telemetry trail.
 - **Proposal**: none beyond the sinal card's; the cost is 8 lines.
 
 - **Status (wave 2):** partially resolved by sinal 1ff1c18: `forwarder.new(name)` is total and takes no capacity, so the app drops the `Result` handling and 3 lines; the supervisor and the `config.observations` wiring stay, because http_gun 1dc20a1 still emits only through its own forwarder (it did not adopt `sinal.emit` plus an application route).
+
+- **Status (wave 3):** resolved by http_gun e55fa1d: events go through `sinal.emit` by default. `telemetry.start` drops the supervisor, the forwarder, the `forwarder` accessor and the 50 ms drain sleep in `observations` (telemetry.gleam 316 to 298 lines, 18 net), and `app.gleam` drops the `with_observations` wiring. The collector's handler only sends a message, so running in the pool is safe here; an app with a slow handler would still route `["http_gun"]` to a forwarder.
 
 ## Glue measure
 
@@ -450,3 +458,129 @@ http_gun guide's join-table example covered the whole correlation change. The
 only gap: the http_gun guide says a join table "is no longer needed" but does
 not say that a context type holding the old `Id` (here `Session.http_id`)
 must also change, nor that tool calls inside a saga still cannot be tagged.
+
+## Re-run after wave 3
+
+Package heads: saga 2ee5e0a, http_gun 1a5f5ef, fabric d10635f, sinal 44c5395,
+json_blueprint 74a9a7d, llm_wire 576482e. 12 tests pass (unchanged count; one
+test was rewritten, see below) and `gleam run` prints the five tickets, the
+ledger and the T-1 trail as before (20 events; 22 saga and 100 llm_wire events
+still unattributable). `gleam format` is clean and the build has no warnings.
+The Hex rate limit did not interrupt this run.
+
+| Seam                                                           | Before | After | Change                                                                                                                                  |
+| -------------------------------------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Unknown payment outcome (SD-1): `Hold` decider, `OnUnknown`    | 23     | 6     | `saga.unknown_when` on the step; `workflow_with`, `OnUnknown` and the `compensate` decider deleted (refund.gleam 124 to 107 lines)      |
+| Model and shop clients plus loopback policy                    | 26     | 11    | one client with `loopback_only()` and `with_request_timeout`; the shop's 1 s budget is a `with_timeout` view (app.gleam 93 to 71 lines) |
+| http_gun observation forwarder, supervisor, drain sleep (SD-9) | ~16    | 0     | default `sinal.emit` delivery; telemetry.gleam 316 to 298 lines                                                                         |
+| `fabric_saga.tool` `Result` handling                           | 4      | 0     | `tool` returns the tool; `desk.build` keeps `Result` only for the endpoint and `agent.build`                                            |
+| http_gun evidence split in `shop.refund`                       | 5      | 7     | two `Failure(evidence: ..)` patterns become `error.evidence(failure)` and a nested `case`: +2                                           |
+| Saga callbacks and `Config`                                    | —      | —     | `undo(fn(undo) ..)` and `execution.config() \|> with_max_concurrency(1)`: line-neutral rewrites                                         |
+| Telemetry correlation across fabric, http_gun (saga: none)     | ~10    | ~10   | none: `execution.with_correlation` exists but `fabric_saga.tool` cannot take a per-ticket `Config` (SD-2, SD-3)                         |
+
+**Status (wave 3 fixes):** SD-1 resolved by saga 92612fd; the unknown payment now ends `Unresolved` (not `Failed`) with `settlement.undone == []`, and fabric 8eb5a16 maps it to `Uncertain`. The refund and fabric-level tests expected no change; only the saga seam test changed.
+
+Source lines (`src/`): 108 deleted, 51 added, net about 57 fewer. The test
+file changed by +18 and -15.
+
+- **Test turned from defect to behavior.** `saga_reports_a_returned_unknown_payment_as_known_unless_held_test`
+  asserted both defects (an aborting decider gave a clean `Failed`, and
+  `unknown_effects` was `[]` even for the held run). It is now
+  `saga_names_a_returned_unknown_payment_as_an_unknown_effect_test`: the same
+  run asserts `unknown_effects == [UnknownEffect(StepAttempt(1), _, ActionReturnedUnknown)]`
+  and an empty ledger. The fabric-level test needed no edit and passes with
+  no `Hold`: the model never sees a failure for the A-400 refund, and the run
+  pauses until `fabric.reconcile`.
+- **Seams that still need glue.**
+  - Per-ticket saga correlation and per-ticket saga input: fabric
+    (`fabric_saga.tool` takes one `Config` and no context mapping; SD-2, SD-3).
+  - The refund's `PaymentOutcomeUnknown` mapping from http_gun's `MaybeSent`
+    (7 lines in shop.gleam): the app owns it, because only the app knows a
+    5xx or a missing refund id also leaves the refund possibly taken.
+  - The typed final answer (23 lines, SD-4) and the reconciliation JSON
+    string (SD-5): fabric.
+  - The scripted OpenAI wire (about 100 lines, SD-7): llm_wire.
+
+### New friction
+
+- **`unknown_when` repeats a decision `shop.refund` already made.**
+  `shop.refund` maps the http_gun failure to `PaymentOutcomeUnknown`, and
+  `refund.gleam` then matches that constructor again:
+
+  ```gleam
+  |> saga.unknown_when(fn(error) {
+    case error {
+      PaymentOutcomeUnknown(_) -> True
+      _ -> False
+    }
+  })
+  ```
+
+  It is 6 lines of `case` for a one-constructor test. A step error type that
+  can answer the question itself is not expressible, so a `fn(e) -> Bool`
+  that pattern-matches is the only form. It reads fine; it is not free.
+
+- **`unknown_when` marks, but does not hold.** `Hold` kept the run from
+  rolling back earlier steps. `unknown_when` with no decider ends the step
+  with `Failed(StepFailed(..))`, and saga undoes what completed before it.
+  That is right for this workflow, where the payment is the first step. A
+  workflow whose uncertain step comes after a payment would void the payment
+  while the later effect may exist. The author must still write a `compensate`
+  decider returning `Hold` for that case, so `unknown_when` replaces the
+  `Hold` trick only for the first-step case and for classification. The
+  `unknown_when` doc comment does not say this.
+
+  **Status (wave 3 fixes):** resolved by saga 92612fd; an unknown effect with no decider ends the run `Unresolved` and undoes nothing, so a workflow whose uncertain step follows a payment needs no `Hold` decider. `saga.on_unknown(step, saga.RollBack)` restores the rollback.
+
+- **`error.evidence` reads worse than the old pattern for a two-way split.**
+  `Error(Failure(evidence: NotSubmitted, ..) as failure) -> ..` was one arm
+  per case; now an `Error(failure)` arm holds a nested `case` on
+  `error.evidence(failure)` (7 lines, was 5). The opaque type is the right
+  trade for the library, but a split on evidence is the one decision this
+  app makes with the failure, and a `Result` helper such as
+  `error.map_not_sent(result, fn(f) -> e)` would not read better either.
+  No change proposed; recorded as a cost.
+- **One client leaves the shop's 1 s budget in a view the app must not
+  forget.** `Shop.client` now holds a `with_timeout` view of the shared
+  client, so `desk.correlated` stacks `with_correlation` on a view. It
+  composed with no surprise, but the llm_wire client gets the bare 10 s
+  default only because `desk.Settings.llm_client` is passed the unviewed
+  client by hand; nothing prevents passing the shop view to the model.
+- **`StartError` needs `describe_start_error`.** The old code used
+  `string.inspect`; the new call is one function and returns a readable
+  string. Not friction, but `app.gleam` no longer imports `gleam/string`.
+
+### What worked well (wave 3)
+
+- `destination.loopback_only()` is the clearest change: the 10-line nested
+  `Policy` update and its comment about `allow_loopback` leaving public hosts
+  open collapse to one call, and public hosts stay denied as before.
+- `unknown_when` plus fabric d10635f made the app's most important test pass
+  with the honest outcome and no app code that knows about `Uncertain`.
+- `fabric_saga.tool` returning the tool removed an error path that could
+  never fail for this app.
+- Default `sinal.emit` delivery from http_gun removed the app's only
+  supervision glue for observability.
+
+### Migration guides
+
+Sufficient. The saga guide's `unknown_when` entry and its support_desk note
+predicted the SD-1 change exactly; the http_gun guide's `loopback_only`,
+`Failure` and `Kind` entries covered every compile error. Gaps: (1) neither
+guide says `unknown_when` without a decider ends `Failed`, not `Unresolved`,
+and still rolls back earlier steps; (2) the saga guide lists `execution.Config`
+setters but not that `fabric_saga.tool` cannot take a per-call one, which is
+what stops the new `with_correlation` from helping an agent.
+
+**Status (wave 3 fixes):** gap (1) resolved by saga 92612fd; the follow-up section documents `Unresolved`, no rollback by default, and `on_unknown`. Gap (2) is unchanged (fabric).
+
+### After the follow-up fixes
+
+12 tests pass (unchanged); `gleam run` and `gleam format` are clean, with no
+warnings. `saga.define` is total, so `refund.workflow` lost its
+`let assert Ok(workflow)` and trailing `workflow` (3 lines). The saga seam
+test now asserts `Unresolved(_, PaymentOutcomeUnknown(_), settlement)` with
+`settlement.undone == []`, where it asserted `Failed(StepFailed(..))`. Source:
+7 lines removed, 6 added (refund.gleam 107 to 106, all in docs and `define`).
+Test: 7 removed, 7 added. grind, `durable`, `describe_cause` and
+`http_gun` additions are not used by this app.
