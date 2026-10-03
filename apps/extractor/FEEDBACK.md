@@ -119,6 +119,20 @@ prints the demo batch.
   HTTP-date `Retry-After` into milliseconds. The app mapping would then be
   about 10 lines.
 
+- **Status (wave 3):** partially resolved by http_gun e55fa1d. The mapping
+  of http_gun failures no longer lists reasons: `decide_http` is one
+  `error.is_retryable(failure, idempotent: True)` call, and a refused
+  destination, a limit and a malformed request all fall out as `Discard`
+  (outcome.gleam, 16 lines to 14, three exhaustive patterns gone). It stays
+  open for llm_wire: `WireError.HttpFailure` carries `Reason`, not `Failure`,
+  so `Kind` and `is_retryable` are unreachable until the app rebuilds a
+  failure with `http_error.new(reason, submission(evidence))` from llm_wire's
+  `RetryEvidence` (+10 lines). `retry.assess` still answers `Unknown` for every
+  `HttpFailure`, the HTTP-date hint is unchanged, and the whole mapping went
+  from 78 to 71 lines (comments included). The new test
+  `http_failures_are_decided_by_kind_test` covers the classes through both
+  entry points.
+
 ### EXT-3 Invalid structured output loses the raw output and the typed reason
 
 - **Packages**: llm_wire, json_blueprint. **Kind**: ergonomics. **Severity**: major.
@@ -209,6 +223,20 @@ prints the demo batch.
   own, so passing the correlation to the client view does not reach its
   events.
 
+- **Status (wave 3):** partially resolved by sinal c6e2d36 and grind 749c0dc;
+  the job-id table is gone. The app submits with
+  `job.with_correlation(correlation.from_key(document_id))`; every Grind event
+  carries it as `ref.correlation` (required, not an `Option`), and the worker
+  reads it from `worker.correlation(context)` for its http_gun views.
+  `from_key` also removes the 128-byte friction: the `from_string` plus
+  `unique()` fallback and its unattributed attempts are gone, and `trace`
+  applies the same function to the id it is asked about. Removed:
+  `job_submitted`, the `JobSubmitted` message, `State.jobs`, the `JobId` key and
+  its lookup arms (24 lines). Added: `document_correlation` and a longer
+  `begin_attempt` (13 lines, 5 of them comments). Still open: llm_wire events
+  carry no correlation, so the emitting-pid table stays, and all 23
+  unattributed events are llm_wire's.
+
 ### EXT-5 One Blueprint codec cannot serve as a Grind codec or a pog row decoder
 
 - **Packages**: json_blueprint, grind. **Kind**: ecosystem-interop. **Severity**: major.
@@ -250,6 +278,16 @@ prints the demo batch.
   helper is 11 lines instead of 13 and the three Grind codecs went from 57
   to 46 together with the getter change (EXT-6). The pog half is unchanged
   (jsonb still arrives as text).
+
+- **Status (wave 3):** partially resolved by grind 749c0dc and json_blueprint
+  60c0dfb. `grind_codec` is `worker.codec(encode, decoder)` with no version
+  string and no `let assert Ok(wire)` (16 to 13 lines). The three codec versions
+  (`document-job-v1`, `extracted-v2`, `job-error-v1`) became the default `"1"`,
+  so a job stored by the previous app would no longer be claimed; the demo
+  database is disposable. `store.find` builds its `decode.failure` value with
+  `codec.placeholder(invoice.codec())`, which deletes the hand-written
+  `placeholder()` (4 lines). The pog row decoder is otherwise unchanged
+  (jsonb arrives as text).
 
 ### EXT-6 A six-field record codec needs combine chains and nested tuples
 
@@ -303,6 +341,16 @@ prints the demo batch.
   the host string (llm_wire/src/llm_wire/internal/api.gleam:1472), and
   `allowed_hosts` still ignores ports.
 
+- **Status (wave 3):** resolved by http_gun e55fa1d for the policy half.
+  `destination.loopback_only() |> destination.only_hosts([...])` replaces the
+  `allow_loopback` plus nested `Policy` update, and entries take a port: the LLM
+  client now admits only `127.0.0.1:<provider port>`, so it cannot reach the
+  document server on the same address (new assertion in
+  `fetcher_cannot_reach_the_provider_origin_test`). llm_wire still matches the
+  endpoint host string. The port pin has a cost in tests: a dead provider port
+  (`:9`, for the transport-failure test) must also be given to the client's
+  policy, so `with_pipeline` takes a provider port, not a base URL.
+
 ### EXT-8 A queue handler still requires an unused `perform` function
 
 - **Packages**: grind. **Kind**: ergonomics. **Severity**: minor.
@@ -314,6 +362,12 @@ prints the demo batch.
 - **Proposal** (grind): one `define` whose handler returns
   `WorkerResponse(output, error)`, with `worker.from_result` as the adapter for
   plain `Result` handlers.
+
+- **Status (wave 3):** resolved by grind 749c0dc. `worker.responding` takes
+  `handle: fn(context, input) -> Response`; there is no `perform` and no second
+  mapping (`define` 41 to 24 lines). `outcome.to_response` returns
+  `worker.Response` with `Snoozed(after: Duration, ..)`, so the `retry_delay`
+  `Result` and its "unrepresentable snooze" arm are gone (14 to 9 lines).
 
 ### EXT-9 The result write cannot share Grind's acknowledgement transaction
 
@@ -327,6 +381,15 @@ prints the demo batch.
 - **Proposal** (grind): accept an application `pog.Connection` in `Settings`,
   or offer a handler hook that runs a caller statement inside the success
   acknowledgement transaction.
+
+- **Status (wave 3):** partially resolved by grind 749c0dc. The second pool is
+  gone: the app builds one `pog.Config`, Grind keeps its pool name, and
+  `grind.connection(jobs)` hands the same pool to `store.save` (`store.start`,
+  11 lines, and the `Env.store` field are deleted). Not resolved: Grind has no
+  hook that runs a caller statement inside the acknowledgement transaction.
+  `submit_in` enqueues a job in the app's transaction, which this app does not
+  need (extraction writes a result, it enqueues nothing). The row and the job's
+  success still commit separately, and the upsert on `document_id` stays.
 
 ### EXT-10 grind and llm_wire cap gleam_stdlib below 1.0
 
@@ -370,6 +433,12 @@ prints the demo batch.
   below the 57 of the pre-wave `combine` version, and `LineItem` and the
   Grind input and error codecs fit on one or two lines per field. The cross-field
   total check is unchanged.
+
+- **Status (wave 3):** resolved by grind 749c0dc. `job.state_name` is public
+  (telemetry's `string.lowercase(string.inspect(state))` helper is deleted) and
+  `grind.await(jobs, handle, within:)` replaces the 50 ms polling loop
+  (`await` 17 to 9 lines). The remaining wait in the app is `await_all`, which
+  awaits the handles one after another.
 
 ## Glue measure
 
@@ -622,3 +691,138 @@ before the third argument) was mechanical. Gaps: the http_gun guide says an
 app can drop its join table but does not mention the 128-byte bound, which an
 app with free-form ids meets first, and the sinal `required_field` section
 does not say that an observer-only app has nothing to switch.
+
+## Re-run after wave 3 (2 Oct 2026)
+
+Package heads: grind 749c0dc (008b657), http_gun e55fa1d (1a5f5ef), sinal
+c6e2d36, json_blueprint 60c0dfb, llm_wire 576482e (testing types only). 13
+tests pass (`../scripts/with-postgres.sh gleam test`; the app had 11, and the
+two new ones cover failure classes by `Kind` and the handler run through
+`grind/testing`). `gleam run` prints the same demo batch: three stored
+invoices, four discards, two provider calls for `globex` with `acknowledged
+scheduled` between its two claims, and 23 unattributed events (llm_wire 23,
+http_gun 0). The migration changed the seven source files and the test: src
+216 added and 272 removed (net -56), test 141 added and 68 removed (net +73,
+of which about 70 lines are the two new tests and the port-pin assertion).
+
+Glue before to after, in lines counted per function with its comments:
+
+| Seam                                                        | Before | After | Change                                                                                                                    |
+| ----------------------------------------------------------- | ------ | ----- | ------------------------------------------------------------------------------------------------------------------------- |
+| Worker definition with unused `perform` (EXT-8)             | 41     | 24    | `worker.responding`; `perform`, `registry`, the `define` `Result` and its `let assert`s gone                              |
+| Pipeline: start, queue policy, submit, await, stop (EXT-11) | 82     | 59    | one `grind.new(pool) \|> with_worker \|> with_queue`; `queue.Consumer`, `registry.new` and the polling `await` gone       |
+| Second pool and `Env.store` (EXT-9)                         | ~15    | 4     | `grind.connection(jobs)`; `store.start` deleted, `jobs.connection` added                                                  |
+| Job id registry (EXT-4)                                     | 24     | 13    | `job_submitted`, `JobSubmitted`, `State.jobs`, `JobId` replaced by `from_key` and `worker.correlation(context)`           |
+| http_gun failure mapping (EXT-2)                            | 60     | 71    | `Kind` and `is_retryable` remove the reason patterns, but llm_wire's `Reason` must be rebuilt into a `Failure` (+10)      |
+| Two HTTP clients and their destination policies (EXT-7)     | 40     | 40    | builders replace the record updates (-10), a 10-line `observed` helper for the `Option(Forwarder)` replaces field punning |
+| Blueprint placeholder (EXT-5)                               | 4      | 0     | `codec.placeholder(invoice.codec())`                                                                                      |
+| Grind codec helper (EXT-5)                                  | 16     | 13    | `worker.codec` is total and unversioned                                                                                   |
+
+Glue removed: about 95 lines. Added: about 40, in the `Kind` mapping, the
+`observed` helper, `document_correlation` and `jobs.connection`.
+
+Blockers and seams the wave 3 brief names:
+
+- **One pool (CHK-1 counterpart):** resolved here. Grind and the app share one
+  pool of 8 built from one `pog.Config`.
+- **Transactional completion (EXT-9, CHK-2 counterpart):** not resolved for a
+  result write. `submit_in` solves "enqueue with my write"; nothing solves "my
+  write with the job's success". Proposal (grind): a `worker.responding_in`
+  whose handler receives the open transaction that the acknowledgement commits
+  (`fn(context, tx, input) -> Response`), or `grind.complete_in`. Until then
+  the idempotent upsert remains.
+- **Abandonment replay (RA-2 counterpart):** the app keeps the default
+  `HoldUncertain`. Extraction is idempotent (the upsert), so
+  `with_abandonment(ReplayAfterLeaseExpiry(..))` would be sound here, but no
+  test crashes a node, so it is not claimed.
+- **Context (WHK-8 counterpart):** `worker.correlation` replaced the registry.
+  `worker.attempt` is read by no code: the retry policy receives the attempt
+  directly, and the 15-minute handler timeout, 100-snooze cap and 7-day pruner
+  defaults do not change this app's tests. The snooze test still passes with
+  the cap because the `globex` job snoozes once.
+
+Where a redesigned API reads worse for this app:
+
+- **`grind.submit` returns `Admission`, so a plain submit has a dead branch.**
+  Before, `postgres.submit` returned `Result(Handle, _)`. Now:
+
+  ```gleam
+  |> result.try(fn(admission) {
+    case admission {
+      grind.Inserted(handle) -> Ok(handle)
+      // No uniqueness policy is set, so no other admission can happen.
+      grind.Existing(_) | grind.Rescheduled(_) -> Error("job was not inserted")
+    }
+  })
+  ```
+
+  `Existing(Conflict)` carries no handle either, so even a correct branch would
+  need `grind.bind`. Proposal (grind): `grind.submit` returns the handle for a
+  job without `job.unique`, or a `grind.inserted(admission)` helper.
+
+  **Status (wave 3 fixes):** resolved by grind 6bd06ec..eb7b173;
+  `grind.handle(admission)` returns the new or the occupying job, so
+  `jobs.submit` is `|> result.map(grind.handle)` and the 7-line `case` is gone.
+
+- **The worker needs the runtime before the runtime exists.** The handler writes
+  on Grind's pool, but `define` runs before `grind.new(pool)`, so it captures
+  `grind.named(name)` and calls `grind.connection(jobs)` per attempt (and
+  `connection` panics if the runtime is not configured). It works, and it
+  beats the second pool, but `Env` lost a field and `define` gained two
+  parameters (`jobs`, `queue_name`). A `Context` accessor for the runtime's
+  connection (`worker.connection(context)`) would remove both.
+
+  **Status (wave 3 fixes):** resolved by grind 9ccbfb5; the handler calls
+  `worker.connection(context)` and `testing.with_connection` sets it in the
+  handler test. `define` lost its `jobs` parameter and the `grind.named` capture.
+
+- **http_gun's `with_observations` takes a `Forwarder`, not an `Option`.** The
+  wave 2 `Config` had an `observations: Option(Forwarder)` field the app passed
+  through; now a 10-line helper chooses between `with_observations` and the
+  default. Routing once (`forwarder.route(["http_gun"], f)`) would remove the
+  per-client parameter, but it is node-wide state and the tests start several
+  clients.
+- **`observe_labelled` was not adopted.** Its label buys readable
+  `list_handlers` ids, but the formatter wraps each call to three lines (about
+  +28 in `telemetry.start`), and nothing in this app reads handler ids.
+  `fields.check` does not apply (the app defines no Sinal events).
+- **The default worker version makes stored jobs unclaimable.** Dropping the
+  three version strings is the point of the default, but nothing in the app or
+  the migration notes how to tell that a job stored under `"document-job-v1"`
+  is now `contract_mismatch`. The migration guide says so; the failure would
+  surface as `Failed(ContractMismatch, ..)` in `await`.
+
+Seams that still need glue, and who owns them:
+
+| Seam                                            | Glue                                      | Owner                                     |
+| ----------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| llm_wire `Reason` to http_gun `Kind`            | 10 lines (`submission`, `http_error.new`) | llm_wire (carry `Failure`, or use `Kind`) |
+| llm_wire retry advice (EXT-2)                   | `decide_extract`, 38 lines                | llm_wire (`retry.advise`)                 |
+| llm_wire events carry no correlation (EXT-4)    | emitting-pid table, about 25 lines        | llm_wire                                  |
+| Result write inside the acknowledgement (EXT-9) | the idempotent upsert                     | grind                                     |
+| Plain submit returns a three-way admission      | 6 lines                                   | grind                                     |
+| Optional observations forwarder                 | 10 lines                                  | http_gun                                  |
+
+Migration guides: sufficient. The grind guide's extractor entry named the
+symbols and the EXT-9 and EXT-11 replacements; the http_gun guide's `Kind`
+section and destination examples were enough for the policy and the mapping.
+Gaps: the grind guide says "write the extracted invoice inside the job with
+`grind.connection` (one pool)", which suggests a transactional write the
+facade does not offer; it gives one pool, not one transaction. The http_gun
+guide does not say that llm_wire's `HttpFailure` carries a `Reason`, which is
+where an app mapping llm_wire errors meets the opaque `Failure` first.
+
+**Status (wave 3 fixes), start order:** resolved by grind 9ccbfb5. `grind.start`
+then `grind.migrate` would now fail with `SchemaNotMigrated`; `start` takes
+`grind.with_startup_migration`, which applies the migrations before any
+consumer polls. The app's own table still follows on `grind.connection(jobs)`,
+which is safe because no job is submitted before `jobs.start` returns.
+
+### After the follow-up fixes
+
+13 tests pass (`../scripts/with-postgres.sh gleam test`) and `gleam run` prints
+the same batch. The fixes touched `jobs.gleam` (about 15 lines removed, 9
+added) and the handler test (1 removed, 2 added): net -5. Removed: the
+`grind.named` capture and the `jobs` parameter of `define`, the separate
+`grind.migrate` call, and the 7-line `Admission` branch. EXT-9 (result write
+inside the acknowledgement) is unchanged.

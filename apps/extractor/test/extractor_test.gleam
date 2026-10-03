@@ -9,6 +9,7 @@ import extractor/outcome
 import extractor/scripted
 import extractor/store
 import extractor/telemetry
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -16,9 +17,11 @@ import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
 import gleeunit
+import grind
 import grind/job
-import grind/postgres
+import grind/testing
 import grind/worker
+import http_gun/destination
 import http_gun/error as http_error
 import json/blueprint/codec
 import llm_wire/session
@@ -46,30 +49,27 @@ fn database_url() -> String {
   url
 }
 
-/// Starts scripted services, telemetry, both clients, the store and a
-/// Grind pipeline on its own queue. `providers_base` overrides where the
-/// LLM calls go.
+/// Starts scripted services, telemetry, both clients and a Grind pipeline
+/// on its own queue. `provider_port` picks the loopback port the LLM
+/// client may reach and the models call.
 fn with_pipeline(
   queue: String,
   documents: List(scripted.Document),
-  providers_base: fn(scripted.Services) -> String,
+  provider_port: fn(scripted.Services) -> Int,
   run: fn(Context) -> a,
 ) -> a {
   let assert Ok(services) = scripted.start(documents)
   let assert Ok(collector) = telemetry.start()
   let assert Ok(http) =
     clients.start(
-      clients.Loopback([fixtures.document_host]),
+      clients.Loopback([fixtures.document_host], provider_port(services)),
       Some(collector.http_observations),
     )
-  let assert Ok(db) = store.start(database_url())
-  let assert Ok(Nil) = store.migrate(db)
-  let base = providers_base(services)
+  let base = "http://127.0.0.1:" <> int.to_string(provider_port(services))
   let env =
     jobs.Env(
       clients: http,
       model: fn(provider) { llm.model(provider, base, "sk-scripted") },
-      store: db,
       collector:,
       limits: document.default_limits(),
     )
@@ -79,6 +79,10 @@ fn with_pipeline(
   clients.stop(http)
   telemetry.stop(collector)
   result
+}
+
+fn live(services: scripted.Services) -> Int {
+  services.providers_port
 }
 
 fn submit(
@@ -125,22 +129,19 @@ pub fn invoice_codec_round_trips_and_checks_totals_test() {
 }
 
 pub fn batch_is_extracted_and_stored_test() {
-  use context <- with_pipeline(
-    "extract_common",
-    fixtures.batch(),
-    scripted.providers_base,
-  )
+  use context <- with_pipeline("extract_common", fixtures.batch(), live)
   let submitted = [
     submit(context, "acme", llm.OpenAi),
     submit(context, "initech", llm.Google),
   ]
   let assert [
-    job.SucceededWith(jobs.Extracted(row_id: acme_row, invoice: acme)),
-    job.SucceededWith(jobs.Extracted(invoice: initech, ..)),
+    grind.Succeeded(jobs.Extracted(row_id: acme_row, invoice: acme)),
+    grind.Succeeded(jobs.Extracted(invoice: initech, ..)),
   ] = list.map(submitted, finish(context, _))
   assert acme == fixtures.acme()
   assert initech == fixtures.initech()
-  let assert Ok([stored]) = store.find(context.env.store, "acme")
+  let assert Ok([stored]) =
+    store.find(jobs.connection(context.pipeline), "acme")
   assert stored.row_id == acme_row
   assert stored.provider == "openai"
   assert stored.invoice == fixtures.acme()
@@ -153,7 +154,10 @@ pub fn same_extraction_runs_on_three_providers_test() {
     fixtures.document("throttled", fixtures.acme(), scripted.AlwaysStatus(429))
   let assert Ok(services) = scripted.start([throttled, ..fixtures.batch()])
   let assert Ok(http) =
-    clients.start(clients.Loopback([fixtures.document_host]), None)
+    clients.start(
+      clients.Loopback([fixtures.document_host], services.providers_port),
+      None,
+    )
   let text = fixtures.render(fixtures.acme())
   let results =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
@@ -219,20 +223,16 @@ pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
     )
   assert outcome.decide(outcome.ExtractFailed(rate_limited))
     == outcome.Snooze(1000, "provider answered 429")
-  let assert worker.WorkerSnoozed(delay, _) =
+  let assert worker.Snoozed(after:, ..) =
     outcome.to_response(outcome.Snooze(1000, "provider answered 429"))
-  assert worker.retry_delay_milliseconds(delay) == 1000
+  assert after == duration.milliseconds(1000)
 
   // End to end: the first call is refused, the job is snoozed, the second
   // call succeeds.
-  use context <- with_pipeline(
-    "extract_rate_limit",
-    fixtures.batch(),
-    scripted.providers_base,
-  )
+  use context <- with_pipeline("extract_rate_limit", fixtures.batch(), live)
   let started = timestamp.system_time()
   let submitted = submit(context, "globex", llm.Anthropic)
-  let assert job.SucceededWith(jobs.Extracted(invoice:, ..)) =
+  let assert grind.Succeeded(jobs.Extracted(invoice:, ..)) =
     finish(context, submitted)
   let elapsed = timestamp.difference(started, timestamp.system_time())
   assert duration.to_seconds(elapsed) >=. 1.0
@@ -245,12 +245,8 @@ pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
 }
 
 pub fn invalid_structured_output_is_discarded_test() {
-  use context <- with_pipeline(
-    "extract_invalid_output",
-    fixtures.batch(),
-    scripted.providers_base,
-  )
-  let assert [job.DiscardedWithReason(currency), job.DiscardedWithReason(total)] =
+  use context <- with_pipeline("extract_invalid_output", fixtures.batch(), live)
+  let assert [grind.Discarded(currency), grind.Discarded(total)] =
     list.map(
       [
         submit(context, "bad-currency", llm.OpenAi),
@@ -263,7 +259,7 @@ pub fn invalid_structured_output_is_discarded_test() {
     == "invalid structured output: Structured output failed schema validation: $[\"currency\"]: unknown enum label"
   assert total
     == "invalid structured output: Structured output failed codec decode: $[\"total_cents\"]: total 9999 differs from line sum 4490"
-  assert store.find(context.env.store, "bad-currency") == Ok([])
+  assert store.find(jobs.connection(context.pipeline), "bad-currency") == Ok([])
 }
 
 pub fn oversized_and_unsupported_documents_are_discarded_test() {
@@ -277,7 +273,7 @@ pub fn oversized_and_unsupported_documents_are_discarded_test() {
   use context <- with_pipeline(
     "extract_oversized",
     [declared_huge, ..fixtures.batch()],
-    scripted.providers_base,
+    live,
   )
   // The declared length stops the fetch at the response head.
   let declared =
@@ -292,7 +288,7 @@ pub fn oversized_and_unsupported_documents_are_discarded_test() {
     )
   assert declared == Error(document.TooLarge(65_536, 100_000))
   // A chunked body without a length is stopped by the streaming cap.
-  let assert [job.DiscardedWithReason(huge), job.DiscardedWithReason(pdf)] =
+  let assert [grind.Discarded(huge), grind.Discarded(pdf)] =
     list.map(
       [
         submit(context, "huge", llm.OpenAi),
@@ -308,13 +304,14 @@ pub fn oversized_and_unsupported_documents_are_discarded_test() {
 pub fn provider_transport_failure_retries_until_budget_test() {
   // Port 9 on loopback refuses connections: a transport failure.
   use context <- with_pipeline("extract_transport", fixtures.batch(), fn(_) {
-    "http://127.0.0.1:9"
+    9
   })
   let submitted = submit(context, "acme", llm.OpenAi)
   // The worker's error codec keeps the typed JobError and its detail.
-  let assert job.BusinessFailedWithCause(
-    outcome.Transient(outcome.Extract, detail),
-    worker.BudgetExhausted,
+  let assert grind.Failed(
+    grind.Business(outcome.Transient(outcome.Extract, detail)),
+    Some(job.BudgetExhausted),
+    _,
   ) = finish(context, submitted)
   assert string.starts_with(detail, "Connection failed")
   let trace = telemetry.trace(context.collector, "acme")
@@ -329,42 +326,51 @@ pub fn provider_transport_failure_retries_until_budget_test() {
 pub fn fetcher_cannot_reach_the_provider_origin_test() {
   let assert Ok(services) = scripted.start(fixtures.batch())
   let assert Ok(http) =
-    clients.start(clients.Loopback([fixtures.document_host]), None)
+    clients.start(
+      clients.Loopback([fixtures.document_host], services.providers_port),
+      None,
+    )
   // A hostile batch entry points the fetcher at the provider server.
   let hostile = scripted.providers_base(services) <> "/openai/v1/responses"
-  let assert Error(
-    document.Transport(http_error.Failure(
-      reason: http_error.DestinationRejected,
-      evidence: http_error.NotSubmitted,
-    )) as error,
-  ) = document.fetch(http.fetcher, hostile, document.default_limits())
+  let assert Error(document.Transport(failure) as error) =
+    document.fetch(http.fetcher, hostile, document.default_limits())
+  assert http_error.reason(failure)
+    == http_error.DestinationRejected(destination.HostNotAllowed)
+  assert http_error.kind(failure) == http_error.Refused
+  assert http_error.evidence(failure) == http_error.NotSent
   assert outcome.decide(outcome.FetchFailed(error))
     == outcome.Discard(
-      "document fetch failed: Network destination rejected; not submitted",
+      "document fetch failed: Network destination rejected: host or port not allowed; not sent",
     )
   // The LLM client in turn cannot fetch documents.
-  let assert Error(document.Transport(http_error.Failure(
-    reason: http_error.DestinationRejected,
-    ..,
-  ))) =
+  let assert Error(document.Transport(failure)) =
     document.fetch(
       http.llm,
       scripted.document_url(services, fixtures.document_host, "acme"),
       document.default_limits(),
     )
+  assert http_error.kind(failure) == http_error.Refused
+  // The port is pinned too: the document server shares the provider's host
+  // address, and the LLM client still refuses it.
+  let assert Error(document.Transport(failure)) =
+    document.fetch(
+      http.llm,
+      "http://127.0.0.1:"
+        <> int.to_string(services.documents_port)
+        <> "/docs/acme",
+      document.default_limits(),
+    )
+  assert http_error.reason(failure)
+    == http_error.DestinationRejected(destination.HostNotAllowed)
   clients.stop(http)
 }
 
 // Telemetry ---------------------------------------------------------------
 
 pub fn one_job_is_followed_across_packages_test() {
-  use context <- with_pipeline(
-    "extract_telemetry",
-    fixtures.batch(),
-    scripted.providers_base,
-  )
+  use context <- with_pipeline("extract_telemetry", fixtures.batch(), live)
   let submitted = submit(context, "initech", llm.Google)
-  let assert job.SucceededWith(_) = finish(context, submitted)
+  let assert grind.Succeeded(_) = finish(context, submitted)
   let trace = telemetry.trace(context.collector, "initech")
   let grind = telemetry.count(trace.attributed, telemetry.Grind)
   let http = telemetry.count(trace.attributed, telemetry.Http)
@@ -383,22 +389,90 @@ pub fn one_job_is_followed_across_packages_test() {
 /// EXT-1 regression: with an error codec, a snoozed job is re-claimed and
 /// runs again, and its finished job can be re-bound from its id.
 pub fn snoozed_job_with_error_codec_runs_again_test() {
-  use context <- with_pipeline(
-    "extract_snooze_typed",
-    fixtures.batch(),
-    scripted.providers_base,
-  )
+  use context <- with_pipeline("extract_snooze_typed", fixtures.batch(), live)
   let submitted = submit(context, "globex", llm.Anthropic)
-  let assert job.SucceededWith(jobs.Extracted(invoice:, ..)) as finished =
+  let assert grind.Succeeded(jobs.Extracted(invoice:, ..)) as finished =
     finish(context, submitted)
   assert invoice == fixtures.globex()
   // The rate-limited first call and the successful second call.
   assert scripted.provider_calls(context.services, "globex") == 2
   let assert Ok(rebound) =
-    postgres.bind_handle(
-      context.pipeline.database,
+    grind.bind(
+      context.pipeline.jobs,
       context.pipeline.worker,
-      job.id_value(submitted.1),
+      job.id(submitted.1),
     )
-  assert postgres.outcome(context.pipeline.database, rebound) == Ok(finished)
+  assert grind.outcome(context.pipeline.jobs, rebound) == Ok(finished)
+}
+
+// Failure classes ---------------------------------------------------------
+
+/// EXT-2: http_gun's closed `Kind` and `is_retryable` decide fetch failures
+/// and, once llm_wire's `Reason` is rebuilt into a `Failure`, extraction
+/// failures; no exhaustive map of reasons is left in the app.
+pub fn http_failures_are_decided_by_kind_test() {
+  let fetch = fn(reason, evidence) {
+    outcome.decide(
+      outcome.FetchFailed(document.Transport(http_error.new(reason, evidence))),
+    )
+  }
+  let refused = http_error.ConnectionFailed(http_error.ConnectionRefused)
+  assert fetch(refused, http_error.NotSent)
+    == outcome.Retry(outcome.Transient(
+      outcome.Fetch,
+      "document fetch failed: Connection failed: connection refused; not sent",
+    ))
+  let assert outcome.Retry(_) =
+    fetch(http_error.DeadlineExceeded, http_error.MaybeSent)
+  let assert outcome.Discard(_) =
+    fetch(
+      http_error.LimitExceeded(http_error.ResponseBodyBytes, 10, 11),
+      http_error.NotSent,
+    )
+  let assert outcome.Discard(_) =
+    fetch(
+      http_error.InvalidRequest(http_error.InvalidTarget),
+      http_error.NotSent,
+    )
+  // The same classes through an llm_wire failure.
+  let extract = fn(reason, classification) {
+    outcome.decide(
+      outcome.ExtractFailed(llm.CallFailed(
+        provider: types.OpenAI,
+        error: types.HttpFailure(reason),
+        evidence: types.RetryEvidence(classification, False, False),
+      )),
+    )
+  }
+  let assert outcome.Retry(outcome.Transient(outcome.Extract, _)) =
+    extract(refused, types.NoRequestSent)
+  let assert outcome.Discard(_) =
+    extract(
+      http_error.DestinationRejected(destination.HostNotAllowed),
+      types.NoRequestSent,
+    )
+}
+
+/// The handler runs once in the calling process with a synthetic context,
+/// without being submitted; it still writes on the runtime's pool.
+pub fn handler_runs_without_a_queue_test() {
+  use context <- with_pipeline("extract_handler", fixtures.batch(), live)
+  let job =
+    jobs.DocumentJob(
+      document_id: "acme",
+      url: scripted.document_url(
+        context.services,
+        fixtures.document_host,
+        "acme",
+      ),
+      provider: llm.OpenAi,
+    )
+  let assert Ok(worker.Succeeded(jobs.Extracted(invoice:, ..))) =
+    testing.perform_with(
+      context.pipeline.worker,
+      testing.context(job_id: 99, attempt: 2)
+        |> testing.with_connection(jobs.connection(context.pipeline)),
+      job,
+    )
+  assert invoice == fixtures.acme()
 }

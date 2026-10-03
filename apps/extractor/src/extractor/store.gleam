@@ -1,13 +1,13 @@
-//// Extracted invoices in the application's own Postgres pool.
+//// Extracted invoices in Grind's own pool.
 ////
-//// Grind owns a separate pool against the same database and does not accept
-//// or lend a `pog.Connection`, so the result write cannot share a
-//// transaction with the job's acknowledgement. The upsert on `document_id`
-//// makes a replayed attempt converge on one row instead.
+//// The app builds the `pog.Config` once; Grind keeps its pool name, and
+//// `grind.connection` hands the same pool to this module. The result write
+//// is still its own statement: Grind offers no hook inside the job's
+//// acknowledgement transaction, so the upsert on `document_id` makes a
+//// replayed attempt converge on one row.
 
 import extractor/invoice.{type Invoice}
 import gleam/dynamic/decode
-import gleam/erlang/process
 import gleam/list
 import gleam/result
 import json/blueprint/codec
@@ -15,17 +15,6 @@ import pog
 
 pub type Stored {
   Stored(row_id: Int, document_id: String, provider: String, invoice: Invoice)
-}
-
-pub fn start(database_url: String) -> Result(pog.Connection, String) {
-  let name = process.new_name("extractor_store")
-  use config <- result.try(
-    pog.url_config(name, database_url)
-    |> result.replace_error("invalid DATABASE_URL"),
-  )
-  pog.start(config |> pog.pool_size(4))
-  |> result.map(fn(started) { started.data })
-  |> result.replace_error("could not start the store pool")
 }
 
 pub fn migrate(db: pog.Connection) -> Result(Nil, pog.QueryError) {
@@ -98,7 +87,7 @@ pub fn find(
       Ok(invoice) -> decode.success(Stored(id, document_id, provider, invoice))
       Error(_) ->
         decode.failure(
-          Stored(id, document_id, provider, placeholder()),
+          Stored(id, document_id, provider, codec.placeholder(invoice.codec())),
           "Invoice",
         )
     }
@@ -123,8 +112,4 @@ pub fn count(db: pog.Connection) -> Result(Int, pog.QueryError) {
       _ -> 0
     }
   })
-}
-
-fn placeholder() -> Invoice {
-  invoice.Invoice("", "", "", invoice.Usd, [], 0)
 }

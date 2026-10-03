@@ -48,7 +48,7 @@ pub fn fetch(
     request.to(url) |> result.replace_error(InvalidUrl(url)),
   )
   let req = request.set_body(base, <<>>)
-  http_gun.try_with_response(client, req, Transport, fn(resp) {
+  http_gun.with_response(client, req, Transport, fn(resp) {
     use content_type <- result.try(check_head(resp, limits))
     use collected <- result.try(
       body.collect(resp.body, limits.max_bytes)
@@ -87,8 +87,8 @@ fn check_head(
 }
 
 fn collect_error(failure: http_error.Failure) -> FetchError {
-  case failure.reason {
-    http_error.LimitExceeded(http_error.CollectedBodyBytes, limit, observed) ->
+  case http_error.reason(failure) {
+    http_error.LimitExceeded(http_error.ResponseBodyBytes, limit, observed) ->
       TooLarge(limit, observed)
     _ -> Transport(failure)
   }
