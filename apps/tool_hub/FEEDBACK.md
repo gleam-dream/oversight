@@ -276,6 +276,15 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   (:105-109). The output side of the mount, a pass-through `Codec(Value)`,
   still needs a hand-built `codec.custom` (:120).
 
+- **Status (wave 3):** resolved by json_blueprint 60c0dfb. The output
+  side of the mount, the pass-through `Codec(Value)`, is `codec.value()`
+  (src/tool_hub/remote_tools.gleam:117); it replaces
+  `codec.custom(encode: Ok, decode: Ok, schema: None, placeholder: Null)`.
+  1 line and the `Null` and `None` imports removed; the placeholder is no
+  longer the app's concern. The `Json` to text to contract round trip on the
+  input side remains (Relay's `ToolDeclaration.input_schema` is still
+  `json.Json`; relay is unchanged in wave 3).
+
 ### TH-7 One question cannot be followed across relay, fabric, llm_wire and http_gun
 
 - **Packages**: llm_wire, relay, fabric, http_gun. **Kind**: composition.
@@ -337,6 +346,19 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   the same 24 http_gun events join and the same 18 relay and 17 llm_wire
   events do not. The new type is correct for when they adopt it, and the
   per-question correlation is then the only key an app needs.
+
+- **Status (wave 3):** partially resolved by http_gun 1a5f5ef (the
+  client label). `config.with_label` puts the client's name in
+  `Metadata.client`, so the telemetry handler now tells the provider client
+  (`tool_hub_provider`) from the test's second client (`mcp_wire`) without
+  a correlation: the handler prints the label and
+  `common_path_answers_through_both_mcp_servers_test` asserts that every
+  http_gun event joined to the run is the provider's. This is a way to
+  filter, not a join. The join itself is unchanged: `llm.model` still binds
+  its client when the agent is built and the run id exists only after
+  `fabric.start`, so the app rebuilds the agent per question and keeps
+  `Link`, `link` and `follow` (~35 lines, no change). The same 24 http_gun
+  events join and the same 18 relay and 17 llm_wire events do not.
 
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
@@ -412,6 +434,18 @@ after 4 turns, 4 without usage`;
   `forwarder.emit_routed` is gone, so the proposal now reads "use
   `sinal.emit` when `observations` is `None`".
 
+- **Status (wave 3):** resolved by http_gun e55fa1d. Observations go
+  through `sinal.emit` when the client has no forwarder, which was the
+  proposal. The app's handlers only send to its collector, so they run in
+  the emitting process and the forwarder is gone: the supervisor and
+  forwarder in telemetry.gleam (7 lines), `http_forwarder` (3), the two
+  fields of `Telemetry` that held them (2), the `forwarder.dropped_event`
+  handler that watched them (8), the `with_observations` plumbing in
+  `provider_client`, and `src/tool_hub_ffi.erl` (10 lines, which existed
+  only to stop that supervisor without a crash report) are all deleted:
+  about 30 lines. An app whose handlers do real work would route
+  `["http_gun"]` to a forwarder once; this one does not need to.
+
 ### TH-12 Dependency resolution
 
 - **Packages**: relay. **Kind**: ecosystem-interop. **Severity**: nit.
@@ -482,6 +516,12 @@ Relay use.
   replaced it: `provider_client` (src/tool_hub.gleam:78-89) now pipes the
   config through one call. The helper keeps every other destination rule,
   so the provider client still refuses private and reserved addresses.
+  **Status (wave 3):** `allow_loopback` alone still admits public hosts, so
+  the provider client is now
+  `with_destination(destination.loopback_only() |> destination.only_hosts(["127.0.0.1"]))`
+  (http_gun e55fa1d). It refuses everything but the scripted provider's
+  host, and `provider_client_refuses_public_hosts_test` pins that
+  (`error.kind` is `Refused`, evidence `NotSent`).
 - **llm_wire's scripted provider** (`testing.config()` plus the reply
   builders) let a 205-line mist server stand in for a real provider,
   including a held stream for cancellation tests.
@@ -558,3 +598,61 @@ New friction:
   handler cannot be written once for every package: `sinal.observe` on
   `http_telemetry.event()` matches only http_gun, and the other packages
   have no `correlation` key to match.
+
+## Re-run after wave 3
+
+Package heads: http_gun 1a5f5ef, json_blueprint 74a9a7d (`codec.value` at
+60c0dfb), sinal 44c5395 (`observe_labelled` at 42dd684), relay 6ee2ae9
+(unchanged API), fabric d10635f, llm_wire 576482e. 12 tests pass, three runs
+in a row (11 before, plus `provider_client_refuses_public_hosts_test`);
+`gleam run` prints the same trail (12 fabric and 24 http_gun events joined,
+18 relay and 17 llm_wire not).
+
+| Seam                                               | Before | After | Change                                                                                                                            |
+| -------------------------------------------------- | ------ | ----- | --------------------------------------------------------------------------------------------------------------------------------- |
+| http_gun forwarder and supervisor for observations | 7      | 0     | `sinal.emit` is the default path (TH-11); also `http_forwarder`, the dropped handler, two `Telemetry` fields: ~30 lines in all    |
+| `tool_hub_ffi.erl` (stop the forwarder supervisor) | 10     | 0     | file deleted; nothing else used it                                                                                                |
+| Pass-through output codec                          | 1      | 1     | `codec.custom(.., placeholder: Null)` is `codec.value()`; two imports and the invented placeholder go (TH-6)                      |
+| http_gun loopback client                           | 7      | 7     | `Config(..)` update with a 60 s ceiling and observations is `loopback_only() \|> only_hosts(..)` and a label; stricter, same size |
+| Per-call 60 s deadline on the client               | 1      | 0     | llm_wire's view carries its own budget; no ceiling to raise                                                                       |
+| Sinal handler labels                               | 0      | 15    | `sinal.observe` is `sinal.observe_labelled(.., "tool_hub_relay_..", ..)`: same line count, a name in `list_handlers`              |
+| Telemetry correlation (agent per question, link)   | ~35    | ~35   | unchanged (TH-7): the run id is unknown when the agent is built                                                                   |
+
+Net diff of the app source: 189 added and 164 removed, of which
+telemetry.gleam alone is +175 -139 because the labels re-wrap 15 handler
+calls (see the new friction below). The deleted glue is about 40 lines
+(forwarder 7, `http_forwarder` 3, fields 2, dropped handler 8, FFI 10, codec
+1, the 60 s ceiling and its imports); the labels add back about 55.
+
+Seams that still need glue, and who owns them:
+
+- Relay ↔ fabric adapter (~150 lines), failure mapping and cancellation
+  bridge (11 lines): relay and fabric (TH-3, TH-4, TH-5). Wave 3 did not
+  touch them.
+- The per-question agent and the `Link` join (~35 lines): fabric, which has
+  to pass the run id or a caller-supplied correlation to the model function
+  (TH-7).
+- `ToolDeclaration.input_schema` as `json.Json`, rendered to text and parsed
+  again: relay (TH-6).
+
+New friction:
+
+- `observe_labelled` makes every handler call longer without making the app
+  simpler. `sinal.observe(relay_telemetry.invocation_completed_event(), fn(measured, m) {`
+  is now 106 columns and `gleam format` wraps it onto four lines, so
+  telemetry.gleam grew by about 36 net lines for 15 labels that nothing in
+  the app reads. The label is worth it only for an app that
+  inspects `telemetry:list_handlers`. A helper that derives the label from
+  the event (`sinal.observe_named(event, run)`, naming the handler after the
+  event) would give the same result without the repetition; sinal owns it.
+- `provider_client` had to change its signature: it took the app's
+  `Telemetry` for the forwarder and now takes the client label. A test that
+  starts a second client must pick a second label, or its events read as the
+  provider's. That is the point of the label, but nothing warns when two
+  clients share one.
+- http_gun's `Metadata.client` is `Option(String)`, so the handler keeps a
+  `None -> "unlabelled"` arm for a case this app never produces.
+- `http_gun.start` returns an unsupervised client linked to the caller; the
+  hub still stops it by hand. `supervised(config, name)` and `named(name)`
+  would remove that, but the hub has no supervisor of its own to put it
+  under, and adding one only for that is more code than the `stop` call.

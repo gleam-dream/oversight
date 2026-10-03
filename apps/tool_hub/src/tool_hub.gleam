@@ -12,10 +12,10 @@ import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{Some}
 import gleam/string
 import http_gun
 import http_gun/config as http_config
+import http_gun/destination
 import llm_wire/testing
 import llm_wire/types
 import relay/client
@@ -74,16 +74,15 @@ pub fn settings(name: String) -> Settings {
 }
 
 /// The HTTP client for the model provider. http_gun refuses loopback by
-/// default, so the scripted provider needs an explicit policy.
-pub fn provider_client(
-  telemetry: telemetry.Telemetry,
-) -> Result(http_gun.Client, String) {
-  http_config.Config(
-    ..http_config.default(),
-    deadline_ms: 60_000,
-    observations: Some(telemetry.http_forwarder(telemetry)),
+/// default, so the scripted provider needs an explicit policy. The label
+/// tells this client's events from any other client's. Observations go
+/// through `sinal.emit`, which the app's handlers read directly.
+pub fn provider_client(label: String) -> Result(http_gun.Client, String) {
+  http_config.default()
+  |> http_config.with_destination(
+    destination.loopback_only() |> destination.only_hosts(["127.0.0.1"]),
   )
-  |> http_config.allow_loopback
+  |> http_config.with_label(label)
   |> http_gun.start
   |> result_string
 }
@@ -103,7 +102,7 @@ pub fn start(
   )
   let notices = process.new_subject()
   use provider <- try(scripted_llm.start(script, notices))
-  use http <- try(provider_client(telemetry))
+  use http <- try(provider_client("tool_hub_provider"))
   let runs = store.in_memory(process.new_name(settings.name <> "_runs"))
   use Nil <- try(store.start(runs) |> result_string)
   let inventory_peer = fn(context: assistant.Context) { context.inventory }
@@ -159,7 +158,7 @@ pub fn stop(hub: Hub) -> Nil {
   client.close(hub.peer)
   http.stop_http_server(hub.inventory)
   scripted_llm.stop(hub.provider)
-  let _ = http_gun.stop(hub.http)
+  http_gun.stop(hub.http)
   telemetry.stop(hub.telemetry)
 }
 

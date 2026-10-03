@@ -9,12 +9,12 @@
 import fabric/tool as fabric_tool
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/string
 import json/blueprint/codec
 import json/blueprint/contract
-import json/blueprint/value.{Null}
+import json/blueprint/value
 import relay/client
 import relay/content
 import relay/tool as relay_tool
@@ -117,7 +117,7 @@ pub fn mount_discovered(
       option.unwrap(declaration.description, ""),
       contract.value_codec(remote),
       // The output is forwarded as the peer sent it.
-      codec.custom(encode: Ok, decode: Ok, schema: None, placeholder: Null),
+      codec.value(),
     )
   fabric_tool.bind(
     definition,
