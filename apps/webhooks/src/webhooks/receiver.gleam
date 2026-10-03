@@ -4,6 +4,7 @@
 ////   /ok    204
 ////   /gone  410
 ////   /busy  429 with Retry-After: 1 on the first call, then 204
+////   /throttled  429 with Retry-After: 0, always
 ////   /flaky 503 twice, then 204
 ////   /big   200 with a 64 KiB body
 
@@ -95,6 +96,7 @@ fn serve(
     "/gone", _ -> reply(410, [], <<"gone":utf8>>)
     "/busy", 1 -> reply(429, [#("retry-after", "1")], <<>>)
     "/busy", _ -> reply(204, [], <<>>)
+    "/throttled", _ -> reply(429, [#("retry-after", "0")], <<>>)
     "/flaky", n if n <= 2 -> reply(503, [], <<"try later":utf8>>)
     "/flaky", _ -> reply(204, [], <<>>)
     "/big", _ -> reply(200, [], big_body())

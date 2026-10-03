@@ -1,6 +1,6 @@
-//// The application's own tables, on the application's own pog pool. Grind
-//// cannot share this pool (it starts its own from a URL), so the app runs
-//// two pools against one database.
+//// The application's own tables, on the pool grind runs on. That pool's
+//// `search_path` is grind's schema, so every table here is qualified with
+//// `public`.
 
 import gleam/dynamic/decode
 import gleam/list

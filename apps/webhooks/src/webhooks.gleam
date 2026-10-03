@@ -16,12 +16,12 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
-import grind/job
-import grind/postgres
-import grind/queue
+import gleam/time/duration
+import grind
 import http_gun
 import http_gun/config
 import http_gun/destination
+import http_gun/error
 import mist
 import webhooks/attempt
 import webhooks/delivery
@@ -60,21 +60,37 @@ pub fn simulated_dns(
 
 fn run(url: String) -> Nil {
   wisp.set_logger_level(wisp.ErrorLevel)
+  let rx = receiver.start()
   let options =
     service.Options(
       ..service.options(url),
-      plan: delivery.Plan(max_attempts: 3, backoff: attempt.Backoff(200, 2000)),
+      plan: delivery.Plan(
+        max_attempts: 3,
+        backoff: attempt.Backoff(200, 2000),
+        snooze: attempt.SnoozePolicy(..attempt.default_snooze(), max_snoozes: 3),
+      ),
       egress: egress.Settings(
         ..egress.default_settings(),
-        public_resolver: Some(simulated_dns),
+        // The internal tier reaches the receiver's port and the dead port 1,
+        // and no other loopback port.
+        internal_hosts: [
+          "127.0.0.1:" <> int.to_string(receiver.port(rx)),
+          "127.0.0.1:1",
+        ],
+        resolver: Some(simulated_dns),
       ),
     )
   let assert Ok(svc) = service.start(options)
-  let rx = receiver.start()
   let api = start_api(svc.context)
-  // The operator's own client for calling the API: a third policy.
+  // The operator's own client for calling the API: loopback, this port only.
   let assert Ok(admin) =
-    http_gun.start(config.default() |> config.allow_loopback)
+    config.default()
+    |> config.with_destination(
+      destination.loopback_only()
+      |> destination.only_hosts(["127.0.0.1:" <> int.to_string(api)]),
+    )
+    |> config.without_observations
+    |> http_gun.start
   io.println("== webhooks: grind + http_gun + sinal on wisp/mist/pog ==")
   io.println(
     "API on 127.0.0.1:"
@@ -84,12 +100,13 @@ fn run(url: String) -> Nil {
   )
 
   io.println("\n-- registering endpoints")
-  let ops_paths = ["/ok", "/flaky", "/busy", "/gone", "/big"]
+  let ops_paths = ["/ok", "/flaky", "/busy", "/throttled", "/gone", "/big"]
   let ops_subs =
     list.map(ops_paths, fn(path) {
       #(path, register(admin, api, "ops", receiver.url(rx, path)))
     })
   let down = register(admin, api, "ops", "http://127.0.0.1:1/down")
+  let _ = register(admin, api, "ops", "http://127.0.0.1:5432/hook")
   let _ =
     register(admin, api, "acme", "https://169.254.169.254/latest/meta-data")
   let _ = register(admin, api, "acme", "http://hooks.acme.example/hook")
@@ -116,15 +133,13 @@ fn run(url: String) -> Nil {
   let acme_jobs = publish(admin, api, "acme", "invoice.paid", "{\"invoice\":7}")
   let published = list.append(ops_jobs, acme_jobs)
 
-  let consumer =
-    service.start_consumer(
-      svc,
-      queue.default_policy()
-        |> queue.with_poll_interval(50)
-        |> queue.with_maximum_concurrency(4),
-    )
-  let outcomes = await_outcomes(svc, published, 100)
-  let assert Ok(_) = queue.stop(consumer)
+  let outcomes =
+    list.map(published, fn(entry) {
+      let assert Ok(handle) = grind.bind(svc.jobs, svc.worker, entry.1)
+      let assert Ok(outcome) =
+        grind.await(svc.jobs, handle, within: duration.seconds(15))
+      #(entry.0, outcome)
+    })
 
   io.println("\n-- outcomes")
   list.each(outcomes, fn(entry) {
@@ -149,7 +164,7 @@ fn run(url: String) -> Nil {
     }
     io.println(
       "  "
-      <> string.pad_end(label, 8, " ")
+      <> string.pad_end(label, 11, " ")
       <> describe_outcome(outcome)
       <> "  ["
       <> attempts
@@ -206,7 +221,7 @@ fn run(url: String) -> Nil {
     <> " could not be attributed to a delivery)",
   )
 
-  let _ = http_gun.stop(admin)
+  http_gun.stop(admin)
   service.stop(svc)
   io.println("\ndone.")
 }
@@ -244,55 +259,25 @@ fn verify(r: receiver.Received, secrets) -> Bool {
 }
 
 fn describe_outcome(
-  outcome: job.Outcome(attempt.Receipt, attempt.DeliveryError),
+  outcome: grind.Outcome(attempt.Receipt, attempt.DeliveryError),
 ) -> String {
   case outcome {
-    job.SucceededWith(receipt) ->
+    grind.Succeeded(receipt) ->
       "delivered "
       <> int.to_string(receipt.status)
       <> case receipt.body {
-        attempt.BodyOverLimit(limit) ->
-          " (body over " <> int.to_string(limit) <> "-byte read limit, ignored)"
-        _ -> ""
+        attempt.BodyIncomplete(reason) -> " (body not read: " <> reason <> ")"
+        attempt.BodyRead(_) -> ""
       }
-    job.BusinessFailedWithCause(e, cause) ->
+    grind.Failed(grind.Business(e), cause, _) ->
       "failed: "
       <> attempt.describe_error(e)
       <> " ("
       <> string.inspect(cause)
       <> ")"
-    job.BusinessFailedWith(e) -> "failed: " <> attempt.describe_error(e)
-    job.DiscardedWithReason(reason) -> "discarded: " <> reason
-    job.Pending(state) -> "pending (" <> string.inspect(state) <> ")"
+    grind.Discarded(reason) -> "discarded: " <> reason
+    grind.Pending(state) -> "pending (" <> string.inspect(state) <> ")"
     other -> string.inspect(other)
-  }
-}
-
-fn await_outcomes(
-  svc: service.Service,
-  published: List(#(String, Int)),
-  tries: Int,
-) -> List(#(String, job.Outcome(attempt.Receipt, attempt.DeliveryError))) {
-  let outcomes =
-    list.map(published, fn(entry) {
-      let assert Ok(handle) =
-        postgres.bind_handle(svc.jobs, svc.worker, entry.1)
-      let assert Ok(outcome) = postgres.outcome(svc.jobs, handle)
-      #(entry.0, outcome)
-    })
-  let settled =
-    list.all(outcomes, fn(e) {
-      case e.1 {
-        job.Pending(_) -> False
-        _ -> True
-      }
-    })
-  case settled || tries == 0 {
-    True -> outcomes
-    False -> {
-      process.sleep(100)
-      await_outcomes(svc, published, tries - 1)
-    }
   }
 }
 
@@ -334,7 +319,7 @@ fn call(
         buffered.response.status,
         bit_array.to_string(buffered.response.body) |> result.unwrap(""),
       ))
-    Error(failure) -> Error(attempt.failure_name(failure.reason))
+    Error(failure) -> Error(error.name(failure))
   }
 }
 

@@ -6,9 +6,9 @@ import gleam/int
 import gleam/json
 import gleam/option.{Some}
 import gleam/result
-import grind/job
-import grind/postgres
-import grind/queue
+import gleam/time/duration
+import grind
+import grind/testing
 import http_gun/destination
 import pog
 import webhooks/attempt
@@ -18,7 +18,7 @@ import webhooks/service.{type Service}
 import webhooks/web
 import wisp/simulate
 
-/// Simulated DNS for the public tier.
+/// Simulated DNS.
 pub fn test_dns(
   host: String,
   _remaining: Int,
@@ -40,11 +40,16 @@ pub fn options() -> service.Options {
   service.Options(
     ..service.options(url),
     queue: "webhooks_" <> int.to_string(unique_int()),
-    plan: delivery.Plan(max_attempts: 3, backoff: attempt.Backoff(0, 0)),
+    plan: delivery.Plan(
+      ..delivery.default_plan(),
+      max_attempts: 3,
+      backoff: attempt.Backoff(0, 0),
+    ),
     egress: egress.Settings(
       ..egress.default_settings(),
-      public_resolver: Some(test_dns),
+      resolver: Some(test_dns),
     ),
+    consumers: False,
   )
 }
 
@@ -53,11 +58,28 @@ pub fn outcome(
   svc: Service,
   id: Int,
 ) -> Result(
-  job.Outcome(attempt.Receipt, attempt.DeliveryError),
-  postgres.JobReadError,
+  grind.Outcome(attempt.Receipt, attempt.DeliveryError),
+  grind.ReadError,
 ) {
-  use handle <- result.try(postgres.bind_handle(svc.jobs, svc.worker, id))
-  postgres.outcome(svc.jobs, handle)
+  use handle <- result.try(grind.bind(svc.jobs, svc.worker, id))
+  grind.outcome(svc.jobs, handle)
+}
+
+/// Runs the service queue's due jobs, one at a time, until none is due.
+pub fn drain(svc: Service) -> Result(Int, testing.DrainError) {
+  drain_up_to(svc, 50)
+}
+
+pub fn drain_up_to(
+  svc: Service,
+  limit: Int,
+) -> Result(Int, testing.DrainError) {
+  testing.drain(
+    svc.jobs,
+    queue: svc.queue,
+    limit:,
+    within: duration.seconds(20),
+  )
 }
 
 pub fn with_service(options: service.Options, run: fn(Service) -> a) -> a {
@@ -68,13 +90,6 @@ pub fn with_service(options: service.Options, run: fn(Service) -> a) -> a {
     |> pog.execute(svc.db)
   let result = run(svc)
   service.stop(svc)
-  result
-}
-
-pub fn with_consumer(svc: Service, run: fn(queue.Consumer) -> a) -> a {
-  let consumer = service.start_consumer(svc, service.manual_policy())
-  let result = run(consumer)
-  let assert Ok(_) = queue.stop(consumer)
   result
 }
 
@@ -128,7 +143,7 @@ pub fn publish(svc: Service, raw: String) -> List(#(String, Int)) {
   deliveries
 }
 
-/// Asynchronous observations (forwarders) need a moment to land.
+/// grind's observations go through its forwarder and need a moment to land.
 pub fn settle() -> Nil {
   process.sleep(150)
 }

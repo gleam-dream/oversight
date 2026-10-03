@@ -10,11 +10,11 @@ import gleam/list
 import gleam/option.{None}
 import gleam/result
 import gleam/string
+import grind
 import grind/job
-import grind/postgres
-import grind/submission
 import grind/worker.{type Worker}
 import pog
+import sinal/correlation
 import webhooks/attempt.{type Delivery, type DeliveryError, type Receipt}
 import webhooks/store
 import webhooks/subscription.{type Tier}
@@ -23,13 +23,10 @@ import wisp.{type Request, type Response}
 pub type Context {
   Context(
     db: pog.Connection,
-    jobs: postgres.Database,
-    queue: String,
+    jobs: grind.Grind,
     worker: Worker(Delivery, Receipt, DeliveryError),
     tenants: Dict(String, Tier),
     internal_hosts: List(String),
-    /// Called with (job id, delivery id) after each admission.
-    on_submitted: fn(Int, String) -> Nil,
   )
 }
 
@@ -121,8 +118,10 @@ pub type PublishError {
 }
 
 /// Fan an event out: one grind job per active subscription. Each job is
-/// admitted with a deterministic `SubmissionId` (`event:subscription`), so a
-/// publisher retrying the same event id converges on the same jobs.
+/// admitted with a deterministic id (`event:subscription`), so a publisher
+/// retrying the same event id converges on the same jobs, and in the same
+/// transaction as its delivery row. The job carries the delivery's
+/// correlation into the worker and every grind event.
 pub fn publish(
   ctx: Context,
   tenant: String,
@@ -148,29 +147,31 @@ pub fn publish(
         subscription_id: sub.id,
         body:,
       )
-    let assert Ok(submission_id) = submission.submission_id(delivery_id)
-    case
-      postgres.submit_with_id(
-        ctx.jobs,
-        ctx.queue,
-        submission_id,
-        ctx.worker,
-        delivery,
-        submission.Immediately,
-      )
-    {
-      Ok(submission.Inserted(handle)) -> {
-        let job_id = job.id_value(handle)
-        let _ =
-          store.record_delivery(ctx.db, delivery_id, event_id, sub.id, job_id)
-        ctx.on_submitted(job_id, delivery_id)
-        Ok(Published(delivery_id, job_id))
+    let delivery_job =
+      job.new(ctx.worker, delivery)
+      |> job.with_id(delivery_id)
+      |> job.with_correlation(correlation.from_key(delivery_id))
+    pog.transaction(ctx.db, fn(tx) {
+      case grind.submit_in(ctx.jobs, tx, delivery_job) {
+        Ok(grind.Inserted(handle)) -> {
+          let job_id = job.id(handle)
+          store.record_delivery(tx, delivery_id, event_id, sub.id, job_id)
+          |> result.replace(Published(delivery_id, job_id))
+          |> result.replace_error(StorageFailed)
+        }
+        // A resubmit converges on the job that holds the id; its delivery
+        // row was written with it.
+        Ok(admission) ->
+          Ok(Published(delivery_id, job.id(grind.handle(admission))))
+        Error(_) -> Error(AdmissionFailed(delivery_id))
       }
-      Ok(submission.Existing(conflict))
-      | Ok(submission.Rescheduled(conflict)) ->
-        Ok(Published(delivery_id, submission.conflict_job_id(conflict)))
-      Error(_) -> Error(AdmissionFailed(delivery_id))
-    }
+    })
+    |> result.map_error(fn(e) {
+      case e {
+        pog.TransactionRolledBack(e) -> e
+        pog.TransactionQueryError(_) -> AdmissionFailed(delivery_id)
+      }
+    })
   })
 }
 

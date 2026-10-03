@@ -1,30 +1,32 @@
-//// Per-tenant egress. http_gun's destination policy belongs to a client
-//// (one pool, one policy), with no per-request override, so a multi-tenant
-//// app keeps one client per policy tier and routes each delivery to the
-//// client of its tenant's tier.
+//// Egress: one http_gun client for every tenant. Its destination policy is
+//// the union of the tiers (public and loopback), and each delivery narrows
+//// it to its tenant's tier with a client view (`subscription.policy`), the
+//// same policy registration checks. The client refuses any request that
+//// skips the view (`config.require_view_destination`), so a public tenant
+//// can never reach loopback through the base client.
 
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import http_gun
 import http_gun/config
 import http_gun/destination
-import http_gun/error
-import sinal/forwarder
-import webhooks/subscription.{type Tier, InternalTier, PublicTier}
+import webhooks/subscription.{type Tier}
 
 pub type Egress {
-  Egress(public: http_gun.Client, internal: http_gun.Client)
+  Egress(client: http_gun.Client, internal_hosts: List(String))
 }
 
 pub type Settings {
   Settings(
     /// Request ceiling for one delivery attempt.
     deadline_ms: Int,
-    /// Hosts the internal tier may reach; loopback is allowed only for them.
+    /// `host` or `host:port` entries the internal tier may reach on loopback.
     internal_hosts: List(String),
-    /// Test seam: simulated DNS for the public tier. `None` uses the system resolver.
-    public_resolver: Option(destination.Resolver),
-    observations: Option(forwarder.Forwarder),
+    /// Test seam: simulated DNS. `None` uses the system resolver.
+    resolver: Option(config.Resolver),
+    /// Test seam: how the client starts, e.g. `testing.playback(script, _)`.
+    start_client: fn(config.Config) ->
+      Result(http_gun.Client, http_gun.StartError),
   )
 }
 
@@ -32,75 +34,36 @@ pub fn default_settings() -> Settings {
   Settings(
     deadline_ms: 5000,
     internal_hosts: ["127.0.0.1", "localhost"],
-    public_resolver: None,
-    observations: None,
+    resolver: None,
+    start_client: http_gun.start,
   )
 }
 
-/// Shared limits for both tiers. The response-body bound is per request
-/// (`delivery.send`), not per client.
-pub fn base_config(settings: Settings) -> config.Config {
-  let d = config.default()
-  config.Config(
-    ..d,
-    deadline_ms: settings.deadline_ms,
-    connect_ms: int_min(settings.deadline_ms, d.connect_ms),
-    observations: settings.observations,
-  )
+pub fn config(settings: Settings) -> config.Config {
+  let base =
+    config.default()
+    |> config.with_request_timeout(config.Milliseconds(settings.deadline_ms))
+    |> config.with_destination(
+      destination.default() |> destination.allow_loopback,
+    )
+    |> config.require_view_destination
+  case settings.resolver {
+    Some(resolver) -> config.with_resolver(base, resolver)
+    None -> base
+  }
 }
 
-/// Public destinations only. Private, loopback, link-local and metadata
-/// addresses are refused for every answer the resolver returns.
-pub fn public_config(settings: Settings) -> config.Config {
-  let base = base_config(settings)
-  config.Config(
-    ..base,
-    destination: destination.Policy(
-      allow_public: True,
-      allow_loopback: False,
-      allow_private: False,
-      allowed_hosts: None,
-      resolver: settings.public_resolver,
-    ),
-  )
-}
-
-/// Loopback, but only for the named hosts (no port matching is available).
-pub fn internal_config(settings: Settings) -> config.Config {
-  let base = base_config(settings)
-  config.Config(
-    ..base,
-    destination: destination.Policy(
-      ..base.destination,
-      allow_public: False,
-      allowed_hosts: Some(settings.internal_hosts),
-    ),
-  )
-  |> config.allow_loopback
-}
-
-pub fn start(settings: Settings) -> Result(Egress, error.Failure) {
-  use public <- result.try(http_gun.start(public_config(settings)))
-  use internal <- result.try(http_gun.start(internal_config(settings)))
-  Ok(Egress(public:, internal:))
+pub fn start(settings: Settings) -> Result(Egress, http_gun.StartError) {
+  use client <- result.map(settings.start_client(config(settings)))
+  Egress(client:, internal_hosts: settings.internal_hosts)
 }
 
 pub fn stop(egress: Egress) -> Nil {
-  let _ = http_gun.stop(egress.public)
-  let _ = http_gun.stop(egress.internal)
-  Nil
+  http_gun.stop(egress.client)
 }
 
+/// The client view for one tier: it can only narrow the client's policy.
 pub fn client_for(egress: Egress, tier: Tier) -> http_gun.Client {
-  case tier {
-    PublicTier -> egress.public
-    InternalTier -> egress.internal
-  }
-}
-
-fn int_min(a: Int, b: Int) -> Int {
-  case a < b {
-    True -> a
-    False -> b
-  }
+  egress.client
+  |> http_gun.with_destination(subscription.policy(tier, egress.internal_hosts))
 }
