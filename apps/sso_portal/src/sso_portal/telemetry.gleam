@@ -1,17 +1,18 @@
-//// Sinal subscriptions for every package in the portal, plus the glue needed
-//// to follow one browser request across them.
+//// Sinal subscriptions for every package in the portal, plus a collector
+//// that follows one browser request across them.
 ////
-//// - Warden emits `[warden, http, request]` synchronously in the process that
-////   called it (the wisp request process), with no correlation field.
+//// - Warden emits `[warden, http, request]`, `[warden, login]`,
+////   `[warden, refresh]` and `[warden, logout]` in the process that called
+////   it, each carrying the `Correlation` of the `warden.with_correlation`
+////   view that made the call.
 //// - http_gun emits `[http_gun, lifecycle]` through a Sinal forwarder (a
-////   different process), carrying the caller's optional `Correlation`.
+////   different process), carrying the caller's optional `Correlation`; it
+////   does so for the portal's billing calls and for Warden's provider calls.
 //// - wisp, mist and pog emit nothing through Sinal.
 ////
-//// To join the two, each request registers `self()` with a fresh Sinal
-//// `Correlation`, which it also passes to http_gun; Warden events are
-//// attributed by emitting pid, http_gun events by the correlation they carry.
+//// A request makes one `Correlation` and hands it to Warden and to http_gun.
+//// Nothing here maps processes to requests.
 
-import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/int
 import gleam/io
@@ -25,16 +26,22 @@ import http_gun/telemetry as gun_telemetry
 import sinal
 import sinal/correlation.{type Correlation}
 import sinal/forwarder.{type Forwarder}
-import warden/observation
+import warden/telemetry as warden_telemetry
 
 pub type Record {
   WardenHttp(
-    /// The request that emitted it, resolved from the emitting pid.
-    request: Option(Correlation),
+    correlation: Option(Correlation),
     method: String,
     path: String,
     outcome: String,
     duration_ms: Int,
+  )
+  /// `[warden, login]`, `[warden, refresh]` or `[warden, logout]`: the
+  /// event name and its closed outcome.
+  WardenSession(
+    correlation: Option(Correlation),
+    event: String,
+    outcome: String,
   )
   GunLifecycle(correlation: Option(Correlation), milestone: String)
   ForwarderDropped(rejected: Int, lost: Int, unavailable: Int)
@@ -50,18 +57,12 @@ pub opaque type Telemetry {
 }
 
 type State {
-  State(
-    records: List(Record),
-    links: Dict(Pid, Correlation),
-    last: Option(Correlation),
-    echo_: Bool,
-  )
+  State(records: List(Record), last: Option(Correlation), echo_: Bool)
 }
 
 type Message {
   Add(Record)
-  AddWarden(Pid, Record)
-  Link(Pid, Correlation)
+  Begin(Correlation)
   All(reply: Subject(#(List(Record), Option(Correlation))))
 }
 
@@ -69,7 +70,7 @@ type Message {
 /// every package's events. `print` echoes each event as it arrives.
 pub fn start(print: Bool) -> Result(Telemetry, String) {
   use collector <- result.try(
-    actor.new(State([], dict.new(), option.None, print))
+    actor.new(State([], option.None, print))
     |> actor.on_message(collect)
     |> actor.start
     |> result.map(fn(started) { started.data })
@@ -82,30 +83,71 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
     |> supervisor.start
     |> result.replace_error("forwarder did not start"),
   )
-  let warden_attachment =
+  let warden_http =
     sinal.observe_labelled(
-      observation.http_request(),
+      warden_telemetry.http_request(),
       "sso_portal_warden",
       fn(m, r) {
         process.send(
           collector,
-          AddWarden(
-            process.self(),
-            WardenHttp(
-              request: option.None,
-              method: case r.method {
-                observation.Get -> "GET"
-                observation.Post -> "POST"
-              },
-              path: r.path,
-              outcome: case r.outcome {
-                observation.Status(code) -> int.to_string(code)
-                observation.Failed(sent:, class:) ->
-                  "failed(" <> class <> ", sent=" <> string.inspect(sent) <> ")"
-              },
-              duration_ms: m.duration_ms,
-            ),
-          ),
+          Add(WardenHttp(
+            correlation: r.correlation,
+            method: case r.method {
+              warden_telemetry.Get -> "GET"
+              warden_telemetry.Post -> "POST"
+            },
+            path: r.path,
+            outcome: case r.outcome {
+              warden_telemetry.Status(code) -> int.to_string(code)
+              warden_telemetry.Failed(evidence:, reason:) ->
+                "failed("
+                <> warden_telemetry.transport_reason_name(reason)
+                <> ", "
+                <> case evidence {
+                  warden_telemetry.NotSent -> "not sent"
+                  warden_telemetry.MaybeSent -> "maybe sent"
+                }
+                <> ")"
+            },
+            duration_ms: m.duration_ms,
+          )),
+        )
+      },
+    )
+  let warden_login =
+    sinal.observe_labelled(
+      warden_telemetry.login(),
+      "sso_portal_warden_login",
+      fn(_, l) {
+        process.send(
+          collector,
+          Add(WardenSession(l.correlation, "login", string.inspect(l.outcome))),
+        )
+      },
+    )
+  let warden_refresh =
+    sinal.observe_labelled(
+      warden_telemetry.refresh(),
+      "sso_portal_warden_refresh",
+      fn(_, r) {
+        process.send(
+          collector,
+          Add(WardenSession(r.correlation, "refresh", string.inspect(r.outcome))),
+        )
+      },
+    )
+  let warden_logout =
+    sinal.observe_labelled(
+      warden_telemetry.logout(),
+      "sso_portal_warden_logout",
+      fn(_, l) {
+        process.send(
+          collector,
+          Add(WardenSession(
+            l.correlation,
+            "logout",
+            string.inspect(l.revocation),
+          )),
         )
       },
     )
@@ -137,7 +179,14 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
   Ok(Telemetry(
     collector:,
     forwarder:,
-    attachments: [warden_attachment, gun_attachment, drop_attachment],
+    attachments: [
+      warden_http,
+      warden_login,
+      warden_refresh,
+      warden_logout,
+      gun_attachment,
+      drop_attachment,
+    ],
     supervisor: sup.pid,
   ))
 }
@@ -156,11 +205,11 @@ pub fn forwarder(telemetry: Telemetry) -> Forwarder {
   telemetry.forwarder
 }
 
-/// Start tracing the calling request process: returns the correlation to
-/// attach to http_gun calls with `http_gun.with_correlation`.
+/// Start tracing a request: the correlation to give both
+/// `warden.with_correlation` and `http_gun.with_correlation`.
 pub fn begin_request(telemetry: Telemetry) -> Correlation {
   let request = correlation.unique()
-  process.send(telemetry.collector, Link(process.self(), request))
+  process.send(telemetry.collector, Begin(request))
   request
 }
 
@@ -174,8 +223,9 @@ pub fn last_request_trace(telemetry: Telemetry) -> List(Record) {
     Some(id) ->
       list.filter(records, fn(record) {
         case record {
-          WardenHttp(request:, ..) -> request == Some(id)
-          GunLifecycle(correlation:, ..) -> correlation == Some(id)
+          WardenHttp(correlation:, ..)
+          | WardenSession(correlation:, ..)
+          | GunLifecycle(correlation:, ..) -> correlation == Some(id)
           ForwarderDropped(..) -> False
         }
       })
@@ -199,6 +249,8 @@ pub fn describe(record: Record) -> String {
       <> " ("
       <> int.to_string(duration_ms)
       <> " ms)"
+    WardenSession(event:, outcome:, ..) ->
+      "[warden." <> event <> "] " <> outcome
     GunLifecycle(milestone:, correlation:) ->
       "[http_gun.lifecycle] "
       <> milestone
@@ -225,26 +277,7 @@ fn collect(state: State, message: Message) -> actor.Next(State, Message) {
       }
       actor.continue(State(..state, records: [record, ..state.records]))
     }
-    AddWarden(pid, record) ->
-      case record {
-        WardenHttp(..) ->
-          collect(
-            state,
-            Add(
-              WardenHttp(
-                ..record,
-                request: option.from_result(dict.get(state.links, pid)),
-              ),
-            ),
-          )
-        _ -> collect(state, Add(record))
-      }
-    // A mist connection process serves several keep-alive requests, so the
-    // link is replaced by the newest request on that process.
-    Link(pid, id) ->
-      actor.continue(
-        State(..state, links: dict.insert(state.links, pid, id), last: Some(id)),
-      )
+    Begin(id) -> actor.continue(State(..state, last: Some(id)))
     All(reply) -> {
       process.send(reply, #(list.reverse(state.records), state.last))
       actor.continue(state)

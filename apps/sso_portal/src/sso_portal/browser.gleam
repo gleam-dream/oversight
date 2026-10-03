@@ -9,12 +9,12 @@ import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import gleam/uri
 import http_gun
 import http_gun/config
 import http_gun/destination
 import http_gun/error
-import sso_portal/pki.{type Pki}
 
 pub type Browser {
   Browser(client: http_gun.Client, jar: Dict(String, String))
@@ -24,16 +24,27 @@ pub type Page {
   Page(url: String, status: Int, location: Option(String), body: String)
 }
 
-/// The browser trusts the provider's self-signed certificate and may reach
-/// loopback, like a developer's browser would.
-pub fn new(pki: Pki) -> Browser {
+/// The browser trusts the test provider's root (`warden/testing` publishes
+/// it as PEM) and may reach loopback, like a developer's browser would.
+pub fn new(root_pem: String) -> Browser {
   let assert Ok(client) =
     config.default()
-    |> config.with_trust(config.Anchors([pki.certificate_der]))
-    |> config.with_request_timeout(config.Milliseconds(10_000))
+    |> config.with_trust(config.Anchors([pem_to_der(root_pem)]))
+    |> config.with_request_timeout(config.After(duration.seconds(10)))
     |> config.with_destination(destination.loopback_only())
     |> http_gun.start
   Browser(client:, jar: dict.new())
+}
+
+/// The DER bytes of a one-certificate PEM text; http_gun takes DER anchors.
+fn pem_to_der(pem: String) -> BitArray {
+  let body =
+    string.split(pem, "\n")
+    |> list.filter(fn(line) { !string.starts_with(line, "-----") })
+    |> string.concat
+    |> string.trim
+  let assert Ok(der) = bit_array.base64_decode(body)
+  der
 }
 
 pub fn close(browser: Browser) -> Nil {
