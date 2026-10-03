@@ -886,3 +886,78 @@ gaps:
 
 The json_blueprint guide does not apply; see the CHK-7 status for why
 adopting json_blueprint would not shrink this app's codecs.
+
+## Re-run after wave 4 (Duration)
+
+http_gun dcfbc07. Tests: 12 passed. `gleam run` completes with no unattributed
+events. `gleam format --check` is clean.
+
+Removed (2 lines): `config.Milliseconds(5000)` and the bare
+`deadline.after(deadline_ms)`. Added (3 lines):
+`config.After(duration.seconds(5))`,
+`deadline.after(duration.milliseconds(deadline_ms))` and the
+`gleam/time/duration` import in `gateway.gleam`. `gleam.toml` raises
+`gleam_time` to `>= 1.11.0` (the guide's floor; `manifest.toml` re-resolved).
+
+Friction:
+
+- The guide says grind and saga "already use" `Duration`. That holds for grind
+  and for `saga_postgres.with_lease`, but not for the call this app converts
+  for. `durable.drive(run, timeout: Int)` (saga `durable.gleam:703`) still
+  takes milliseconds, so the conversion glue in `jobs.gleam` stays:
+  `budget` turns grind's deadline into `duration.to_milliseconds`, and
+  `drive_until_cancelled` adds `+ 1000` to that `Int` for the two receives.
+  `execution.with_step_timeout(10_000)` and `Config.saga_lease_ms` are also
+  `Int`. The glue can only go once saga takes a `Duration`.
+- `Gateway.payment_deadline_ms` and `shipping_deadline_ms` are the app's own
+  `Int` fields and still convert at the one `deadline.after` call. I left
+  them: the guide's row for this app asks only for that conversion, and
+  retyping them would also change `app.Config` and the test that sets
+  `shipping_deadline_ms: 5000`.
+
+### Saga af644b0 (`Duration` for every timeout)
+
+Tests: 12 passed. `gleam run` completes with no unattributed events.
+`gleam format --check` is clean.
+
+Removed:
+
+- `jobs.gleam`: `const attempt_budget_ms = 60_000`; `import gleam/int`;
+  `budget(..) -> Int` with `duration.to_milliseconds` and
+  `int.max(left - 5000, 1)`; `timeout: Int`, `timeout + 1000` (twice) and
+  `duration.milliseconds(attempt_budget_ms + 5000)`.
+- `app.gleam`: `saga_lease_ms: Int`, `grind_lease_ms: Int`,
+  `payment_deadline_ms: Int`, `shipping_deadline_ms: Int` (and their
+  defaults `30_000`, `6000`, `300`, `300`); `with_step_timeout(10_000)`;
+  `duration.milliseconds(config.saga_lease_ms)` and
+  `duration.milliseconds(config.grind_lease_ms)`.
+- `gateway.gleam`: `payment_deadline_ms: Int`, `shipping_deadline_ms: Int`,
+  `deadline_ms: Int` and `duration.milliseconds(deadline_ms)`.
+- `orders.gleam`: `execution.await(run, 60_000)`.
+- `checkout_test.gleam`: `shipping_deadline_ms: 5000` (x3), `lease = 300`,
+  `timeout: 10_000`, `lease + 500`.
+
+Added:
+
+- `jobs.gleam`: `fn attempt_budget() -> Duration` (`duration.seconds(60)`);
+  `budget(..) -> Duration` (`duration.subtract(.., duration.seconds(5))`,
+  floored at 1 ms with `duration.compare`, plus `import gleam/order`);
+  `timeout: Duration` passed straight to `durable.drive`; one
+  `wait = to_milliseconds(add(timeout, seconds(1)))` for the two receives,
+  because `process.selector_receive` and `process.receive` still take an
+  `Int`.
+- `app.gleam`: `Duration` fields `payment_deadline`, `shipping_deadline`,
+  `saga_lease`, `grind_lease` (`milliseconds(300)` x2, `seconds(30)`,
+  `seconds(6)`); `execution.After(duration.seconds(10))`;
+  `config.saga_lease` and `config.grind_lease` passed as they are.
+- `gateway.gleam`: `payment_deadline: Duration`, `shipping_deadline:
+Duration`, `limit: Duration`; `deadline.after(limit)`.
+- `orders.gleam`: `duration.seconds(60)` and the `gleam/time/duration` import.
+- `checkout_test.gleam`: `shipping_deadline: duration.seconds(5)` (x3),
+  `lease = duration.milliseconds(300)`, `timeout: duration.seconds(10)`,
+  `owner_loss_within: duration.add(lease, duration.milliseconds(500))`.
+
+Friction: the Int-to-`Duration` conversion between grind and saga is gone,
+but one `to_milliseconds` remains at the `gleam/erlang/process` receive
+calls. The migration note says the `+ 1000` moves onto a `Duration`; it
+cannot reach the receive without that conversion.

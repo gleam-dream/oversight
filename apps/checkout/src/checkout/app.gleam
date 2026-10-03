@@ -16,7 +16,7 @@ import gleam/erlang/process.{type Pid}
 import gleam/otp/static_supervisor
 import gleam/result
 import gleam/string
-import gleam/time/duration
+import gleam/time/duration.{type Duration}
 import grind
 import grind/queue
 import grind/worker.{type Worker}
@@ -31,17 +31,17 @@ pub type Config {
     database_url: String,
     pool_size: Int,
     /// Per-request budgets for the two provider APIs.
-    payment_deadline_ms: Int,
-    shipping_deadline_ms: Int,
+    payment_deadline: Duration,
+    shipping_deadline: Duration,
     /// How long a "slow" scripted provider holds its answer.
     provider_slow_ms: Int,
     charge_attempts: Int,
     /// saga_postgres's claim lease: how long the claim of a lost node blocks
     /// the next `drive`. (A killed runner releases its claim at once.)
-    saga_lease_ms: Int,
+    saga_lease: Duration,
     grind_statement_deadline_ms: Int,
     /// Grind's attempt lease; at least 4 × the statement deadline.
-    grind_lease_ms: Int,
+    grind_lease: Duration,
     poll_interval_ms: Int,
     redelivery_ms: Int,
   )
@@ -51,13 +51,13 @@ pub fn default_config(database_url: String) -> Config {
   Config(
     database_url:,
     pool_size: 10,
-    payment_deadline_ms: 300,
-    shipping_deadline_ms: 300,
+    payment_deadline: duration.milliseconds(300),
+    shipping_deadline: duration.milliseconds(300),
     provider_slow_ms: 800,
     charge_attempts: 2,
-    saga_lease_ms: 30_000,
+    saga_lease: duration.seconds(30),
     grind_statement_deadline_ms: 1500,
-    grind_lease_ms: 6000,
+    grind_lease: duration.seconds(6),
     poll_interval_ms: 50,
     redelivery_ms: 100,
   )
@@ -86,7 +86,7 @@ pub fn start(config: Config) -> Result(App, String) {
   let jobs = grind.named(jobs_name)
   let storage =
     saga_postgres.config(pool)
-    |> saga_postgres.with_lease(config.saga_lease_ms)
+    |> saga_postgres.with_lease(config.saga_lease)
 
   // Observability: a supervised forwarder for http_gun lifecycle events.
   let http_observations =
@@ -118,8 +118,8 @@ pub fn start(config: Config) -> Result(App, String) {
       client: http,
       payments_url:,
       shipping_url:,
-      payment_deadline_ms: config.payment_deadline_ms,
-      shipping_deadline_ms: config.shipping_deadline_ms,
+      payment_deadline: config.payment_deadline,
+      shipping_deadline: config.shipping_deadline,
     )
   let checkout =
     workflow.define(workflow.Deps(
@@ -130,7 +130,9 @@ pub fn start(config: Config) -> Result(App, String) {
       },
       charge_attempts: config.charge_attempts,
     ))
-  let saga_config = execution.config() |> execution.with_step_timeout(10_000)
+  let saga_config =
+    execution.config()
+    |> execution.with_step_timeout(execution.After(duration.seconds(10)))
   let services =
     Services(
       pool:,
@@ -147,14 +149,14 @@ pub fn start(config: Config) -> Result(App, String) {
     jobs.checkout_worker(
       services,
       redelivery: duration.milliseconds(config.redelivery_ms),
-      busy: duration.milliseconds(config.saga_lease_ms),
+      busy: config.saga_lease,
     )
 
   let queue = fn(name) {
     queue.new(name)
     |> queue.with_poll_interval(duration.milliseconds(config.poll_interval_ms))
     |> queue.with_concurrency(4)
-    |> queue.with_lease(duration.milliseconds(config.grind_lease_ms))
+    |> queue.with_lease(config.grind_lease)
   }
   let grind_config =
     grind.new(pog.pool_size(pool_config, config.pool_size))

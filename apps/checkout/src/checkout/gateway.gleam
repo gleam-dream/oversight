@@ -17,6 +17,7 @@ import gleam/int
 import gleam/json
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/time/duration.{type Duration}
 import gleam/uri
 import http_gun
 import http_gun/config
@@ -29,8 +30,8 @@ pub type Gateway {
     client: http_gun.Client,
     payments_url: String,
     shipping_url: String,
-    payment_deadline_ms: Int,
-    shipping_deadline_ms: Int,
+    payment_deadline: Duration,
+    shipping_deadline: Duration,
   )
 }
 
@@ -42,7 +43,7 @@ pub fn client_config(
   hosts: List(String),
 ) -> config.Config {
   config.default()
-  |> config.with_request_timeout(config.Milliseconds(5000))
+  |> config.with_request_timeout(config.After(duration.seconds(5)))
   |> config.with_destination(
     destination.loopback_only() |> destination.only_hosts(hosts),
   )
@@ -92,7 +93,7 @@ pub fn charge(
     gateway.payments_url <> "/charges",
     Some(key),
     Some(body),
-    gateway.payment_deadline_ms,
+    gateway.payment_deadline,
   ))
   case status {
     200 -> decode_id(Payments, status, bytes)
@@ -117,7 +118,7 @@ pub fn void(
     gateway.payments_url <> "/charges/" <> charge_id <> "/void",
     None,
     None,
-    gateway.payment_deadline_ms,
+    gateway.payment_deadline,
   ))
   case status {
     200 -> Ok(Nil)
@@ -137,7 +138,7 @@ pub fn find_charge(
     gateway.payments_url <> "/charges/by-key/" <> key,
     None,
     None,
-    gateway.payment_deadline_ms,
+    gateway.payment_deadline,
   ))
   case status {
     200 -> {
@@ -163,7 +164,7 @@ pub fn book(
     gateway.shipping_url <> "/shipments",
     Some(key),
     Some(body),
-    gateway.shipping_deadline_ms,
+    gateway.shipping_deadline,
   ))
   case status {
     201 -> decode_id(Shipping, status, bytes)
@@ -183,7 +184,7 @@ pub fn cancel_shipment(
     gateway.shipping_url <> "/shipments/by-key/" <> key <> "/cancel",
     None,
     None,
-    gateway.shipping_deadline_ms,
+    gateway.shipping_deadline,
   ))
   case status {
     200 | 404 -> Ok(Nil)
@@ -203,7 +204,7 @@ pub fn find_shipment(
     gateway.shipping_url <> "/shipments/by-key/" <> key,
     None,
     None,
-    gateway.shipping_deadline_ms,
+    gateway.shipping_deadline,
   ))
   case status {
     200 -> {
@@ -222,7 +223,7 @@ fn call(
   url: String,
   idempotency_key: Option(String),
   body: Option(json.Json),
-  deadline_ms: Int,
+  limit: Duration,
 ) -> Result(#(Int, BitArray), CheckoutError) {
   let assert Ok(base) = request.to(url)
   let req =
@@ -238,7 +239,7 @@ fn call(
     None -> req
   }
   client
-  |> http_gun.with_deadline(deadline.after(deadline_ms))
+  |> http_gun.with_deadline(deadline.after(limit))
   |> http_gun.send(req)
   |> result.map(fn(buffered) {
     #(buffered.response.status, buffered.response.body)

@@ -11,7 +11,7 @@ gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 # One pool for the app, grind and saga_postgres: both pin pog 4.1.x.
 pog = ">= 4.1.0 and < 4.2.0"
-gleam_time = ">= 1.0.0 and < 2.0.0"
+gleam_time = ">= 1.11.0 and < 2.0.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"

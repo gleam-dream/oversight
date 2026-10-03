@@ -17,6 +17,7 @@ import gleam/json
 import gleam/list
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import grind.{type Grind}
 import grind/job
 import grind/worker.{type Worker}
@@ -73,7 +74,7 @@ pub fn place_local(s: Services, order: OrderRequest) -> Report {
     Error(error) ->
       Report(domain.Rejected, string.inspect(error), Error(Nil), [], 0)
     Ok(run) ->
-      case execution.await(run, 60_000) {
+      case execution.await(run, duration.seconds(60)) {
         Ok(outcome) -> finalize(s, order, outcome)
         Error(error) ->
           Report(domain.Pending, string.inspect(error), Error(Nil), [], 0)

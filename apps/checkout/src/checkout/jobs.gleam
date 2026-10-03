@@ -21,9 +21,9 @@ import checkout/orders.{type Services}
 import checkout/telemetry
 import gleam/dynamic/decode
 import gleam/erlang/process
-import gleam/int
 import gleam/json
 import gleam/option.{None, Some}
+import gleam/order
 import gleam/result
 import gleam/time/duration.{type Duration}
 import gleam/time/timestamp
@@ -33,7 +33,9 @@ import saga/execution
 
 /// How long one attempt may drive the saga. The worker's timeout is a
 /// little longer, so `drive` returns before grind stops the handler.
-const attempt_budget_ms = 60_000
+fn attempt_budget() -> Duration {
+  duration.seconds(60)
+}
 
 pub fn execution_id(order: OrderRequest) -> String {
   "checkout:" <> order.order_id
@@ -58,7 +60,7 @@ pub fn checkout_worker(
   )
   |> worker.with_queue(orders.checkouts_queue)
   |> worker.with_timeout(
-    worker.After(duration.milliseconds(attempt_budget_ms + 5000)),
+    worker.After(duration.add(attempt_budget(), duration.seconds(5))),
   )
   |> worker.with_abandonment(worker.ReplayAfterLeaseExpiry(max_replays: 3))
 }
@@ -126,7 +128,7 @@ type Driving {
 fn drive_until_cancelled(
   run: durable.Run(OrderRequest, Booked, CheckoutError, UndoError),
   context: worker.Context,
-  timeout: Int,
+  timeout: Duration,
 ) -> Result(execution.Outcome(Booked, CheckoutError, UndoError), durable.Error) {
   let reply = process.new_subject()
   process.spawn(fn() { process.send(reply, durable.drive(run, timeout:)) })
@@ -138,11 +140,13 @@ fn drive_until_cancelled(
         CancelRequested
       }),
     )
-  case process.selector_receive(driving, timeout + 1000) {
+  let wait =
+    duration.to_milliseconds(duration.add(timeout, duration.seconds(1)))
+  case process.selector_receive(driving, wait) {
     Ok(Driven(result)) -> result
     Ok(CancelRequested) -> {
       let _ = durable.cancel(run)
-      process.receive(reply, timeout + 1000)
+      process.receive(reply, wait)
       |> result.unwrap(Error(durable.DriveTimedOut))
     }
     Error(Nil) -> Error(durable.DriveTimedOut)
@@ -151,14 +155,18 @@ fn drive_until_cancelled(
 
 /// The time left before grind stops the handler, less a margin to save the
 /// outcome and acknowledge.
-fn budget(context: worker.Context) -> Int {
+fn budget(context: worker.Context) -> Duration {
   case worker.deadline(context) {
-    None -> attempt_budget_ms
+    None -> attempt_budget()
     Some(deadline) -> {
       let left =
         timestamp.difference(timestamp.system_time(), deadline)
-        |> duration.to_milliseconds
-      int.max(left - 5000, 1)
+        |> duration.subtract(duration.seconds(5))
+      let floor = duration.milliseconds(1)
+      case duration.compare(left, floor) {
+        order.Lt -> floor
+        _ -> left
+      }
     }
   }
 }

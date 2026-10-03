@@ -317,7 +317,7 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
   // the saga runner. The saga lease keeps its 30 s default: the killed
   // runner releases its claim, so the redelivery does not wait for it.
   use application <- with_app(fn(c) {
-    app.Config(..c, shipping_deadline_ms: 5000)
+    app.Config(..c, shipping_deadline: duration.seconds(5))
   })
   let services = application.services
   let assert Ok(Nil) = db.set_stock(services.pool, "durable-sku", 2)
@@ -374,7 +374,7 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
 /// checkpoint without an operator.
 pub fn durable_checkout_after_job_crash_replays_without_an_operator_test() {
   use application <- with_app(fn(c) {
-    app.Config(..c, shipping_deadline_ms: 5000)
+    app.Config(..c, shipping_deadline: duration.seconds(5))
   })
   let services = application.services
   let assert Ok(Nil) = db.set_stock(services.pool, "crash-sku", 2)
@@ -428,7 +428,7 @@ pub fn durable_checkout_after_job_crash_replays_without_an_operator_test() {
 /// the saga rolls back from its next checkpoint.
 pub fn durable_checkout_cancelled_through_grind_rolls_back_test() {
   use application <- with_app(fn(c) {
-    app.Config(..c, shipping_deadline_ms: 5000)
+    app.Config(..c, shipping_deadline: duration.seconds(5))
   })
   let services = application.services
   let assert Ok(Nil) = db.set_stock(services.pool, "cancel-sku", 2)
@@ -464,13 +464,17 @@ fn parent(pid: process.Pid) -> Result(process.Pid, Nil)
 /// which grind built and also uses.
 pub fn saga_postgres_on_the_shared_pool_passes_conformance_test() {
   use application <- with_app(fn(c) { c })
-  let lease = 300
+  let lease = duration.milliseconds(300)
   let storage =
     saga_postgres.config(application.services.pool)
     |> saga_postgres.with_lease(lease)
     |> saga_postgres.storage
   let fresh = fn() { Ok(conformance.fixture(storage, cleanup: fn() { Nil })) }
-  assert conformance.run(fresh, timeout: 10_000, owner_loss_within: lease + 500)
+  assert conformance.run(
+      fresh,
+      timeout: duration.seconds(10),
+      owner_loss_within: duration.add(lease, duration.milliseconds(500)),
+    )
     == Ok(Nil)
 }
 
