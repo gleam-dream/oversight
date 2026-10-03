@@ -22,6 +22,17 @@ narrates six orders and their telemetry.
   failure codec needed by durable step errors (129), and cross-package
   telemetry correlation (about 75).
 
+**Wave 3:** every blocker is resolved. One pog pool serves the app, grind
+and saga_postgres (CHK-1); the receipt and the durable checkout job commit
+inside the app's transactions (CHK-2); saga reports the unknown payment
+without a crash (CHK-3); the 326-line storage adapter and the 129-line
+`Failure` codec are deleted (CHK-4, CHK-7); the correlation registry is gone
+(CHK-5); and a crashed job recovers without an operator (CHK-6). 12 tests
+pass. `src` shrinks from 2,872 to 2,319 code lines. The remaining glue is a
+driver process that lets a handler watch grind's cancellation while
+`durable.drive` blocks, and a deadline conversion between grind and saga.
+See "Re-run after wave 3".
+
 ## Answers to the brief's questions
 
 - **Can a saga step carry http_gun failure classes without stringifying
@@ -76,6 +87,17 @@ narrates six orders and their telemetry.
   needs. The app's pool then becomes grind's. Accepting a foreign pool can
   follow once grind's private pgo coupling (RISKS.md risk 1) is gone.
 
+**Status (wave 3):** resolved by grind 749c0dc (one grind facade). `grind.new`
+takes the app's `pog.Config` and builds the one pool
+(apps/checkout/src/checkout/app.gleam:160); the order tables, saga_postgres
+and grind all run on it (`pog.named_connection(pool_name)`, app.gleam:84,
+which is what `grind.connection` returns). `db.start_pool` (11 lines), the
+`postgres.settings` block (13), the `pool_pid` field and its exit are
+deleted: one budget of 10 connections instead of 10 + 5 + 2. One cost: the
+pool's `search_path` is grind's schema, so the app dropped
+`with_schema("checkout_jobs")` and grind's tables now share `public` with the
+app's (see the wave 3 re-run).
+
 ### CHK-2 No transactional enqueue; the receipt needs an outbox
 
 - **Packages**: grind, pog. **Kind**: composition. **Severity**: major.
@@ -97,6 +119,18 @@ narrates six orders and their telemetry.
 queue, worker, input)` runs the same admission statements on the caller's
   connection and emits `admitted` only after the caller commits. A deferred
   observation is acceptable.
+
+**Status (wave 3):** resolved by grind 749c0dc (`grind.submit_in`). The order's
+confirmation and its receipt job commit in one `pog.transaction`
+(apps/checkout/src/checkout/orders.gleam:202-216), and so do the pending
+order row and the durable checkout job (orders.gleam:87-106). The outbox is
+deleted: its table, `confirm_with_receipt`, `OutboxRow`, `pending_receipts`,
+`mark_submitted`, `flush_outbox` and the startup flush, 76 lines. The new
+transactional code is 25 lines of ordinary application code (the
+transaction and the job builder). The crash-between-commit-and-submit test
+is replaced by `receipt_job_commits_with_the_order_test`: a rolled-back
+confirmation leaves `grind.state` at `JobNotFound`, and a committed one
+leaves one job however often it is resubmitted (`job.with_id`).
 
 ### CHK-3 Saga's unknown-effect report cannot see an HTTP outcome that is unknown
 
@@ -131,6 +165,18 @@ Failure(DeadlineExceeded, MayHaveBeenSent))`. Its decider retries under the
   also named in `unknown_effects`, so a retried success becomes
   `CompletedWithUnknownEffects`.
 
+**Status (wave 3):** resolved by saga f27b628 (`saga.unknown_when`). Both
+provider steps mark a `MaybeSent` failure as unknown
+(apps/checkout/src/checkout/workflow.gleam:136, :203); the decider still
+receives the typed error. `unknown_payment_outcome_is_reported_by_saga_test`
+now expects `CompletedWithUnknownEffects` with one
+`UnknownEffect(charge_card, StepAttempt(1), ActionReturnedUnknown)` for the
+lost answer, and two such effects in the held order's settlement. The crash
+test became `unknown_payment_keeps_the_typed_failure_test`: the cause is
+`ProviderUnreachable(Payments, error.new(DeadlineExceeded, MaybeSent))`, no
+string. The shipment-timeout test now reports `unknown_effects == 1` instead
+of 0. +2 lines.
+
 ### CHK-4 The `Storage` contract forces a database adapter to track processes
 
 - **Packages**: saga, pog. **Kind**: extensibility. **Severity**: major.
@@ -158,6 +204,15 @@ Failure(DeadlineExceeded, MayHaveBeenSent))`. Its decider retries under the
   `owner_loss_within: Int` parameter so lease-based adapters can declare
   their window. Ship the Postgres adapter as `saga_postgres` on pog. With
   those changes, this app's adapter would shrink to its SQL.
+
+**Status (wave 3):** resolved by saga 2ee5e0a (`saga_postgres`) and 1d965bd
+(claims as values, id-addressed storage). `checkout/saga_store.gleam` (326
+lines) and its 8-line table are deleted; the app wires saga_postgres in 7
+lines on the shared pool (apps/checkout/src/checkout/app.gleam:88-89, :140,
+:178-179). Conformance now runs against saga_postgres on that pool with a
+300 ms lease and `owner_loss_within: lease + 500`
+(`saga_postgres_on_the_shared_pool_passes_conformance_test`), so the
+"500 ms reclaim" rule no longer forces a sub-second lease on production.
 
 ### CHK-5 Following one order across packages takes a correlation registry and a process trick
 
@@ -227,6 +282,20 @@ the proposal's http_gun item (`telemetry.id`) is superseded and its saga
 and grind items stand. The wave-2 warning about `forwarder.route` still
 applies to `Emitter`.
 
+**Status (wave 3):** resolved by saga 89c1aec and 1d965bd (`execution.with_correlation`,
+`durable.with_correlation`, `execution` and `correlation` in every metadata
+record), grind 749c0dc (`job.with_correlation`, `JobRef.correlation`) and
+sinal c6e2d36 (`correlation.from_key`). Every event is attributed by the
+correlation its own package carries
+(apps/checkout/src/checkout/telemetry.gleam:99-183). Deleted: the `Key`
+type and its four kinds, the links dict and `Link` message,
+`from_tagged_id`, the storage claim hook (app.gleam, 8 lines), the
+`SagaRun` link in `place_local` (5), the `Emitter(process.self())` trick and
+the web-layer correlation check (5; `from_key` cannot fail).
+`telemetry.gleam` goes from 224 to 154 code lines; the seam from ~62 to 8
+(five `with_correlation` calls and `order`). The wave-2 `forwarder.route`
+hazard is gone: nothing depends on which process runs a handler.
+
 ### CHK-6 A crashed grind attempt leaves the saga runner alive, and recovery needs an operator
 
 - **Packages**: grind, saga. **Kind**: composition. **Severity**: major.
@@ -254,6 +323,20 @@ StopRunner | Detach)`. `StopRunner` kills the runner and keeps the
   - grind: add a worker declaration such as
     `worker.with_expired_lease(ReplayAutomatically)` for handlers that are
     idempotent by construction.
+
+**Status (wave 3):** resolved by saga 1d965bd (`drive(run, timeout:)` stops its
+runner when the caller exits) and grind 749c0dc
+(`worker.with_abandonment(ReplayAfterLeaseExpiry(max_replays:))`). The
+checkout worker declares replay (apps/checkout/src/checkout/jobs.gleam:61).
+`durable_checkout_after_job_crash_replays_without_an_operator_test` kills
+the handler process: the runner is dead within 1 s, grind requeues the job
+after its lease, and the next claim resumes the saga (one charge, one
+shipment request) with no `admin.resolve_uncertain`. The operator replay
+(10 lines in the test) is gone. Grind's `worker.cancellation` also reaches a
+running checkout now (`durable_checkout_cancelled_through_grind_rolls_back_test`),
+at the cost of a driver process (see the wave 3 re-run). New defect: grind
+emits no `quarantined` event for a replayed attempt, so `replayed: True` is
+unreachable (wave 3 re-run).
 
 ### CHK-7 http_gun's `Failure` has no serialised form, so durable step errors need a hand-written codec
 
@@ -292,6 +375,15 @@ panicking or `null`-storing Blueprint bridge to delete, because it does not use
 json_blueprint. The 129-line `Failure` codec and the 18-line (now 18, longer
 line) bridge stay, so CHK-7 remains open.
 
+**Status (wave 3):** resolved by http_gun e55fa1d (`error.to_json`,
+`error.decoder`). The 129-line codec is two calls
+(apps/checkout/src/checkout/codecs.gleam:170, :206), and
+`checkout_error_codec_round_trips_http_failures_test` round-trips four
+failures, including a status and a `DestinationRejected(HostNotAllowed)`.
+saga's `codec.json` and grind's `worker.codec` take the same
+`fn(a) -> Result(Json, String)` encoder, so the bridge goes from 18 to 10
+lines (codecs.gleam:20-33).
+
 ### CHK-8 Saga effect keys cannot serve as provider idempotency keys
 
 - **Packages**: saga. **Kind**: ergonomics. **Severity**: minor.
@@ -304,6 +396,15 @@ line) bridge stay, so CHK-7 remains open.
 - **Proposal** (saga): pass `effect` a structured key value,
   `EffectKey(step: String, attempt: Int)`, with `step` stable across retries
   and runs of the same execution. Document which part to send downstream.
+
+**Status (wave 3):** partially resolved by saga f27b628 (`EffectKey.idempotency`,
+stable across retries and across restarts of one durable execution). The
+app keeps `pay-<order>` and `ship-<order>`
+(apps/checkout/src/checkout/workflow.gleam:48-54), because a local run
+derives `idempotency` from its run id (saga/src/saga.gleam:84-87): a second
+`POST /orders` for the same order is a new run and would charge again. The
+order id is the business key across runs; saga has no way to take one. 0
+lines removed.
 
 ### CHK-9 Saga and grind cap `gleam_stdlib < 1.0`
 
@@ -347,6 +448,10 @@ workaround to remove: both workers use `worker.define` with `Nil` errors,
 because the durable handler answers only `Succeeded`, `Snoozed`, `Uncertain`
 or `Cancelled`, and the receipt failure carries nothing worth keeping.
 
+**Status (wave 3):** resolved by grind 749c0dc. `worker.responding(id, input:,
+output:, handle: fn(context, input))` needs no `perform`
+(apps/checkout/src/checkout/jobs.gleam:51). -1 line.
+
 ### CHK-11 Lowering grind's statement deadline trips a private margin
 
 - **Packages**: grind. **Kind**: docs. **Severity**: nit.
@@ -356,6 +461,222 @@ or `Cancelled`, and the receipt failure carries nothing worth keeping.
   below the deadline (apps/checkout/src/checkout/app.gleam:84-86).
 - **Proposal** (grind): carry the numbers in the error,
   `UniqueLockWaitTooCloseToDeadline(lock_wait_ms, margin_ms, deadline_ms)`.
+
+**Status (wave 3):** resolved by grind 749c0dc:
+`UniqueLockWaitTooCloseToDeadline(lock_wait_ms:, margin_ms:, deadline_ms:)`.
+The constraint stays, so the app keeps `with_unique_lock_wait(250)` and its
+comment (apps/checkout/src/checkout/app.gleam:168-170).
+
+## Re-run after wave 3
+
+The heads are grind 008b657, saga 2ee5e0a (with `integrations/saga_postgres`),
+http_gun 1a5f5ef and sinal 44c5395. 12 tests pass (9 before). Three are
+new: the `Failure` round trip, the destination pin, and cancellation through
+grind. Four replace a test of a gap with a test of the correct behavior: the
+crash test, the operator replay, the outbox, and the adapter's conformance
+(now saga_postgres on the shared pool). They passed three runs in a row. `gleam format` is clean. `gleam run` narrates the six orders, waits for
+the durable one with `grind.await` instead of polling the order row, prints
+both traces and reports 0 unattributed events. The grind schema is v13
+through `grind.migrate`, and saga_postgres's v1 migration runs from
+`saga_postgres.migrate` on the same pool (apps/checkout/src/checkout/app.gleam:175-180).
+
+| Seam                                    | Before | After | Change                                                                                                                         |
+| --------------------------------------- | -----: | ----: | ------------------------------------------------------------------------------------------------------------------------------ |
+| Saga `Storage` on pog (CHK-4)           |    334 |     7 | `saga_store.gleam` and its table deleted; `saga_postgres.config`, `with_lease`, `storage`, `migrate`                           |
+| http_gun `Failure` codec (CHK-7)        |    129 |     2 | `error.to_json`, `error.decoder()`                                                                                             |
+| Saga ↔ grind codec bridge               |     18 |    10 | `codec.json` and `worker.codec` take the same fallible gleam_json encoder                                                      |
+| Receipt outbox (CHK-2)                  |     76 |     0 | `grind.submit_in` in the confirmation's transaction; the durable job is also admitted with its order row                       |
+| Second pool (CHK-1)                     |     24 |     0 | `grind.new(pog.Config)`; the app uses the same pool by name                                                                    |
+| Telemetry correlation (CHK-5)           |    ~62 |     8 | registry, key kinds, claim hook, `process.self()` attribution, tagged-id parser and web check deleted                          |
+| Dummy `perform` (CHK-10)                |      1 |     0 | `worker.responding`                                                                                                            |
+| Grind worker driving durable saga       |     63 |   128 | +30 driver process for `worker.cancellation`; +11 deadline → `timeout:`; `error_kind` mapping; Busy snoozes for the saga lease |
+| Unknown-outcome handling (CHK-3, CHK-8) |    ~45 |   ~51 | +2 `unknown_when`; +4 shipment undo, needed once cancellation can roll back a finished last step; keys still order-derived     |
+| http_gun destination policy             |     13 |    17 | `loopback_only() \|> only_hosts([..])` pins `host:port` of both providers; +7 for an app `authority(url)` helper               |
+
+Code lines in `src` (excluding blanks and comments) go from 2,872 to 2,319
+(−553). The test module goes from 323 to 387, for three more tests.
+
+Seams that still need glue:
+
+- **Watching grind's cancellation while saga drives** (saga, 30 lines,
+  apps/checkout/src/checkout/jobs.gleam:112-148). `durable.drive` blocks its
+  caller, and `worker.cancellation(context)` is a selector on the handler's
+  own mailbox (grind/src/grind/worker.gleam:404), so a handler cannot wait
+  for both without a second process:
+
+  ```gleam
+  let reply = process.new_subject()
+  process.spawn(fn() { process.send(reply, durable.drive(run, timeout:)) })
+  let driving =
+    process.new_selector()
+    |> process.select_map(reply, Driven)
+    |> process.merge_selector(
+      process.map_selector(worker.cancellation(context), fn(_) { CancelRequested }),
+    )
+  case process.selector_receive(driving, timeout + 1000) {
+    Ok(Driven(result)) -> result
+    Ok(CancelRequested) -> {
+      let _ = durable.cancel(run)
+      process.receive(reply, timeout + 1000)
+      |> result.unwrap(Error(durable.DriveTimedOut))
+    }
+    Error(Nil) -> Error(durable.DriveTimedOut)
+  }
+  ```
+
+  The extra process also moves `drive`'s caller: the runner's parent is now
+  the driver, not the handler, so the crash test walks two parents. Proposal
+  (saga): `durable.drive_until(run, timeout:, cancel: process.Selector(Nil))`,
+  which selects on the caller's selector inside `drive` and records the
+  cancellation itself. Severity: minor.
+
+- **Grind's deadline to saga's timeout** (grind or saga, 11 lines,
+  jobs.gleam:152-163). `worker.deadline(context)` is an
+  `Option(Timestamp)`; `durable.drive` takes `timeout: Int` milliseconds.
+  Every grind job that drives a saga computes the difference against the
+  system clock. Proposal (grind): `worker.time_left(context) ->
+Option(Duration)`; or (saga) let `drive` take a `Duration`. Severity: nit.
+- **Order-derived provider keys** (saga, 6 lines). See the CHK-8 status.
+- **Pinning the providers' ports** (http_gun, 7 lines,
+  apps/checkout/src/checkout/gateway.gleam:60-66). `only_hosts` takes
+  `"host:port"` strings, and the app holds base URLs, so it parses each URL.
+  Proposal (http_gun): `destination.only_origins(policy, List(String))`
+  taking URLs. Severity: nit.
+
+New friction:
+
+- **A killed runner's claim blocks every drive for a whole lease, and
+  grind's snooze cap can end the job first** (saga, grind, major). `drive`
+  learns the claim (`RunnerClaimed`) and releases it when it times out, but
+  on `RunnerDown` it returns `RunnerLost` without releasing
+  (saga/src/saga/durable.gleam:711). saga_postgres's lease is 30 s by
+  default. The wave-2 handler snoozed every retryable error for 100 ms; with
+  grind's new 100-snooze cap, the redelivered job would see `Busy` about 100
+  times in 10 s and end `Failed(.., SnoozeLimitReached, ..)` with the saga
+  unfinished. The app now snoozes `Busy` for the saga lease
+  (apps/checkout/src/checkout/jobs.gleam:99-105), and the killed-runner test
+  lowers the lease to 1 s. Two bounded defaults (decision 5) interact here,
+  and neither README mentions the other. Proposal (saga): release a claim
+  `drive` holds when its runner dies, as on `DriveTimedOut`; and document
+  "snooze `Busy` for at least the storage lease" next to `error_kind`.
+
+  **Status (wave 3 fixes):** partially resolved by saga 92612fd; a killed
+  runner now releases its claim before `drive` returns `RunnerLost`, so the
+  redelivery resumes at once. The killed-runner test keeps the 30 s default
+  lease instead of lowering it to 1 s, and asserts the job finishes in under
+  10 s. The app's `Busy` snooze stays at the lease
+  (apps/checkout/src/checkout/jobs.gleam:41-46): saga's guide says the lease
+  remains the fallback when the runner's node is lost, and a shorter snooze
+  would meet grind's snooze cap first. Only the doc comment changed.
+
+- **A replayed attempt emits no `quarantined` event** (grind, minor,
+  defect). The quarantine scan's `RETURNING job.attempt_id` reads the row
+  after the update, and a replay sets `attempt_id = NULL`
+  (grind/src/grind/internal/lease.gleam:62-72); `emit_quarantined` then
+  skips the row (lease.gleam:217-218). So `QuarantinedMetadata.replayed` is
+  never `True`, and the only trace of the replay is a second `claimed` event
+  (`attempt=2`). The crash test asserts on the two claims instead. Proposal
+  (grind): return the pre-update attempt from the candidate CTE, and add a
+  test that a replay emits `quarantined` with `replayed: True`. The second
+  claim's `attempt=2` also reads oddly next to `with_max_attempts`'s "a
+  replayed lease does not use one".
+
+  **Status (wave 3 fixes):** resolved by grind 6bd06ec. The crash test now
+  asserts `job quarantined replayed=True` and two `claimed attempt=1` events
+  (a replay no longer uses a business attempt), where it pinned `attempt=2`
+  and no `quarantined` event
+  (apps/checkout/test/checkout_test.gleam).
+
+- **One pool means one `search_path`** (grind, minor). The pool's
+  `search_path` is grind's schema (grind/src/grind.gleam:116-121,
+  grind/README.md "One pool"). The wave-2 app kept grind in
+  `checkout_jobs`, away from its own tables. Keeping that now means
+  schema-qualifying every app statement (13 queries and 4 tables), so the app
+  dropped `with_schema` and grind's `grind_*` tables share `public`
+  with the app's. The README states it; the cost is that "one pool" and
+  "one installation per schema" pull in opposite directions for an app with
+  its own tables.
+
+  **Status (wave 3 fixes):** resolved by grind 9ccbfb5. The pool keeps the
+  app's `search_path`, so the app's queries stay unqualified and
+  `grind.with_schema("checkout_jobs")` is back
+  (apps/checkout/src/checkout/app.gleam:170-175). All 13 queries and 4 tables
+  are unchanged, and grind's tables are out of `public` again.
+
+- **`submit_in` emits no `admitted` event** (grind, nit). It is documented
+  (grind/src/grind.gleam:788-790), because grind cannot see the commit. Both
+  of the app's jobs are now admitted that way, so the trace lost its
+  `job admitted` lines; the first grind event of an order is `claimed`.
+  Proposal (grind): `grind.announce(jobs, admission)` for the caller to call
+  after its commit.
+
+  **Status (wave 3 fixes):** partially resolved by grind eb7b173; `submit_in`
+  documents the recipe (record the admission after the commit, keyed by
+  `job.id(grind.handle(admission))`). The app did not adopt it, so its trace
+  still starts at `claimed`. `grind.handle(admission)` replaced the
+  three-variant match in `admission_job_id` (-6 lines).- **Cancellation can roll back a finished last step** (saga, docs). The app's
+  `book_shipment` had no undo, because a successful last step used to mean a
+  completed run. With `grind.cancel` → `durable.cancel`, a shipment booked
+  while the cancellation was pending ended the run `Cancelled` with the
+  shipment in `settlement.not_undoable` and still booked at the provider.
+  The app added an undo (apps/checkout/src/checkout/workflow.gleam:200-202).
+  Saga behaves as documented; the durable README could say that a
+  cancellation observed after the last step's attempt still rolls that step
+  back.
+
+- **A killed handler logs a supervisor report** (grind, nit). Killing the
+  handler process prints a `SUPERVISOR REPORT ... reason: killed` from
+  grind's handler factory supervisor in the test output.
+- **http_gun's default observations reach a client that never asked**
+  (http_gun, nit). The demo's and tests' customer client used to emit
+  nothing; with `sinal.emit` as the default it would put un-correlated
+  events into the collector, so it now needs `config.without_observations`
+  (apps/checkout/src/checkout/gateway.gleam:53-57). The migration guide says
+  so.
+
+Positive:
+
+- The grind, saga and http_gun guides each had a checkout section that named
+  every change this app needed, including the `unknown_payment` test's new
+  expectation.
+- `grind.named` and `pog.named_connection` make every handle available
+  before the runtime starts, so the workers that need the pool could be
+  defined before `grind.start` without threading a value.
+- `durable.error_kind` replaced the variant match with a five-way decision
+  that maps cleanly onto grind responses.
+- `grind.await` replaced every poll of a job's state, in the demo and in the
+  durable tests.
+- `destination.loopback_only() |> destination.only_hosts([..])` expresses
+  the payment client's policy, and a refused destination is
+  `Kind.Refused`/`NotSent` before any connection
+  (`payment_client_refuses_public_and_unpinned_hosts_test`).
+
+### After the follow-up fixes
+
+All 12 tests pass three runs in a row, `gleam format` is clean, and `gleam run`
+reports 0 unattributed events. `src` loses 15 code lines and gains 7 (net -8);
+the test module goes from 485 to 511 lines. Removed: the `let assert Ok` around
+`saga.define` and `durable.new`, `durable.new`'s `version: "1"`, the
+three-variant `admission_job_id` match, the `pool` parameter of
+`receipt_worker` (its handler reads `worker.connection(context)`), and the
+`grind.migrate` call after `grind.start`. Added: `grind.with_schema` and
+`grind.with_startup_migration`.
+
+- **Startup order** (grind 9ccbfb5): `grind.with_startup_migration` replaces
+  `start` then `migrate`. The app's own tables and saga_postgres's migration
+  still run after `start`, on grind's pool, because no consumer reads them
+  before a job is submitted.
+- **Unknown effects** (saga 92612fd): the CHK-3 test
+  `unknown_payment_keeps_the_typed_failure_test` pinned `Failed(StepFailed(..))`
+  for a step with `unknown_when` and no decider. That ending is now
+  `Unresolved` with nothing undone. The test asserts it, and asserts the old
+  ending through `saga.on_unknown(_, saga.RollBack)`. The app's payment and
+  shipment deciders decide every unknown error themselves, so the order tests
+  did not change.
+- **`execution.describe_cause`** takes `error: domain.describe_error` (1 site).
+- Not adopted: `grind.connection(grind.named(..))` was never in a worker (the
+  workers read the pool from `Services`); only the receipt worker moved to
+  `worker.connection`.
 
 ## Re-run after the follow-up fixes
 

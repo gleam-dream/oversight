@@ -3,9 +3,14 @@
 //// run behind `POST /orders` and the durable run driven by a grind job.
 ////
 //// Provider idempotency keys are derived from the order id, not from saga's
-//// effect keys: saga gives every retry a distinct attempt key, and in local
-//// runs the key embeds a per-run integer, so it cannot dedupe a retried
-//// charge at the provider.
+//// `EffectKey.idempotency`. Saga's key is stable across retries and across
+//// restarts of one durable execution, but a local run derives it from its
+//// run id, so a second `POST /orders` for the same order would charge again.
+//// The order id is the business key across runs.
+////
+//// Both provider steps mark a `MaybeSent` transport failure with
+//// `saga.unknown_when`, so saga names the attempt in `unknown_effects`
+//// while the decider still receives the typed error.
 
 import checkout/codecs
 import checkout/db
@@ -15,11 +20,13 @@ import checkout/domain.{
   UndoError,
 }
 import checkout/gateway.{type Gateway}
+import gleam/option.{None, Some}
 import gleam/result
 import http_gun
 import pog
 import saga.{type Step, type Workflow}
 import saga/durable
+import saga/execution
 
 pub type Deps {
   Deps(
@@ -35,6 +42,9 @@ pub type Deps {
 pub type Checkout =
   Workflow(OrderRequest, Booked, CheckoutError, UndoError)
 
+pub type Persistence =
+  durable.Persistence(OrderRequest, Booked, CheckoutError, UndoError)
+
 pub fn payment_key(order: OrderRequest) -> String {
   "pay-" <> order.order_id
 }
@@ -44,29 +54,26 @@ pub fn shipment_key(order: OrderRequest) -> String {
 }
 
 pub fn define(deps: Deps) -> Checkout {
-  let assert Ok(workflow) =
-    saga.define("checkout", fn(input) {
-      input
-      |> saga.perform(reserve_stock(deps))
-      |> saga.perform(charge_card(deps))
-      |> saga.perform(book_shipment(deps))
-    })
-  workflow
+  saga.define("checkout", fn(input) {
+    input
+    |> saga.perform(reserve_stock(deps))
+    |> saga.perform(charge_card(deps))
+    |> saga.perform(book_shipment(deps))
+  })
 }
 
 pub fn persistence(
   workflow: Checkout,
-) -> durable.Persistence(OrderRequest, Booked, CheckoutError, UndoError) {
-  let assert Ok(persistence) =
-    durable.prepare(
-      workflow,
-      "1",
-      codecs.to_saga(codecs.order()),
-      codecs.to_saga(codecs.booked()),
-      codecs.to_saga(codecs.checkout_error()),
-      codecs.to_saga(codecs.undo_error()),
-    )
-  persistence
+  config: execution.Config,
+) -> Persistence {
+  durable.new(
+    workflow,
+    input: codecs.to_saga(codecs.order()),
+    output: codecs.to_saga(codecs.booked()),
+    error: codecs.to_saga(codecs.checkout_error()),
+    undo_error: codecs.to_saga(codecs.undo_error()),
+  )
+  |> durable.with_config(config)
 }
 
 fn reserve_stock(
@@ -75,19 +82,19 @@ fn reserve_stock(
   saga.step("reserve_stock", fn(order: OrderRequest) {
     db.reserve(deps.pool, order) |> result.replace(Reserved(order))
   })
-  |> saga.undo(fn(order, _reserved) {
-    db.release(deps.pool, order.order_id)
+  |> saga.undo(fn(undo) {
+    db.release(deps.pool, undo.input.order_id)
     |> result.map_error(UndoError("reserve_stock", _))
   })
-  |> saga.recoverable(
-    "1",
-    codecs.to_saga(codecs.order()),
-    codecs.to_saga(codecs.reserved()),
-    fn(order, _key) {
+  |> durable.recoverable(
+    version: "1",
+    input: codecs.to_saga(codecs.order()),
+    output: codecs.to_saga(codecs.reserved()),
+    resolve: fn(order, _key) {
       case db.reservation(deps.pool, order.order_id) {
-        Ok(db.Absent) -> saga.EffectAbsent
-        Ok(_) -> saga.EffectCompleted(Reserved(order))
-        Error(_) -> saga.EffectUnknown
+        Ok(db.Absent) -> durable.NotSent
+        Ok(_) -> durable.Completed(Reserved(order))
+        Error(_) -> durable.MaybeSent
       }
     },
   )
@@ -96,10 +103,10 @@ fn reserve_stock(
 fn charge_card(
   deps: Deps,
 ) -> Step(Reserved, Charged, CheckoutError, UndoError) {
-  let void = fn(reserved: Reserved, charged: Charged) {
+  let void = fn(charged: Charged) {
     gateway.void(
       deps.gateway,
-      deps.client_for(reserved.order.order_id),
+      deps.client_for(charged.reserved.order.order_id),
       charged.charge_id,
     )
     |> result.map_error(UndoError("charge_card", _))
@@ -121,54 +128,46 @@ fn charge_card(
     )
     |> result.map(Charged(reserved, _))
   })
-  |> saga.undo(void)
-  // An unknown payment outcome is a typed error to saga, so saga's
-  // `unknown_effects` never sees it. The decider retries under the same
-  // provider idempotency key, and holds (no rollback) when attempts run out.
-  |> saga.compensate(
-    max_attempts: deps.charge_attempts,
-    with: fn(_reserved, failure, attempt) {
-      case failure {
-        saga.Returned(error) ->
-          case domain.effect_uncertain(error), attempt.remaining > 0 {
-            True, True -> saga.Retry
-            True, False -> saga.Hold(error)
-            False, _ -> saga.Abort(error)
-          }
-        saga.Crashed(_) | saga.TimedOut ->
-          case attempt.remaining > 0 {
-            True -> saga.Retry
-            False -> saga.Hold(Interrupted("charge_card"))
-          }
-      }
-    },
-  )
-  |> saga.restore_undo(fn(reserved, charged, _key) {
-    saga.UndoWith(fn() { void(reserved, charged) })
+  |> saga.undo(fn(undo) { void(undo.output) })
+  |> saga.unknown_when(domain.effect_uncertain)
+  // Retry an unknown payment outcome under the same provider idempotency
+  // key, and hold (no rollback) when attempts run out.
+  |> saga.compensate(max_attempts: deps.charge_attempts, with: fn(failed) {
+    case failed.failure {
+      saga.Returned(error) ->
+        case domain.effect_uncertain(error), failed.attempts_left > 0 {
+          True, True -> saga.Retry
+          True, False -> saga.Hold(error)
+          False, _ -> saga.Abort(error)
+        }
+      saga.Crashed(_) | saga.TimedOut ->
+        case failed.attempts_left > 0 {
+          True -> saga.Retry
+          False -> saga.Hold(Interrupted("charge_card"))
+        }
+    }
   })
-  |> saga.reconcile_compensation(fn(reserved, _attempt, _key) {
+  |> durable.restore_undo(fn(undo) { saga.UndoWith(fn() { void(undo.output) }) })
+  |> durable.resolve_compensation(fn(reserved, _key) {
     case lookup(reserved) {
       Ok(gateway.ChargeFound(id, False)) -> {
         let charged = Charged(reserved, id)
-        saga.CompensationResolved(saga.Continue(
-          charged,
-          saga.UndoWith(fn() { void(reserved, charged) }),
-        ))
+        Some(saga.Continue(charged, saga.UndoWith(fn() { void(charged) })))
       }
-      Ok(_) -> saga.CompensationResolved(saga.Retry)
-      Error(_) -> saga.CompensationUnknown
+      Ok(_) -> Some(saga.Retry)
+      Error(_) -> None
     }
   })
-  |> saga.recoverable(
-    "1",
-    codecs.to_saga(codecs.reserved()),
-    codecs.to_saga(codecs.charged()),
-    fn(reserved, _key) {
+  |> durable.recoverable(
+    version: "1",
+    input: codecs.to_saga(codecs.reserved()),
+    output: codecs.to_saga(codecs.charged()),
+    resolve: fn(reserved, _key) {
       case lookup(reserved) {
         Ok(gateway.ChargeFound(id, _)) ->
-          saga.EffectCompleted(Charged(reserved, id))
-        Ok(gateway.NoCharge) -> saga.EffectAbsent
-        Error(_) -> saga.EffectUnknown
+          durable.Completed(Charged(reserved, id))
+        Ok(gateway.NoCharge) -> durable.NotSent
+        Error(_) -> durable.MaybeSent
       }
     },
   )
@@ -192,11 +191,17 @@ fn book_shipment(
     gateway.book(deps.gateway, client(charged), order, shipment_key(order))
     |> result.map(Booked(charged, _))
   })
+  // A booked shipment is cancelled when a cancellation rolls the run back
+  // after this last step succeeded.
+  |> saga.undo(fn(undo) {
+    cancel(undo.input) |> result.map_error(UndoError("book_shipment", _))
+  })
+  |> saga.unknown_when(domain.effect_uncertain)
   // A shipment request that timed out may still have been booked. Saga only
   // undoes steps that succeeded, so cancelling a possibly-booked shipment
   // is this step's own compensation cleanup.
-  |> saga.compensate(max_attempts: 1, with: fn(charged, failure, _attempt) {
-    let error = case failure {
+  |> saga.compensate(max_attempts: 1, with: fn(failed) {
+    let error = case failed.failure {
       saga.Returned(error) -> error
       saga.Crashed(_) | saga.TimedOut -> Interrupted("book_shipment")
     }
@@ -205,7 +210,7 @@ fn book_shipment(
     {
       False -> saga.Abort(error)
       True ->
-        case cancel(charged) {
+        case cancel(failed.input) {
           Ok(Nil) -> saga.Abort(error)
           Error(cleanup) ->
             saga.AbortAfterCleanupFailure(
@@ -215,19 +220,22 @@ fn book_shipment(
         }
     }
   })
-  |> saga.restore_undo(fn(_, _, _) { saga.NoUndo })
-  |> saga.reconcile_compensation(fn(charged, _attempt, _key) {
+  |> durable.restore_undo(fn(undo) {
+    saga.UndoWith(fn() {
+      cancel(undo.input) |> result.map_error(UndoError("book_shipment", _))
+    })
+  })
+  |> durable.resolve_compensation(fn(charged, _key) {
     case cancel(charged) {
-      Ok(Nil) ->
-        saga.CompensationResolved(saga.Abort(Interrupted("book_shipment")))
-      Error(_) -> saga.CompensationUnknown
+      Ok(Nil) -> Some(saga.Abort(Interrupted("book_shipment")))
+      Error(_) -> None
     }
   })
-  |> saga.recoverable(
-    "1",
-    codecs.to_saga(codecs.charged()),
-    codecs.to_saga(codecs.booked()),
-    fn(charged, _key) {
+  |> durable.recoverable(
+    version: "1",
+    input: codecs.to_saga(codecs.charged()),
+    output: codecs.to_saga(codecs.booked()),
+    resolve: fn(charged, _key) {
       let order = charged.reserved.order
       case
         gateway.find_shipment(
@@ -237,9 +245,9 @@ fn book_shipment(
         )
       {
         Ok(gateway.ShipmentFound(id, False)) ->
-          saga.EffectCompleted(Booked(charged, id))
-        Ok(_) -> saga.EffectAbsent
-        Error(_) -> saga.EffectUnknown
+          durable.Completed(Booked(charged, id))
+        Ok(_) -> durable.NotSent
+        Error(_) -> durable.MaybeSent
       }
     },
   )
