@@ -6,19 +6,18 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
+import grind
+import grind/admin
 import grind/job
-import grind/postgres
-import grind/worker
 import pog
 import research_agent/app.{type App}
-import research_agent/db
 import research_agent/events
 import research_agent/jobs
 import research_agent/node
-import research_agent/saga_store
 import research_agent/services.{type Services}
 import research_agent/telemetry.{type Telemetry}
 import saga/storage/conformance
+import saga_postgres
 import sinal
 import sinal/correlation
 
@@ -93,11 +92,19 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   use f <- with_node("t_common")
   services.script(f.world, "otp", services.happy_script(f.world, "otp"))
   let assert Ok(id) = app.start_research(f.node, "otp")
-  let assert Ok(job.SucceededWith(published)) =
+  let assert Ok(grind.Succeeded(published)) =
     app.await_outcome(f.node, id, 15_000)
   let assert True = string.starts_with(published.url, "https://blog.example/")
   let assert Ok(row) = app.row(f.node, id)
   let assert "published" = row.state
+  // The unqualified `research` table lives in the node's schema, because the
+  // app's pool keeps its own `search_path` (grind 9ccbfb5).
+  let assert Ok(pog.Returned(1, _)) =
+    pog.query(
+      "SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 't_common' AND table_name = 'research'",
+    )
+    |> pog.execute(f.node.db)
 
   // Fabric kept the whole conversation in Postgres: user prompt, two tool
   // requests with their results, and the answer.
@@ -116,8 +123,9 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
     published: 1,
   ) = counts
 
-  // Following the request across packages: grind (job id), fabric (run id)
-  // and http_gun (the research's `Correlation`) join; llm_wire and saga events cannot.
+  // Following the request across packages: grind, saga and http_gun carry
+  // the research's `Correlation`, fabric joins through its run id, and
+  // llm_wire events cannot be joined.
   let trace = telemetry.trace(f.telemetry, id)
   let sources = telemetry.sources(trace)
   let assert True = list.contains(sources, "grind")
@@ -131,13 +139,14 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let assert ["queued", "researching", "publishing", "published"] = states
   let assert True = list.contains(sources, "fabric")
   let assert True = list.contains(sources, "http_gun")
+  // The durable saga carries the job's correlation (saga wave 3): its run
+  // and step events join the request, and none is left over.
+  let assert True = list.contains(sources, "saga")
   let assert False = list.contains(sources, "llm_wire")
-  let assert False = list.contains(sources, "saga")
   let unattributed = trace.unattributed
   let assert Ok(llm_events) = list.key_find(unattributed, "llm_wire")
   let assert True = llm_events > 0
-  let assert Ok(saga_events) = list.key_find(unattributed, "saga")
-  let assert True = saga_events > 0
+  let assert Error(Nil) = list.key_find(unattributed, "saga")
   // The model's HTTP calls run on the client fixed at agent build time, so
   // they carry no correlation either.
   let assert Ok(http_unkeyed) = list.key_find(unattributed, "http_gun")
@@ -156,7 +165,7 @@ pub fn search_down_once_is_explained_to_the_model_which_retries_test() {
   ])
   services.fail_searches(f.world, 1)
   let assert Ok(id) = app.start_research(f.node, "beam")
-  let assert Ok(job.SucceededWith(_)) = app.await_outcome(f.node, id, 15_000)
+  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 15_000)
   // The failed search reached the model as a tool result, not a crash.
   let assert Ok(snapshot) = app.snapshot(f.node, id)
   let assert Ok(failed) =
@@ -184,9 +193,10 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   let assert Ok(outcome) = app.await_outcome(f.node, id, 15_000)
   // The worker's error codec keeps the typed `NoSources` through
   // persistence, with the cause that ended the job (RA-9, grind 7a04831).
-  let assert job.BusinessFailedWithCause(
-    jobs.NoSources("the search service is unavailable"),
-    worker.BudgetExhausted,
+  let assert grind.Failed(
+    grind.Business(jobs.NoSources("the search service is unavailable")),
+    Some(job.BudgetExhausted),
+    _,
   ) = outcome
   // Two attempts, each with its own run (search + answer).
   let assert services.Counts(search_calls: 2, llm_calls: 4, published: 0, ..) =
@@ -200,8 +210,7 @@ pub fn publish_failure_after_upload_deletes_the_draft_test() {
   services.script(f.world, "lisp", services.happy_script(f.world, "lisp"))
   services.set_publish_fails(f.world, True)
   let assert Ok(id) = app.start_research(f.node, "lisp")
-  let assert Ok(job.DiscardedWithReason(reason)) =
-    app.await_outcome(f.node, id, 15_000)
+  let assert Ok(grind.Discarded(reason)) = app.await_outcome(f.node, id, 15_000)
   let assert True = string.contains(reason, "publish")
   let assert [#(_, services.Deleted)] = services.drafts(f.world)
   let assert services.Counts(
@@ -216,7 +225,7 @@ pub fn publish_failure_after_upload_deletes_the_draft_test() {
 
 // Failure: cancellation ---------------------------------------------------------
 
-pub fn cancellation_reaches_the_run_and_closes_the_llm_stream_test() {
+pub fn cancelling_the_job_reaches_the_run_and_closes_the_llm_stream_test() {
   use f <- with_node("t_cancel")
   services.script(f.world, "erlang", [
     services.CallSearch("erlang"),
@@ -235,25 +244,10 @@ pub fn cancellation_reaches_the_run_and_closes_the_llm_stream_test() {
       10_000,
     )
 
-  // Grind's cancellation alone: recorded, but the handler is never told, so
-  // the agent keeps streaming.
-  let assert Ok(postgres.CancellationRequested) = app.cancel_job(f.node, id)
-  let assert Error(Nil) =
-    wait_for(
-      f.notices,
-      fn(n) {
-        case n {
-          services.LlmStreamClosed(_, _) -> True
-          _ -> False
-        }
-      },
-      500,
-    )
-
-  // The app's API also cancels the Fabric run: its model task is killed and
-  // the HTTP stream closes.
-  let assert Ok(app.Cancellation(_, Some(run.Finished(run.Cancelled)))) =
-    app.cancel_research(f.node, id)
+  // Grind's cancellation alone: the handler sees it through its job
+  // context (within a third of the 6 s lease) and cancels the Fabric run,
+  // whose model task is killed, so the HTTP stream closes.
+  let assert Ok(grind.CancellationRequested) = app.cancel_research(f.node, id)
   let assert Ok(services.LlmStreamClosed("erlang", 1)) =
     wait_for(
       f.notices,
@@ -265,9 +259,15 @@ pub fn cancellation_reaches_the_run_and_closes_the_llm_stream_test() {
       },
       5000,
     )
-  let assert Ok(job.CancelledWithReason(_)) =
-    app.await_outcome(f.node, id, 10_000)
+  let assert Ok(grind.Cancelled(reason)) = app.await_outcome(f.node, id, 10_000)
+  let assert Ok(snapshot) = app.snapshot(f.node, id)
+  let assert run.Finished(run.Cancelled) = snapshot.status
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "cancelled" = row.state
   let assert 0 = services.counts(f.world).drafts_created
+  // Grind keeps the caller's reason, not the handler's `Cancelled` reason.
+  let assert "cancelled by caller" = reason
+  Nil
 }
 
 // Advanced: crash recovery across VMs ------------------------------------------
@@ -293,25 +293,35 @@ fn crash_and_recover(
   let assert Ok(_) = wait_for(notices, ready, 20_000)
   node.kill(peer)
 
-  // A new node in this VM. Grind's lease (6 s) must expire before the
-  // abandoned attempt is quarantined; then the app authorizes its replay.
+  // A new node in this VM. Once Grind's lease (6 s) expires, the worker's
+  // abandonment policy (`ReplayAfterLeaseExpiry`) requeues the job, and
+  // this node's consumer runs it again: no app sweep, no operator decision.
   let observed = telemetry.start(False)
   let assert Ok(survivor) =
     app.start(settings(world, "node-b", schema, Some(observed)))
-  let assert Ok(1) = release_abandoned(survivor, 40)
   check(Fixture(world, survivor, notices, observed), id)
+  // The operator view shows one replay and no decision: the job never
+  // waited in `uncertain`.
+  let assert Ok([summary]) =
+    admin.list(
+      survivor.jobs,
+      admin.query(limit: 10) |> admin.in_queue(jobs.queue),
+    )
+  let assert 1 = summary.replay_count
+  let assert job.Succeeded = summary.state
+  // The replay did not use up a business attempt, as
+  // `worker.with_max_attempts` documents (RA-12, grind 6bd06ec): the job
+  // finished as its first attempt.
+  let assert 1 = summary.attempt
+  let trace = telemetry.trace(observed, id)
+  let assert False = list.any(trace.events, fn(e) { e.name == "job.resolved" })
+  // Grind reports the replay: one `[grind, job, quarantined]` event with
+  // `replayed: True`, joined to the request by its correlation.
+  let assert [quarantined] =
+    list.filter(trace.events, fn(e) { e.name == "job.quarantined" })
+  let assert "lease expired, replayed" = quarantined.detail
   app.stop(survivor)
   telemetry.stop(observed)
-}
-
-fn release_abandoned(node: App, tries: Int) -> Result(Int, String) {
-  case app.recover_abandoned(node) {
-    Ok(0) if tries > 0 -> {
-      process.sleep(250)
-      release_abandoned(node, tries - 1)
-    }
-    other -> other
-  }
 }
 
 pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
@@ -335,7 +345,7 @@ pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
       }
     },
   )
-  let assert Ok(job.SucceededWith(_)) = app.await_outcome(f.node, id, 20_000)
+  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 30_000)
   // Resumed, not restarted: the search done before the crash is not repeated,
   // and the model call lost with the VM is issued again (3 + 1 calls).
   let assert services.Counts(
@@ -365,7 +375,7 @@ pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
       }
     },
   )
-  let assert Ok(job.SucceededWith(_)) = app.await_outcome(f.node, id, 20_000)
+  let assert Ok(grind.Succeeded(_)) = app.await_outcome(f.node, id, 30_000)
   // The read became an uncertain effect; the app read the page again and
   // reconciled the action with that result.
   let assert Ok(snapshot) = app.snapshot(f.node, id)
@@ -377,26 +387,35 @@ pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
   Nil
 }
 
-// Glue checked against the owning package's contract ---------------------------
+// The shared pool checked against the owning package's contract ----------------
 
-pub fn the_postgres_saga_storage_passes_saga_conformance_test() {
-  let assert Ok(config) =
-    pog.url_config(process.new_name("conformance_pool"), database_url())
-  let assert Ok(started) = pog.start(config)
-  let conn = started.data
-  let assert Ok(Nil) = db.migrate(conn)
+/// The saga storage is saga_postgres on the pool Grind built from the app's
+/// `pog.Config` (the app's `search_path`, Grind's isolation and
+/// idle-in-transaction timeout), and it still passes saga's conformance
+/// suite there.
+pub fn saga_postgres_on_the_shared_pool_passes_saga_conformance_test() {
+  use f <- with_node("t_saga_conformance")
+  let lease = 1000
   let assert Ok(Nil) =
     conformance.run(
       fn() {
-        let id = "conformance-" <> int.to_string(int.random(1_000_000_000))
-        let store = saga_store.new(conn, "conformance", 10_000)
+        let schema = "t_saga_c" <> int.to_string(int.random(1_000_000_000))
+        let assert Ok(config) =
+          saga_postgres.config(f.node.db)
+          |> saga_postgres.with_lease(lease)
+          |> saga_postgres.with_schema(schema)
+        let assert Ok(Nil) = saga_postgres.migrate(config)
         Ok(
-          conformance.Fixture(saga_store.storage(store, id), fn() {
-            saga_store.delete(store, id)
+          conformance.fixture(saga_postgres.storage(config), cleanup: fn() {
+            let _ =
+              pog.query("DROP SCHEMA " <> schema <> " CASCADE")
+              |> pog.execute(f.node.db)
+            Nil
           }),
         )
       },
-      5000,
+      timeout: 5000,
+      owner_loss_within: lease + 500,
     )
 }
 

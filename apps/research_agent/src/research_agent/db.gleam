@@ -1,9 +1,10 @@
-//// The application's own tables on its own pog pool: the `research` index
-//// that ties one research id to its Grind job, its Fabric run and its
-//// result, and the saga checkpoint table (see `saga_store`).
+//// The application's own table on the pool it shares with Grind, Fabric and
+//// Saga: the `research` index that ties one research id to its Grind job,
+//// its Fabric run and its result. The app's pool puts the node's schema first
+//// on its `search_path`, so the unqualified table lives next to Grind's,
+//// Fabric's and Saga's.
 
 import gleam/dynamic/decode
-import gleam/list
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
@@ -14,64 +15,54 @@ pub type Row {
   Row(
     id: String,
     topic: String,
-    job_id: Option(Int),
+    job_id: Int,
     run_id: Option(String),
     state: String,
     detail: String,
   )
 }
 
-pub fn migrate(db: pog.Connection) -> Result(Nil, String) {
-  [
-    "CREATE TABLE IF NOT EXISTS research (
-       id text PRIMARY KEY,
-       topic text NOT NULL,
-       job_id bigint,
-       run_id text,
-       state text NOT NULL,
-       detail text NOT NULL DEFAULT '',
-       updated_at timestamptz NOT NULL DEFAULT now())",
-    "CREATE TABLE IF NOT EXISTS saga_executions (
-       id text PRIMARY KEY,
-       revision bigint NOT NULL,
-       generation bigint NOT NULL,
-       cancelled boolean NOT NULL DEFAULT false,
-       data bytea NOT NULL,
-       owner text,
-       lease_until timestamptz)",
-  ]
-  |> list.try_each(fn(sql) { exec(db, pog.query(sql)) })
+pub fn migrate(db: pog.Connection, schema: String) -> Result(Nil, String) {
+  use Nil <- result.try(exec(
+    db,
+    pog.query("CREATE SCHEMA IF NOT EXISTS \"" <> schema <> "\""),
+  ))
+  exec(
+    db,
+    pog.query(
+      "CREATE TABLE IF NOT EXISTS research (
+         id text PRIMARY KEY,
+         topic text NOT NULL,
+         job_id bigint NOT NULL,
+         run_id text,
+         state text NOT NULL,
+         detail text NOT NULL DEFAULT '',
+         updated_at timestamptz NOT NULL DEFAULT now())",
+    ),
+  )
 }
 
+/// Records a request and its job. Called inside the transaction that
+/// submits the job (`grind.submit_in`), so the row and the job commit
+/// together; the caller announces `Queued` after the commit.
 pub fn insert(
-  db: pog.Connection,
+  tx: pog.Connection,
   id: String,
   topic: String,
+  job_id: Int,
 ) -> Result(Nil, String) {
   pog.query(
-    "INSERT INTO research (id, topic, state) VALUES ($1, $2, 'queued')
-     ON CONFLICT (id) DO NOTHING",
+    "INSERT INTO research (id, topic, job_id, state) VALUES ($1, $2, $3, 'queued')",
   )
   |> pog.parameter(pog.text(id))
   |> pog.parameter(pog.text(topic))
-  |> exec(db, _)
-  |> announced(id, events.Queued)
-}
-
-pub fn set_job(
-  db: pog.Connection,
-  id: String,
-  job_id: Int,
-) -> Result(Nil, String) {
-  pog.query("UPDATE research SET job_id = $2 WHERE id = $1")
-  |> pog.parameter(pog.text(id))
   |> pog.parameter(pog.int(job_id))
-  |> exec(db, _)
+  |> exec(tx, _)
 }
 
 /// Records the Fabric run id. Fabric issues the id inside `fabric.start`, so
 /// this write necessarily follows the run's first commit: a crash between
-/// the two leaves an orphan run (see FEEDBACK RA-2).
+/// the two leaves an orphan run (see FEEDBACK RA-3).
 pub fn set_run(
   db: pog.Connection,
   id: String,
@@ -129,22 +120,10 @@ pub fn get(db: pog.Connection, id: String) -> Result(Row, String) {
   })
 }
 
-/// Research whose job has not reached a final state in this table.
-pub fn unfinished(db: pog.Connection) -> Result(List(Row), String) {
-  pog.query(
-    "SELECT id, topic, job_id, run_id, state, detail FROM research
-     WHERE state IN ('queued', 'researching', 'publishing') AND job_id IS NOT NULL",
-  )
-  |> pog.returning(row_decoder())
-  |> pog.execute(db)
-  |> result.map(fn(returned) { returned.rows })
-  |> result.map_error(string.inspect)
-}
-
 fn row_decoder() -> decode.Decoder(Row) {
   use id <- decode.field(0, decode.string)
   use topic <- decode.field(1, decode.string)
-  use job_id <- decode.field(2, decode.optional(decode.int))
+  use job_id <- decode.field(2, decode.int)
   use run_id <- decode.field(3, decode.optional(decode.string))
   use state <- decode.field(4, decode.string)
   use detail <- decode.field(5, decode.string)

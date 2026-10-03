@@ -1,5 +1,5 @@
 //// A node in another VM, for the crash test: the peer runs the app with
-//// its own grind consumer, Fabric store and HTTP clients against the same
+//// its own Grind runtime, Fabric store and HTTP client against the same
 //// database, and is then killed with SIGKILL.
 
 import gleam/dynamic.{type Dynamic}
@@ -41,8 +41,8 @@ pub fn start_research_on(
   |> result.flatten
 }
 
-/// Runs in the peer: a long-lived owner process starts the app (Grind's
-/// consumer and http_gun's clients link to their starter) and keeps it.
+/// Runs in the peer: a long-lived owner process starts the app (its
+/// supervision trees link to their starter) and keeps it.
 pub fn boot(settings: app.Settings, topic: String) -> Result(String, String) {
   let reply = process.new_subject()
   process.spawn_unlinked(fn() {

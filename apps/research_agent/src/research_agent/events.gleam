@@ -2,8 +2,9 @@
 ////
 //// It carries the research id as a `sinal/correlation.Correlation`, so an
 //// observer follows a request through these events without a registry.
-//// http_gun carries it too (`remote.correlated`); Grind, Fabric, llm_wire and
-//// Saga events still join through `telemetry`'s bindings.
+//// Grind, Saga and http_gun carry it too (`job.with_correlation`,
+//// `durable.with_correlation`, `remote.correlated`); Fabric events still
+//// join through `telemetry`'s run binding, and llm_wire events not at all.
 
 import sinal
 import sinal/correlation.{type Correlation}
@@ -52,13 +53,8 @@ pub fn state_changed() -> sinal.Event(Nil, Transition) {
   })
 }
 
-/// Announces that research `id` entered `state`. Ids come from
-/// `app.start_research` (`correlation.unique`), so they always fit; an id
-/// that does not is not announced.
+/// Announces that research `id` entered `state`.
 pub fn announce(id: String, state: State) -> Nil {
-  case correlation.from_string(id) {
-    Ok(correlation) ->
-      sinal.emit(state_changed(), Nil, Transition(state:, correlation:))
-    Error(_) -> Nil
-  }
+  let correlation = correlation.from_key(id)
+  sinal.emit(state_changed(), Nil, Transition(state:, correlation:))
 }

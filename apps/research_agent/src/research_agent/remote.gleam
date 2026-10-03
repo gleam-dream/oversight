@@ -12,30 +12,24 @@ import sinal/correlation
 
 pub type Failure {
   /// The request never produced a response.
-  Unreachable(reason: error.Reason, may_have_been_sent: Bool)
+  Unreachable(failure: error.Failure)
   /// The service answered with a status we did not expect.
   Status(code: Int, body: String)
 }
 
 pub fn describe(failure: Failure) -> String {
   case failure {
-    Unreachable(reason, _) ->
-      "unreachable: "
-      <> error.describe(error.Failure(reason, error.NotSubmitted))
+    Unreachable(failure) -> "unreachable: " <> error.describe(failure)
     Status(code, _) -> "HTTP " <> int.to_string(code)
   }
 }
 
-/// A client whose requests carry the research id as their correlation. An
-/// id that is not a valid `Correlation` leaves the client uncorrelated.
+/// A client whose requests carry the research id as their correlation.
 pub fn correlated(
   client: http_gun.Client,
   research: String,
 ) -> http_gun.Client {
-  case correlation.from_string(research) {
-    Ok(id) -> http_gun.with_correlation(client, id)
-    Error(_) -> client
-  }
+  http_gun.with_correlation(client, correlation.from_key(research))
 }
 
 pub fn call(
@@ -57,10 +51,7 @@ pub fn call(
   let req =
     list.fold(headers, req, fn(req, h) { request.set_header(req, h.0, h.1) })
   use buffered <- result.try(
-    http_gun.send(client, req)
-    |> result.map_error(fn(failure) {
-      Unreachable(failure.reason, failure.evidence == error.MayHaveBeenSent)
-    }),
+    http_gun.send(client, req) |> result.map_error(Unreachable),
   )
   let text = bit_array.to_string(buffered.response.body) |> result.unwrap("")
   Ok(#(buffered.response.status, text))
