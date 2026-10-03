@@ -1,5 +1,5 @@
 //// A scripted LLM provider on loopback that speaks the OpenAI Responses
-//// SSE wire format. It is stateless: each turn reads the conversation
+//// SSE wire format, written by `llm_wire/testing.events_for`. It is stateless: each turn reads the conversation
 //// llm_wire sent (the user's request, the function calls and their
 //// outputs) and plays a careful support agent. Its final answer is the
 //// JSON of a `Resolution`, as the system prompt asks.
@@ -18,6 +18,8 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import json/blueprint/codec
+import llm_wire/message
+import llm_wire/testing
 import mist
 import support_desk/domain.{
   type Outcome, Declined, NotEligible, RefundFailed, Refunded, Resolution,
@@ -86,14 +88,22 @@ fn respond(body: String) -> Response(mist.ResponseData) {
       let order_id = order_id(items)
       case decide(order_id, results(items)) {
         CallTool(name, arguments) ->
-          sse(tool_call_events(calls + 1, name, json.to_string(arguments)))
+          sse(
+            testing.tool_calls("", [
+              testing.ScriptedCall(
+                "call_" <> int.to_string(calls + 1),
+                name,
+                json.to_string(arguments),
+              ),
+            ]),
+          )
         Answer(outcome, refunded, message) -> {
           let assert Ok(text) =
             codec.encode_json(
               domain.resolution(),
               Resolution(order_id, outcome, refunded, message),
             )
-          sse(text_events(text))
+          sse(testing.text(text))
         }
       }
     }
@@ -248,110 +258,23 @@ fn item_decoder() -> decode.Decoder(Item) {
 
 // OpenAI Responses SSE ------------------------------------------------------
 
-fn tool_call_events(n: Int, name: String, arguments: String) -> List(String) {
-  let item_id = "fc_" <> int.to_string(n)
-  [
-    event(
-      "response.output_item.added",
-      json.object([
-        #("output_index", json.int(0)),
-        #(
-          "item",
-          json.object([
-            #("id", json.string(item_id)),
-            #("type", json.string("function_call")),
-            #("call_id", json.string("call_" <> int.to_string(n))),
-            #("name", json.string(name)),
-          ]),
-        ),
-      ]),
-    ),
-    event(
-      "response.function_call_arguments.delta",
-      json.object([
-        #("output_index", json.int(0)),
-        #("item_id", json.string(item_id)),
-        #("delta", json.string(arguments)),
-      ]),
-    ),
-    event(
-      "response.output_item.done",
-      json.object([
-        #("output_index", json.int(0)),
-        #("item", json.object([#("id", json.string(item_id))])),
-      ]),
-    ),
-    completed(),
-  ]
+/// The scripted reply as the OpenAI Responses stream llm_wire's own
+/// `testing.events_for` writes, with the usage the old fixture reported.
+fn wire(reply: testing.Reply) -> testing.Reply {
+  testing.with_usage(reply, message.Usage(150, 40, 190))
+  |> testing.events_for(message.OpenAI, _)
 }
 
-fn text_events(text: String) -> List(String) {
-  [
-    event(
-      "response.output_item.added",
-      json.object([
-        #("output_index", json.int(0)),
-        #(
-          "item",
-          json.object([
-            #("id", json.string("msg_1")),
-            #("type", json.string("message")),
-          ]),
-        ),
-      ]),
-    ),
-    event(
-      "response.output_text.delta",
-      json.object([
-        #("output_index", json.int(0)),
-        #("item_id", json.string("msg_1")),
-        #("delta", json.string(text)),
-      ]),
-    ),
-    event(
-      "response.output_item.done",
-      json.object([
-        #("output_index", json.int(0)),
-        #("item", json.object([#("id", json.string("msg_1"))])),
-      ]),
-    ),
-    completed(),
-  ]
-}
-
-fn completed() -> String {
-  event(
-    "response.completed",
-    json.object([
-      #(
-        "response",
-        json.object([
-          #("id", json.string("resp_1")),
-          #("status", json.string("completed")),
-          #(
-            "usage",
-            json.object([
-              #("input_tokens", json.int(150)),
-              #("output_tokens", json.int(40)),
-              #("total_tokens", json.int(190)),
-            ]),
-          ),
-        ]),
-      ),
-    ]),
-  )
-}
-
-fn event(name: String, payload: json.Json) -> String {
-  "event: " <> name <> "\ndata: " <> json.to_string(payload) <> "\n\n"
-}
-
-fn sse(events: List(String)) -> Response(mist.ResponseData) {
-  response.new(200)
-  |> response.set_header("content-type", "text/event-stream")
-  |> response.set_body(
-    mist.Bytes(bytes_tree.from_string(string.concat(events))),
-  )
+fn sse(reply: testing.Reply) -> Response(mist.ResponseData) {
+  case wire(reply) {
+    testing.Events(chunks) ->
+      response.new(200)
+      |> response.set_header("content-type", "text/event-stream")
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_string(string.concat(chunks))),
+      )
+    testing.Interrupted(_) | testing.Status(..) -> status(500)
+  }
 }
 
 fn status(code: Int) -> Response(mist.ResponseData) {
