@@ -39,6 +39,16 @@ pub type Effect {
 pub type Peer(context) =
   fn(context) -> client.Client
 
+/// The peer under the run's correlation, so the call's Relay and HTTP Gun
+/// events join the question's.
+fn inbound(
+  peer: Peer(context),
+  context: context,
+  call: fabric_tool.Call,
+) -> client.Client {
+  client.with_correlation(peer(context), call.correlation)
+}
+
 // --- typed path --------------------------------------------------------------
 
 /// The fabric definition for a Relay definition. One way only: fabric's
@@ -65,8 +75,8 @@ pub fn mount(
   let effect = effect_of(relay_tool.declaration(definition))
   fabric_tool.bind(
     fabric_definition(definition),
-    fn(context, input) {
-      client.call(peer(context), definition, input) |> outcome
+    fn(context, call, input) {
+      client.call(inbound(peer, context, call), definition, input) |> outcome
     },
     classify(effect, _),
   )
@@ -115,8 +125,13 @@ pub fn mount_discovered(
     )
   fabric_tool.bind(
     definition,
-    fn(context, arguments) {
-      client.call_discovered(peer(context), declaration, arguments) |> outcome
+    fn(context, call, arguments) {
+      client.call_discovered(
+        inbound(peer, context, call),
+        declaration,
+        arguments,
+      )
+      |> outcome
     },
     classify(effect_of(declaration), _),
   )
