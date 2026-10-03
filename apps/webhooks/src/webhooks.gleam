@@ -16,7 +16,7 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
-import gleam/time/duration
+import gleam/time/duration.{type Duration}
 import grind
 import http_gun
 import http_gun/config
@@ -48,7 +48,7 @@ pub fn main() -> Nil {
 /// public and one private address, the shape of a DNS-rebinding attack.
 pub fn simulated_dns(
   host: String,
-  _remaining_ms: Int,
+  _remaining: Duration,
 ) -> Result(List(destination.Address), Nil) {
   case host {
     "rebind.acme.test" ->

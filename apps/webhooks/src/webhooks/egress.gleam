@@ -7,6 +7,7 @@
 
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/time/duration.{type Duration}
 import http_gun
 import http_gun/config
 import http_gun/destination
@@ -19,7 +20,7 @@ pub type Egress {
 pub type Settings {
   Settings(
     /// Request ceiling for one delivery attempt.
-    deadline_ms: Int,
+    deadline: Duration,
     /// `host` or `host:port` entries the internal tier may reach on loopback.
     internal_hosts: List(String),
     /// Test seam: simulated DNS. `None` uses the system resolver.
@@ -32,7 +33,7 @@ pub type Settings {
 
 pub fn default_settings() -> Settings {
   Settings(
-    deadline_ms: 5000,
+    deadline: duration.seconds(5),
     internal_hosts: ["127.0.0.1", "localhost"],
     resolver: None,
     start_client: http_gun.start,
@@ -42,7 +43,7 @@ pub fn default_settings() -> Settings {
 pub fn config(settings: Settings) -> config.Config {
   let base =
     config.default()
-    |> config.with_request_timeout(config.Milliseconds(settings.deadline_ms))
+    |> config.with_request_timeout(config.After(settings.deadline))
     |> config.with_destination(
       destination.default() |> destination.allow_loopback,
     )

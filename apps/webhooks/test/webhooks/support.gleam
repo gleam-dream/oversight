@@ -6,7 +6,7 @@ import gleam/int
 import gleam/json
 import gleam/option.{Some}
 import gleam/result
-import gleam/time/duration
+import gleam/time/duration.{type Duration}
 import grind
 import grind/testing
 import http_gun/destination
@@ -21,7 +21,7 @@ import wisp/simulate
 /// Simulated DNS.
 pub fn test_dns(
   host: String,
-  _remaining: Int,
+  _remaining: Duration,
 ) -> Result(List(destination.Address), Nil) {
   case host {
     // A rebinding-style answer: one public and one private address.

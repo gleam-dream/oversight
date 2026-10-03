@@ -904,3 +904,28 @@ the nine `public.` qualifiers changed in place). Added: about 16 (the
 `Retry-After` read, the `grind.handle` arm). Tests: about 55 added for two
 new tests, 3 changed (direct sends go through `client_for`; `public.` dropped
 from the truncate).
+
+## Re-run after wave 4 (Duration)
+
+http_gun dcfbc07. Tests: 14 passed. `gleam run` completes. `gleam format
+--check` is clean.
+
+Removed (about 9 lines changed in place): `Settings.deadline_ms: Int`, its
+`5000` default and `config.Milliseconds(settings.deadline_ms)`; the two
+resolver parameters typed `Int` (`_remaining_ms`, `_remaining`). Added: about
+the same count. `Settings.deadline: Duration` (default `duration.seconds(5)`)
+feeds `config.After(settings.deadline)` directly, so no `Int` is converted
+anywhere. The resolvers take `Duration`. `gleam.toml` raises `gleam_time` to
+`>= 1.11.0`. No conversion glue existed or was left.
+
+Friction:
+
+- `destination.Rejection` gained `PlaintextRefused(Class)`, so the exhaustive
+  `case` in `subscription.gleam` stopped compiling. The default
+  `AllowPlaintext` makes the branch unreachable here, but the compiler needs
+  it. I map it to `ForbiddenAddress(class)` with a comment. The guide says the
+  default is unchanged and "plaintext callers keep working"; it does warn that
+  a `case` on `Rejection` gains a branch, but the webhooks row of the app table
+  does not list `subscription.gleam`.
+- The resolver type change reached `src/webhooks.gleam` and the test
+  `support.gleam` as well; the table names only `egress.gleam`.
