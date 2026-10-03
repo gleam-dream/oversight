@@ -107,6 +107,10 @@ pub fn validate_endpoint(
     Ok(Nil) -> Ok(parsed)
     Error(destination.HostNotAllowed) ->
       Error(HostNotAllowlisted(host <> ":" <> int.to_string(port)))
-    Error(destination.AddressRefused(class)) -> Error(ForbiddenAddress(class))
+    // The policy keeps the default `AllowPlaintext`, so the plaintext rule
+    // never fires here; the branch only keeps the match total.
+    Error(destination.AddressRefused(class))
+    | Error(destination.PlaintextRefused(class)) ->
+      Error(ForbiddenAddress(class))
   }
 }
