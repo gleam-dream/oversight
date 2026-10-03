@@ -71,11 +71,13 @@ pub fn refund(
       #("idempotency_key", json.string("refund-" <> request.order_id)),
     ])
   case call(shop, http.Post, "/payments/refunds", json.to_string(body)) {
-    Error(http_error.Failure(evidence: http_error.NotSubmitted, ..) as failure) ->
-      Error(PaymentUnavailable(http_error.describe(failure)))
-    Error(
-      http_error.Failure(evidence: http_error.MayHaveBeenSent, ..) as failure,
-    ) -> Error(PaymentOutcomeUnknown(http_error.describe(failure)))
+    Error(failure) ->
+      case http_error.evidence(failure) {
+        http_error.NotSent ->
+          Error(PaymentUnavailable(http_error.describe(failure)))
+        http_error.MaybeSent ->
+          Error(PaymentOutcomeUnknown(http_error.describe(failure)))
+      }
     Ok(Reply(201, text)) ->
       json.parse(text, decode.at(["refund_id"], decode.string))
       |> result.replace_error(PaymentOutcomeUnknown(

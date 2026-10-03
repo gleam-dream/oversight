@@ -90,7 +90,7 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
       config.openai(openai.options(key)) |> config.with_endpoint(endpoint),
       model_id,
     )
-  use issue_refund <- result.try(
+  let issue_refund =
     fabric_saga.tool(
       domain.issue_refund(),
       refund.workflow(settings.shop, settings.ledger),
@@ -98,8 +98,6 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
       explain: refund.explain,
       rollback_within: 5000,
     )
-    |> result.map_error(fn(errors) { "saga config: " <> string.inspect(errors) }),
-  )
   let tools = [
     tool.bind(
       domain.lookup_order(),
