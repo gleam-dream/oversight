@@ -15,6 +15,7 @@ import gleam/string
 import gleam/time/duration
 import gleam/uri
 import grind
+import grind/admin
 import grind/job
 import grind/queue
 import grind/worker.{type Worker}
@@ -41,7 +42,7 @@ pub type Settings {
     schema: String,
     /// Base URL of the scripted services (search, pages, publisher, LLM).
     services: String,
-    fabric_lease_ms: Int,
+    fabric_lease: duration.Duration,
     telemetry: Option(Telemetry),
   )
 }
@@ -110,7 +111,7 @@ fn fabric_settings(
   database: pog.Connection,
 ) -> Result(fabric_postgres.Settings, String) {
   fabric_postgres.settings(database, node: settings.node)
-  |> fabric_postgres.with_lease(settings.fabric_lease_ms)
+  |> fabric_postgres.with_lease(settings.fabric_lease)
   |> fabric_postgres.with_schema(settings.schema)
   |> result.map_error(string.inspect)
 }
@@ -173,13 +174,16 @@ pub fn start(settings: Settings) -> Result(App, String) {
   use http_settings <- result.try(http_settings(settings.services))
   let http = http_gun.named(http_name)
   let endpoints = endpoints(settings.services)
-  use _validated <- result.try(
+  // One agent serves every run: fabric hands each model call the run's
+  // correlation.
+  use agent <- result.try(
     researcher.build(http, endpoints) |> result.map_error(string.inspect),
   )
   let deps =
     jobs.Deps(
       runs:,
-      agent: researcher.agent_for(endpoints),
+      agent:,
+      context: researcher.Context(http:),
       http:,
       sagas: saga_postgres.storage(saga_settings),
       endpoints:,
@@ -316,14 +320,29 @@ pub fn row(app: App, id: String) -> Result(db.Row, String) {
 }
 
 /// The run's stored snapshot: its transcript is the checkpointed
-/// conversation.
+/// conversation. The run is the job's latest attempt's.
 pub fn snapshot(app: App, id: String) -> Result(run.Snapshot, String) {
   use row <- result.try(db.get(app.db, id))
-  use run_id <- result.try(option.to_result(row.run_id, "no run yet"))
-  let assert Ok(run_id) = run.parse_id(run_id)
-  let context = researcher.context(app.http, id)
+  use summaries <- result.try(
+    admin.list(
+      app.jobs,
+      admin.query(limit: 1)
+        |> admin.in_queue(jobs.queue)
+        |> admin.after(row.job_id - 1),
+    )
+    |> result.map_error(admin.describe_error),
+  )
+  use summary <- result.try(case summaries {
+    [summary] if summary.id == row.job_id -> Ok(summary)
+    _ -> Error("no job " <> int.to_string(row.job_id))
+  })
   use handle <- result.try(
-    fabric.open(app.runs, app.deps.agent(context), context, run_id)
+    fabric.open(
+      app.runs,
+      app.deps.agent,
+      app.deps.context,
+      jobs.run_id(row.job_id, summary.attempt),
+    )
     |> result.map_error(string.inspect),
   )
   fabric.snapshot(handle) |> result.map_error(string.inspect)

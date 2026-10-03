@@ -101,6 +101,18 @@ cancellation to another, so the app owns the joins (RA-1).
   reconciliation (RA-4). Fabric's sweeper stays unregistered: decision 1 says
   the job drives the run, which FABRIC-R13 (wave 5) is to encode.
 
+  **Status (round 5):** partially resolved by fabric fd60851. The `run_id`
+  column, `db.set_run` and `telemetry.bind_run` are gone, because the job
+  names its run (RA-3). The `research` row stays: it maps the app's research
+  id to the job id Grind issues (`app.handle`) and holds the state shown to
+  callers, so the "join table" shrinks (db.gleam 137 → 110 lines) rather than
+  disappears. The job-to-run state machine is the same size
+  (`drive_agent`, `start_run`, `follow`, `reconcile_all`: jobs.gleam
+  187-318 before, 189-318 after): the "no sources, start afresh" branch and
+  the 250 ms polling went, and a bounded retry of `StartUnconfirmed` and the
+  `run_id` function came. FABRIC-R13 (a Grind adapter in fabric) is still
+  open.
+
 ### RA-2 Grind never redelivers a job whose node died; the app authorizes each replay
 
 - **Packages**: grind. **Kind**: composition. **Severity**: major.
@@ -158,6 +170,23 @@ cancellation to another, so the app owns the joins (RA-1).
 
   **Status (wave 3):** unchanged; fabric-owned (FABRIC-R2, wave 5). The
   `run_id` column, `db.set_run` and `telemetry.bind_run` stay.
+
+  **Status (round 5):** resolved by fabric fd60851 (`fabric.start(.., id:,
+..)`, `AlreadyStarted`). The job starts its run as
+  `research-<job id>-<attempt>` (`jobs.run_id`), where `attempt` is Grind's
+  business attempt. A replay keeps both numbers (the crash tests assert
+  `attempt == 1` after a replay), so `start` answers `AlreadyStarted` and the
+  job `recover`s the run; a `NoSources` retry has attempt 2 and so a fresh
+  run, which replaced the `await(handle, 0)` probe that looked for a finished
+  "no sources" run. No orphan run is possible between `start` and a row
+  write, because there is no row write. The id could not be the research id
+  alone, since a retried job must not reopen the finished run. Cost: code
+  outside the handler cannot know the attempt. `app.snapshot` reads it with
+  `admin.list(.. |> admin.after(job_id - 1))` and checks the returned id
+  (10 lines); a `grind.attempt(handle)` read would remove that. In-flight
+  jobs of the previous version have a `run_id` column no code reads and would
+  start a second run on replay; the app has no deployed data, so no migration
+  is written.
 
 ### RA-4 After a crash, even a read-only tool suspends the run until the app reconciles it
 
@@ -342,6 +371,25 @@ cancellation to another, so the app owns the joins (RA-1).
   `events no request id could claim: []`; the test asserts that no llm_wire,
   saga or http_gun event is left over (it was 15 llm_wire and 6 http_gun).
   Fabric events still join through `bind_run` (FABRIC-R8, wave 5).
+
+  **Status (round 5):** resolved by fabric fd60851 / 409f1a7. The job passes
+  `Some(worker.correlation(job))` to `fabric.start`; `model.Request` carries
+  it and `fabric/llm` tags each turn, so `researcher.agent_for` and its
+  `let assert` are gone and `Deps` holds one `Agent` and one `Context` built
+  when the node starts. The tools read `call.correlation`
+  (`http_gun.with_correlation(context.http, call.correlation)`), so
+  `Context` lost its `research` field and `remote.correlated` was deleted.
+  Run events carry `correlation`, so the `Run` key, the `BindRun` message,
+  the run-to-research table and `telemetry.bind_run` are gone and the
+  collector's snapshot returns a plain list. `gleam run` joins 51 events and
+  prints `events no request id could claim: []`; the test now also asserts no
+  fabric event is left over. Two joins remain by hand, both on the app's side
+  of a package border: the saga's HTTP client is correlated in the job
+  (`jobs.handle`, one line) because a saga step receives no `tool.Call`, and
+  `replay_read_only` takes the correlation as a parameter because it runs
+  outside a tool call. `fabric/observation.LeaseLost` still has no
+  `correlation`, so a lease loss would be unattributed (the app keys it
+  `Unkeyed`; no test triggers it).
 
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
@@ -900,6 +948,12 @@ json_blueprint 74a9a7d, fabric d10635f, llm_wire 576482e.
     the lease renewal (≤ 2 s here), so the 250 ms costs little, but it is a
     loop the app owns. Fabric-owned: an `await` that also returns on a
     caller's selector.
+
+    **Status (round 5):** resolved by `fabric.await_with`. `follow` waits for
+    the run and `worker.cancellation` in one receive (5 s slices, only
+    because the loop also re-reads the status), and the 250 ms polling and its
+    `selector_receive` are gone.
+
   - **The handler's cancel reason is dropped**: the job ends
     `Cancelled("cancelled by caller")` though the handler returned
     `Cancelled("research cancelled")` (grind; the test pins it).
@@ -1021,3 +1075,48 @@ Package heads: llm_wire 9f35183, http_gun 4a6eeb0, saga af644b0, fabric
   llm_wire guide named `researcher.gleam`, `telemetry.gleam`, `services.gleam`
   and the test. It did not say that correlation needs the agent built per
   research for fabric's model; that is the one step the guide left to the app.
+
+### After round 5
+
+Package heads: fabric fd60851 / 409f1a7 (local, not pushed).
+
+- **Tests**: 9 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests, which replay the job in
+  another VM and find the run by its derived id. `gleam run` prints the four
+  scenarios; `gleam format` and `gleam build --warnings-as-errors` pass. One
+  assertion added: no fabric event is unattributed.
+- **Lines** (`git diff --numstat`, source and test): 177 added, 205 removed,
+  net 28 fewer. By file: `db.gleam` 137 → 110 (`run_id` column and field,
+  `set_run`), `telemetry.gleam` 398 → 387 (`Run` key, `BindRun`, run table,
+  `bind_run`), `remote.gleam` 70 → 61 (`correlated`), `researcher.gleam`
+  203 → 202 (`agent_for` 12 lines out; the correlation plumbing in), `jobs.gleam`
+  318 → 318 (81 lines rewritten), `app.gleam` 330 → 349 (the `snapshot`
+  attempt lookup, 21 lines, and `Duration` settings). The Duration changes
+  are `model_retry_delay`, `fabric_lease`, `await_with` and `with_lease`; no
+  millisecond integer reaches fabric any more.
+- **Unattributed events per request**: 0 of 51 on the common path (was 0 of
+  51, but through `bind_run`). Remaining holes, not exercised by a test:
+  fabric's `lease.lose` carries no correlation, and Sinal's
+  `forwarder.dropped` is unkeyed by nature.
+- **New friction**:
+  - A derived run id needs Grind's attempt, which only a running handler
+    reads. `app.snapshot` goes through the operator listing (`admin.list`
+    with `after(job_id - 1)`, limit 1) to find it. Grind should offer the
+    attempt on a handle, or fabric should open "the latest run of a family".
+  - `run.parse_id` is a `Result` for a string the app built from two
+    integers, so `jobs.run_id` carries a `let assert`; a constructor from a
+    prefix and a number, or `run.id_from(parts)`, would not.
+  - The saga step gets no `tool.Call`, so the publication's HTTP client is
+    still correlated by hand. The app's saga is started by the job, not by a
+    fabric tool, so `fabric_saga.tool` does not apply.
+  - `StartUnconfirmed` is the caller's to retry; the app wrote a three-try
+    recursion for it. Fabric could retry once itself, since the id is
+    idempotent.
+  - `fabric.cancel`'s non-cancelled result and a consumed `Interrupted(Nil)`
+    drop a cancellation silently: when the run finished in the same moment,
+    the job follows the run to its end. This was true of the polling loop
+    too, and is now visible at the call.
+- **Migration guide**: accurate for the three sites it names. It said the job
+  could "start under `run.parse_id(job_id)`", which is only right if a retry
+  may reopen a finished run; this app's `NoSources` retry needs the attempt
+  in the id, which the guide does not mention.

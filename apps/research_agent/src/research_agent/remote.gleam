@@ -8,7 +8,6 @@ import gleam/list
 import gleam/result
 import http_gun
 import http_gun/error
-import sinal/correlation
 
 pub type Failure {
   /// The request never produced a response.
@@ -22,14 +21,6 @@ pub fn describe(failure: Failure) -> String {
     Unreachable(failure) -> "unreachable: " <> error.describe(failure)
     Status(code, _) -> "HTTP " <> int.to_string(code)
   }
-}
-
-/// A client whose requests carry the research id as their correlation.
-pub fn correlated(
-  client: http_gun.Client,
-  research: String,
-) -> http_gun.Client {
-  http_gun.with_correlation(client, correlation.from_key(research))
 }
 
 pub fn call(

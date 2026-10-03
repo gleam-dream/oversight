@@ -10,8 +10,9 @@
 ////   job `recover`s the run and continues from the last commit.
 //// - Saga owns the publication's effects and their compensation, with its
 ////   checkpoint in `saga_executions` (saga_postgres).
-//// - The app owns the join: the `research` row that names the job id and
-////   the run id, because Fabric issues the run id itself.
+//// - The app owns one join: the `research` row names the Grind job, which
+////   Grind issues. The run id derives from the job (`run_id`), so a replayed
+////   job starts its run idempotently and no row names the run.
 
 import fabric
 import fabric/agent.{type Agent}
@@ -20,7 +21,7 @@ import fabric/store.{type Store}
 import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -38,6 +39,7 @@ import research_agent/wire
 import saga/durable
 import saga/execution
 import saga/storage.{type Storage}
+import sinal/correlation.{type Correlation}
 
 pub const queue = "research"
 
@@ -46,7 +48,8 @@ pub const queue = "research"
 pub type Deps {
   Deps(
     runs: Store,
-    agent: fn(Context) -> Agent(Context),
+    agent: Agent(Context),
+    context: Context,
     http: http_gun.Client,
     sagas: Storage,
     endpoints: Endpoints,
@@ -112,16 +115,15 @@ pub fn handle(
   job: worker.Context,
   research: Research,
 ) -> worker.Response(Published, ResearchError) {
-  let context = researcher.context(deps.http, research.id)
   let conn = worker.connection(job)
-  case drive_agent(deps, conn, context, worker.cancellation(job), research) {
+  case drive_agent(deps, job, conn, research) {
     Ok(domain.Written(title, body)) -> {
       let _ = db.set_state(conn, research.id, events.Publishing, title)
       let article = Article(research.id, title, body)
       let published =
         publish.run(
           deps.sagas,
-          context.http,
+          http_gun.with_correlation(deps.http, worker.correlation(job)),
           deps.publisher,
           article,
           worker.correlation(job),
@@ -184,120 +186,117 @@ type Ending {
   Stopped(reason: String)
 }
 
-/// Starts the run, or continues the one this research already has.
+/// The Fabric run of one attempt of a job. Grind's `job_id` is stable across
+/// replays and `attempt` counts only business attempts, so a replayed job
+/// finds its own run and a retried job (`NoSources`) starts a fresh one.
+pub fn run_id(job_id: Int, attempt: Int) -> run.RunId {
+  let assert Ok(id) =
+    run.parse_id(
+      "research-" <> int.to_string(job_id) <> "-" <> int.to_string(attempt),
+    )
+    as "digits and dashes are a valid run id"
+  id
+}
+
+/// Starts the attempt's run, or continues the one a replay already has.
 fn drive_agent(
   deps: Deps,
+  job: worker.Context,
   conn: pog.Connection,
-  context: Context,
-  cancellation: process.Selector(Nil),
   research: Research,
 ) -> Result(domain.Answer, Ending) {
-  use row <- result.try(db.get(conn, research.id) |> result.map_error(Stopped))
-  use handle <- result.try(case row.run_id {
-    None -> start_run(deps, conn, context, research)
-    Some(id) -> {
-      let assert Ok(id) = run.parse_id(id)
-      // On a leased store `recover` is safe at any time: it takes over only
-      // a free or expired lease, or a lease of this store whose runner is
-      // gone, and otherwise just opens the run.
-      fabric.recover(deps.runs, deps.agent(context), context, id)
-      |> result.map_error(fn(e) { Stopped("recover: " <> string.inspect(e)) })
-      |> result.try(fn(handle) {
-        // A previous attempt that found no sources ends a run; a retry
-        // starts afresh.
-        case fabric.await(handle, 0) {
-          Ok(run.Finished(run.Completed(text))) ->
-            case domain.parse_answer(text) {
-              Ok(domain.NoSources(_)) ->
-                start_run(deps, conn, context, research)
-              _ -> Ok(handle)
-            }
-          _ -> Ok(handle)
-        }
-      })
-    }
-  })
-  follow(deps, context, cancellation, handle)
+  let id = run_id(worker.job_id(job), worker.attempt(job))
+  let correlation = worker.correlation(job)
+  use handle <- result.try(start_run(deps, conn, research, id, correlation, 3))
+  follow(deps, correlation, worker.cancellation(job), handle)
 }
 
 fn start_run(
   deps: Deps,
   conn: pog.Connection,
-  context: Context,
   research: Research,
+  id: run.RunId,
+  correlation: Correlation,
+  tries: Int,
 ) -> Result(fabric.Run(Context), Ending) {
-  use handle <- result.try(
+  let started =
     fabric.start(
       deps.runs,
-      deps.agent(context),
-      context,
-      domain.prompt(research),
+      deps.agent,
+      id:,
+      context: deps.context,
+      prompt: domain.prompt(research),
+      correlation: Some(correlation),
     )
-    |> result.map_error(fn(e) { Stopped("start: " <> string.inspect(e)) }),
-  )
-  // Fabric issues the run id, so it is recorded only after the run's first
-  // commit (FEEDBACK RA-3).
-  let id = run.id_to_string(fabric.id(handle))
-  telemetry.bind_run(deps.telemetry, id, research.id)
-  use Nil <- result.map(
-    db.set_run(conn, research.id, id) |> result.map_error(Stopped),
-  )
-  handle
+  case started {
+    Ok(handle) -> {
+      use Nil <- result.map(
+        db.set_state(conn, research.id, events.Researching, "")
+        |> result.map_error(Stopped),
+      )
+      handle
+    }
+    // A replay: on a leased store `recover` is safe at any time. It takes
+    // over only a free or expired lease, or a lease of this store whose
+    // runner is gone, and otherwise just opens the run.
+    Error(fabric.AlreadyStarted(_)) ->
+      fabric.recover(deps.runs, deps.agent, deps.context, id)
+      |> result.map_error(fn(e) { Stopped("recover: " <> string.inspect(e)) })
+    // The same id may be started again.
+    Error(fabric.StartUnconfirmed(..)) if tries > 1 ->
+      start_run(deps, conn, research, id, correlation, tries - 1)
+    Error(e) -> Error(Stopped("start: " <> string.inspect(e)))
+  }
 }
 
-/// Waits for the run in short slices, so the job's cancellation reaches it:
-/// `fabric.await` takes no selector, so the handler polls Grind's.
+/// Waits for the run, or for Grind's cancellation of the job, whichever
+/// comes first.
 fn follow(
   deps: Deps,
-  context: Context,
+  correlation: Correlation,
   cancellation: process.Selector(Nil),
   handle: fabric.Run(Context),
 ) -> Result(domain.Answer, Ending) {
-  let next = fn(handle) { follow(deps, context, cancellation, handle) }
-  case fabric.await(handle, 250) {
-    Ok(run.Working) ->
-      case process.selector_receive(cancellation, 0) {
-        // Grind committed a cancellation of this job: cancel the run, which
-        // kills its model call and closes the LLM stream.
-        Ok(Nil) ->
-          case fabric.cancel(handle) {
-            Ok(run.Finished(run.Cancelled)) -> Error(Cancelled)
-            _ -> next(handle)
-          }
-        Error(Nil) -> next(handle)
+  let next = fn(handle) { follow(deps, correlation, cancellation, handle) }
+  case
+    fabric.await_with(handle, within: duration.seconds(5), or: cancellation)
+  {
+    // Grind committed a cancellation of this job: cancel the run, which
+    // kills its model call and closes the LLM stream.
+    Ok(fabric.Interrupted(Nil)) ->
+      case fabric.cancel(handle) {
+        Ok(run.Finished(run.Cancelled)) -> Error(Cancelled)
+        _ -> next(handle)
       }
-    Ok(run.Unattended) ->
+    Ok(fabric.Reached(run.Working)) -> next(handle)
+    Ok(fabric.Reached(run.Unattended)) ->
       case
-        fabric.recover(
-          deps.runs,
-          deps.agent(context),
-          context,
-          fabric.id(handle),
-        )
+        fabric.recover(deps.runs, deps.agent, deps.context, fabric.id(handle))
       {
         Ok(handle) -> next(handle)
         Error(e) -> Error(Stopped("recover: " <> string.inspect(e)))
       }
-    Ok(run.Suspended([], uncertain)) ->
-      case reconcile_all(deps, context, handle, uncertain) {
+    Ok(fabric.Reached(run.Suspended([], uncertain))) ->
+      case reconcile_all(deps, correlation, handle, uncertain) {
         Ok(Nil) -> next(handle)
         Error(reason) -> Error(Stopped(reason))
       }
-    Ok(run.Suspended(approvals, _)) ->
+    Ok(fabric.Reached(run.Suspended(approvals, _))) ->
       Error(Stopped(
         int.to_string(list.length(approvals)) <> " unexpected approvals",
       ))
-    Ok(run.Finished(run.Completed(text))) ->
+    Ok(fabric.Reached(run.Finished(run.Completed(text)))) ->
       domain.parse_answer(text) |> result.map_error(Stopped)
-    Ok(run.Finished(run.Cancelled)) -> Error(Cancelled)
-    Ok(run.Finished(other)) -> Error(Stopped(string.inspect(other)))
+    Ok(fabric.Reached(run.Finished(run.Cancelled))) -> Error(Cancelled)
+    Ok(fabric.Reached(run.Finished(other))) ->
+      Error(Stopped(string.inspect(other)))
     Error(e) -> Error(Stopped("await: " <> string.inspect(e)))
   }
 }
 
 fn reconcile_all(
   deps: Deps,
-  context: Context,
+  correlation: Correlation,
   handle: fabric.Run(Context),
   uncertain: List(run.UncertainAction),
 ) -> Result(Nil, String) {
@@ -307,7 +306,8 @@ fn reconcile_all(
   list.try_each(uncertain, fn(action) {
     use content <- result.try(researcher.replay_read_only(
       deps.endpoints,
-      context,
+      deps.context,
+      correlation,
       snapshot,
       action,
     ))

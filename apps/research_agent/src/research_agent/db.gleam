@@ -1,25 +1,18 @@
 //// The application's own table on the pool it shares with Grind, Fabric and
-//// Saga: the `research` index that ties one research id to its Grind job,
-//// its Fabric run and its result. The app's pool puts the node's schema first
+//// Saga: the `research` index that ties one research id to its Grind job and
+//// its progress. The Fabric run needs no column: its id derives from the job
+//// (`jobs.run_id`). The app's pool puts the node's schema first
 //// on its `search_path`, so the unqualified table lives next to Grind's,
 //// Fabric's and Saga's.
 
 import gleam/dynamic/decode
-import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import pog
 import research_agent/events
 
 pub type Row {
-  Row(
-    id: String,
-    topic: String,
-    job_id: Int,
-    run_id: Option(String),
-    state: String,
-    detail: String,
-  )
+  Row(id: String, topic: String, job_id: Int, state: String, detail: String)
 }
 
 pub fn migrate(db: pog.Connection, schema: String) -> Result(Nil, String) {
@@ -34,7 +27,6 @@ pub fn migrate(db: pog.Connection, schema: String) -> Result(Nil, String) {
          id text PRIMARY KEY,
          topic text NOT NULL,
          job_id bigint NOT NULL,
-         run_id text,
          state text NOT NULL,
          detail text NOT NULL DEFAULT '',
          updated_at timestamptz NOT NULL DEFAULT now())",
@@ -58,24 +50,6 @@ pub fn insert(
   |> pog.parameter(pog.text(topic))
   |> pog.parameter(pog.int(job_id))
   |> exec(tx, _)
-}
-
-/// Records the Fabric run id. Fabric issues the id inside `fabric.start`, so
-/// this write necessarily follows the run's first commit: a crash between
-/// the two leaves an orphan run (see FEEDBACK RA-3).
-pub fn set_run(
-  db: pog.Connection,
-  id: String,
-  run_id: String,
-) -> Result(Nil, String) {
-  pog.query(
-    "UPDATE research SET run_id = $2, state = 'researching', updated_at = now()
-     WHERE id = $1",
-  )
-  |> pog.parameter(pog.text(id))
-  |> pog.parameter(pog.text(run_id))
-  |> exec(db, _)
-  |> announced(id, events.Researching)
 }
 
 pub fn set_state(
@@ -106,7 +80,7 @@ fn announced(
 
 pub fn get(db: pog.Connection, id: String) -> Result(Row, String) {
   pog.query(
-    "SELECT id, topic, job_id, run_id, state, detail FROM research WHERE id = $1",
+    "SELECT id, topic, job_id, state, detail FROM research WHERE id = $1",
   )
   |> pog.parameter(pog.text(id))
   |> pog.returning(row_decoder())
@@ -124,10 +98,9 @@ fn row_decoder() -> decode.Decoder(Row) {
   use id <- decode.field(0, decode.string)
   use topic <- decode.field(1, decode.string)
   use job_id <- decode.field(2, decode.int)
-  use run_id <- decode.field(3, decode.optional(decode.string))
-  use state <- decode.field(4, decode.string)
-  use detail <- decode.field(5, decode.string)
-  decode.success(Row(id:, topic:, job_id:, run_id:, state:, detail:))
+  use state <- decode.field(3, decode.string)
+  use detail <- decode.field(4, decode.string)
+  decode.success(Row(id:, topic:, job_id:, state:, detail:))
 }
 
 fn exec(db: pog.Connection, query: pog.Query(a)) -> Result(Nil, String) {

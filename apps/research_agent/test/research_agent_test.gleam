@@ -45,7 +45,7 @@ fn settings(
     node:,
     schema:,
     services: services.base_url(world),
-    fabric_lease_ms: 1000,
+    fabric_lease: duration.seconds(1),
     telemetry:,
   )
 }
@@ -146,6 +146,7 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   // The model runs on the research's correlated client view, and llm_wire
   // reads the correlation from it: its events join, and none is left over.
   let assert True = list.contains(sources, "llm_wire")
+  let assert Error(Nil) = list.key_find(trace.unattributed, "fabric")
   let assert Error(Nil) = list.key_find(trace.unattributed, "llm_wire")
   let assert Error(Nil) = list.key_find(trace.unattributed, "saga")
   let assert Error(Nil) = list.key_find(trace.unattributed, "http_gun")
