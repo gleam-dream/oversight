@@ -206,7 +206,8 @@ pub fn billing_down_keeps_the_session_test() {
   billing_api.stop(portal.billing_api)
   let assert Ok(#(_, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.status == 503
-  assert string.contains(page.body, "ConnectionFailed")
+  assert string.contains(page.body, "Connection failed")
+  assert string.contains(page.body, "not sent")
   assert rows(portal) == 1
   assert fake_idp.stats(portal.idp).refresh_grants == 0
 }

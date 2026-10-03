@@ -12,6 +12,8 @@ import gleam/string
 import gleam/uri
 import http_gun
 import http_gun/config
+import http_gun/destination
+import http_gun/error
 import sso_portal/pki.{type Pki}
 
 pub type Browser {
@@ -26,19 +28,16 @@ pub type Page {
 /// loopback, like a developer's browser would.
 pub fn new(pki: Pki) -> Browser {
   let assert Ok(client) =
-    config.Config(
-      ..config.default(),
-      trust: config.Anchors([pki.certificate_der]),
-      deadline_ms: 10_000,
-    )
-    |> config.allow_loopback
+    config.default()
+    |> config.with_trust(config.Anchors([pki.certificate_der]))
+    |> config.with_request_timeout(config.Milliseconds(10_000))
+    |> config.with_destination(destination.loopback_only())
     |> http_gun.start
   Browser(client:, jar: dict.new())
 }
 
 pub fn close(browser: Browser) -> Nil {
-  let _ = http_gun.stop(browser.client)
-  Nil
+  http_gun.stop(browser.client)
 }
 
 /// One request; cookies are recorded, redirects are not followed.
@@ -64,7 +63,7 @@ pub fn request(
   }
   use buffered <- result.try(
     http_gun.send(browser.client, req)
-    |> result.map_error(fn(f) { "http: " <> string.inspect(f.reason) }),
+    |> result.map_error(fn(f) { "http: " <> error.describe(f) }),
   )
   let response = buffered.response
   let jar =

@@ -195,19 +195,11 @@ fn start_warden(
 fn start_billing_client(
   telemetry: Telemetry,
 ) -> Result(http_gun.Client, String) {
-  let settings =
-    gun_config.Config(
-      ..gun_config.default(),
-      deadline_ms: 5000,
-      connect_ms: 1000,
-      observations: Some(telemetry.forwarder(telemetry)),
-    )
-    |> gun_config.allow_loopback
-  // Billing is loopback only; there is no helper for denying public hosts.
-  gun_config.Config(
-    ..settings,
-    destination: destination.Policy(..settings.destination, allow_public: False),
-  )
+  gun_config.default()
+  |> gun_config.with_request_timeout(gun_config.Milliseconds(5000))
+  |> gun_config.with_connect_timeout(1000)
+  |> gun_config.with_observations(telemetry.forwarder(telemetry))
+  |> gun_config.with_destination(destination.loopback_only())
   |> http_gun.start
   |> result.map_error(fn(failure) {
     "billing client: " <> string.inspect(failure)

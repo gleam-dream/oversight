@@ -83,45 +83,57 @@ pub fn start(print: Bool) -> Result(Telemetry, String) {
     |> result.replace_error("forwarder did not start"),
   )
   let warden_attachment =
-    sinal.observe(observation.http_request(), fn(m, r) {
-      process.send(
-        collector,
-        AddWarden(
-          process.self(),
-          WardenHttp(
-            request: option.None,
-            method: case r.method {
-              observation.Get -> "GET"
-              observation.Post -> "POST"
-            },
-            path: r.path,
-            outcome: case r.outcome {
-              observation.Status(code) -> int.to_string(code)
-              observation.Failed(sent:, class:) ->
-                "failed(" <> class <> ", sent=" <> string.inspect(sent) <> ")"
-            },
-            duration_ms: m.duration_ms,
+    sinal.observe_labelled(
+      observation.http_request(),
+      "sso_portal_warden",
+      fn(m, r) {
+        process.send(
+          collector,
+          AddWarden(
+            process.self(),
+            WardenHttp(
+              request: option.None,
+              method: case r.method {
+                observation.Get -> "GET"
+                observation.Post -> "POST"
+              },
+              path: r.path,
+              outcome: case r.outcome {
+                observation.Status(code) -> int.to_string(code)
+                observation.Failed(sent:, class:) ->
+                  "failed(" <> class <> ", sent=" <> string.inspect(sent) <> ")"
+              },
+              duration_ms: m.duration_ms,
+            ),
           ),
-        ),
-      )
-    })
+        )
+      },
+    )
   let gun_attachment =
-    sinal.observe(gun_telemetry.event(), fn(_timing, meta) {
-      process.send(
-        collector,
-        Add(GunLifecycle(
-          correlation: meta.correlation,
-          milestone: milestone(meta.milestone),
-        )),
-      )
-    })
+    sinal.observe_labelled(
+      gun_telemetry.event(),
+      "sso_portal_http_gun",
+      fn(_timing, meta) {
+        process.send(
+          collector,
+          Add(GunLifecycle(
+            correlation: meta.correlation,
+            milestone: milestone(meta.milestone),
+          )),
+        )
+      },
+    )
   let drop_attachment =
-    sinal.observe(forwarder.dropped_event(), fn(d, _meta) {
-      process.send(
-        collector,
-        Add(ForwarderDropped(d.rejected, d.lost, d.unavailable)),
-      )
-    })
+    sinal.observe_labelled(
+      forwarder.dropped_event(),
+      "sso_portal_dropped",
+      fn(d, _meta) {
+        process.send(
+          collector,
+          Add(ForwarderDropped(d.rejected, d.lost, d.unavailable)),
+        )
+      },
+    )
   Ok(Telemetry(
     collector:,
     forwarder:,
@@ -139,7 +151,7 @@ pub fn stop(telemetry: Telemetry) -> Nil {
   process.kill(telemetry.supervisor)
 }
 
-/// The forwarder to put in `http_gun/config.Config(observations:)`.
+/// The forwarder to pass to `http_gun/config.with_observations`.
 pub fn forwarder(telemetry: Telemetry) -> Forwarder {
   telemetry.forwarder
 }
