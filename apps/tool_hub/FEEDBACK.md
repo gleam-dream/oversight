@@ -211,6 +211,17 @@ input, CallOptions(cancellation: Option(Token), deadline: Option(Int)))`.
   their grace ends; fabric adds a selector for a run's status (owners: relay,
   fabric).
 
+- **Status (round 5):** the waiter is resolved by fabric fd60851.
+  `fabric.await_with(running, within: assistant.budget, or:
+relay_tool.cancelled(call))` waits for the run and for the cancellation in
+  one receive, so `await_or_cancel` (33 lines: the waiter, its
+  `spawn_unlinked` trap, the kill and the nested `Result(Result(..))`) is
+  gone. The handler is one `case` on `Interrupted(Nil)` (cancel the run,
+  return `Cancelled`) and `Reached(status)`; the call and its arms add 5
+  lines to `ask`. The cancellation tests pass unchanged, including the
+  negative one (`cancel_with_caller: False` passes an empty selector, so
+  `Interrupted` never arrives).
+
 ### TH-4 Relay transport failures carry no submission evidence
 
 - **Packages**: relay (http_gun as the model). **Kind**: composition.
@@ -442,6 +453,21 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   The `Link` and the per-question agent stay (~35 lines): fabric events
   carry only the run id, and `llm.model` binds its client before the run
   exists (owner: fabric).
+
+- **Status (round 5):** the app-side join is resolved by fabric fd60851;
+  the relay half is not. `ask` passes the request's correlation to
+  `fabric.start(.., id: run.new_id(), correlation: Some(correlation))`. Fabric
+  then puts it on every run event, on each model turn's HTTP Gun view
+  (`fabric/llm` applies `request.correlation`) and in every `tool.Call`, so:
+  the agent is built once (`assistant.build_agent`, in `tool_hub.start`;
+  `agent_for` and its 18 lines are gone); the question's `Context` is no
+  longer rebuilt with a correlated inventory client (the tools read
+  `call.correlation`, `remote_tools.inbound`, 8 lines); `Link`, `link`, the
+  `on_run` callback and `State.links` are gone (~35 lines). `follow` still
+  needs the run id to name the question, but takes the correlation from the
+  run's own events (`RunKey` now carries both), not from an app-side table.
+  `gleam run` joins the same 12 fabric, 42 http_gun, 20 llm_wire and 6 relay
+  events, and 17 relay events stay unjoined (see round 5 below).
 
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
@@ -876,3 +902,80 @@ New friction:
 - **fabric still takes milliseconds.** `fabric.await(run, within: Int)` is
   the only millisecond conversion left in the app
   (`duration.to_milliseconds(assistant.budget)`); fabric owns it.
+
+  **Status (round 5):** resolved. `fabric.await` and `await_with` take a
+  `Duration`, and the app has no millisecond conversion left.
+
+### After round 5
+
+Package heads: fabric fd60851/409f1a7 (local, not pushed); the others are
+unchanged from wave 4. 14 tests pass, three runs in a row, 14.4, 14.2 and
+14.4 s (15.0 s before). `gleam run` prints the same trail. `gleam format`
+is clean.
+
+| Seam                                                    | Before | After | Change                                                                                                   |
+| ------------------------------------------------------- | ------ | ----- | -------------------------------------------------------------------------------------------------------- |
+| Waiter and selector for cancel (`await_or_cancel`)      | 33     | 0     | `fabric.await_with(.., or: relay_tool.cancelled(call))`; the `case` in `ask` is 5 lines longer (TH-3)    |
+| Agent per question (`agent_for`)                        | 18     | 0     | `build_agent` runs once in `tool_hub.start` (11 lines); `Assistant` holds `agent` instead of four fields |
+| Run ↔ correlation link (`Link`, `link`, `follow` table) | ~35    | 0     | the correlation goes to `fabric.start`; fabric's events carry it; `follow` reads it from `run.start`     |
+| Correlated inventory client per question                | 3      | 0     | `Context` is shared; `remote_tools.inbound` reads `call.correlation` per call (8 lines, two call sites)  |
+| `fabric.await` milliseconds                             | 1      | 0     | `within: assistant.budget` (a `Duration`); the test's `await(handle, 2000)` is `duration.seconds(2)`     |
+
+Lines: src +102 −143 (net −41), test +3 −5. The cancellation glue and the
+correlation glue are the two things that shrank. The test changes are the
+`RunKey` pattern, `hub.assistant.agent` in place of `agent_for` and a
+`Duration`.
+
+Remaining unattributed events for the demo question: **17 relay events**
+(unchanged), and 8 http_gun events that the old count did not report.
+
+- 12 relay events are the inventory server's: `request.admitted`,
+  `invocation.started`, `invocation.completed`, `exchange.closed` for each of
+  the three calls. The agent's Relay client carries the question's
+  correlation, but a client's correlation does not cross the wire, so the
+  server invents none of its own (it has no `http.with_correlation` here).
+  `tool.Call.correlation` made the _client-side_ events join (the three
+  `client.call` records and their http_gun traffic), not these.
+- 5 relay events are the external caller's: its `tools/list` request, that
+  exchange's `exchange.closed`, the `ask_assistant` `exchange.closed` (the
+  closed-exchange metadata has no correlation field) and the two
+  `client.call` records of the `assistant_caller` client, which runs outside
+  the question.
+- The 8 http_gun events belong to `assistant_caller`'s two requests. They are
+  outside the question by design; earlier rounds counted only relay and
+  llm_wire among the unjoined.
+
+Neither remaining gap is fixable in the app. Relay owns both: it has to
+carry the client's correlation to the server (or let the inventory server
+derive one from a header) and put a correlation on `ExchangeClosedMeta`.
+
+New friction:
+
+- **No caller run id here.** The brief's idempotent start does not apply:
+  `ask` is a request, not a job. Relay does not give a handler its invocation
+  id (`HandlerCallContext`), and a retried `tools/call` arrives as a new POST
+  with a new correlation, so `run.new_id()` is the only honest id and a
+  client retry starts a second run. If Relay exposed the request's
+  idempotency key or invocation id, `run.parse_id` could derive the run id
+  from it and a retry would find `AlreadyStarted`.
+- **`follow` still takes the run id.** `Answer.run_id` is the only handle an
+  MCP client has, so the telemetry join keeps one lookup: find the
+  correlation on the run's events, then join everything under it. That is
+  four lines, but it means the answer does not carry the correlation. Putting
+  the correlation in `Answer` would be an output-schema change for a
+  diagnostic, so it was not done.
+- **`await_with` leaves a dead branch.** With `cancel_with_caller: False`
+  the selector is empty and `Interrupted(Nil)` cannot arrive, yet the type
+  still demands the arm. That is what `process.new_selector()` costs; a
+  `Never`-typed variant would be exact but is not worth a second function.
+- **`Assistant` lost its model fields, and `tool_hub.start` gained them.**
+  Building the agent once moves the provider client, settings, model id and
+  tools from the record into `start`. The test helper `cancelled_run` reopens
+  a run with `hub.assistant.agent`, so the agent is now a public field of the
+  record rather than something the caller can rebuild.
+- **`remote_tools.inbound` is needed twice.** The typed and the discovered
+  mount both wrap the peer with `call.correlation`. A fabric helper that
+  applied the call's correlation to any package's handle would not help, as
+  each package has its own `with_correlation`; the 8 lines stay in the app.
+- **The suite is slightly faster** (14.3 s against 15.0 s). The drain in
+  `client.close` (about 5 s per in-flight call) still dominates.

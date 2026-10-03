@@ -21,7 +21,6 @@ import relay/content
 import relay/http
 import relay/testing as relay_testing
 import relay/tool as relay_tool
-import sinal/correlation
 import tool_hub
 import tool_hub/assistant
 import tool_hub/inventory
@@ -77,7 +76,7 @@ fn stream_closed_within(
 fn run_ids(records: List(telemetry.Record)) -> List(String) {
   list.filter_map(records, fn(record) {
     case record.package, record.event, record.key {
-      "fabric", "run.start", telemetry.RunKey(id) -> Ok(id)
+      "fabric", "run.start", telemetry.RunKey(id, _) -> Ok(id)
       _, _, _ -> Error(Nil)
     }
   })
@@ -517,10 +516,9 @@ fn same(mcp: client.Client) -> client.Client {
 fn cancelled_run(hub: tool_hub.Hub) -> run.Status {
   let assert [id] = run_ids(telemetry.records(hub.telemetry))
   let assert Ok(parsed) = run.parse_id(id)
-  let assert Ok(desk) = assistant.agent_for(hub.assistant, correlation.unique())
   let assert Ok(handle) =
-    fabric.open(hub.store, desk, hub.assistant.context, parsed)
-  let assert Ok(status) = fabric.await(handle, 2000)
+    fabric.open(hub.store, hub.assistant.agent, hub.assistant.context, parsed)
+  let assert Ok(status) = fabric.await(handle, within: duration.seconds(2))
   status
 }
 

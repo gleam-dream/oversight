@@ -2,14 +2,15 @@
 //// follow one question across them.
 ////
 //// Join keys available today:
-//// - fabric: the run id on every agent event.
-//// - http_gun, llm_wire and relay: the question's `Correlation`. The assistant
-////   server gives each request one (`http.with_correlation`), the handler
-////   reads it (`tool.correlation`) and puts it on the provider's HTTP Gun view
-////   (which llm_wire reads) and on the inventory client's Relay view.
+//// - fabric, http_gun, llm_wire and relay: the question's `Correlation`. The
+////   assistant server gives each request one (`http.with_correlation`), the
+////   handler reads it (`tool.correlation`) and starts the run under it
+////   (`fabric.start`). Fabric puts it on every run event, on the provider's
+////   HTTP Gun view (which llm_wire reads) and in every `tool.Call`, which the
+////   tools put on the inventory client's Relay view.
 //// - relay events of the inventory server: an exchange or invocation integer
 ////   only, because a Relay client's correlation does not cross the wire.
-//// The app links the run id to the correlation once the run exists.
+//// Fabric events also carry the run id, which names the question to follow.
 
 import fabric/model
 import fabric/observation
@@ -26,8 +27,8 @@ import sinal
 import sinal/correlation.{type Correlation}
 
 pub type Key {
-  /// A fabric run id.
-  RunKey(String)
+  /// A fabric run id and the correlation its events carry.
+  RunKey(run: String, correlation: Correlation)
   /// The `Correlation` of one question.
   CorrelationKey(Correlation)
   /// A Relay exchange id (per HTTP POST).
@@ -50,35 +51,22 @@ pub opaque type Telemetry {
   Telemetry(collector: Subject(Message), attachments: List(sinal.Attachment))
 }
 
-type State {
-  State(records: List(Record), links: List(#(String, Correlation)))
-}
-
 type Message {
   Add(Record)
-  Link(run: String, correlation: Correlation)
-  Snapshot(Subject(State))
+  Snapshot(Subject(List(Record)))
 }
 
 /// Attaches to every event. The handlers only send to the collector, so they
 /// run in the emitting process and need no forwarder.
 pub fn start() -> Telemetry {
   let assert Ok(collector) =
-    actor.new(State([], []))
-    |> actor.on_message(fn(state, message) {
+    actor.new([])
+    |> actor.on_message(fn(records, message) {
       case message {
-        Add(record) ->
-          actor.continue(State(..state, records: [record, ..state.records]))
-        Link(run, correlation) ->
-          actor.continue(
-            State(..state, links: [#(run, correlation), ..state.links]),
-          )
+        Add(record) -> actor.continue([record, ..records])
         Snapshot(reply) -> {
-          process.send(
-            reply,
-            State(..state, records: list.reverse(state.records)),
-          )
-          actor.continue(state)
+          process.send(reply, list.reverse(records))
+          actor.continue(records)
         }
       }
     })
@@ -136,15 +124,6 @@ pub fn start() -> Telemetry {
   Telemetry(sink, attachments)
 }
 
-/// Records which correlation a run's question carries.
-pub fn link(
-  telemetry: Telemetry,
-  run: String,
-  correlation: Correlation,
-) -> Nil {
-  process.send(telemetry.collector, Link(run, correlation))
-}
-
 fn key_of(correlation: Option(Correlation), otherwise: Key) -> Key {
   case correlation {
     Some(correlation) -> CorrelationKey(correlation)
@@ -153,28 +132,24 @@ fn key_of(correlation: Option(Correlation), otherwise: Key) -> Key {
 }
 
 pub fn records(telemetry: Telemetry) -> List(Record) {
-  snapshot(telemetry).records
-}
-
-fn snapshot(telemetry: Telemetry) -> State {
   process.call(telemetry.collector, 1000, Snapshot)
 }
 
 /// Every record that a key joins to `run`, and every other record.
 pub fn follow(telemetry: Telemetry, run: String) -> Followed {
-  let State(records:, links:) = snapshot(telemetry)
+  let records = records(telemetry)
+  // The run's own events name its correlation.
   let correlations =
-    list.filter_map(links, fn(link) {
-      case link.0 == run {
-        True -> Ok(link.1)
-        False -> Error(Nil)
+    list.filter_map(records, fn(record) {
+      case record.key {
+        RunKey(id, correlation) if id == run -> Ok(correlation)
+        _ -> Error(Nil)
       }
     })
   let #(joined, unjoined) =
     list.partition(records, fn(record) {
       case record.key {
-        RunKey(id) -> id == run
-        CorrelationKey(id) -> list.contains(correlations, id)
+        RunKey(_, id) | CorrelationKey(id) -> list.contains(correlations, id)
         _ -> False
       }
     })
@@ -193,7 +168,7 @@ pub fn has(records: List(Record), package: String, event: String) -> Bool {
 
 pub fn render(record: Record) -> String {
   let key = case record.key {
-    RunKey(_) -> " [run]"
+    RunKey(..) -> " [run]"
     CorrelationKey(_) -> " [correlation]"
     ExchangeKey(id) -> " [exchange " <> int.to_string(id) <> "]"
     InvocationKey(id) -> " [invocation " <> int.to_string(id) <> "]"
@@ -336,7 +311,9 @@ fn fabric_handlers(
     sinal.observe_labelled(
       observation.run_started(),
       "tool_hub_fabric_run_started",
-      fn(_, m) { add("fabric", "run.start", m.agent, RunKey(m.run)) },
+      fn(_, m) {
+        add("fabric", "run.start", m.agent, RunKey(m.run, m.correlation))
+      },
     ),
     sinal.observe_labelled(
       observation.model_turn(),
@@ -350,7 +327,7 @@ fn fabric_handlers(
             <> " "
             <> string.inspect(m.result)
             <> usage_text(usage),
-          RunKey(m.run),
+          RunKey(m.run, m.correlation),
         )
       },
     ),
@@ -358,7 +335,12 @@ fn fabric_handlers(
       observation.tool_dispatched(),
       "tool_hub_fabric_tool_dispatched",
       fn(_, m) {
-        add("fabric", "tool.start", m.action.tool, RunKey(m.action.run))
+        add(
+          "fabric",
+          "tool.start",
+          m.action.tool,
+          RunKey(m.action.run, m.correlation),
+        )
       },
     ),
     sinal.observe_labelled(
@@ -369,14 +351,14 @@ fn fabric_handlers(
           "fabric",
           "tool.stop",
           m.action.tool <> " " <> string.inspect(m.disposition),
-          RunKey(m.action.run),
+          RunKey(m.action.run, m.correlation),
         )
       },
     ),
     sinal.observe_labelled(
       observation.run_cancelled(),
       "tool_hub_fabric_run_cancelled",
-      fn(_, m) { add("fabric", "run.cancel", "", RunKey(m.run)) },
+      fn(_, m) { add("fabric", "run.cancel", "", RunKey(m.run, m.correlation)) },
     ),
     sinal.observe_labelled(
       observation.run_finished(),
@@ -391,7 +373,7 @@ fn fabric_handlers(
             <> " turns, "
             <> int.to_string(totals.unreported_replies)
             <> " without usage",
-          RunKey(m.run),
+          RunKey(m.run, m.correlation),
         )
       },
     ),

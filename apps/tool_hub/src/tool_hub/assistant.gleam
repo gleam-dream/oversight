@@ -33,17 +33,11 @@ pub type Context {
 pub type Assistant {
   Assistant(
     store: Store,
-    /// The application's HTTP client for the model provider.
-    http: http_gun.Client,
-    settings: llm_wire.Config,
-    model_id: String,
-    tools: List(fabric_tool.Tool(Context)),
+    /// Built once; every question's run reuses it.
+    agent: agent.Agent(Context),
     context: Context,
     /// How long one question may take.
     budget: Duration,
-    /// Called once a run exists, with the correlation its model, inventory
-    /// and Relay events carry, so telemetry can join fabric's run id to it.
-    on_run: fn(run.RunId, Correlation) -> Nil,
     /// Cancel the run when Relay cancels the `ask_assistant` call.
     cancel_with_caller: Bool,
   )
@@ -89,23 +83,19 @@ pub fn ask_assistant() -> relay_tool.Definition(Question, Answer) {
   )
 }
 
-/// The agent for one question. It is rebuilt per question only so that its
-/// model calls carry the question's correlation: `llm.model` binds its HTTP
-/// client when the agent is built, before the run id exists.
-pub fn agent_for(
-  assistant: Assistant,
-  correlation: Correlation,
+/// The assistant's agent, built once. Each run's correlation reaches the
+/// model's HTTP requests through `model.Request`, and the inventory calls
+/// through `tool.Call`.
+pub fn build_agent(
+  http: http_gun.Client,
+  settings: llm_wire.Config,
+  model_id: String,
+  tools: List(fabric_tool.Tool(Context)),
 ) -> Result(agent.Agent(Context), List(agent.ConfigError)) {
-  let model =
-    llm.model(
-      http_gun.with_correlation(assistant.http, correlation),
-      assistant.settings,
-      assistant.model_id,
-    )
   agent.new(
     "inventory_assistant",
-    model,
-    assistant.tools,
+    llm.model(http, settings, model_id),
+    tools,
     policy.always_allow(),
   )
   |> agent.with_system_prompt(
@@ -123,75 +113,45 @@ pub fn ask(
   correlation: Correlation,
   cancelled: process.Selector(Nil),
 ) -> Result(Answer, AskError) {
-  use desk <- result.try(
-    agent_for(assistant, correlation)
-    |> result.map_error(fn(errors) { StartFailed(string.inspect(errors)) }),
-  )
-  // The inventory calls of this question carry its correlation too.
-  let context =
-    Context(client.with_correlation(assistant.context.inventory, correlation))
   use running <- result.try(
-    fabric.start(assistant.store, desk, context, question.question)
+    fabric.start(
+      assistant.store,
+      assistant.agent,
+      id: run.new_id(),
+      context: assistant.context,
+      prompt: question.question,
+      correlation: Some(correlation),
+    )
     |> result.map_error(fn(error) { StartFailed(string.inspect(error)) }),
   )
-  let id = fabric.id(running)
-  let run_id = run.id_to_string(id)
-  assistant.on_run(id, correlation)
+  let run_id = run.id_to_string(fabric.id(running))
   let cancelled = case assistant.cancel_with_caller {
     True -> cancelled
     False -> process.new_selector()
   }
-  case await_or_cancel(running, assistant.budget, cancelled) {
-    Error(Nil) -> Error(Cancelled)
-    Ok(Ok(run.Finished(run.Completed(text)))) -> Ok(Answer(text, run_id))
-    Ok(Ok(run.Finished(run.Refused(reason)))) -> Error(ModelRefused(reason))
-    Ok(Ok(run.Finished(run.Cancelled))) -> Error(Cancelled)
-    Ok(Ok(run.Finished(other))) -> Error(Failed(string.inspect(other)))
-    Ok(Ok(run.Suspended(_approvals, [_, ..] as uncertain))) ->
+  case fabric.await_with(running, within: assistant.budget, or: cancelled) {
+    Ok(fabric.Interrupted(Nil)) -> {
+      let _ = fabric.cancel(running)
+      Error(Cancelled)
+    }
+    Ok(fabric.Reached(run.Finished(run.Completed(text)))) ->
+      Ok(Answer(text, run_id))
+    Ok(fabric.Reached(run.Finished(run.Refused(reason)))) ->
+      Error(ModelRefused(reason))
+    Ok(fabric.Reached(run.Finished(run.Cancelled))) -> Error(Cancelled)
+    Ok(fabric.Reached(run.Finished(other))) ->
+      Error(Failed(string.inspect(other)))
+    Ok(fabric.Reached(run.Suspended(_approvals, [_, ..] as uncertain))) ->
       Error(Uncertain(run_id, uncertain))
-    Ok(Ok(run.Suspended(approvals, []))) ->
+    Ok(fabric.Reached(run.Suspended(approvals, []))) ->
       Error(Failed(
         int.to_string(list.length(approvals)) <> " approvals pending",
       ))
-    Ok(Ok(run.Working)) | Ok(Ok(run.Unattended)) -> {
+    Ok(fabric.Reached(run.Working)) | Ok(fabric.Reached(run.Unattended)) -> {
       let _ = fabric.cancel(running)
       Error(TimedOut(run_id))
     }
-    Ok(Error(error)) -> Error(Failed(string.inspect(error)))
-  }
-}
-
-/// `fabric.await` blocks and offers no selector, so a waiter process
-/// awaits the run and this handler selects on its answer and on `cancelled`.
-/// A cancellation cancels the run, which is the point of the signal.
-fn await_or_cancel(
-  running: fabric.Run(Context),
-  budget: Duration,
-  cancelled: process.Selector(Nil),
-) -> Result(Result(run.Status, fabric.RecordError), Nil) {
-  let answer = process.new_subject()
-  // Unlinked: killing a linked waiter would kill this handler too.
-  let waiter =
-    process.spawn_unlinked(fn() {
-      process.send(
-        answer,
-        fabric.await(running, duration.to_milliseconds(budget)),
-      )
-    })
-  let outcome =
-    process.new_selector()
-    |> process.select_map(answer, Ok)
-    |> process.merge_selector(
-      process.map_selector(cancelled, fn(_) { Error(Nil) }),
-    )
-    |> process.selector_receive_forever
-  process.kill(waiter)
-  case outcome {
-    Ok(status) -> Ok(status)
-    Error(Nil) -> {
-      let _ = fabric.cancel(running)
-      Error(Nil)
-    }
+    Error(error) -> Error(Failed(string.inspect(error)))
   }
 }
 

@@ -5,7 +5,6 @@
 ////    questions with a scripted LLM provider (llm_wire over http_gun).
 //// 3. A second Relay server exposes that agent as the tool `ask_assistant`.
 
-import fabric/run
 import fabric/store
 import fabric/tool as fabric_tool
 import gleam/erlang/process.{type Subject}
@@ -118,19 +117,22 @@ pub fn start(
     Typed -> Ok(typed_tools(inventory_peer))
     Discovered -> remote_tools.discover(peer, inventory_peer) |> result_string
   })
+  use agent <- try(
+    assistant.build_agent(
+      http,
+      scripted_llm.settings(provider),
+      "scripted-1",
+      tools,
+    )
+    |> result_string,
+  )
   let assistant =
     assistant.Assistant(
       store: runs,
-      http:,
-      settings: scripted_llm.settings(provider),
-      model_id: "scripted-1",
-      tools:,
+      agent:,
       context: assistant.Context(peer),
       budget: settings.budget,
       cancel_with_caller: settings.cancel_with_caller,
-      on_run: fn(id, correlation) {
-        telemetry.link(telemetry, run.id_to_string(id), correlation)
-      },
     )
   use assistant_server <- try(assistant.serve(
     assistant,
