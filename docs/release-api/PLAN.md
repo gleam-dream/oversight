@@ -206,6 +206,52 @@ Effect on the apps:
 | fabric         | fabric_typesafe keeps an `@internal` placeholder accessor because `question.Batch` is not a codec.                                                                                                                            | 5    |
 | all            | Timeouts mix `Duration` and `Int` milliseconds across packages (research_agent, secure_mcp). Pick one unit for the ecosystem and record it as a convention.                                                                   | 4    |
 
+### Wave 4 results (3 October 2026)
+
+Wave 4 redesigned llm_wire, relay and warden. Owner decisions for the wave:
+
+- warden validates JWT access tokens locally (RFC 9068) in 1.0;
+- relay stays one package with a framework-neutral handler and a thin mist listener;
+- every public timeout in the ecosystem is a gleam_time `Duration`, with an explicit `Infinity`.
+
+http_gun and saga switched to `Duration` first. Every package gate and every app passed on the final heads before anything was pushed.
+
+| Package  | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| http_gun | `Duration` for every timeout (`Timeout = After(Duration) \| Infinity`); `destination.with_plaintext` decided against resolved addresses; `http_gun.correlation(client)`; `require_view_destination` counts only real narrowing, so a library's scheme tightening cannot lift an application's fail-closed requirement. 206 tests.                                                                                                                                                                                                                                                            |
+| saga     | `Duration` for every timeout, with `execution.Timeout = After(Duration) \| Infinity`. 199 tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| llm_wire | LLM-R1–R11. One execution family (`Request(o)`, `Outcome(o)`, `Event(o)`). Stream timers at 600 s whole call, 180 s first token and 60 s idle, reset by tool-argument deltas. `advise(failure)` returns a `Duration`. Typed errors carry http_gun's `Failure`. Opaque config. Message and turn JSON codecs. Correlation read from the http_gun view. `testing.events_for` per wire. The plaintext rule now lives in http_gun. The ported tests found three bugs: a usage report ending the first-token wait, interrupted fakes completing, and three oracle tests that never ran. 287 tests. |
+| relay    | RELAY-R1–R16. A framework-neutral `http.handler` and a streaming `mist_handler`. The client runs on http_gun, with a typed `client.Error` (status, `WWW-Authenticate`, RPC error, evidence) and per-call headers, deadline, cancellation and correlation. Total `define`, three binders, an opaque `Call`, declarations with `input_contract`. Readable authorization values, rendered challenge and RFC 9728 metadata, and `http.new_protected` with a caller verifier. Bounded defaults; `relay/testing`. Seven bugs found and fixed. 277 tests; conformance 108/108.                      |
+| warden   | WARDEN-R1–R11. A sealed store port (AES-256-GCM) with conformance; `access_token` with a 30 s margin and 5 s wait; `warden/testing` (scripted provider and PKI); a gleam_http boundary; restart-stable handles; RFC 7009 revocation; hardened introspection; and `warden/resource`, local RFC 9068 validation that fails closed. Decisions D19–D34 recorded. 175 tests.                                                                                                                                                                                                                      |
+| fabric   | Migrated to the new llm_wire. Stored turns use llm_wire's `turn_replay_*` codecs; old records read, proven with captured fixtures. `fabric/llm.gleam` 324 → 204 lines. 45/45 gate checks.                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+Late fixes, also before the push:
+
+- **relay:** a cancelled handler gets its grace period (`http.with_cancellation_grace`, default 5 s) before it is killed, on every cancellation path (TH-3). `client.close` cancels in-flight calls at once instead of draining.
+- **warden:** the relay verifier recipe in the README did not compile. It is corrected, mirrored verbatim in the `resource` module doc, and compiled against relay by a new gate step. `resource.verifier` takes labelled `rejected:` and `unavailable:` arguments.
+
+Effect on the apps:
+
+- **Blocker SSO-1 resolved:** sessions survive a warden restart through a pog store that passes `check_store`.
+- **SMCP-2 to SMCP-6 resolved:** secure_mcp deleted its MCP mount (114 lines), raw client (109), test provider (459) and challenge code (41). JWT verification went from 89 lines to 18.
+- **Test providers:** sso_portal deleted its 644-line provider and 160-line refresh policy.
+- **Correlation:** llm_wire events are now fully attributed in extractor and research_agent, and support_desk's llm_wire events now join the ticket (100 → 0 unattributed per ticket).
+- **tool_hub:** TH-2, TH-4, TH-6 and TH-9 resolved.
+
+**Follow-ups found during wave 4:**
+
+| Package  | Item                                                                                                                                                                                                                                                                                   | Wave |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| fabric   | `fabric/llm.model` binds its client when the agent is built, so a per-request correlation needs an agent per request (support_desk, research_agent). `model.Request` should carry the run and correlation (FABRIC-R8).                                                                 | 5    |
+| fabric   | fabric's own public timeouts are still `Int` milliseconds (`fabric.await`, `rollback_within`, `with_deadline`, `fabric_postgres.with_lease`). Apply the `Duration` rule (FABRIC-R3/R7).                                                                                                | 5    |
+| fabric   | Stored turns written after wave 4 omit the dead `issues` list, so a pre-wave-4 fabric cannot read them. Accepted because fabric is unpublished; recorded in its CHANGELOG.                                                                                                             | —    |
+| fabric   | `advise`'s `Retry-After` delay is dropped because `ModelError` has no field for it. `fabric.await` has no selector, so a handler that must react to relay's `cancelled` signal needs an unlinked waiter process (tool_hub: 33 lines that a run-status selector would cut to about 12). | 5    |
+| warden   | The test provider has no HTTP `/authorize`, so apps add a login hook in production code; it cannot revoke a single access token; its audience is fixed at start. The trust anchor is PEM only. The redirect URI cannot vary per login (SSO-10).                                        | 5    |
+| warden   | Warden's exact-audience check runs before relay's, so a wrong-audience token gets the generic 401.                                                                                                                                                                                     | 5    |
+| relay    | A verifier receives only the token, not the request's correlation, so an introspection call cannot be tied to its MCP request. A relay client's correlation does not reach the server's events.                                                                                        | 5    |
+| llm_wire | `testing.events_for` covers success streams only and returns a `Reply` the caller must unwrap; tests build `Failure` values by hand; `advise` stops short of grind's snooze-versus-backoff choice.                                                                                     | 5    |
+| upstream | pog's `timestamp_decoder` fails on `timestamptz` columns (sso_portal casts through epoch microseconds). gleam_time 1.11's `duration.compare` mis-orders negative durations (saga works around it). Report both upstream.                                                               | —    |
+
 ## sinal
 
 | Id        | Change                                                                                              | Breaks              | Effort | Wave | Status                                                              |
