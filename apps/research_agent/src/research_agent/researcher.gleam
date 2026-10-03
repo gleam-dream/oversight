@@ -10,6 +10,7 @@ import gleam/http
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import gleam/uri
 import http_gun
 import json/blueprint/codec
@@ -19,16 +20,18 @@ import research_agent/domain.{
   type Page, type PageRequest, type SearchQuery, type SearchResults, Page,
 }
 import research_agent/remote
+import sinal/correlation.{type Correlation}
 
-/// The live context of one run. Fabric never stores it: `start`, `open` and
-/// `recover` each take it again. The HTTP client carries the research id as
-/// its correlation.
+/// The live context of every run. Fabric never stores it: `start`, `open` and
+/// `recover` each take it again. It holds no run's identity: each tool call
+/// joins its run by `tool.Call.correlation`.
 pub type Context {
-  Context(research: String, http: http_gun.Client)
+  Context(http: http_gun.Client)
 }
 
-pub fn context(http: http_gun.Client, research: String) -> Context {
-  Context(research:, http: remote.correlated(http, research))
+/// The tools' HTTP client for one correlation, the run's.
+fn client(context: Context, correlation: Correlation) -> http_gun.Client {
+  http_gun.with_correlation(context.http, correlation)
 }
 
 /// Where the tools and the provider live.
@@ -56,12 +59,12 @@ pub fn read_definition() -> tool.Definition(PageRequest, Page) {
 
 pub fn search(
   endpoints: Endpoints,
-  context: Context,
+  http: http_gun.Client,
   query: SearchQuery,
 ) -> Result(SearchResults, remote.Failure) {
   let url = endpoints.search <> "?q=" <> uri.percent_encode(query.query)
   use body <- result.try(
-    remote.call(context.http, http.Get, url, [], "")
+    remote.call(http, http.Get, url, [], "")
     |> remote.expect([200]),
   )
   codec.decode_json(domain.search_results_codec(), body)
@@ -71,10 +74,10 @@ pub fn search(
 }
 
 pub fn read(
-  context: Context,
+  http: http_gun.Client,
   request: PageRequest,
 ) -> Result(Page, remote.Failure) {
-  remote.call(context.http, http.Get, request.url, [], "")
+  remote.call(http, http.Get, request.url, [], "")
   |> remote.expect([200])
   |> result.map(fn(text) { Page(request.url, text) })
 }
@@ -115,33 +118,27 @@ pub fn build(
   let tools = [
     tool.bind(
       search_definition(),
-      fn(context, query) { search(endpoints, context, query) },
+      fn(context, call, query) {
+        search(endpoints, client(context, call.correlation), query)
+      },
       explain,
     ),
     tool.bind(
       read_definition(),
-      fn(context, page) { read(context, page) },
+      fn(context, call, page) { read(client(context, call.correlation), page) },
       explain,
     ),
   ]
   agent.new("researcher", model, tools, gate(endpoints))
   |> agent.with_system_prompt(domain.system_prompt())
   |> agent.with_limits(
-    agent.Limits(..agent.default_limits(), max_turns: 8, model_retry_delay: 50),
+    agent.Limits(
+      ..agent.default_limits(),
+      max_turns: 8,
+      model_retry_delay: duration.milliseconds(50),
+    ),
   )
   |> agent.build
-}
-
-/// The agent of one research. llm_wire reads the correlation from the client
-/// a model call is sent on, and a Fabric model sees no run context, so the
-/// model is built over the research's correlated client (RA-7). `start`
-/// builds the agent once to validate its configuration.
-pub fn agent_for(endpoints: Endpoints) -> fn(Context) -> Agent(Context) {
-  fn(context: Context) {
-    let assert Ok(agent) = build(context.http, endpoints)
-      as "the agent was validated when the node started"
-    agent
-  }
 }
 
 /// Recovery glue. After a crash, Fabric turns every tool that had started
@@ -153,6 +150,7 @@ pub fn agent_for(endpoints: Endpoints) -> fn(Context) -> Agent(Context) {
 pub fn replay_read_only(
   endpoints: Endpoints,
   context: Context,
+  correlation: Correlation,
   snapshot: run.Snapshot,
   uncertain: run.UncertainAction,
 ) -> Result(String, String) {
@@ -162,18 +160,19 @@ pub fn replay_read_only(
     |> result.replace_error("no action record for the uncertain effect"),
   )
   let arguments = record.call.arguments_json
+  let http = client(context, correlation)
   let rendered = case uncertain.tool {
     "search" -> {
       use query <- result.try(decode(domain.search_query_codec(), arguments))
       use found <- result.try(
-        search(endpoints, context, query) |> result.map_error(remote.describe),
+        search(endpoints, http, query) |> result.map_error(remote.describe),
       )
       encode(domain.search_results_codec(), found)
     }
     "read" -> {
       use page <- result.try(decode(domain.page_request_codec(), arguments))
       use page <- result.try(
-        read(context, page) |> result.map_error(remote.describe),
+        read(http, page) |> result.map_error(remote.describe),
       )
       encode(domain.page_codec(), page)
     }

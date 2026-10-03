@@ -34,7 +34,7 @@ fn story(url: String) -> Nil {
       node: "demo-1",
       schema: "research_demo",
       services: services.base_url(world),
-      fabric_lease_ms: 3000,
+      fabric_lease: duration.seconds(3),
       telemetry: Some(observed),
     ))
   io.println(

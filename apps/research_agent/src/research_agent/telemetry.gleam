@@ -10,13 +10,14 @@
 //// - saga: the correlation the job handler passes to the durable run
 ////   (`durable.with_correlation`);
 //// - http_gun: the research id as a `Correlation`, attached with
-////   `with_correlation` (the tool handlers do that per call);
-//// - fabric: `run` (issued by `fabric.start`; the app records it);
-//// - llm_wire: the correlation of the HTTP client view the model call runs
-////   on, which is the research id (`researcher.agent_for`).
+////   `with_correlation` (the tool handlers take it from `tool.Call`);
+//// - fabric: the correlation the job passes to `fabric.start`, carried by
+////   every run event but `lease.lose`;
+//// - llm_wire: the correlation of the HTTP client view `fabric/llm` tags
+////   each model turn with, which is the run's, hence the research id.
 
 import fabric/observation as fabric_events
-import gleam/dict.{type Dict}
+import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
@@ -37,9 +38,9 @@ import sinal/forwarder
 /// What an event can be joined on.
 pub type Key {
   /// The research id itself, from every event that carries the research's
-  /// `Correlation`: the app's own, Grind's, Saga's and http_gun's.
+  /// `Correlation`: the app's own, Grind's, Saga's, Fabric's, llm_wire's and
+  /// http_gun's.
   Research(String)
-  Run(String)
   Unkeyed
 }
 
@@ -53,19 +54,18 @@ pub type Telemetry {
 
 pub opaque type Message {
   Record(Observed)
-  BindRun(String, String)
-  Snapshot(Subject(#(List(Observed), Dict(String, String))))
+  Snapshot(Subject(List(Observed)))
 }
 
 type State {
-  State(events: List(Observed), runs: Dict(String, String), echo_events: Bool)
+  State(events: List(Observed), echo_events: Bool)
 }
 
 /// Starts the collector and attaches to every package's events. With
 /// `echo_events`, each event is printed as it arrives.
 pub fn start(echo_events: Bool) -> Telemetry {
   let assert Ok(started) =
-    actor.new(State([], dict.new(), echo_events))
+    actor.new(State([], echo_events))
     |> actor.on_message(handle)
     |> actor.start
   let collector = started.data
@@ -157,7 +157,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
     sinal.observe(
       fabric_events.run_started(),
       fn(_, m: fabric_events.RunStarted) {
-        record("fabric", "run.start", Run(m.run), m.agent)
+        record("fabric", "run.start", research(m.correlation), m.agent)
       },
     ),
     sinal.observe(
@@ -166,7 +166,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "fabric",
           "run.recover",
-          Run(m.run),
+          research(m.correlation),
           "incarnation " <> int.to_string(m.incarnation),
         )
       },
@@ -177,7 +177,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "fabric",
           "run.take_over",
-          Run(m.run),
+          research(m.correlation),
           "from " <> m.previous_owner,
         )
       },
@@ -186,14 +186,14 @@ pub fn start(echo_events: Bool) -> Telemetry {
       record(
         "fabric",
         "model.stop",
-        Run(m.run),
+        research(m.correlation),
         "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
       )
     }),
     sinal.observe(
       fabric_events.tool_dispatched(),
       fn(_, m: fabric_events.ToolDispatched) {
-        record("fabric", "tool.start", Run(m.action.run), m.action.tool)
+        record("fabric", "tool.start", research(m.correlation), m.action.tool)
       },
     ),
     sinal.observe(
@@ -202,7 +202,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "fabric",
           "tool.stop",
-          Run(m.action.run),
+          research(m.correlation),
           m.action.tool <> " " <> string.inspect(m.disposition),
         )
       },
@@ -210,17 +210,22 @@ pub fn start(echo_events: Bool) -> Telemetry {
     sinal.observe(
       fabric_events.run_cancelled(),
       fn(_, m: fabric_events.RunCancelled) {
-        record("fabric", "run.cancel", Run(m.run), "")
+        record("fabric", "run.cancel", research(m.correlation), "")
       },
     ),
     sinal.observe(
       fabric_events.run_finished(),
       fn(_, m: fabric_events.RunFinished) {
-        record("fabric", "run.stop", Run(m.run), string.inspect(m.outcome))
+        record(
+          "fabric",
+          "run.stop",
+          research(m.correlation),
+          string.inspect(m.outcome),
+        )
       },
     ),
     sinal.observe(fabric_events.lease_lost(), fn(_, m: fabric_events.LeaseLost) {
-      record("fabric", "lease.lose", Run(m.run), string.inspect(m.reason))
+      record("fabric", "lease.lose", Unkeyed, string.inspect(m.reason))
     }),
     // saga
     sinal.observe(saga_events.run_started(), fn(_, m: saga_events.RunMetadata) {
@@ -307,25 +312,14 @@ fn job(ref: grind_events.JobRef) -> Key {
   Research(correlation.to_string(ref.correlation))
 }
 
+fn research(correlation: correlation.Correlation) -> Key {
+  Research(correlation.to_string(correlation))
+}
+
 fn keyed(correlation: Option(correlation.Correlation)) -> Key {
   case correlation {
     Some(id) -> Research(correlation.to_string(id))
     None -> Unkeyed
-  }
-}
-
-pub fn bind_run(
-  telemetry: Option(Telemetry),
-  run: String,
-  research: String,
-) -> Nil {
-  each(telemetry, BindRun(run, research))
-}
-
-fn each(telemetry: Option(Telemetry), message: Message) -> Nil {
-  case telemetry {
-    Some(t) -> process.send(t.collector, message)
-    None -> Nil
   }
 }
 
@@ -338,11 +332,10 @@ pub type Trace {
 pub fn trace(telemetry: Telemetry, research: String) -> Trace {
   // Let in-flight forwarder deliveries land.
   process.sleep(100)
-  let #(events, runs) = process.call(telemetry.collector, 2000, Snapshot)
+  let events = process.call(telemetry.collector, 2000, Snapshot)
   let owner = fn(key) {
     case key {
       Research(id) -> Ok(id)
-      Run(id) -> dict.get(runs, id)
       Unkeyed -> Error(Nil)
     }
   }
@@ -374,12 +367,8 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
       }
       actor.continue(State(..state, events: [observed, ..state.events]))
     }
-    BindRun(id, research) ->
-      actor.continue(
-        State(..state, runs: dict.insert(state.runs, id, research)),
-      )
     Snapshot(reply) -> {
-      process.send(reply, #(list.reverse(state.events), state.runs))
+      process.send(reply, list.reverse(state.events))
       actor.continue(state)
     }
   }
