@@ -289,6 +289,16 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `grind_bind_handle_after_terminal_write_test` (secure_mcp_test.gleam:287):
   a succeeded and a business-failed job re-bind by id and read
   `SucceededWith("hello")` and the typed reason `"refused"`.
+- **Status (wave 3):** resolved by grind 749c0dc; nothing left to prove
+  separately. The worker is `worker.new(..) |> worker.with_error_codec(..)`
+  (tools.gleam `report_worker`, 12 lines; 23 before), `report_status` re-binds
+  with `grind.bind`, and a failed report reads back as the typed
+  `grind.Failed(grind.Business("no data for period"), Some(job.RetryDeclined), _)`
+  (`failed_report_test` asserts that value and the `failed: no data for
+period` status). The 41-line probe test
+  `grind_bind_handle_after_terminal_write_test` is deleted: the round-trip and
+  failed-report tests already re-bind a succeeded and a failed job through
+  `report_status`, so the defect is covered by ordinary behavior.
 
 ### SMCP-8 One report type needs two codec systems
 
@@ -321,6 +331,16 @@ tool handlers receive the authenticated principal, and `generate_report` /
   new-friction item below). Its getters need no annotation: 15 `fn(x: Type)`
   annotations are gone and `reports.gleam` is 10 lines shorter. The bridge is
   still needed (13 lines, +2); the two codec systems are joined only by it.
+- **Status (wave 3):** partially resolved by grind 749c0dc. `worker.codec` is
+  total (`encode, decoder`, version `"1"`), so the three `Result(_, CodecError)`
+  returns, their `use ... result.try` lines in tools.gleam and the `version`
+  parameter of the bridge are gone: reports.gleam's Grind section is 28 lines
+  (31 before), the bridge is 10 lines, and `report_worker` has no `Result`.
+  The bridge itself stays, because Grind cannot import json_blueprint (see
+  the re-run section). The wave 2 versions (`"report-job-v1"`, ...) are not
+  kept: this app stores nothing between runs, but a deployed wave 2 app would
+  need `worker.with_version("v1")` and `worker.with_codec_version(..)` per
+  codec to claim its stored jobs.
 
 ### SMCP-9 Telemetry: one request is followable only through app bridge events
 
@@ -367,6 +387,21 @@ tool handlers receive the authenticated principal, and `generate_report` /
   lines (66 before). The bridge events themselves stay: relay and warden carry
   no `Correlation`, so the join is still `correlation -> exchange_id` and
   `correlation -> job_id`.
+- **Status (wave 3):** partially resolved by grind 749c0dc. Every job
+  stores a correlation and every Grind job event carries it
+  (`telemetry.JobRef.correlation`), so the tool submits with
+  `job.with_correlation(context.correlation)` and the app's
+  `[secure_mcp, report, submitted]` event (type, codec, emitter and its
+  collector line) is deleted. `job.admitted`, `job.claimed` and
+  `job.acknowledged` now print the request's own correlation, and a caller's
+  `x-request-id` reaches them (`telemetry_correlation_test`,
+  `request_id_header_correlation_test`). Telemetry.gleam is 239 lines (266
+  before). What remains is the relay side: `[secure_mcp, mcp, request]`
+  still joins `correlation -> exchange_id` because relay (unchanged in wave 3)
+  carries no `Correlation`, and warden's `http.request` still has none. Warden
+  now labels its HTTP Gun client `"warden"` (3bc1732), but the label shows
+  only in http_gun events, which this app cannot attach to without adding
+  `http_gun` as a dependency.
 
 ### SMCP-10 Small gaps found on the way
 
@@ -384,6 +419,10 @@ tool handlers receive the authenticated principal, and `generate_report` /
     (relay/src/relay/tool.gleam:778-784), so `tools/list` cannot vary per
     principal through the ordinary server. This app did not need it; the
     relay card's note on `ToolPolicy`/`dispatch_granted` already covers it.
+- **Status (wave 3):** the grind item is resolved by grind 749c0dc:
+  `job.state_name(state)` replaces the 15-line `state_name` in tools.gleam
+  (the collector's `state_label` helper is gone too, using the same
+  function). The two relay items are unchanged: relay did not change in wave 3.
 
 ## Glue measure
 
@@ -634,3 +673,135 @@ package carries a `Correlation` yet.
   section names this app's two events but not that the collector's
   `option.map(..) |> option.unwrap("-")` helper becomes dead code, which only
   the unused-function and import warnings revealed.
+
+## Re-run after wave 3
+
+Against grind 749c0dc/83a02b0, sinal 44c5395, json_blueprint 74a9a7d, warden
+b59ffc1 (57e1f54 and 3bc1732: `stop`, the `"warden"` client label) and relay
+6ee2ae9 (pins only). `../scripts/with-postgres.sh gleam test`: 11 passed, no
+failures. One test was removed (the SMCP-7 probe) and one added
+(`invalid_report_is_refused_at_submit_test`). `gleam run` exits 0 with the
+same narration; the three Grind telemetry lines now end in
+`correlation=<the request's id>`. `gleam format` is clean and the build has no
+warnings. Warden needed no change here (`warden.stop` and the label are
+invisible to this app); relay compiled unchanged, so SMCP-2, SMCP-3 and
+SMCP-6 stay open as written.
+
+| Seam                                    | Before                                                                                                                                                | After                                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Grind start-up (app.gleam `start_jobs`) | 32 lines: settings, validate, start, migrate, registry, policy, consumer                                                                              | 25 lines: one `pog.Config`, one `grind.Config`, `grind.start`, `grind.migrate`                              |
+| Grind shutdown (`app.stop`)             | `queue.stop` then `postgres.close`, only from the starting process                                                                                    | `grind.stop(jobs)` from any process; the "must run in the calling process" comment is gone                  |
+| Handles in `Running`                    | `Database`, `Consumer`, worker                                                                                                                        | `Grind` (a name), worker                                                                                    |
+| Worker definition (`report_worker`)     | 23 lines, `Result`, 3 `result.try` codec unwraps                                                                                                      | 12 lines, no `Result`                                                                                       |
+| Worker retry policy                     | `retry_policy(fn(_failure, _context) { DoNotRetry })`                                                                                                 | `with_retry_policy(fn(_error, _attempt) { worker.DoNotRetry })`                                             |
+| Grind codec bridge (reports.gleam)      | 31 lines, three `Result` wrappers, version strings                                                                                                    | 28 lines, no `Result`, no version                                                                           |
+| State names (SMCP-10)                   | 15 lines in tools.gleam, 3 in telemetry.gleam                                                                                                         | 0: `job.state_name`                                                                                         |
+| Outcome mapping in `report_status`      | 7 arms over 9 `job.*` patterns (two or-patterns)                                                                                                      | 7 arms over 7 `grind.*` patterns; `Failed(Business(reason), ..)` replaces two `BusinessFailedWith*`         |
+| Report bridge event (SMCP-9)            | `[secure_mcp, report, submitted]`: type, codec, emitter and collector entry (telemetry.gleam 266 → 239 lines with the three added correlation fields) | 0: `job.with_correlation(context.correlation)`                                                              |
+| Test and `gleam run` polling            | 22 lines of `await_status`/`await_loop` over `report_status`; a 25-line retry loop in `secure_mcp.gleam`                                              | `grind.bind` + `grind.await(within:)` once (11-line test helper, 6 lines in main); one `report_status` call |
+| SMCP-7 probe test                       | about 40 lines, a second queue consumer with manual polling                                                                                           | 0 (covered by `failed_report_test` and the round trip)                                                      |
+| Lost submit reply                       | `CommitUnknownWithoutId`: not handled, could duplicate                                                                                                | `admit`, 8 lines: `CommitUnknown(pending)` goes to `grind.reconcile_submission` (new behavior, untested)    |
+| Error from the job codec                | not reachable (no refined codec)                                                                                                                      | `InvalidReport(reason)`: `non_empty` refinement (11 lines) plus 3 lines of mapping; tested                  |
+| gleam.toml                              | no `gleam_time`                                                                                                                                       | +1 line (`gleam_time`, for `duration`)                                                                      |
+
+`git diff --numstat` over `src`, `test` and gleam.toml: 260 lines added and
+279 removed. Roughly 60 of the added lines are new behavior (the refusal path
+and its test, `admit`, the `field` test helper, `non_empty`).
+
+Seams that still need glue, and who owns them:
+
+- Relay: the buffered `/mcp` handler (114 lines), challenges and metadata (41),
+  the authenticated client (109), and the exchange bridge event. Unchanged.
+- Warden: the 459-line scripted provider (SMCP-5), introspection without
+  audience (SMCP-4). Unchanged.
+- json_blueprint and grind: the 10-line codec bridge. Grind documents it in
+  its README (`worker.codec(fn(v) { codec.to_json(..) |> result.map_error(codec.describe_encode_error) }, codec.decoder(c))`)
+  but the app still writes it.
+
+### New friction
+
+- **`Admission` makes a plain submit match three variants.** The job has no
+  uniqueness policy, so only `Inserted` can happen, yet `grind.submit`
+  returns `Admission` and the handler needs
+  `Existing(conflict) | Rescheduled(conflict) -> conflict.job_id` to be total
+  (4 lines in `generate_report`). The old `postgres.submit` returned a handle.
+  A `let assert Ok(grind.Inserted(handle))` would be shorter but panics in a
+  request handler. Proposal (grind): a `grind.submit_unique`-style split, or
+  `submit` returning the handle when the job has no `unique` policy.
+
+  **Status (wave 3 fixes):** resolved by grind 6bd06ec; `grind.handle(admission)`
+  replaces the three-variant `case`, so `generate_report` reads
+  `job.id(grind.handle(admission))`.
+
+- **`CommitUnknown` needs the caller to hold the typed pending value.** The
+  `admit` helper has to restate the full
+  `Result(Admission(ReportJob, Report, String), SubmitError(ReportJob, Report, String))`
+  type (3 lines of signature), because the error carries the worker's three
+  type parameters. An alias such as `grind.Submitted(job)` would shorten every
+  caller; Gleam has no way to infer it in a helper.
+
+  **Status (wave 3 fixes):** resolved in the app, no package change; the `admit`
+  helper and its 3-line signature are gone, the `CommitUnknown` case is inline
+  in `generate_report`, and `submit_failed` takes
+  `grind.SubmitError(input, output, failure)` with type variables.
+
+- **`SubmitError` has no reason text for `InvalidInput` alone.** The tool maps
+  `InvalidInput(reason)` to its own `InvalidReport(reason)` and everything else
+  to `SubmitFailed`; `grind.describe_submit_error` exists but renders the
+  whole error, including its prefix, so the client message would read as
+  grind's wording. Using the `reason` directly was shorter, but it exposes the
+  Blueprint path text (`$["title"]: must not be empty`) to MCP clients.
+- **`migrate` needs a running runtime, so consumers poll before the schema
+  exists.** The order is `grind.start` then `grind.migrate`. `start`
+  succeeded on a fresh cluster with no tables and nothing visible failed while
+  the consumer polled, so it works here; but a deploy that migrates before
+  starting has no entry point except cigogne, and the old
+  `postgres.migrate` before `queue.start` order is gone.
+
+  **Status (wave 3 fixes):** resolved by grind 9ccbfb5; `start_jobs` passes
+  `grind.with_startup_migration`, so the schema is current before any consumer
+  polls and `grind.migrate` is no longer called.
+
+- **A stand-alone app has no supervision tree to give `supervised`.** This app
+  starts its parts (provider, Warden, Grind, mist) by hand and stops them in
+  reverse, so it uses `grind.start`/`grind.stop`, which the README labels for
+  scripts and tests. The ordinary path would be a `static_supervisor` holding
+  Grind, Warden and mist; Warden's `warden.start` and mist's `mist.start` are
+  not child specifications here, so the app would need two more adapters.
+  The package defaults are right for this app; its composition is the part
+  that stays hand-rolled.
+- **`Options.poll_interval` is now a `Duration`, which adds a dependency.**
+  `queue.with_poll_interval(duration)` made the app's own `Options` field a
+  `gleam_time` type and required `gleam_time` in gleam.toml (Gleam warns on a
+  transitive import). Correct typing, one more line for every Grind user.
+- **`sinal.observe_labelled`, `correlation.from_key`, `fields.check`,
+  `codec.value()`, `grind.submit_in` do not apply.** The collector's 12
+  handlers have no ids to replace (wave 2 removed them); the only correlation
+  built from outside input is the validated `x-request-id`, which must keep
+  `from_string` (it must refuse an oversized value, not hash it, and the test
+  pins that); no app event has an enum; no value is passed through unchanged;
+  and the app has no transaction of its own.
+- **Bounded defaults changed nothing observable.** The 15-minute handler
+  timeout, 100 snoozes and 7-day pruner do not touch a 20 ms report job. The
+  1 MiB payload limit applies to a report title that the tool does not bound;
+  `PayloadTooLarge` would have fallen into `SubmitFailed` ("try again"), wrong
+  advice for a request that never fits, so `submit_failed` maps it to a
+  refusal too. Nothing tests it: Relay's mount limit may reject such a body
+  first, and the app had to know to look. Branching on
+  `grind.submit_error_kind(error) == grind.Invalid` would cover both and any
+  future variant, but then the client sees no reason text of its own.
+- **Migration guide.** Sufficient for every edit in this app; the secure_mcp
+  index entry named `state_name`, the total codec and the refined-codec test
+  correctly. Gaps: it does not say that `grind.start` needs a fresh
+  `process.new_name` per runtime (the test suite starts 11), nor that
+  `grind.Grind` is a name that can be stored in `tools.registry` before the
+  runtime starts, which this app relied on.
+
+### After the follow-up fixes
+
+11 tests pass (`../scripts/with-postgres.sh gleam test`); `gleam run` exits 0
+and `gleam format` and the build are clean. The fixes touched `tools.gleam` and
+`app.gleam` only: about 31 lines removed, 17 added (the `admit` helper, the
+`Admission` case, the `migrate` branch; `with_startup_migration`, the inline
+`CommitUnknown` case and `grind.handle` added). No test pinned a fixed defect,
+so none changed.

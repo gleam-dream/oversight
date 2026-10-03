@@ -3,15 +3,14 @@
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import grind.{type Grind}
 import grind/job
-import grind/postgres
 import grind/worker.{type Worker}
 import relay/tool
 import secure_mcp/auth.{type Principal}
 import secure_mcp/reports.{
   type Report, type ReportJob, ReportJob, ReportStatus, Submitted,
 }
-import secure_mcp/telemetry
 import sinal/correlation.{type Correlation}
 
 pub const queue = "reports"
@@ -29,36 +28,27 @@ pub type ReportWorker =
 /// Application errors of the tools. Only the rendered text reaches clients.
 pub type ToolError {
   ReportNotFound
+  /// Grind's input codec refused the report; the reason names the field.
+  InvalidReport(reason: String)
   SubmitFailed
   ReadFailed
 }
 
-pub fn report_worker() -> Result(ReportWorker, String) {
-  use input <- result.try(reports.job_codec() |> result.map_error(describe))
-  use output <- result.try(
-    reports.report_json_codec() |> result.map_error(describe),
-  )
-  use error <- result.try(
-    reports.report_error_codec() |> result.map_error(describe),
-  )
-  // A report failure is deterministic (no data), so it is not retried.
-  worker.define_with_error_codec(
+pub fn report_worker() -> ReportWorker {
+  worker.new(
     "reports.generate",
-    "v1",
-    input,
-    output,
-    error,
-    reports.build,
+    input: reports.job_codec(),
+    output: reports.report_json_codec(),
+    perform: reports.build,
   )
-  |> result.map(worker.with_retry_policy(
-    _,
-    worker.retry_policy(fn(_failure, _context) { worker.DoNotRetry }),
-  ))
-  |> result.map_error(describe)
+  |> worker.with_error_codec(reports.report_error_codec())
+  // A report failure is deterministic (no data), so it is not retried.
+  |> worker.with_retry_policy(fn(_error, _attempt) { worker.DoNotRetry })
+  |> worker.with_queue(queue)
 }
 
 pub fn registry(
-  database: postgres.Database,
+  jobs: Grind,
   report_worker: ReportWorker,
 ) -> Result(tool.Registry(McpContext), String) {
   use generate_name <- result.try(
@@ -100,14 +90,14 @@ pub fn registry(
     tool.handle_advanced_with_error_renderer(
       generate,
       fn(call, request) {
-        generate_report(database, report_worker, call.application, request)
+        generate_report(jobs, report_worker, call.application, request)
       },
       render,
     ),
     tool.handle_advanced_with_error_renderer(
       status,
       fn(call, request) {
-        report_status(database, report_worker, call.application, request)
+        report_status(jobs, report_worker, call.application, request)
       },
       render,
     ),
@@ -116,60 +106,84 @@ pub fn registry(
 }
 
 fn generate_report(
-  database: postgres.Database,
+  jobs: Grind,
   report_worker: ReportWorker,
   context: McpContext,
   request: reports.ReportRequest,
 ) -> Result(tool.HandlerResult(reports.Submitted), ToolError) {
-  let job =
-    ReportJob(
-      owner: context.principal.subject,
-      title: request.title,
-      period: request.period,
+  // The request's correlation travels with the job: Grind's admitted, claimed
+  // and acknowledged events carry it, so no bridge event is needed.
+  let report =
+    job.new(
+      report_worker,
+      ReportJob(
+        owner: context.principal.subject,
+        title: request.title,
+        period: request.period,
+      ),
     )
-  use handle <- result.try(
-    postgres.submit(database, queue, report_worker, job)
-    |> result.replace_error(SubmitFailed),
+    |> job.with_correlation(context.correlation)
+  // A lost reply is settled from the submission's receipt.
+  use admission <- result.try(
+    case grind.submit(jobs, report) {
+      Error(grind.CommitUnknown(pending)) ->
+        grind.reconcile_submission(jobs, pending)
+      other -> other
+    }
+    |> result.map_error(submit_failed),
   )
-  let job_id = job.id_value(handle)
-  telemetry.report_submitted(context.correlation, job_id)
+  let job_id = job.id(grind.handle(admission))
   Ok(tool.Complete(Submitted(job_id:, state: "queued"), []))
 }
 
+fn submit_failed(
+  error: grind.SubmitError(input, output, failure),
+) -> ToolError {
+  case error {
+    grind.InvalidInput(reason) -> InvalidReport(reason)
+    grind.PayloadTooLarge(..) -> InvalidReport("the report is too large")
+    _ -> SubmitFailed
+  }
+}
+
 fn report_status(
-  database: postgres.Database,
+  jobs: Grind,
   report_worker: ReportWorker,
   context: McpContext,
   request: reports.StatusRequest,
 ) -> Result(tool.HandlerResult(reports.ReportStatus), ToolError) {
   let job_id = request.job_id
-  // Another user's job and a missing job are indistinguishable to the caller.
+  // Another user's job and a missing job are indistinguishable to the caller,
+  // and so is an id that belongs to another worker.
   use handle <- result.try(
-    postgres.bind_handle(database, report_worker, job_id)
-    |> result.replace_error(ReportNotFound),
+    grind.bind(jobs, report_worker, job_id) |> result.map_error(read_failed),
   )
   use owned <- result.try(
-    postgres.arguments(database, handle)
-    |> result.replace_error(ReportNotFound),
+    grind.arguments(jobs, handle) |> result.map_error(read_failed),
   )
   use <- guard(owned.owner == context.principal.subject, ReportNotFound)
   use outcome <- result.try(
-    postgres.outcome(database, handle) |> result.replace_error(ReadFailed),
+    grind.outcome(jobs, handle) |> result.map_error(read_failed),
   )
   let status = case outcome {
-    job.Pending(state) -> ReportStatus(job_id, state_name(state), None)
-    job.SucceededWith(report) -> ReportStatus(job_id, "succeeded", Some(report))
-    job.BusinessFailedWith(reason) | job.BusinessFailedWithCause(reason, _) ->
+    grind.Pending(state) -> ReportStatus(job_id, job.state_name(state), None)
+    grind.Succeeded(report) -> ReportStatus(job_id, "succeeded", Some(report))
+    grind.Failed(grind.Business(reason), _, _) ->
       ReportStatus(job_id, "failed: " <> reason, None)
-    job.DiscardedWithReason(_) -> ReportStatus(job_id, "discarded", None)
-    job.CancelledWithReason(_) -> ReportStatus(job_id, "cancelled", None)
-    job.FailedOperationally(reason)
-    | job.FailedOperationallyWithCause(reason, _) ->
-      ReportStatus(job_id, "failed: " <> reason, None)
-    job.ReconciliationRequired(_) ->
-      ReportStatus(job_id, "needs reconciliation", None)
+    grind.Failed(_, _, description) ->
+      ReportStatus(job_id, "failed: " <> description, None)
+    grind.Discarded(_) -> ReportStatus(job_id, "discarded", None)
+    grind.Cancelled(_) -> ReportStatus(job_id, "cancelled", None)
+    grind.Uncertain(_) -> ReportStatus(job_id, "needs reconciliation", None)
   }
   Ok(tool.Complete(status, []))
+}
+
+fn read_failed(error: grind.ReadError) -> ToolError {
+  case grind.read_error_kind(error) {
+    grind.NotFound | grind.Mismatch -> ReportNotFound
+    _ -> ReadFailed
+  }
 }
 
 fn guard(
@@ -186,25 +200,9 @@ fn guard(
 fn render(error: ToolError) -> String {
   case error {
     ReportNotFound -> "No such report job for this user."
+    InvalidReport(reason) -> "The report was refused: " <> reason
     SubmitFailed -> "The report could not be queued; try again."
     ReadFailed -> "The report state could not be read; try again."
-  }
-}
-
-// GLUE (SMCP-9): `job.state_to_stored` is `@internal`, so the app names states.
-fn state_name(state: job.State) -> String {
-  case state {
-    job.Queued -> "queued"
-    job.Scheduled -> "scheduled"
-    job.Retryable -> "retryable"
-    job.Executing -> "executing"
-    job.Succeeded -> "succeeded"
-    job.BusinessFailed -> "business_failed"
-    job.RuntimeFailed -> "runtime_failed"
-    job.ContractMismatch -> "contract_mismatch"
-    job.Uncertain -> "uncertain"
-    job.Discarded -> "discarded"
-    job.Cancelled -> "cancelled"
   }
 }
 

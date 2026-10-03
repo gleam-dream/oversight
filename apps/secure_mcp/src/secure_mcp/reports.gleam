@@ -87,11 +87,30 @@ pub fn status_request_codec() -> codec.Codec(StatusRequest) {
   codec.success(StatusRequest(job_id:))
 }
 
+/// The job's own contract is stricter than the tool's: a report needs a title.
+/// Grind enforces it at `submit` (`InvalidInput`), before anything is stored.
 pub fn job_input_codec() -> codec.Codec(ReportJob) {
   use owner <- codec.field("owner", codec.string(), get: fn(j) { j.owner })
-  use title <- codec.field("title", codec.string(), get: fn(j) { j.title })
+  use title <- codec.field("title", non_empty(codec.string()), get: fn(j) {
+    j.title
+  })
   use period <- codec.field("period", codec.string(), get: fn(j) { j.period })
   codec.success(ReportJob(owner:, title:, period:))
+}
+
+fn non_empty(inner: codec.Codec(String)) -> codec.Codec(String) {
+  let check = fn(text) {
+    case text {
+      "" -> Error("must not be empty")
+      _ -> Ok(text)
+    }
+  }
+  codec.try_map(
+    inner,
+    decode: check,
+    encode: check,
+    placeholder: codec.placeholder(inner),
+  )
 }
 
 pub fn report_codec() -> codec.Codec(Report) {
@@ -113,15 +132,12 @@ pub fn status_codec() -> codec.Codec(ReportStatus) {
 
 // --- Grind codecs, derived from the Blueprint codecs -------------------------
 
-/// The one bridge: a Blueprint codec as a versioned Grind codec. A value the
-/// codec cannot encode is rejected with the codec's own message, so Grind fails
-/// the submit or ends the job instead of storing something unreadable.
-fn grind(
-  version: String,
-  codec: codec.Codec(a),
-) -> Result(worker.Codec(a), worker.CodecError) {
+/// The one bridge: a Blueprint codec as a Grind codec. A value the codec
+/// cannot encode is rejected with the codec's own message, so Grind fails the
+/// submit (`InvalidInput`) or ends the job instead of storing something
+/// unreadable.
+fn grind(codec: codec.Codec(a)) -> worker.Codec(a) {
   worker.codec(
-    version,
     fn(value) {
       codec.to_json(codec, value)
       |> result.map_error(codec.describe_encode_error)
@@ -130,15 +146,15 @@ fn grind(
   )
 }
 
-pub fn job_codec() -> Result(worker.Codec(ReportJob), worker.CodecError) {
-  grind("report-job-v1", job_input_codec())
+pub fn job_codec() -> worker.Codec(ReportJob) {
+  grind(job_input_codec())
 }
 
-pub fn report_json_codec() -> Result(worker.Codec(Report), worker.CodecError) {
-  grind("report-v1", report_codec())
+pub fn report_json_codec() -> worker.Codec(Report) {
+  grind(report_codec())
 }
 
 /// The worker's business failure reason, stored so `report_status` can show it.
-pub fn report_error_codec() -> Result(worker.Codec(String), worker.CodecError) {
-  grind("report-error-v1", codec.string())
+pub fn report_error_codec() -> worker.Codec(String) {
+  grind(codec.string())
 }

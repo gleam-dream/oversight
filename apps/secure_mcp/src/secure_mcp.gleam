@@ -10,6 +10,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
+import grind
 import secure_mcp/app
 import secure_mcp/client.{Refused, Structured, ToolError}
 import secure_mcp/dev_provider
@@ -65,7 +67,12 @@ fn narrate(running: app.Running, collector: telemetry.Collector) -> Nil {
     "3. generate_report as alice -> Grind job " <> int.to_string(job_id),
   )
 
-  let summary = await_summary(running.mcp_url, alice.access_token, job_id, 50)
+  // The app runs in this process, so wait in Grind instead of polling MCP.
+  let assert Ok(handle) =
+    grind.bind(running.jobs, running.report_worker, job_id)
+  let assert Ok(_) =
+    grind.await(running.jobs, handle, within: duration.seconds(10))
+  let summary = report_summary(running.mcp_url, alice.access_token, job_id)
   io.println("4. report_status as alice -> " <> summary)
 
   let assert Ok(bob) = client.sign_in(running.base_url, "bob")
@@ -110,12 +117,7 @@ fn narrate(running: app.Running, collector: telemetry.Collector) -> Nil {
   |> list.each(io.println)
 }
 
-fn await_summary(
-  mcp_url: String,
-  token: String,
-  job_id: Int,
-  attempts: Int,
-) -> String {
+fn report_summary(mcp_url: String, token: String, job_id: Int) -> String {
   let reply =
     client.call_tool(
       mcp_url,
@@ -136,11 +138,6 @@ fn await_summary(
     Ok(Structured(value)) ->
       case decode.run(value, decoder) {
         Ok(#(_, Some(summary))) -> summary
-        Ok(#(state, None)) if attempts > 0 -> {
-          process.sleep(50)
-          let _ = state
-          await_summary(mcp_url, token, job_id, attempts - 1)
-        }
         other -> "unexpected status " <> string.inspect(other)
       }
     other -> "unexpected reply " <> string.inspect(other)
