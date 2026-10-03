@@ -29,7 +29,7 @@ import wisp/wisp_mist
 
 pub const client_id = "secure-mcp"
 
-/// The scripted provider's client secret; tests revoke tokens with it.
+/// The scripted provider's client secret.
 pub const client_secret = "dev-only-client-secret"
 
 /// How `/mcp` verifies a bearer token.
@@ -120,7 +120,7 @@ pub fn start(options: Options) -> Result(Running, String) {
     |> mcp_http.handler
     |> result.map_error(mcp_http.describe_start_error),
   )
-  let context = web.Context(warden: warden_client, provider:, mcp_url:)
+  let context = web.Context(warden: warden_client, mcp_url:)
   let browser =
     wisp_mist.handler(web.handle(_, context), wisp.random_string(64))
   // Relay's mist handler streams (SSE, keepalives, cancellation on
