@@ -2,15 +2,12 @@
 //// per document.
 ////
 //// The app submits each job with `correlation.from_key(document_id)`. Grind
-//// events carry it as `ref.correlation`, the worker reads it from its
-//// context and attaches it to its http_gun client views, so the three
-//// sources need no table. llm_wire events carry only
-//// `stage/provider/outcome`, so the collector attributes them through the
-//// emitting process, which works only when llm_wire emits in a process the
-//// worker registered.
+//// events carry it as `ref.correlation`; the worker reads it from its
+//// context and sets it once on the http_gun client views it passes to
+//// http_gun and llm_wire, whose events read it from the view. All three
+//// sources therefore carry the same correlation and need no table.
 
-import gleam/dict.{type Dict}
-import gleam/erlang/process.{type Pid, type Subject}
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -20,7 +17,6 @@ import gleam/result
 import gleam/string
 import grind/job
 import grind/telemetry as grind_telemetry
-import grind/worker
 import http_gun/telemetry as http_telemetry
 import llm_wire/telemetry as llm_telemetry
 import sinal
@@ -34,23 +30,12 @@ pub type Source {
 }
 
 pub type Record {
-  Record(source: Source, key: Key, summary: String)
-}
-
-/// What the event offers for correlation.
-pub type Key {
-  Correlated(Option(Correlation))
-  EmitterPid(Pid)
+  Record(source: Source, correlation: Option(Correlation), summary: String)
 }
 
 pub opaque type Message {
   Observed(Record)
-  WorkerProcess(pid: Pid, document_id: String)
-  Snapshot(reply: Subject(State))
-}
-
-pub type State {
-  State(records: List(Record), processes: Dict(Pid, String))
+  Snapshot(reply: Subject(List(Record)))
 }
 
 pub type Collector {
@@ -65,7 +50,7 @@ pub type Collector {
 /// one Sinal handler per observed event.
 pub fn start() -> Result(Collector, String) {
   use subject <- result.try(
-    actor.new(State([], dict.new()))
+    actor.new([])
     |> actor.on_message(handle)
     |> actor.start
     |> result.map(fn(started) { started.data })
@@ -79,46 +64,50 @@ pub fn start() -> Result(Collector, String) {
     |> supervisor.start
     |> result.replace_error("could not start the observation forwarder"),
   )
-  let record = fn(source, key, summary) {
-    process.send(subject, Observed(Record(source, key, summary)))
+  let record = fn(source, correlation, summary) {
+    process.send(subject, Observed(Record(source, correlation, summary)))
   }
   let attachments = [
     sinal.observe(grind_telemetry.admitted(), fn(_, meta) {
       record(
         Grind,
-        Correlated(Some(meta.ref.correlation)),
+        Some(meta.ref.correlation),
         "admitted " <> job.state_name(meta.committed_state),
       )
     }),
     sinal.observe(grind_telemetry.claimed(), fn(_, meta) {
       record(
         Grind,
-        Correlated(Some(meta.ref.correlation)),
+        Some(meta.ref.correlation),
         "claimed attempt " <> int.to_string(meta.attempt.attempt),
       )
     }),
     sinal.observe(grind_telemetry.acknowledged(), fn(_, meta) {
       record(
         Grind,
-        Correlated(Some(meta.ref.correlation)),
+        Some(meta.ref.correlation),
         "acknowledged " <> job.state_name(meta.committed_state),
       )
     }),
     sinal.observe(grind_telemetry.released(), fn(_, meta) {
-      record(Grind, Correlated(Some(meta.ref.correlation)), "released")
+      record(Grind, Some(meta.ref.correlation), "released")
     }),
     sinal.observe(http_telemetry.event(), fn(_, meta) {
       record(
         Http,
-        Correlated(meta.correlation),
+        meta.correlation,
         option.unwrap(meta.client, "http") <> " " <> milestone(meta.milestone),
       )
     }),
-    sinal.observe(llm_telemetry.observation_event(), fn(_, meta) {
+    sinal.observe(llm_telemetry.event(), fn(_, meta) {
       record(
         Llm,
-        EmitterPid(process.self()),
-        meta.provider <> " " <> meta.stage <> " " <> meta.outcome,
+        meta.correlation,
+        meta.provider
+          <> " "
+          <> llm_telemetry.stage_name(meta.stage)
+          <> " "
+          <> llm_telemetry.outcome_name(meta.outcome),
       )
     }),
   ]
@@ -138,22 +127,7 @@ pub fn document_correlation(document_id: String) -> Correlation {
   correlation.from_key(document_id)
 }
 
-/// Called by the worker: registers the worker process for llm_wire
-/// attribution and returns the job's correlation for the http_gun client
-/// views. Every attempt of a job shares the correlation.
-pub fn begin_attempt(
-  collector: Collector,
-  context: worker.Context,
-) -> Correlation {
-  let correlation = worker.correlation(context)
-  process.send(
-    collector.subject,
-    WorkerProcess(process.self(), correlation.to_string(correlation)),
-  )
-  correlation
-}
-
-pub fn snapshot(collector: Collector) -> State {
+pub fn snapshot(collector: Collector) -> List(Record) {
   process.call(collector.subject, 1000, Snapshot)
 }
 
@@ -164,26 +138,16 @@ pub type Trace {
 }
 
 pub fn trace(collector: Collector, document_id: String) -> Trace {
-  let state = snapshot(collector)
+  let records = snapshot(collector)
   let document_id = document_correlation(document_id) |> correlation.to_string
   let #(attributed, rest) =
-    list.partition(state.records, fn(record) {
-      owner(state, record.key) == Some(document_id)
+    list.partition(records, fn(record) {
+      option.map(record.correlation, correlation.to_string) == Some(document_id)
     })
   Trace(
     attributed:,
-    unattributed: list.filter(rest, fn(record) {
-      owner(state, record.key) == None
-    }),
+    unattributed: list.filter(rest, fn(record) { record.correlation == None }),
   )
-}
-
-fn owner(state: State, key: Key) -> Option(String) {
-  case key {
-    Correlated(Some(id)) -> Some(correlation.to_string(id))
-    Correlated(None) -> None
-    EmitterPid(pid) -> dict.get(state.processes, pid) |> option.from_result
-  }
 }
 
 pub fn count(records: List(Record), source: Source) -> Int {
@@ -199,20 +163,15 @@ pub fn render(record: Record) -> String {
   source <> "  " <> record.summary
 }
 
-fn handle(state: State, message: Message) -> actor.Next(State, Message) {
+fn handle(
+  records: List(Record),
+  message: Message,
+) -> actor.Next(List(Record), Message) {
   case message {
-    Observed(record) ->
-      actor.continue(State(..state, records: [record, ..state.records]))
-    WorkerProcess(pid, document_id) ->
-      actor.continue(
-        State(
-          ..state,
-          processes: dict.insert(state.processes, pid, document_id),
-        ),
-      )
+    Observed(record) -> actor.continue([record, ..records])
     Snapshot(reply) -> {
-      process.send(reply, State(..state, records: list.reverse(state.records)))
-      actor.continue(state)
+      process.send(reply, list.reverse(records))
+      actor.continue(records)
     }
   }
 }

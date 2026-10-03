@@ -16,6 +16,8 @@ import gleam/list
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import llm_wire/message.{type Provider}
+import llm_wire/testing
 import mist
 
 pub type Behavior {
@@ -150,9 +152,9 @@ fn providers_handler(
   req: Request(mist.Connection),
 ) -> Response(mist.ResponseData) {
   let wire = case req.method, request.path_segments(req) {
-    http.Post, ["openai", "v1", "responses"] -> Ok(OpenAiWire)
-    http.Post, ["anthropic", "v1", "messages"] -> Ok(AnthropicWire)
-    http.Post, ["google", "v1beta", "models", _] -> Ok(GoogleWire)
+    http.Post, ["openai", "v1", "responses"] -> Ok(message.OpenAI)
+    http.Post, ["anthropic", "v1", "messages"] -> Ok(message.Anthropic)
+    http.Post, ["google", "v1beta", "models", _] -> Ok(message.Google)
     _, _ -> Error(Nil)
   }
   case wire, mist.read_body(req, 1_048_576) {
@@ -180,14 +182,8 @@ fn marker(body: String) -> String {
   }
 }
 
-type Wire {
-  OpenAiWire
-  AnthropicWire
-  GoogleWire
-}
-
 fn answer(
-  wire: Wire,
+  wire: Provider,
   behavior: Behavior,
   attempt: Int,
 ) -> Response(mist.ResponseData) {
@@ -204,202 +200,31 @@ fn answer(
   }
 }
 
-fn sse(wire: Wire, output: String) -> Response(mist.ResponseData) {
-  let events = case wire {
-    OpenAiWire -> [
-      event(
-        "response.output_item.added",
-        json.object([
-          #("output_index", json.int(0)),
-          #(
-            "item",
-            json.object([
-              #("id", json.string("msg_1")),
-              #("type", json.string("message")),
-            ]),
-          ),
-        ]),
-      ),
-      event(
-        "response.output_text.delta",
-        json.object([
-          #("output_index", json.int(0)),
-          #("item_id", json.string("msg_1")),
-          #("delta", json.string(output)),
-        ]),
-      ),
-      event(
-        "response.output_item.done",
-        json.object([
-          #("output_index", json.int(0)),
-          #(
-            "item",
-            json.object([
-              #("id", json.string("msg_1")),
-              #("type", json.string("message")),
-              #("role", json.string("assistant")),
-            ]),
-          ),
-        ]),
-      ),
-      event(
-        "response.completed",
-        json.object([
-          #(
-            "response",
-            json.object([
-              #("id", json.string("resp_1")),
-              #("status", json.string("completed")),
-              #("usage", usage("input_tokens", "output_tokens", "total_tokens")),
-            ]),
-          ),
-        ]),
-      ),
-    ]
-    AnthropicWire -> [
-      event(
-        "message_start",
-        json.object([
-          #("type", json.string("message_start")),
-          #(
-            "message",
-            json.object([
-              #("id", json.string("msg_1")),
-              #(
-                "usage",
-                json.object([
-                  #("input_tokens", json.int(120)),
-                  #("output_tokens", json.int(1)),
-                ]),
-              ),
-            ]),
-          ),
-        ]),
-      ),
-      event(
-        "content_block_start",
-        json.object([
-          #("type", json.string("content_block_start")),
-          #("index", json.int(0)),
-          #(
-            "content_block",
-            json.object([
-              #("type", json.string("text")),
-              #("text", json.string("")),
-            ]),
-          ),
-        ]),
-      ),
-      event(
-        "content_block_delta",
-        json.object([
-          #("type", json.string("content_block_delta")),
-          #("index", json.int(0)),
-          #(
-            "delta",
-            json.object([
-              #("type", json.string("text_delta")),
-              #("text", json.string(output)),
-            ]),
-          ),
-        ]),
-      ),
-      event(
-        "content_block_stop",
-        json.object([
-          #("type", json.string("content_block_stop")),
-          #("index", json.int(0)),
-        ]),
-      ),
-      event(
-        "message_delta",
-        json.object([
-          #("type", json.string("message_delta")),
-          #("delta", json.object([#("stop_reason", json.string("end_turn"))])),
-          #("usage", json.object([#("output_tokens", json.int(80))])),
-        ]),
-      ),
-      event(
-        "message_stop",
-        json.object([#("type", json.string("message_stop"))]),
-      ),
-    ]
-    GoogleWire -> [
-      data(
-        json.object([
-          #("responseId", json.string("resp_1")),
-          #(
-            "candidates",
-            json.preprocessed_array([candidate([text_part(output)], [])]),
-          ),
-        ]),
-      ),
-      data(
-        json.object([
-          #(
-            "candidates",
-            json.preprocessed_array([
-              candidate([], [#("finishReason", json.string("STOP"))]),
-            ]),
-          ),
-          #(
-            "usageMetadata",
-            usage("promptTokenCount", "candidatesTokenCount", "totalTokenCount"),
-          ),
-        ]),
-      ),
-    ]
+/// The provider's own wire for a text answer, lowered by llm_wire's testing
+/// module instead of written event by event.
+fn sse(wire: Provider, output: String) -> Response(mist.ResponseData) {
+  let reply =
+    testing.text(output)
+    |> testing.with_usage(message.Usage(120, 80, 200))
+    |> testing.events_for(wire, _)
+  let chunks = case reply {
+    testing.Events(chunks) | testing.Interrupted(chunks) -> chunks
+    testing.Status(..) -> []
   }
   response.new(200)
   |> response.set_header("content-type", "text/event-stream")
   |> response.set_body(
-    mist.Bytes(bytes_tree.from_string(string.concat(events))),
+    mist.Bytes(bytes_tree.from_string(string.concat(chunks))),
   )
 }
 
-fn candidate(
-  parts: List(json.Json),
-  extra: List(#(String, json.Json)),
-) -> json.Json {
-  json.object([
-    #(
-      "content",
-      json.object([
-        #("role", json.string("model")),
-        #("parts", json.preprocessed_array(parts)),
-      ]),
-    ),
-    ..extra
-  ])
-}
-
-fn text_part(text: String) -> json.Json {
-  json.object([#("text", json.string(text))])
-}
-
-fn usage(input: String, output: String, total: String) -> json.Json {
-  json.object([
-    #(input, json.int(120)),
-    #(output, json.int(80)),
-    #(total, json.int(200)),
-  ])
-}
-
-fn event(name: String, payload: json.Json) -> String {
-  "event: " <> name <> "\ndata: " <> json.to_string(payload) <> "\n\n"
-}
-
-fn data(payload: json.Json) -> String {
-  "data: " <> json.to_string(payload) <> "\n\n"
-}
-
 fn provider_error(
-  wire: Wire,
+  wire: Provider,
   status: Int,
   message: String,
 ) -> Response(mist.ResponseData) {
   let body = case wire {
-    OpenAiWire ->
+    message.OpenAI | message.Custom(_) ->
       json.object([
         #(
           "error",
@@ -409,7 +234,7 @@ fn provider_error(
           ]),
         ),
       ])
-    AnthropicWire ->
+    message.Anthropic ->
       json.object([
         #("type", json.string("error")),
         #(
@@ -420,7 +245,7 @@ fn provider_error(
           ]),
         ),
       ])
-    GoogleWire ->
+    message.Google ->
       json.object([
         #(
           "error",

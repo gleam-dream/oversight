@@ -12,14 +12,13 @@ import gleam/erlang/process
 import gleam/list
 import gleam/result
 import gleam/string
-import gleam/time/duration
+import gleam/time/duration.{type Duration}
 import grind
 import grind/job
 import grind/queue
 import grind/worker
 import http_gun
 import json/blueprint/codec
-import llm_wire/types
 import pog
 
 pub type DocumentJob {
@@ -40,8 +39,7 @@ pub type Handle =
 pub type Env {
   Env(
     clients: Clients,
-    model: fn(llm.Provider) -> Result(llm.Model, types.WireError),
-    collector: telemetry.Collector,
+    model: fn(llm.Provider) -> llm.Model,
     limits: document.Limits,
   )
 }
@@ -79,21 +77,20 @@ pub fn attempt(
   context: worker.Context,
   job: DocumentJob,
 ) -> Result(Extracted, outcome.Failure) {
-  let correlation = telemetry.begin_attempt(env.collector, context)
+  let correlation = worker.correlation(context)
   let fetcher = http_gun.with_correlation(env.clients.fetcher, correlation)
   let llm_client = http_gun.with_correlation(env.clients.llm, correlation)
   use fetched <- result.try(
     document.fetch(fetcher, job.url, env.limits)
     |> result.map_error(outcome.FetchFailed),
   )
-  use model <- result.try(
-    env.model(job.provider)
-    |> result.map_error(fn(error) {
-      outcome.ExtractFailed(llm.NotPrepared(error))
-    }),
-  )
   use invoice <- result.try(
-    llm.extract(llm_client, model, job.document_id, fetched.text)
+    llm.extract(
+      llm_client,
+      env.model(job.provider),
+      job.document_id,
+      fetched.text,
+    )
     |> result.map_error(outcome.ExtractFailed),
   )
   use row_id <- result.try(
@@ -211,18 +208,18 @@ pub type Finished =
 pub fn await(
   pipeline: Pipeline,
   handle: Handle,
-  timeout_ms: Int,
+  timeout: Duration,
 ) -> Result(Finished, String) {
-  grind.await(pipeline.jobs, handle, within: duration.milliseconds(timeout_ms))
+  grind.await(pipeline.jobs, handle, within: timeout)
   |> result.map_error(grind.describe_read_error)
 }
 
 pub fn await_all(
   pipeline: Pipeline,
   handles: List(#(DocumentJob, Handle)),
-  timeout_ms: Int,
+  timeout: Duration,
 ) -> List(#(DocumentJob, Result(Finished, String))) {
-  list.map(handles, fn(pair) { #(pair.0, await(pipeline, pair.1, timeout_ms)) })
+  list.map(handles, fn(pair) { #(pair.0, await(pipeline, pair.1, timeout)) })
 }
 
 pub fn stop(pipeline: Pipeline) -> Nil {

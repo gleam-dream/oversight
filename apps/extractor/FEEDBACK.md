@@ -133,6 +133,23 @@ prints the demo batch.
   `http_failures_are_decided_by_kind_test` covers the classes through both
   entry points.
 
+- **Status (wave 4):** resolved by llm_wire 177ad50 and http_gun dcfbc07.
+  `llm_wire.advise(failure)` takes no provider and answers
+  `RetryAdvice(prospect, after: Option(Duration))`; `error.Http` carries
+  http_gun's `Failure`, so `advise` classifies by `Kind` and the app's rebuilt
+  `Failure` (`submission`, `http_error.new`, 7 lines) is deleted, as are
+  `hint_ms` (8 lines, the HTTP-date fallback), the exhaustive `describe` of
+  `WireError` (17 lines) and `provider.identity(config.adapter(..))` in
+  `llm.gleam`. `llm.CallFailed` carries the `llm_wire.Failure` (was provider,
+  error and evidence). `Snooze` and `default_snooze` hold a `Duration`. The
+  decision function itself did not shrink (`decide_extract` 38 lines, now
+  `decide_extract` plus `decide_call` 39): the app still folds the advice into
+  Grind's three responses and still branches on `Status` (snooze with the
+  delay), `Provider(Some(code))` (snooze with a default), `InvalidOutput` and
+  `Protocol` (discard). Advice says whether to retry, not whether Grind should
+  snooze or back off. The whole mapping, `default_snooze` to `decide_http`,
+  went from 71 to 55 lines.
+
 ### EXT-3 Invalid structured output loses the raw output and the typed reason
 
 - **Packages**: llm_wire, json_blueprint. **Kind**: ergonomics. **Severity**: major.
@@ -167,6 +184,19 @@ prints the demo batch.
   drops the app's own message: `describe_decode_error` omits `Custom`
   messages, so `total 9999 differs from line sum 4490` no longer reaches the
   discard reason (see the re-run section).
+
+- **Status (wave 4):** resolved by llm_wire 177ad50. `error.InvalidOutput(raw_output:,
+failure:)` with `failure` one of `InvalidJson`, `SchemaRejected`,
+  `DecodeRejected(codec.DecodeError)`, and the failure has `sent: Completed`
+  (was `EffectUnknown`). The prefix match is gone: `decide_call` discards with
+  `error.describe_value_failure(reason)` plus the first 200 characters of the
+  raw output, and the new test
+  `invalid_output_keeps_the_raw_output_and_a_typed_reason_test` matches
+  `SchemaRejected(_)` for the unknown currency and
+  `DecodeRejected(DecodeError([Field("total_cents")], Custom(message)))` for the
+  bad total, with the app's own message (`differs from line sum`) back in the
+  value. The discard reason now reads `schema validation failed: ...` and
+  `decode failed: ...` (llm_wire's wording, not the app's).
 
 ### EXT-4 One job cannot be followed across packages without an app registry; llm_wire events cannot be attributed
 
@@ -236,6 +266,17 @@ prints the demo batch.
   `begin_attempt` (13 lines, 5 of them comments). Still open: llm_wire events
   carry no correlation, so the emitting-pid table stays, and all 23
   unattributed events are llm_wire's.
+
+- **Status (wave 4):** resolved by llm_wire 177ad50. `llm_wire/telemetry.event()`
+  carries `Metadata(call, correlation, stage, provider, outcome)` and reads the
+  correlation from the `http_gun.Client` view given to `run` (the worker already
+  sets it once with `http_gun.with_correlation`). `EmitterPid`, `Key`,
+  `State.processes`, `WorkerProcess`, `begin_attempt` and the pid lookup are
+  deleted (telemetry.gleam 231 to 190 lines; `State` shrank to a plain
+  `List(Record)`). `gleam run` reports 0 unattributed events (was 23, all
+  llm_wire), and `one_job_is_followed_across_packages_test` attributes all 5
+  of the call's llm_wire events (was 1 of 5) and asserts none is lost. The
+  `Env.collector` field existed only to register the worker pid; it is gone.
 
 ### EXT-5 One Blueprint codec cannot serve as a Grind codec or a pog row decoder
 
@@ -350,6 +391,17 @@ prints the demo batch.
   endpoint host string. The port pin has a cost in tests: a dead provider port
   (`:9`, for the transport-failure test) must also be given to the client's
   policy, so `with_pipeline` takes a provider port, not a base URL.
+
+- **Status (wave 4):** resolved by llm_wire 177ad50 and http_gun dcfbc07 for
+  the llm_wire half. `prepare` no longer matches the host string; each
+  plaintext call's view gets `destination.with_plaintext(PlaintextToLoopbackOnly)`,
+  decided against the resolved addresses. The new test
+  `plaintext_rule_follows_the_resolved_address_test` points the model at
+  `http://llm.example.test:<port>`: with a resolver to 127.0.0.1 the call runs
+  (impossible before), and with a resolver to a public address it fails before
+  sending with `DestinationRejected(PlaintextRefused(Public))`, `NotSent`, and
+  `outcome.decide` discards it. The app carries no plaintext code; the client
+  config in `clients.gleam` is unchanged apart from `Duration`.
 
 ### EXT-8 A queue handler still requires an unused `perform` function
 
@@ -826,3 +878,92 @@ added) and the handler test (1 removed, 2 added): net -5. Removed: the
 `grind.named` capture and the `jobs` parameter of `define`, the separate
 `grind.migrate` call, and the 7-line `Admission` branch. EXT-9 (result write
 inside the acknowledgement) is unchanged.
+
+## Re-run after wave 4 (3 Oct 2026)
+
+Package heads: llm_wire 9f35183 (177ad50), http_gun 4a6eeb0 (dcfbc07), grind and
+sinal unchanged since wave 3. 15 tests pass
+(`../scripts/with-postgres.sh gleam test`; 13 before, plus the typed raw
+output test and the resolved-address plaintext test). `gleam run` prints the
+same batch (three stored invoices, four discards, two provider calls for
+`globex`) with 0 unattributed events (was 23). The migration changed ten
+files: src 174 lines added and 442 removed (net -268), test 139 added and 44
+removed (net +95, of which about 85 lines are the two new tests). `gleam_time`
+is now `>= 1.11.0` in `gleam.toml`.
+
+Glue before to after, in lines counted per function with its comments:
+
+| Seam                                                        | Before       | After | Change                                                                                                   |
+| ----------------------------------------------------------- | ------------ | ----- | -------------------------------------------------------------------------------------------------------- |
+| llm_wire failure mapping (EXT-2)                            | 71           | 55    | `advise`; `submission`, `hint_ms`, exhaustive `describe` and the `Failure` rebuild gone                  |
+| Provider recovery and error evidence in `llm.gleam` (EXT-2) | 8            | 0     | `CallFailed(Failure)`; `provider.identity(config.adapter(..))` gone                                      |
+| Settings: keys, endpoints, deadlines (`llm.model`)          | 37           | 30    | `Result` and three `use` lines gone; `Model` is total; deadlines are `Duration` plus a first-token bound |
+| Hand-written provider SSE (`scripted.sse` and helpers)      | 152          | 15    | `testing.events_for(wire, testing.text(..) \|> with_usage(..))`; error bodies stay                       |
+| Telemetry correlation registry (EXT-4)                      | ~50          | 0     | llm_wire reads the view's correlation; `Key`, pid table, `begin_attempt`, `Env.collector` deleted        |
+| Rejected output (EXT-3)                                     | prefix match | typed | `InvalidOutput(raw_output:, failure:)`; no `starts_with` on text                                         |
+| Plaintext (EXT-7)                                           | 0 in the app | 0     | now decided by http_gun against resolved addresses; proven by a test                                     |
+| Milliseconds                                                | 7 sites      | 0     | `Snooze.delay`, `await`/`await_all`, request and connect timeouts, resolver argument, llm deadlines      |
+
+Stored and wire formats: unchanged. The Grind input, output and error codecs
+and the pog row format are untouched (`jobs.gleam` codec section and
+`store.gleam` have no diff), and a `Transient(stage, detail)` error written
+before this change still decodes. The replaced SSE fixtures are provider wire
+formats, not stored data; the same three provider paths extract the same
+invoice from `events_for` chunks (`same_extraction_runs_on_three_providers_test`).
+Only the text of a discard reason for invalid output changed (llm_wire's
+wording, plus the raw output prefix), and Grind stores it as free text.
+
+Seams that still need glue, and who owns them:
+
+| Seam                                                                | Glue                       | Owner                |
+| ------------------------------------------------------------------- | -------------------------- | -------------------- |
+| Advice to Grind response: snooze, back off or discard               | `decide_call`, 28 lines    | the app (see below)  |
+| Provider error bodies per wire (429 and 5xx) in the loopback server | `provider_error`, 43 lines | llm_wire (`testing`) |
+| Result write inside the acknowledgement (EXT-9)                     | the idempotent upsert      | grind                |
+| Optional observations forwarder                                     | 10 lines (`observed`)      | http_gun             |
+
+New friction, critically:
+
+- **`advise` stops one step short of Grind.** It answers whether another
+  attempt may help and after how long, but the app still decides between
+  `Snooze` (a delay the provider chose, no attempt spent), `Retry` (worker
+  backoff) and `Discard`. The only inputs it needs beyond `advise` are the
+  `Status` and `Provider(Some code)` variants, and it keeps the 5 second
+  `default_snooze` for a `MayHelp` status that sent no `Retry-After`. A
+  `RetryAdvice.after` of `Some` is the clean snooze signal; the app could treat
+  `MayHelp` with `None` as `Retry` and drop the two `Snooze` arms that default
+  the delay, but that changes behavior (a bare 503 would spend an attempt), so
+  the migration kept it. The 78-line mapping asked for in EXT-2 is a 39-line
+  one, not 10.
+- **`events_for` covers success streams only.** The scripted server still
+  writes the 429 and 5xx bodies of the three wires by hand (`provider_error`,
+  43 lines), and `Reply.Status(code, body)` takes a body the caller must build
+  in the provider's shape. A `testing.status_for(provider, code, message)` would
+  remove them. `Interrupted` has no counterpart for a mid-stream provider error
+  event either.
+- **`events_for` returns a `Reply`, not chunks.** A mist server must unwrap
+  `Events(chunks)` and `Interrupted(chunks)` and handle `Status(..)`, a case that
+  cannot occur for `testing.text` (the `[]` arm in `scripted.sse`). A
+  `testing.chunks(reply)` or an `events_for` that returns `List(String)` would
+  avoid the dead branch.
+- **A failed `Failure` must be built by hand in tests.** `llm_wire.Failure` has
+  five fields and "may gain fields", so two tests construct it in full
+  (`error`, `sent`, `partial_output`, `provider`, `usage`) to reach the
+  pure mapping. A `llm_wire.testing.failure(error)` would keep them stable.
+- **First-token and idle timers are separate.** The old single idle timer also
+  bounded the first token; the guide says to set both, and the app sets 5 s for
+  each. A reader who sets only `with_idle_timeout` gets the 180 s default for
+  the first token without a signal.
+- **Discard reasons grew.** Keeping the raw output (EXT-3) means the app now
+  decides how much of a model's answer to store as a discard reason (200
+  characters here); llm_wire gives no helper and no guidance on sensitive
+  output.
+
+Migration guides: sufficient. The llm_wire guide named every file in the
+extractor, the `Failure` construction in the tests and the telemetry change;
+the http_gun guide's resolver and `After(duration)` entries were exact. Gaps:
+the llm_wire guide does not say that `error.Http`'s description is prefixed
+(`HTTP failure: Connection failed ...`), which changed the transport-failure
+test's expected text, and its table for `extractor/jobs.gleam` is stale: the
+worker no longer maps `WireError` at all (`Env.model` is now total and
+`NotPrepared` is built only inside `llm.extract`).

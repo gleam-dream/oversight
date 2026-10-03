@@ -1,21 +1,21 @@
 //// Maps fetch, extraction and storage failures onto Grind's queue responses.
 ////
-//// This is the app's translation between llm_wire's retry vocabulary
-//// (`retry.assess` + `RetryHint` + `RetryEvidence`), http_gun's failure
-//// `Kind`, and Grind's `Response`. Extraction is a read-only provider
-//// call, so retrying after `RequestMayHaveReachedProvider` is safe here; an
-//// app whose call has effects would also branch on `RetryEvidence`.
+//// This is the app's translation between llm_wire's `advise` (a prospect
+//// and the provider's delay), http_gun's failure `Kind` for fetches, and
+//// Grind's `Response`. Extraction is a read-only provider call, so retrying
+//// a `MaybeSent` failure is safe here; an app whose call has effects would
+//// also branch on `failure.sent`.
 
 import extractor/document
 import extractor/llm
 import gleam/int
-import gleam/option.{type Option, None, Some}
+import gleam/option.{Some}
 import gleam/string
-import gleam/time/duration
+import gleam/time/duration.{type Duration}
 import grind/worker
 import http_gun/error as http_error
-import llm_wire/retry
-import llm_wire/types
+import llm_wire
+import llm_wire/error
 import pog
 
 /// Why one extraction attempt failed.
@@ -42,13 +42,15 @@ pub type Decision {
   /// Let the worker's retry policy back off and count an attempt.
   Retry(JobError)
   /// Come back after this delay without spending an attempt.
-  Snooze(delay_ms: Int, reason: String)
+  Snooze(delay: Duration, reason: String)
   /// The input cannot succeed unchanged.
   Discard(reason: String)
 }
 
 /// Delay used when a provider asks to back off without a usable hint.
-pub const default_snooze_ms = 5000
+pub fn default_snooze() -> Duration {
+  duration.seconds(5)
+}
 
 pub fn decide(failure: Failure) -> Decision {
   case failure {
@@ -72,38 +74,42 @@ fn decide_fetch(error: document.FetchError) -> Decision {
   }
 }
 
-fn decide_extract(error: llm.ExtractError) -> Decision {
-  case error {
-    llm.NotPrepared(wire) -> Discard("request not prepared: " <> describe(wire))
+fn decide_extract(extract_error: llm.ExtractError) -> Decision {
+  case extract_error {
+    llm.NotPrepared(problem) ->
+      Discard("request not prepared: " <> error.describe_prepare_error(problem))
     llm.Refused(reason) -> Discard("provider refused: " <> reason)
     llm.Truncated -> Discard("structured output hit the token limit")
     llm.UnexpectedToolCall -> Discard("provider asked for an undeclared tool")
-    llm.CallFailed(provider:, error:, evidence:) ->
-      case retry.assess(provider, error), error {
-        retry.MayHelp, types.HttpStatusError(status_code:, retry_hint:, ..) ->
-          Snooze(
-            hint_ms(retry_hint),
-            "provider answered " <> int.to_string(status_code),
-          )
-        retry.MayHelp, types.ProviderError(code: Some(code), ..) ->
-          Snooze(default_snooze_ms, "provider reported " <> code)
-        retry.MayHelp, _ -> Retry(Transient(Extract, describe(error)))
-        retry.WillNotHelpUnchanged, _ -> Discard(describe(error))
-        // llm_wire leaves every http_gun failure `Unknown`, and carries the
-        // `Reason` without its `Failure`; the app rebuilds the failure from
-        // llm_wire's own evidence to ask http_gun for the `Kind`.
-        retry.Unknown, types.HttpFailure(reason) ->
-          decide_http(
-            Extract,
-            http_error.new(reason, submission(evidence)),
-            describe(error),
-          )
-        retry.Unknown, types.OutputValidationError(reason) ->
-          Discard("invalid structured output: " <> reason)
-        retry.Unknown, types.ProtocolError(reason) ->
-          Discard("provider protocol error: " <> reason)
-        retry.Unknown, _ -> Retry(Transient(Extract, describe(error)))
-      }
+    llm.CallFailed(failure) -> decide_call(failure)
+  }
+}
+
+fn decide_call(failure: llm_wire.Failure) -> Decision {
+  let detail = llm_wire.describe_failure(failure)
+  case failure.error, llm_wire.advise(failure) {
+    error.InvalidOutput(raw_output:, failure: reason), _ ->
+      Discard(
+        "invalid structured output: "
+        <> error.describe_value_failure(reason)
+        <> "; output: "
+        <> string.slice(raw_output, 0, 200),
+      )
+    error.Protocol(problem), _ ->
+      Discard("provider protocol error: " <> problem)
+    error.Status(code:, ..), llm_wire.RetryAdvice(llm_wire.MayHelp, after:) ->
+      Snooze(
+        option.unwrap(after, default_snooze()),
+        "provider answered " <> int.to_string(code),
+      )
+    error.Provider(code: Some(code), ..),
+      llm_wire.RetryAdvice(llm_wire.MayHelp, ..)
+    -> Snooze(default_snooze(), "provider reported " <> code)
+    _, llm_wire.RetryAdvice(llm_wire.MayHelp, ..)
+    | _, llm_wire.RetryAdvice(llm_wire.Unknown, ..)
+    -> Retry(Transient(Extract, detail))
+    _, llm_wire.RetryAdvice(llm_wire.WillNotHelpUnchanged, ..) ->
+      Discard(detail)
   }
 }
 
@@ -121,47 +127,10 @@ fn decide_http(
   }
 }
 
-fn submission(evidence: types.RetryEvidence) -> http_error.Evidence {
-  case evidence.classification {
-    types.NoRequestSent -> http_error.NotSent
-    types.RequestMayHaveReachedProvider | types.EffectUnknown ->
-      http_error.MaybeSent
-  }
-}
-
-/// `Retry-After` seconds become a Grind delay. An HTTP-date value would need
-/// a date parser in the app; it falls back to the default delay.
-fn hint_ms(hint: Option(types.RetryHint)) -> Int {
-  case hint {
-    Some(types.RetryDelaySeconds(seconds)) -> seconds * 1000
-    Some(types.RetryHeaderValue(_)) | None -> default_snooze_ms
-  }
-}
-
 pub fn to_response(decision: Decision) -> worker.Response(output, JobError) {
   case decision {
     Retry(error) -> worker.Failed(error)
-    Snooze(delay_ms, reason) ->
-      worker.Snoozed(duration.milliseconds(delay_ms), reason)
+    Snooze(delay, reason) -> worker.Snoozed(delay, reason)
     Discard(reason) -> worker.Discarded(reason)
-  }
-}
-
-pub fn describe(error: types.WireError) -> String {
-  case error {
-    types.HttpFailure(reason) ->
-      http_error.describe(http_error.new(reason, http_error.MaybeSent))
-    types.HttpStatusError(status_code:, ..) ->
-      "HTTP " <> int.to_string(status_code)
-    types.ProviderError(code:, message:) ->
-      option.unwrap(code, "provider") <> ": " <> message
-    types.DeadlineExceeded(_) -> "deadline exceeded"
-    types.ConfigurationError(reason)
-    | types.PreparationError(reason)
-    | types.TransportError(reason)
-    | types.ProtocolError(reason)
-    | types.OutputValidationError(reason) -> reason
-    types.ResourceLimitExceeded(limit_name:, ..) -> "limit " <> limit_name
-    types.CancelledLocally -> "cancelled locally"
   }
 }
