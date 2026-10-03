@@ -1,22 +1,20 @@
 //// Collects the Sinal events of every package in the app and joins them per
 //// delivery.
 ////
-//// The app's own event and every http_gun event carry the delivery id as the
-//// shared Sinal `correlation` key: the worker passes the delivery's
-//// `Correlation` to http_gun. grind does not carry a correlation yet: its
-//// events carry `job_id`, and the delivery worker does not learn its job id.
-//// The collector therefore keeps one join table the app fills in by hand:
-//// job id -> delivery id (at submit time).
+//// Each delivery job is submitted with `correlation.from_key(delivery_id)`.
+//// grind stores it with the job and puts it in every job event and in the
+//// handler's context; the worker passes it to http_gun and to the app's own
+//// event. Every line is therefore keyed by the same `Correlation`, and lines
+//// are ordered by the emitters' monotonic clock, not by arrival.
 
-import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option}
+import gleam/order
 import gleam/otp/actor
 import gleam/string
-import grind/diagnostic
-import grind/observation
+import grind/telemetry as jobs
 import http_gun/telemetry as http_telemetry
 import sinal
 import sinal/correlation.{type Correlation}
@@ -33,9 +31,8 @@ pub type AttemptMeasurements {
 
 pub type AttemptMetadata {
   AttemptMetadata(
-    /// The delivery id, as the shared `correlation` key; `None` when the id
-    /// is longer than `correlation.max_bytes`.
-    correlation: Option(Correlation),
+    /// The delivery's correlation (`correlation.from_key(delivery_id)`).
+    correlation: Correlation,
     tenant: String,
     outcome: Outcome,
     status: Option(Int),
@@ -61,7 +58,7 @@ pub fn delivery_attempted() -> sinal.Event(AttemptMeasurements, AttemptMetadata)
     fields.success(AttemptMeasurements(duration_ms:))
   }
   let metadata = {
-    use correlation <- fields.include(correlation.field(), get: fn(m) {
+    use correlation <- fields.include(correlation.required_field(), get: fn(m) {
       m.correlation
     })
     use tenant <- fields.include(fields.string("tenant"), get: fn(m) {
@@ -95,23 +92,26 @@ pub fn outcome_name(outcome: Outcome) -> String {
   }
 }
 
-/// The delivery's correlation: its id, when the id fits.
-pub fn delivery_correlation(delivery_id: String) -> Option(Correlation) {
-  correlation.from_string(delivery_id) |> option.from_result
-}
-
 // ---------------------------------------------------------------------------
 // Collector
 // ---------------------------------------------------------------------------
 
 pub type Key {
-  Job(Int)
   Correlated(Correlation)
   Unkeyed
 }
 
 pub type Line {
-  Line(seq: Int, source: String, name: String, key: Key, detail: String)
+  /// `at` is the emitter's monotonic time where the event carries one, and
+  /// the handler's otherwise.
+  Line(
+    seq: Int,
+    at: Int,
+    source: String,
+    name: String,
+    key: Key,
+    detail: String,
+  )
 }
 
 pub opaque type Collector {
@@ -119,33 +119,22 @@ pub opaque type Collector {
 }
 
 pub opaque type Message {
-  Record(source: String, name: String, key: Key, detail: String)
-  NoteJob(job_id: Int, delivery_id: String)
-  Snapshot(reply: Subject(State))
-}
-
-pub opaque type State {
-  State(seq: Int, lines: List(Line), jobs: Dict(Int, String))
+  Record(at: Int, source: String, name: String, key: Key, detail: String)
+  Snapshot(reply: Subject(List(Line)))
 }
 
 pub fn start() -> Collector {
   let assert Ok(started) =
-    actor.new(State(0, [], dict.new()))
-    |> actor.on_message(fn(state: State, message) {
+    actor.new(#(0, []))
+    |> actor.on_message(fn(state: #(Int, List(Line)), message) {
+      let #(seq, lines) = state
       case message {
-        Record(source, name, key, detail) ->
+        Record(at, source, name, key, detail) ->
           actor.continue(
-            State(..state, seq: state.seq + 1, lines: [
-              Line(state.seq + 1, source, name, key, detail),
-              ..state.lines
-            ]),
-          )
-        NoteJob(job, delivery) ->
-          actor.continue(
-            State(..state, jobs: dict.insert(state.jobs, job, delivery)),
+            #(seq + 1, [Line(seq + 1, at, source, name, key, detail), ..lines]),
           )
         Snapshot(reply) -> {
-          process.send(reply, state)
+          process.send(reply, list.reverse(lines))
           actor.continue(state)
         }
       }
@@ -154,26 +143,17 @@ pub fn start() -> Collector {
   Collector(started.data)
 }
 
-pub fn note_job(collector: Collector, job_id: Int, delivery_id: String) -> Nil {
-  process.send(collector.subject, NoteJob(job_id, delivery_id))
-}
-
 pub fn lines(collector: Collector) -> List(Line) {
-  let state = process.call(collector.subject, 1000, Snapshot)
-  list.reverse(state.lines)
+  process.call(collector.subject, 1000, Snapshot)
 }
 
-/// Lines that can be attributed to one delivery, in arrival order.
+/// The lines of one delivery, in the order the emitters stamped them.
 pub fn trace(collector: Collector, delivery_id: String) -> List(Line) {
-  let state = process.call(collector.subject, 1000, Snapshot)
-  state.lines
-  |> list.reverse
-  |> list.filter(fn(line) {
-    case line.key {
-      Job(job) -> dict.get(state.jobs, job) == Ok(delivery_id)
-      Correlated(c) -> correlation.to_string(c) == delivery_id
-      Unkeyed -> False
-    }
+  let key = Correlated(correlation.from_key(delivery_id))
+  lines(collector)
+  |> list.filter(fn(line) { line.key == key })
+  |> list.sort(fn(a, b) {
+    int.compare(a.at, b.at) |> order.break_tie(int.compare(a.seq, b.seq))
   })
 }
 
@@ -184,20 +164,21 @@ pub fn format(line: Line) -> String {
 }
 
 /// Attach to every event of grind, http_gun, sinal and the app. Handlers run
-/// in the emitting process (sync events) or the producer's forwarder.
+/// in the emitting process (http_gun's pool and body processes, the worker)
+/// or in grind's forwarder.
 pub fn attach(collector: Collector) -> List(sinal.Attachment) {
   let c = collector
   [
-    // grind lifecycle, keyed by job id
-    watch(c, observation.admitted(), "grind.job.admitted", fn(_, m) {
-      #(Job(m.ref.job_id), "state=" <> string.inspect(m.committed_state))
+    // grind lifecycle, keyed by the job's correlation
+    watch_job(c, jobs.admitted(), "grind.job.admitted", fn(m) {
+      #(m.ref, "state=" <> string.inspect(m.committed_state))
     }),
-    watch(c, observation.claimed(), "grind.job.claimed", fn(_, m) {
-      #(Job(m.ref.job_id), "attempt=" <> int.to_string(m.attempt.attempt))
+    watch_job(c, jobs.claimed(), "grind.job.claimed", fn(m) {
+      #(m.ref, "attempt=" <> int.to_string(m.attempt.attempt))
     }),
-    watch(c, observation.acknowledged(), "grind.job.acknowledged", fn(_, m) {
+    watch_job(c, jobs.acknowledged(), "grind.job.acknowledged", fn(m) {
       #(
-        Job(m.ref.job_id),
+        m.ref,
         "attempt="
           <> int.to_string(m.attempt.attempt)
           <> " proposed="
@@ -206,59 +187,45 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
           <> string.inspect(m.committed_state),
       )
     }),
-    watch(c, observation.quarantined(), "grind.job.quarantined", fn(_, m) {
-      #(Job(m.ref.job_id), "")
+    watch_job(c, jobs.quarantined(), "grind.job.quarantined", fn(m) {
+      #(m.ref, "replayed=" <> string.inspect(m.replayed))
     }),
-    watch(c, observation.resolved(), "grind.job.resolved", fn(_, m) {
-      #(Job(m.ref.job_id), "")
+    watch_job(c, jobs.resolved(), "grind.job.resolved", fn(m) { #(m.ref, "") }),
+    watch_job(c, jobs.cancellation_decided(), "grind.job.cancellation", fn(m) {
+      #(m.ref, "")
     }),
-    watch(
+    watch_job(c, jobs.released(), "grind.job.released", fn(m) { #(m.ref, "") }),
+    watch_job(
       c,
-      observation.cancellation_decided(),
-      "grind.job.cancellation",
-      fn(_, m) { #(Job(m.ref.job_id), "") },
-    ),
-    watch(c, observation.released(), "grind.job.released", fn(_, m) {
-      #(Job(m.ref.job_id), "")
-    }),
-    watch(
-      c,
-      observation.contract_mismatch_recorded(),
+      jobs.contract_mismatch_recorded(),
       "grind.job.contract_mismatch",
-      fn(_, m) { #(Job(m.ref.job_id), "") },
+      fn(m) { #(m.ref, "") },
     ),
-    watch(c, observation.prune_completed(), "grind.prune.completed", fn(_, _) {
+    watch(c, jobs.prune_completed(), "grind.prune.completed", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, observation.prune_failed(), "grind.prune.failed", fn(_, _) {
+    watch(c, jobs.prune_failed(), "grind.prune.failed", fn(_, _) {
       #(Unkeyed, "")
     }),
-    // grind diagnostics: operational, not per delivery
-    watch(c, diagnostic.renewal(), "grind.diag.renewal", fn(_, m) {
-      #(Job(m.context.ref.job_id), "lease renewed")
+    // grind diagnostics: operational; renewals name their job
+    watch(c, jobs.renewal(), "grind.diag.renewal", fn(_, m) {
+      #(Correlated(m.context.ref.correlation), "lease renewed")
     }),
-    watch(c, diagnostic.acknowledgement(), "grind.diag.ack", fn(_, _) {
+    watch(c, jobs.acknowledgement(), "grind.diag.ack", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(
-      c,
-      diagnostic.acknowledgement_retry(),
-      "grind.diag.ack_retry",
-      fn(_, _) { #(Unkeyed, "") },
-    ),
-    watch(c, diagnostic.checkout(), "grind.diag.checkout", fn(_, _) {
+    watch(c, jobs.acknowledgement_retry(), "grind.diag.ack_retry", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, diagnostic.claim_failed(), "grind.diag.claim_failed", fn(_, _) {
+    watch(c, jobs.checkout(), "grind.diag.checkout", fn(_, _) { #(Unkeyed, "") }),
+    watch(c, jobs.claim_failed(), "grind.diag.claim_failed", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, diagnostic.capacity(), "grind.diag.capacity", fn(_, _) {
-      #(Unkeyed, "")
-    }),
+    watch(c, jobs.capacity(), "grind.diag.capacity", fn(_, _) { #(Unkeyed, "") }),
     // http_gun lifecycle, keyed by the delivery's correlation
     watch(c, http_telemetry.event(), "http_gun.lifecycle", fn(_, m) {
       #(
-        keyed(m.correlation),
+        option.map(m.correlation, Correlated) |> option.unwrap(Unkeyed),
         milestone(m.milestone) <> " mode=" <> string.inspect(m.mode),
       )
     }),
@@ -276,7 +243,7 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
     // the app's own attempt event
     watch(c, delivery_attempted(), "webhooks.delivery.attempted", fn(ms, m) {
       #(
-        keyed(m.correlation),
+        Correlated(m.correlation),
         outcome_name(m.outcome)
           <> " status="
           <> option.map(m.status, int.to_string) |> option.unwrap("-")
@@ -301,19 +268,43 @@ fn watch(
   name: String,
   describe: fn(m, d) -> #(Key, String),
 ) -> sinal.Attachment {
+  observe(collector, event, name, fn(m, d) {
+    let #(key, detail) = describe(m, d)
+    #(monotonic_ms(), key, detail)
+  })
+}
+
+/// A grind job event: keyed by its job's correlation, stamped by grind.
+fn watch_job(
+  collector: Collector,
+  event: sinal.Event(jobs.JobMeasurements, d),
+  name: String,
+  describe: fn(d) -> #(jobs.JobRef, String),
+) -> sinal.Attachment {
+  observe(collector, event, name, fn(m, d) {
+    let #(ref, detail) = describe(d)
+    #(m.monotonic_ms, Correlated(ref.correlation), detail)
+  })
+}
+
+fn observe(
+  collector: Collector,
+  event: sinal.Event(m, d),
+  name: String,
+  describe: fn(m, d) -> #(Int, Key, String),
+) -> sinal.Attachment {
   let source = case string.split_once(name, ".") {
     Ok(#(head, _)) -> head
     Error(Nil) -> name
   }
-  sinal.observe(event, fn(m, d) {
-    let #(key, detail) = describe(m, d)
-    process.send(collector.subject, Record(source, name, key, detail))
+  sinal.observe_labelled(event, "webhooks.collector", fn(m, d) {
+    let #(at, key, detail) = describe(m, d)
+    process.send(collector.subject, Record(at, source, name, key, detail))
   })
 }
 
-fn keyed(correlation: Option(Correlation)) -> Key {
-  option.map(correlation, Correlated) |> option.unwrap(Unkeyed)
-}
+@external(erlang, "webhooks_ffi", "monotonic_ms")
+fn monotonic_ms() -> Int
 
 fn milestone(m: http_telemetry.Milestone) -> String {
   case m {

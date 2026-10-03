@@ -2,14 +2,19 @@
 
 import gleam/bit_array
 import gleam/erlang/process
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import grind/testing as grind_testing
+import grind/worker
 import http_gun/destination
 import http_gun/error
 import sinal
 import sinal/correlation
+import sinal/fields
 import webhooks/attempt.{
-  BodyRead, Delivered, Gone, Receipt, Refused, Reject, Reply, Retry, Snooze,
+  BodyIncomplete, BodyRead, Delivered, Gone, Receipt, Refused, Reject, Reply,
+  Retry, Snooze,
 }
 import webhooks/signing
 import webhooks/subscription.{
@@ -24,46 +29,80 @@ fn reply(status: Int, retry_after) {
 
 pub fn status_and_failure_mapping_test() {
   let snooze = attempt.default_snooze()
-  assert attempt.classify(Ok(Reply(204, None, BodyRead(0))), snooze)
+  let classify = attempt.classify(_, snooze, 0)
+  assert classify(Ok(Reply(204, None, BodyRead(0))))
     == Delivered(Receipt(204, BodyRead(0)))
-  assert attempt.classify(reply(503, None), snooze)
-    == Retry(attempt.ServerError(503))
-  assert attempt.classify(reply(408, None), snooze) == Retry(attempt.Timeout)
-  assert attempt.classify(reply(410, None), snooze)
-    == Gone("receiver answered 410 Gone")
-  assert attempt.classify(reply(400, None), snooze)
-    == Reject(attempt.ClientError(400))
+  assert classify(reply(503, None)) == Retry(attempt.ServerError(503))
+  assert classify(reply(408, None)) == Retry(attempt.Timeout)
+  assert classify(reply(410, None)) == Gone("receiver answered 410 Gone")
+  assert classify(reply(400, None)) == Reject(attempt.ClientError(400))
   // 429 snoozes for Retry-After; the snooze does not consume an attempt.
-  assert attempt.classify(reply(429, Some("7")), snooze)
+  assert classify(reply(429, Some("7")))
     == Snooze(7000, "receiver answered 429; retry-after 7")
   // Missing, malformed or huge Retry-After falls back or is clamped.
-  let assert Snooze(60_000, _) = attempt.classify(reply(429, None), snooze)
+  let assert Snooze(60_000, _) = classify(reply(429, None))
   let assert Snooze(60_000, _) =
-    attempt.classify(reply(429, Some("Wed, 21 Oct 2026 07:28:00 GMT")), snooze)
-  let assert Snooze(3_600_000, _) =
-    attempt.classify(reply(429, Some("999999")), snooze)
-  // http_gun failure classes.
+    classify(reply(429, Some("Wed, 21 Oct 2026 07:28:00 GMT")))
+  let assert Snooze(3_600_000, _) = classify(reply(429, Some("999999")))
+  // WHK-8: once the context shows the snooze budget spent, a 429 uses an
+  // attempt instead.
+  assert attempt.classify(reply(429, Some("7")), snooze, snooze.max_snoozes)
+    == Retry(attempt.RateLimited)
+
+  // http_gun failures, by kind; the failure itself is the job error.
   let failed = fn(reason, evidence) {
-    attempt.classify(Error(error.Failure(reason, evidence)), snooze)
+    let failure = error.new(reason, evidence)
+    #(failure, classify(Error(failure)))
   }
-  assert failed(error.DestinationRejected, error.NotSubmitted)
-    == Refused("destination rejected by policy")
-  assert failed(error.DeadlineExceeded, error.MayHaveBeenSent)
-    == Retry(attempt.Timeout)
-  assert failed(
-      error.ConnectionFailed(error.ConnectionRefused),
-      error.NotSubmitted,
+  let assert #(_, Refused("destination rejected by policy")) =
+    failed(
+      error.DestinationRejected(destination.AddressRefused(destination.Private)),
+      error.NotSent,
     )
-    == Retry(attempt.Transport("connection_failed.connection_refused"))
-  assert failed(error.AdmissionFull, error.NotSubmitted)
-    == Retry(attempt.Unavailable("admission_full"))
-  assert failed(
-      error.LimitExceeded(error.RequestBodyBytes, 10, 20),
-      error.NotSubmitted,
+  let assert #(f, Retry(attempt.Http(g))) =
+    failed(error.DeadlineExceeded, error.MaybeSent)
+  assert f == g
+  let assert #(f, Retry(attempt.Http(g))) =
+    failed(error.ConnectionFailed(error.ConnectionRefused), error.NotSent)
+  assert f == g && error.name(f) == "connection_failed.connection_refused"
+  let assert #(_, Retry(attempt.Http(_))) =
+    failed(error.AdmissionFull, error.NotSent)
+  let assert #(_, Reject(attempt.Http(_))) =
+    failed(error.LimitExceeded(error.RequestBodyBytes, 10, 20), error.NotSent)
+  let assert #(_, Reject(attempt.Http(_))) =
+    failed(error.PlaybackMismatch(0), error.NotSent)
+  // WHK-3: a failure after the head keeps its status, which decides.
+  assert classify(Error(
+      error.new(error.RequestFailed(error.ConnectionReset), error.MaybeSent)
+      |> error.with_status(200),
+    ))
+    == Delivered(Receipt(200, BodyIncomplete("request_failed.connection_reset")))
+  let assert Retry(attempt.ServerError(503)) =
+    classify(Error(
+      error.new(error.IdleTimeout, error.MaybeSent) |> error.with_status(503),
+    ))
+}
+
+/// The job error codec keeps an http_gun failure whole.
+pub fn error_codec_round_trips_http_failures_test() {
+  let failure =
+    error.new(
+      error.LimitExceeded(error.ResponseHeaderBytes, 10, 20),
+      error.MaybeSent,
     )
-    == Reject(attempt.Internal("limit_exceeded.request_body_bytes"))
-  assert failed(error.FixtureMismatch(0), error.NotSubmitted)
-    == Reject(attempt.Internal("fixture_mismatch.0"))
+    |> error.with_status(200)
+  let assert Ok(perform) =
+    grind_testing.perform(
+      worker.responding(
+        "echo",
+        input: attempt.error_codec(),
+        output: attempt.error_codec(),
+        handle: fn(_, e) { worker.Failed(e) },
+      )
+        |> worker.with_error_codec(attempt.error_codec()),
+      attempt.Http(failure),
+    )
+  assert perform == worker.Failed(attempt.Http(failure))
 }
 
 pub fn signature_round_trip_test() {
@@ -102,11 +141,23 @@ pub fn registration_rejects_unsafe_endpoints_test() {
   assert check("https://user:pw@hooks.acme.example/hook", PublicTier)
     == Error(CredentialsInUrl)
   assert check("http://internal.example/hook", InternalTier)
-    == Error(HostNotAllowlisted("internal.example"))
+    == Error(HostNotAllowlisted("internal.example:80"))
   // A host name passes registration; delivery-time policy decides (see the
   // DNS-rebinding test).
   let assert Ok(_) = check("https://rebind.acme.test/hook", PublicTier)
   let assert Ok(_) = check("http://127.0.0.1:4000/hook", InternalTier)
+  // WHK-4: a `host:port` entry pins the internal tier to one local server.
+  let pinned = fn(url) {
+    subscription.validate_endpoint(url, InternalTier, ["127.0.0.1:4000"])
+  }
+  let assert Ok(_) = pinned("http://127.0.0.1:4000/hook")
+  assert pinned("http://127.0.0.1:4001/hook")
+    == Error(HostNotAllowlisted("127.0.0.1:4001"))
+  // The internal tier is loopback only, even for an allowlisted name.
+  assert subscription.validate_endpoint("https://10.0.0.1/hook", InternalTier, [
+      "10.0.0.1",
+    ])
+    == Error(ForbiddenAddress(destination.Private))
 }
 
 /// The app's event round-trips through native telemetry, with the delivery
@@ -119,7 +170,7 @@ pub fn delivery_attempted_event_round_trip_test() {
     })
   let metadata =
     telemetry.AttemptMetadata(
-      correlation: telemetry.delivery_correlation("evt_1:sub_1"),
+      correlation: correlation.from_key("evt_1:sub_1"),
       tenant: "acme",
       outcome: telemetry.Snoozed,
       status: None,
@@ -132,8 +183,35 @@ pub fn delivery_attempted_event_round_trip_test() {
   let assert Ok(Nil) = sinal.detach(attachment)
   assert process.receive(seen, 100)
     == Ok(#(telemetry.AttemptMeasurements(3), metadata))
-  let assert Some(c) = metadata.correlation
-  assert correlation.to_string(c) == "evt_1:sub_1"
-  // A delivery id longer than a correlation allows is emitted without one.
-  assert telemetry.delivery_correlation(string.repeat("x", 200)) == None
+  assert correlation.to_string(metadata.correlation) == "evt_1:sub_1"
+  // A delivery id longer than a correlation allows still gets a stable one.
+  let long = correlation.from_key(string.repeat("x", 200))
+  assert string.length(correlation.to_string(long)) == 64
+  assert long == correlation.from_key(string.repeat("x", 200))
+}
+
+/// Every `Outcome` is in the enum's list, so no observer is ever handed a
+/// value it cannot decode.
+pub fn every_outcome_is_listed_test() {
+  let metadata = sinal.metadata_fields(telemetry.delivery_attempted())
+  list.each(
+    [
+      telemetry.Delivered,
+      telemetry.Retried,
+      telemetry.Snoozed,
+      telemetry.Gone,
+      telemetry.Refused,
+      telemetry.Rejected,
+    ],
+    fn(outcome) {
+      let sample =
+        telemetry.AttemptMetadata(
+          correlation: correlation.from_key("evt"),
+          tenant: "acme",
+          outcome:,
+          status: Some(200),
+        )
+      let assert Ok(Nil) = fields.check(metadata, sample)
+    },
+  )
 }

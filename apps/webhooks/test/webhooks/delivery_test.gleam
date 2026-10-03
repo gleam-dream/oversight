@@ -1,15 +1,19 @@
-//// Live deliveries to the loopback receiver, driven by a manual grind
-//// consumer. Needs DATABASE_URL (../scripts/with-postgres.sh gleam test).
+//// Live deliveries to the loopback receiver; due jobs run on demand with
+//// `grind/testing.drain`. Needs DATABASE_URL
+//// (../scripts/with-postgres.sh gleam test).
 
 import gleam/int
 import gleam/list
+import gleam/option.{Some}
 import gleam/string
+import gleam/time/duration
+import grind
 import grind/job
-import grind/postgres
-import grind/queue
-import grind/worker
+import http_gun/error
 import webhooks/attempt
+import webhooks/delivery
 import webhooks/receiver
+import webhooks/service
 import webhooks/signing
 import webhooks/store
 import webhooks/subscription
@@ -26,10 +30,9 @@ pub fn common_path_signed_delivery_test() {
   let assert [#(delivery_id, job_id)] = support.publish(svc, raw)
   assert delivery_id == "evt_1:" <> sub_id
 
-  use consumer <- support.with_consumer(svc)
-  assert queue.process_one(consumer) == Ok(True)
+  assert support.drain(svc) == Ok(1)
   assert support.outcome(svc, job_id)
-    == Ok(job.SucceededWith(attempt.Receipt(204, attempt.BodyRead(0))))
+    == Ok(grind.Succeeded(attempt.Receipt(204, attempt.BodyRead(0))))
 
   // The receiver got one signed request carrying the idempotency key.
   let assert [request] = receiver.received(rx)
@@ -44,24 +47,31 @@ pub fn common_path_signed_delivery_test() {
 
   // Publishing the same event id again converges on the same job.
   assert support.publish(svc, raw) == [#(delivery_id, job_id)]
-  assert queue.process_one(consumer) == Ok(False)
+  assert support.drain(svc) == Ok(0)
 
   // WHK-2: the worker itself, error codec included, re-binds its own
-  // succeeded job; no read-only twin definition is needed.
-  let assert Ok(handle) = postgres.bind_handle(svc.jobs, svc.worker, job_id)
-  assert postgres.outcome(svc.jobs, handle)
-    == Ok(job.SucceededWith(attempt.Receipt(204, attempt.BodyRead(0))))
+  // succeeded job; `await` returns at once for a finished job.
+  let assert Ok(handle) = grind.bind(svc.jobs, svc.worker, job_id)
+  assert grind.await(svc.jobs, handle, within: duration.seconds(1))
+    == Ok(grind.Succeeded(attempt.Receipt(204, attempt.BodyRead(0))))
+  // The delivery row was written in the job's transaction.
+  let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
+  assert row.job_id == job_id && row.attempts == 1
 
-  // One delivery can be followed across grind, http_gun and the app, but
-  // only through the app's own join tables.
+  // WHK-5: one delivery is followed across grind, http_gun and the app by
+  // its correlation alone, in emit order: claim, request, attempt, ack.
+  // `submit_in` emits no `admitted` event; the commit is the app's.
   support.settle()
   let names =
-    telemetry.trace(svc.collector, delivery_id) |> list.map(fn(l) { l.name })
-  assert list.contains(names, "grind.job.admitted")
-  assert list.contains(names, "grind.job.claimed")
-  assert list.contains(names, "grind.job.acknowledged")
-  assert list.contains(names, "http_gun.lifecycle")
-  assert list.contains(names, "webhooks.delivery.attempted")
+    telemetry.trace(svc.collector, delivery_id)
+    |> list.map(fn(l) { l.name })
+    |> list.filter(fn(name) { name != "grind.diag.renewal" })
+    |> list.unique
+  assert names
+    == [
+      "grind.job.claimed", "http_gun.lifecycle", "webhooks.delivery.attempted",
+      "grind.job.acknowledged",
+    ]
 }
 
 pub fn receiver_down_retries_then_exhausts_test() {
@@ -73,18 +83,49 @@ pub fn receiver_down_retries_then_exhausts_test() {
       svc,
       "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_down\",\"data\":null}",
     )
-  use consumer <- support.with_consumer(svc)
-  assert queue.process_one(consumer) == Ok(True)
-  assert queue.process_one(consumer) == Ok(True)
-  assert queue.process_one(consumer) == Ok(True)
-  assert queue.process_one(consumer) == Ok(False)
-  assert support.outcome(svc, job_id)
-    == Ok(job.BusinessFailedWithCause(
-      attempt.Transport("connection_failed.connection_refused"),
-      worker.BudgetExhausted,
-    ))
+  assert support.drain(svc) == Ok(3)
+  // The typed http_gun failure survives the job's error codec.
+  let assert Ok(grind.Failed(
+    grind.Business(attempt.Http(failure)),
+    Some(job.BudgetExhausted),
+    _,
+  )) = support.outcome(svc, job_id)
+  assert error.name(failure) == "connection_failed.connection_refused"
+  assert error.evidence(failure) == error.NotSent
   let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
   assert row.attempts == 3
+}
+
+/// WHK-8: a receiver that always answers 429 is snoozed `max_snoozes` times
+/// (read from the job's context), then each 429 uses an attempt, so the
+/// delivery ends instead of snoozing forever.
+pub fn always_throttled_receiver_stops_test() {
+  let options = support.options()
+  let plan =
+    delivery.Plan(
+      ..options.plan,
+      snooze: attempt.SnoozePolicy(..attempt.default_snooze(), max_snoozes: 2),
+    )
+  use svc <- support.with_service(service.Options(..options, plan:))
+  let rx = receiver.start()
+  let assert Ok(_) =
+    support.subscribe(svc, "ops", receiver.url(rx, "/throttled"))
+  let assert [#(delivery_id, job_id)] =
+    support.publish(
+      svc,
+      "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_429\",\"data\":null}",
+    )
+  // 2 snoozes, then 3 attempts.
+  assert support.drain(svc) == Ok(5)
+  assert support.outcome(svc, job_id)
+    == Ok(grind.Failed(
+      grind.Business(attempt.RateLimited),
+      Some(job.BudgetExhausted),
+      "worker returned an application error",
+    ))
+  assert list.length(receiver.received(rx)) == 5
+  let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
+  assert row.attempts == 5
 }
 
 pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
@@ -133,18 +174,14 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
       "{\"tenant\":\"ops\",\"type\":\"invoice.paid\",\"id\":\"evt_o\",\"data\":{}}",
     )
   assert list.length(acme) == 2
-  use consumer <- support.with_consumer(svc)
-  assert queue.process_available(consumer) == queue.BatchCompleted(1)
-  assert queue.process_one(consumer) == Ok(True)
-  assert queue.process_one(consumer) == Ok(True)
-  assert queue.process_one(consumer) == Ok(False)
+  assert support.drain(svc) == Ok(3)
 
   list.each(acme, fn(entry) {
     assert support.outcome(svc, entry.1)
-      == Ok(job.DiscardedWithReason("destination rejected by policy"))
+      == Ok(grind.Discarded("destination rejected by policy"))
   })
   let assert [#(_, ops_job)] = ops
-  let assert Ok(job.SucceededWith(_)) = support.outcome(svc, ops_job)
+  let assert Ok(grind.Succeeded(_)) = support.outcome(svc, ops_job)
   // Only the internal tenant's request reached the receiver.
   let assert [only] = receiver.received(rx)
   assert string.starts_with(

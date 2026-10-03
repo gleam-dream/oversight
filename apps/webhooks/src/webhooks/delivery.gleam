@@ -10,11 +10,9 @@ import gleam/http/response
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/uri
-import grind/worker.{type Worker}
+import grind/worker.{type Context, type Worker}
 import http_gun
 import http_gun/error
-import http_gun/request_options
-import pog
 import sinal
 import webhooks/attempt.{
   type Backoff, type Delivery, type DeliveryError, type Disposition,
@@ -30,108 +28,109 @@ pub const worker_id = "webhooks.deliver"
 
 pub type Deps {
   Deps(
-    db: pog.Connection,
     egress: Egress,
     tenants: Dict(String, Tier),
-    /// Unix seconds used in the signature. Injected so cassette playback,
-    /// which matches headers exactly, sees a deterministic signature.
-    clock: fn() -> Int,
-    snooze: SnoozePolicy,
     /// How much of a receiver's response body an attempt will buffer.
     max_response_bytes: Int,
   )
 }
 
 pub type Plan {
-  Plan(max_attempts: Int, backoff: Backoff)
+  Plan(max_attempts: Int, backoff: Backoff, snooze: SnoozePolicy)
 }
 
 pub fn default_plan() -> Plan {
-  Plan(max_attempts: 8, backoff: attempt.Backoff(15_000, 3_600_000))
+  Plan(
+    max_attempts: 8,
+    backoff: attempt.Backoff(15_000, 3_600_000),
+    snooze: attempt.default_snooze(),
+  )
 }
 
-/// The grind worker definition. All decisions live in the queue handler; the
-/// plain `perform` callback is required by `worker.define*` but only reached
-/// through `worker.invoke`, so it adapts the same handler.
+/// The grind worker definition. Receivers deduplicate on `webhook-id`, so an
+/// attempt abandoned by a dead node is replayed instead of held for an
+/// operator.
 pub fn worker(
   deps: Deps,
   plan: Plan,
+  queue: String,
 ) -> Worker(Delivery, Receipt, DeliveryError) {
-  let assert Ok(definition) =
-    worker.define_with_error_codec(
-      worker_id,
-      "v1",
-      attempt.delivery_codec(),
-      attempt.receipt_codec(),
-      attempt.error_codec(),
-      fn(delivery) {
-        case handle(deps, delivery) {
-          worker.WorkerSucceeded(receipt) -> Ok(receipt)
-          worker.WorkerFailed(e) -> Error(e)
-          _ -> Error(attempt.Internal("non-result disposition"))
-        }
-      },
-    )
-  let assert Ok(definition) =
-    worker.with_max_attempts(definition, plan.max_attempts)
-  definition
+  worker.responding(
+    worker_id,
+    input: attempt.delivery_codec(),
+    output: attempt.receipt_codec(),
+    handle: fn(context, delivery) { handle(deps, plan, context, delivery) },
+  )
+  |> worker.with_error_codec(attempt.error_codec())
+  |> worker.with_queue(queue)
+  |> worker.with_max_attempts(plan.max_attempts)
   |> worker.with_retry_policy(attempt.retry_policy(plan.backoff))
-  |> worker.with_queue_handler(fn(delivery) { handle(deps, delivery) })
+  |> worker.with_abandonment(worker.ReplayAfterLeaseExpiry(max_replays: 3))
 }
 
 /// One attempt. Reads the subscription fresh so disabled endpoints and
 /// rotated URLs or secrets take effect on the next attempt.
 pub fn handle(
   deps: Deps,
+  plan: Plan,
+  context: Context,
   delivery: Delivery,
-) -> worker.WorkerResponse(Receipt, DeliveryError) {
-  case store.get_subscription(deps.db, delivery.subscription_id) {
-    Error(store.NotFound) -> worker.WorkerDiscarded("subscription deleted")
+) -> worker.Response(Receipt, DeliveryError) {
+  let db = worker.connection(context)
+  case store.get_subscription(db, delivery.subscription_id) {
+    Error(store.NotFound) -> worker.Discarded("subscription deleted")
     Error(store.QueryFailed(_)) ->
-      worker.WorkerFailed(attempt.Unavailable("subscription lookup failed"))
+      worker.Failed(attempt.Unavailable("subscription lookup failed"))
     Ok(subscription.Subscription(status: subscription.Disabled(reason), ..)) ->
-      worker.WorkerDiscarded("subscription disabled: " <> reason)
+      worker.Discarded("subscription disabled: " <> reason)
     Ok(sub) ->
       case dict.get(deps.tenants, sub.tenant) {
-        Error(Nil) -> worker.WorkerDiscarded("unknown tenant " <> sub.tenant)
-        Ok(tier) -> deliver(deps, delivery, sub, tier)
+        Error(Nil) -> worker.Discarded("unknown tenant " <> sub.tenant)
+        Ok(tier) -> deliver(deps, plan, context, delivery, sub, tier)
       }
   }
 }
 
 fn deliver(
   deps: Deps,
+  plan: Plan,
+  context: Context,
   delivery: Delivery,
   sub: Subscription,
   tier: Tier,
-) -> worker.WorkerResponse(Receipt, DeliveryError) {
+) -> worker.Response(Receipt, DeliveryError) {
   let started = now_ms()
-  let #(result, disposition) = case build_request(sub, delivery, deps.clock()) {
-    Error(e) -> #(Error(Nil), attempt.Reject(e))
+  let correlation = worker.correlation(context)
+  let #(status, disposition) = case
+    build_request(sub, delivery, unix_seconds())
+  {
+    Error(e) -> #(None, attempt.Reject(e))
     Ok(req) -> {
-      let client = egress.client_for(deps.egress, tier)
-      let client = case telemetry.delivery_correlation(delivery.delivery_id) {
-        Some(correlation) -> http_gun.with_correlation(client, correlation)
-        None -> client
+      let sent =
+        egress.client_for(deps.egress, tier)
+        |> http_gun.with_correlation(correlation)
+        |> send(req, deps.max_response_bytes)
+      let status = case sent {
+        Ok(reply) -> Some(reply.status)
+        Error(failure) -> error.status(failure)
       }
-      let sent = send(client, req, deps.max_response_bytes)
-      #(result.replace_error(sent, Nil), attempt.classify(sent, deps.snooze))
+      #(
+        status,
+        attempt.classify(sent, plan.snooze, worker.snooze_count(context)),
+      )
     }
   }
-  let status = case result {
-    Ok(reply) -> Some(reply.status)
-    Error(Nil) -> None
-  }
+  let db = worker.connection(context)
   let _ =
     store.record_attempt(
-      deps.db,
+      db,
       delivery.delivery_id,
       status,
       describe(disposition),
     )
   case disposition {
     attempt.Gone(reason) | attempt.Refused(reason) -> {
-      let _ = store.disable(deps.db, sub.id, reason)
+      let _ = store.disable(db, sub.id, reason)
       Nil
     }
     _ -> Nil
@@ -140,7 +139,7 @@ fn deliver(
     telemetry.delivery_attempted(),
     telemetry.AttemptMeasurements(now_ms() - started),
     telemetry.AttemptMetadata(
-      correlation: telemetry.delivery_correlation(delivery.delivery_id),
+      correlation:,
       tenant: delivery.tenant,
       outcome: outcome(disposition),
       status:,
@@ -192,27 +191,27 @@ pub fn build_request(
 }
 
 /// Send and read the status. The body is read only up to `max_body` for the
-/// delivery log: under the `Truncate` policy a 200 with an oversized body is
-/// still a delivered webhook, so a retrying worker never delivers it twice.
+/// delivery log; an oversized body fails with the response status, which
+/// `attempt.classify` still delivers as a 2xx, so a retrying worker never
+/// delivers it twice.
 pub fn send(
   client: http_gun.Client,
   req: Request(BitArray),
   max_body: Int,
 ) -> Result(Reply, error.Failure) {
-  let options =
-    request_options.Options(
-      ..request_options.default(),
-      collect: Some(request_options.Collect(max_body, request_options.Truncate)),
-    )
-  use sent <- result.map(http_gun.send_with_options(client, req, options))
+  use sent <- result.map(
+    client
+    |> http_gun.with_body_limit(max_body, http_gun.Fail)
+    |> http_gun.send(req),
+  )
   let resp = sent.response
-  let note = case sent.truncated {
-    True -> attempt.BodyOverLimit(max_body)
-    False -> attempt.BodyRead(bit_array.byte_size(resp.body))
-  }
   let retry_after =
     response.get_header(resp, "retry-after") |> option.from_result
-  attempt.Reply(resp.status, retry_after, note)
+  attempt.Reply(
+    resp.status,
+    retry_after,
+    attempt.BodyRead(bit_array.byte_size(resp.body)),
+  )
 }
 
 fn describe(disposition: Disposition) -> String {

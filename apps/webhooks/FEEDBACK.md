@@ -4,8 +4,9 @@
 
 grind, http_gun and sinal compose into a working webhook service through
 public imports only. All 8 tests pass, and `gleam run` prints the full
-narrative. (Re-runs after the package fixes, after wave 2 and after the follow-up
-fixes, all on 2 Oct 2026: see the last three sections.) Most of the composition is direct. A grind worker is a closure, so
+narrative. (Re-runs after the package fixes, after wave 2, after the follow-up
+fixes and after wave 3, all on 2 Oct 2026: see the last four sections. After
+wave 3, 12 tests pass and no finding needs its original glue.) Most of the composition is direct. A grind worker is a closure, so
 it can capture an http_gun client, and that includes a cassette playback
 client. http_gun's typed `Failure` maps cleanly onto grind's
 `WorkerResponse`. grind's retry policy receives the typed error, so a 429
@@ -127,6 +128,18 @@ registered version delivery-error-v1")`. Test:
   shows both policies on the same exchange: `Fail` loses the status,
   `Truncate` returns the 200 with 1024 bytes and `truncated: True`.
 
+- **Status (wave 3):** resolved by http_gun e55fa1d. An oversized body now
+  fails with the status of its response (`error.status(failure) == Some(200)`),
+  so the worker uses `with_body_limit(max, Fail)` and one rule in
+  `attempt.classify`: a failure that carries a status is classified by that
+  status, with `BodyIncomplete(error.name(failure))` as the body note. The
+  same rule now also delivers a 2xx whose body read failed mid-stream
+  (connection reset, idle timeout), which before this wave was retried and
+  delivered twice. `Buffered.truncated`, `BodyOverLimit` and the
+  `request_options.Options` record update are gone; `delivery.send` is 20
+  lines as before but has no branch. `Fail` drops the response headers, so a
+  429 with an oversized body loses its `Retry-After` (see the re-run).
+
 ### WHK-4 Destination policy belongs to the client only; the check cannot be reused
 
 - **Packages:** http_gun. **Kind:** flexibility, ergonomics. **Severity:** major.
@@ -172,6 +185,20 @@ registered version delivery-error-v1")`. Test:
   update, because only loopback has a helper. Every proposal above
   (public `parse_address`/`check`, per-request narrowing, `host:port`
   entries) is still open, so the tiered clients and the FFI stay.
+
+- **Status (wave 3):** resolved by http_gun e55fa1d. All three proposals
+  landed. `egress.gleam` keeps one client whose policy is the union of the
+  tiers (`destination.default() |> destination.allow_loopback`), and each
+  delivery narrows it with `http_gun.with_destination(subscription.policy(tier,
+hosts))`, a view that can only narrow. Registration applies the same
+  `Policy` value with `destination.check(policy, host, port)`, so the copied
+  policy check, `parse_address`, `class_name`-by-classify and the Erlang
+  `parse_ip` FFI are gone. `only_hosts` takes `host:port`, so `gleam run`
+  pins the internal tier to the receiver's port and refuses
+  `127.0.0.1:5432` at registration (`core_test` asserts the same). Glue:
+  `egress.gleam` 83 → 49 lines, registration 22 → 5, FFI 5 → 0; the
+  operator's API client is one builder chain, loopback only and pinned to
+  the API port. The resolver is still client-wide (see the re-run).
 
 ### WHK-5 One delivery can be followed across packages only through app-maintained join tables
 
@@ -235,6 +262,21 @@ registered version delivery-error-v1")`. Test:
   grind's events carry `job_id` and the queue handler cannot see it; and the
   forwarder ordering and the missing grind timestamps above.
 
+- **Status (wave 3):** resolved by grind 749c0dc. Each job is submitted with
+  `job.with_correlation(correlation.from_key(delivery_id))`; grind puts it in
+  every `JobRef` (and so in every job event and in renewal diagnostics) and in
+  the handler's `Context`, where the worker reads it with
+  `worker.correlation(context)` for http_gun and for the app's event. The job
+  id → delivery id table (`NoteJob`, `note_job`, the `jobs` dict, `Key.Job`,
+  `web.Context.on_submitted` and its wiring) is deleted. Every grind job event
+  carries `monotonic_ms`, and http_gun's handlers now run synchronously, so
+  the collector orders a trace by the emitters' clock: the `/flaky` trace in
+  `gleam run` reads claim → request → attempt → ack for each of the three
+  attempts, and `delivery_test` asserts that order. Still unattributed: 213 of
+  363 events in one run, all grind diagnostics (`checkout`, `ack`,
+  `capacity`) that name no job. A transactional `submit_in` emits no
+  `admitted` event, so the trace now starts at the claim.
+
 ### WHK-6 http_gun failure reasons have no stable public name
 
 - **Packages:** http_gun (into grind). **Kind:** ergonomics. **Severity:** minor.
@@ -248,6 +290,16 @@ registered version delivery-error-v1")`. Test:
 - **Proposal (http_gun):** `error.reason_name(Reason) -> String`, the same
   names the cassette codec uses. A `error.class(Failure) -> Transient |
 Permanent | Local` helper would cover most retry mappings.
+
+- **Status (wave 3):** resolved by http_gun e55fa1d. The 85 lines that named
+  and mapped every `Reason`, `TransportCause` and `LimitKind` are gone.
+  `classify` branches on `error.status`, then `error.kind` for `Refused`, and
+  sends everything else through `error.is_retryable(failure, idempotent:
+True)` (receivers deduplicate on `webhook-id`). `DeliveryError.Transport(String)`
+  became `Http(error.Failure)`, stored whole through `error.to_json` and
+  `error.decoder()`, so the job outcome keeps the evidence and status, and
+  logs use `error.name`. `core_test.error_codec_round_trips_http_failures_test`
+  round-trips a failure with a status through the worker's codecs.
 
 ### WHK-7 Cassette matching is exact and playback skips the destination policy
 
@@ -274,6 +326,17 @@ Permanent | Local` helper would cover most retry mappings.
   - Document that playback does not apply the destination policy, or apply
     it to the recorded host.
 
+- **Status (wave 3):** partially resolved by http_gun e55fa1d.
+  `testing.ignoring_headers(script, ["webhook-timestamp", "webhook-signature"])`
+  replaces the injected clock: `Deps.clock` and `Options.clock` are gone, and
+  the test no longer recomputes the HMAC to match (57 → 45 setup lines,
+  including a new `with_tape` that starts the whole service on a playback
+  client through `egress.Settings.start_client`). The testing module docs now
+  say that playback ignores the destination policy, so SSRF tests still use
+  the resolver seam. Still open: a `PlaybackMismatch` inside a worker is an
+  ordinary failure of kind `Playback`, which the worker rejects as a job
+  outcome instead of failing the test loudly.
+
 ### WHK-8 The queue handler sees neither attempt nor snooze count
 
 - **Packages:** grind. **Kind:** extensibility. **Severity:** minor.
@@ -296,6 +359,20 @@ Permanent | Local` helper would cover most retry mappings.
   still cannot see `snooze_count`, so a receiver that always answers 429 is
   snoozed forever (at most `SnoozePolicy.maximum_ms`, 1 h, apart). The app
   has no cap; the only bound left is the subscription being disabled by hand.
+
+- **Status (wave 3):** resolved by grind 749c0dc. The worker is
+  `worker.responding(id, input:, output:, handle: fn(context, delivery) {..})`,
+  with no dummy `perform` and no adapter (12 lines → 0). The handler passes
+  `worker.snooze_count(context)` to `attempt.classify`, which snoozes a 429
+  at most `SnoozePolicy.max_snoozes` times and then fails the attempt with
+  `RateLimited`, so the attempt budget ends the delivery with a typed error.
+  `delivery_test.always_throttled_receiver_stops_test` points a delivery at a
+  receiver that always answers 429 with `Retry-After: 0`: two snoozes, three
+  attempts, five requests, then
+  `Failed(Business(RateLimited), Some(BudgetExhausted), _)`. grind's own
+  `with_max_snoozes` (100) stays as a backstop; the app caps on the context
+  instead because grind's cap ends the job as `BusinessUnrecorded` without
+  the app's error or a final delivery-log row.
 
 ### WHK-9 Dependency resolution: grind's stdlib cap rules out the current mist
 
@@ -351,6 +428,16 @@ Permanent | Local` helper would cover most retry mappings.
   its own forwarder (`src/webhooks/service.gleam:78-84`) instead of one
   `forwarder.route(["http_gun"], ..)`. `sinal.emit` now follows routes; the
   remaining step is http_gun emitting with it.
+
+- **Status (wave 3):** partially resolved by http_gun e55fa1d and sinal
+  42dd684. http_gun emits through `sinal.emit` by default, so the app's
+  forwarder, its supervisor and the `observations` setting are gone
+  (6 lines → 0); the collector's one-`process.send` handlers run in
+  http_gun's pool and body processes, which keeps them in emit order. The
+  collector's attachments use `sinal.observe_labelled(.., "webhooks.collector", ..)`.
+  Still 18 `observe` calls, one per event type; a `watch_job` helper over
+  `telemetry.JobMeasurements` folds the eight grind job events into one
+  shape.
 
 ## What worked well
 
@@ -416,11 +503,19 @@ New friction from the fixes:
   would make it one line and survive later fields. The note about building
   `Options` with a record update, never positionally, is now a rule callers
   must know.
+
+  **Status (wave 3):** resolved by http_gun e55fa1d: per-call settings are
+  client views (`client |> http_gun.with_body_limit(max, http_gun.Fail)`).
+
 - **Only loopback has a helper** (http_gun, ergonomics, nit). The internal
   tier needs `allow_public: False` and `allowed_hosts`, so it still writes
   `destination.Policy(..base.destination, ...)` and then pipes into
   `config.allow_loopback`, mixing the two styles. `config.allowed_hosts` and
   `config.deny_public` (or one `config.with_destination`) would finish it.
+
+  **Status (wave 3):** resolved by http_gun e55fa1d: `destination.loopback_only()
+|> destination.only_hosts(hosts)` and `config.with_destination`.
+
 - **Restoring the snooze makes WHK-8 live** (grind, extensibility, now
   major). See the WHK-8 status: an always-429 receiver is snoozed without
   bound, because the snooze rolls the attempt back and the handler cannot
@@ -485,6 +580,12 @@ New friction from the redesigned APIs:
   a silent detach in every observer), and document the hazard on `enum`
   and `observe`.
 
+  **Status (wave 3):** partially resolved by sinal 0d019ea and 5aef827.
+  `fields.check` lets a test prove every constructor is listed
+  (`core_test.every_outcome_is_listed_test`), and a handler that cannot
+  decode now skips the call and stays attached. The list is still unchecked
+  at compile time; the test must name every constructor.
+
 - **`fields.enum` costs lines when the domain type carries payloads**
   (ergonomics, minor). The worker's `Disposition` holds receipts and
   reasons, so the event needs its own payload-free `Outcome`, a name
@@ -533,6 +634,11 @@ New friction from the redesigned APIs:
   to "any application id" in the module doc, and consider a total
   `correlation.derive(String) -> Correlation` that hashes values over the
   bound.
+
+  **Status (wave 3):** resolved by sinal c6e2d36 (`correlation.from_key`).
+  `delivery_correlation` is deleted; the event reads `required_field()`, and
+  an over-long delivery id gets a stable 64-character digest instead of no
+  correlation.
 
   **Status (follow-up):** not resolved, and wider. `required_field()` does
   not apply: this event cannot promise a correlation, so it keeps
@@ -593,6 +699,11 @@ New friction:
   bytes; see the status on the fallible-correlation note. The cost moved
   rather than vanished: `delivery.deliver` has a `case` and the collector a
   `keyed` helper. A total `correlation.derive` would let both go.
+
+  **Status (wave 3):** resolved by sinal c6e2d36 and grind 749c0dc: the
+  correlation comes from the job's context, always present; the `case` and
+  `keyed` are gone.
+
 - **`worker.codec` still returns `Result` for a constant version string**
   (grind, ergonomics, nit). The three `let assert Ok(codec) = worker.codec(..)`
   in `attempt.gleam` survive unchanged, so wrapping the encoder in
@@ -600,6 +711,10 @@ New friction:
   total, and the `Result` the follow-up added shows up as a visible adapter
   at each of the three call sites. A `worker.codec_total` (or a default of
   total) would spare the common case.
+
+  **Status (wave 3):** resolved by grind 749c0dc: `worker.codec` returns a
+  `Codec`; the three `let assert`s are gone.
+
 - **The collector still cannot attribute 148 of 251 events** (grind, composition, minor).
   The `/flaky` run reports them as unattributed; they are grind
   diagnostics (`checkout`, `ack`) with no job id and no correlation. The
@@ -613,3 +728,179 @@ http_gun guide lists `delivery.gleam:44,117,121` and
 `telemetry.gleam:113,129,138,178,284,304` but not `service.gleam:133`
 (the `Deps.correlate` closure that disappears with the join table), which
 is visible only once `Deps` loses the field.
+
+## Re-run after wave 3 (2 Oct 2026)
+
+Heads: grind 008b657 (facade 749c0dc), http_gun 1a5f5ef (redesign e55fa1d,
+labels 1a5f5ef), sinal 44c5395 (`from_key` c6e2d36, `fields.check`
+0d019ea, labels 42dd684). Resolved: gleam_stdlib 1.0.5, mist 6.0.3,
+glisten 9.0.1, wisp 2.2.2, pog 4.1.0. json_blueprint and saga are not
+dependencies.
+`../scripts/with-postgres.sh gleam test`: 12 passed, no failures (9 before).
+New: `core_test.error_codec_round_trips_http_failures_test`,
+`core_test.every_outcome_is_listed_test`,
+`delivery_test.always_throttled_receiver_stops_test` (WHK-8, the defect
+turned into a test of the bound). Every test that drove a manual consumer
+with `process_one`/`process_available` now asserts a count from
+`testing.drain`. `gleam run` prints the full narrative: `/throttled` snoozes
+three times and fails after three attempts, `/big` is delivered as a 200
+whose body was not read, `127.0.0.1:5432` is refused at registration by the
+internal tier's `host:port` allowlist, and the `/flaky` trace is in causal
+order.
+
+Glue, same measure as before (non-blank, non-comment lines):
+
+| Seam                                                      |       Before → after | Change                                                                                                                                                            |
+| --------------------------------------------------------- | -------------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| http_gun failure/status → grind outcome (`attempt.gleam`) |            192 → 120 | the 85-line `Reason`/`TransportCause`/`LimitKind` naming and mapping → a status, `Refused` and `is_retryable` branch; snooze cap +3; `retryable` shared by policy |
+| Delivery error codec (transport cause)                    |              37 → 32 | `Transport(String)` → `Http(error.Failure)` via `error.to_json`/`decoder`; `let assert` on `worker.codec` gone (×3)                                               |
+| Response body over the read limit, keep status            |              20 → 20 | `Truncate` + `Buffered.truncated` → `Fail` + `error.status`; no branch left, the status rule lives in `classify`                                                  |
+| Per-tenant destination policy (`egress.gleam`)            |              83 → 49 | two tier clients → one client and a `with_destination` view per delivery                                                                                          |
+| Registration policy check (`subscription.gleam`, FFI)     |           22 + 5 → 5 | `parse_address` + `classify` + `parse_ip` FFI → `destination.check(subscription.policy(tier, hosts), host, port)`                                                 |
+| Operator API client policy (`src/webhooks.gleam`)         |                1 → 6 | `config.allow_loopback` (which also admitted public hosts) → loopback only, pinned to the API port, without observations                                          |
+| Cassettes inside worker tests                             |          3 + 57 → 45 | `Deps.clock`/`Options.clock` gone (`ignoring_headers`); `worker_with` and a second consumer → `with_tape` starts the service on a playback client                 |
+| Queue handler without `perform` (WHK-8)                   |               12 → 0 | `worker.responding`                                                                                                                                               |
+| Snooze bound (WHK-8)                                      |           (none) → 3 | `max_snoozes` and a `429 if snoozes >= ..` arm, fed by `worker.snooze_count(context)`                                                                             |
+| Cross-package correlation (job join table, wiring)        |             ~38 → ~6 | `NoteJob`, `note_job`, `jobs` dict, `Key.Job`, `on_submitted` deleted; `from_key` at submit, `worker.correlation` in the worker                                   |
+| Trace ordering (new)                                      |               0 → 18 | `Line.at`, `watch_job` over `JobMeasurements.monotonic_ms`, a sort in `trace`                                                                                     |
+| Two pools, one database                                   |               15 → 0 | `migrate_with_retry` (grind waits for its first connection) and the pog `shutdown` exit gone; one `pog.Config` given to `grind.new`                               |
+| http_gun forwarder wiring (`service.gleam`)               |                6 → 0 | events follow `sinal.emit`                                                                                                                                        |
+| Manual consumers and polling                              | 26 (+28 in main) → 0 | `start_consumer*`, `manual_policy`, `with_consumer`, `await_outcomes` → `without_consumers` + `testing.drain` in tests, consumers + `grind.await` in `main`       |
+
+Net over `src/`: 507 lines added, 735 removed (non-blank, non-comment:
+2,132 → 1,921). Tests: 298 added, 216 removed, for 3 more tests.
+
+Seams that still need glue, and who owns them:
+
+- **The `Disposition` → `worker.Response` mapping and the retry policy**
+  (app). This is domain logic, not glue: which statuses retry, snooze or
+  disable is the webhook service's decision.
+- **Diagnostics without a job** (grind). 213 of 363 events in one `gleam run`
+  name no job (`checkout`, `acknowledgement`, `capacity`), so a per-delivery
+  trace cannot include the storage calls a delivery made. An optional
+  `JobRef` on `checkout` for job-scoped operations would close it.
+- **`PlaybackMismatch` inside a worker** (http_gun, WHK-7). A test that
+  scripts the wrong request sees a rejected job, not a test failure.
+- **18 `sinal.observe` calls** (sinal, WHK-10). One per event type; inherent
+  to typed events.
+
+New friction:
+
+- **A view can only narrow, so the client carries the union policy, and a
+  call that skips the view gets it** (http_gun, footgun, major). Narrowing is
+  the right rule, but it inverts the old safety property. Before, the public
+  tier's client could not reach loopback at all. Now the one client admits
+  public and loopback, and the public tier is safe only because every send
+  goes through `egress.client_for`:
+
+  ```gleam
+  // Safe: narrowed to the tenant's tier.
+  egress.client_for(deps.egress, tier) |> http_gun.send(req)
+  // Compiles, and lets a public tenant's URL reach 127.0.0.1.
+  deps.egress.client |> http_gun.send(req)
+  ```
+
+  The app keeps the field public because the cassette test reads it. A
+  client whose own policy is the narrowest tier, with views that may only
+  _swap within_ an allowlist fixed at start (for example
+  `config.with_destinations([public, internal])` and
+  `http_gun.with_destination_named("internal")`), would keep the per-request
+  routing without a permissive base. Short of that, the module docs could
+  say that the base policy is reachable by any caller holding the client.
+
+  **Status (wave 3 fixes):** resolved by http_gun 0bf369f; the base client sets `config.require_view_destination`, so a call that skips `egress.client_for` fails with `ViewDestinationRequired` (`NotSent`, `Refused`). `cassette_test.request_without_tenant_view_is_refused_test` pins it, and the direct sends in the cassette tests now go through the view.
+
+- **The resolver is client-wide and cannot defer to DNS** (http_gun,
+  flexibility, minor). With one client, the test resolver now answers for
+  every tier, so the internal tier's `localhost` entry no longer resolves in
+  tests (the tests and `gleam run` use `127.0.0.1`). A `config.Resolver`
+  cannot fall back to the system resolver for names it does not script.
+  Proposal: a public `destination.system_resolve(host, remaining_ms)`, or a
+  resolver result that means "use DNS".
+- **`Fail` keeps the status but not the headers** (http_gun, minor). With
+  `with_body_limit(max, Fail)`, a 429 whose body exceeds the limit loses its
+  `Retry-After`, so the delivery snoozes for the default 60 s. `Truncate`
+  keeps the head but needs a second branch on `Buffered.truncated`. The app
+  chose `Fail` for one rule; `error.headers(failure)` (or the head on a
+  `LimitExceeded` failure) would make it lossless.
+
+  **Status (wave 3 fixes):** resolved by http_gun 0bf369f; `attempt.classify` reads `Retry-After` from `error.headers(failure)`, so an oversized 429 snoozes for the receiver's value. `cassette_test.oversized_429_keeps_retry_after_test` asserts 120 s.
+
+- **One pool means grind's `search_path`** (grind, ergonomics, minor). The
+  pool's `search_path` is grind's schema only, so every app statement on it
+  qualifies its tables (`public.webhook_subscriptions`, nine statements).
+  Keeping grind in `public` avoids it but gives up the separate schema. A
+  `search_path` of `grind, public` (or `grind.with_search_path`) would let an
+  app keep both.
+
+  **Status (wave 3 fixes):** resolved by grind 9ccbfb5; the pool keeps the app's `search_path`, and the nine `public.`-qualified statements (store and test truncate) are unqualified again. `with_schema("grind")` stays.
+
+- **`submit_in` has no `admitted` event** (grind, observability, minor). The
+  commit belongs to the app, so grind cannot prove it, and the trace of a
+  transactionally published delivery starts at the claim. The docs say so.
+  A `grind.announce(jobs, admission)` that the app calls after its commit
+  would restore the event without a false claim.
+
+  **Status (wave 3 fixes):** partially resolved by grind eb7b173; documented recipe (record the admission after the commit), not adopted here. The `Existing`/`Rescheduled` branch now uses `grind.handle(admission)`.
+
+- **The job's correlation is opt-in per submit** (grind, ergonomics, nit).
+  Without `job.with_correlation`, grind generates a random correlation and
+  the delivery's trace splits from the app's own key. A job with an id could
+  default to `correlation.from_key(id)`; this app would then drop the line,
+  and every app that submits with ids would join by default.
+- **The worker needs the pool before grind starts it** (grind, nit). The
+  worker is registered in `grind.Config`, but `grind.connection` panics until
+  `start` has run, so the worker's deps reach the pool through
+  `pog.named_connection(pool_name)`, which works because grind keeps the
+  config's pool name. A sentence on `grind.connection` saying that the pool
+  is `pog.named_connection` of the config's name would make this a
+  documented path.
+
+  **Status (wave 3 fixes):** resolved by grind 9ccbfb5; the handler uses `worker.connection(context)`, `Deps.db` and the pool-name lookup are gone, and `grind.with_startup_migration` replaces the separate `grind.migrate` call.
+
+- **`grind.stop` logs a pgo supervisor report** (grind, nit). The first
+  `grind.stop` in a test run logs `SUPERVISOR REPORT ... pgo_pool_sup
+shutdown_error {reload, ..}` while a connection starter is mid-reload.
+  Tests pass; the report is noise.
+- **`supervised`/`named` were not adopted here** (app, not a package
+  defect). The service is started and stopped once per test, and stopping a
+  `static_supervisor` tree still takes an unlink and an exit signal, which
+  is the glue the one pool just removed. `grind.start`/`stop` and
+  `http_gun.start`/`stop` are the documented script-and-test path.
+
+What composed cleanly in this wave:
+
+- `testing.drain(jobs, queue:, limit:, within:)` with `without_consumers`
+  replaced every manual consumer and returns the count the tests assert.
+- `grind.submit_in` put the job and the delivery row in one
+  `pog.transaction`, so a failed `record_delivery` rolls the job back, and a
+  resubmit under the same id converges on the first admission.
+- The retry policy is `fn(error, attempt) -> RetryDecision` returning a
+  `Duration`: no `RetryFailure` unwrap, no fallible `retry_delay`.
+- `error.is_retryable(failure, idempotent: True)` matched the webhook rule
+  exactly, and `error.to_json`/`decoder` let the job error keep the whole
+  failure.
+
+Migration guides: the grind and http_gun guides were sufficient. Every
+compile error had a row, and both index sections named this app's symbols
+and pointed at the right replacement (`destination.parse_address` for the
+FFI, `error.kind`/`name` for `attempt.gleam`, `with_destination` views for
+`egress.gleam`, `testing.drain` for manual polling). Gaps: the http_gun guide
+shows a view narrowing the policy, but not that the base client must
+therefore admit the union of every view, nor the footgun above; and the grind
+guide does not mention that a pool shared with the app pins `search_path`
+to grind's schema. The grind README says "qualify tables in other schemas",
+so the app qualified them up front; an unqualified app query on that pool
+would fail only at run time. The sinal additions applied as documented
+(`from_key`, `fields.check`, `observe_labelled`).
+
+### After the follow-up fixes
+
+`../scripts/with-postgres.sh gleam test`: 14 passed (12 before); `gleam run`
+prints the same narrative. Removed from `src/`: about 14 lines (the
+`grind.migrate` block, `Deps.db` and its `pog` import, the `Conflict` branch,
+the nine `public.` qualifiers changed in place). Added: about 16 (the
+`require_view_destination` line and its docs, `with_startup_migration`, the
+`Retry-After` read, the `grind.handle` arm). Tests: about 55 added for two
+new tests, 3 changed (direct sends go through `client_for`; `public.` dropped
+from the truncate).

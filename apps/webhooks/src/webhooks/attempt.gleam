@@ -4,8 +4,10 @@
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import gleam/time/duration
 import grind/worker
 import http_gun/error
 
@@ -31,8 +33,9 @@ pub type Delivery {
 /// the outcome; the body is diagnostic only.
 pub type BodyNote {
   BodyRead(bytes: Int)
-  /// The body exceeded the read limit; only the first `limit` bytes were kept.
-  BodyOverLimit(limit: Int)
+  /// The head arrived but the body did not: it exceeded the read limit, or
+  /// the connection failed while reading it. `reason` is the http_gun name.
+  BodyIncomplete(reason: String)
 }
 
 pub type Receipt {
@@ -44,8 +47,10 @@ pub type DeliveryError {
   ServerError(status: Int)
   ClientError(status: Int)
   Timeout
-  /// A transport failure; `cause` is a stable name (see `failure_name`).
-  Transport(cause: String)
+  /// 429 after the snooze budget was spent; retried like a server error.
+  RateLimited
+  /// The request failed before a response head arrived.
+  Http(failure: error.Failure)
   /// The local client could not take the request; nothing was sent.
   Unavailable(reason: String)
   /// A local defect or configuration problem; never retried.
@@ -53,104 +58,87 @@ pub type DeliveryError {
 }
 
 pub fn delivery_codec() -> worker.Codec(Delivery) {
-  let assert Ok(codec) =
-    worker.codec(
-      "delivery-v1",
-      worker.infallible(fn(d: Delivery) {
-        json.object([
-          #("delivery_id", json.string(d.delivery_id)),
-          #("event_id", json.string(d.event_id)),
-          #("event_type", json.string(d.event_type)),
-          #("tenant", json.string(d.tenant)),
-          #("subscription_id", json.string(d.subscription_id)),
-          #("body", json.string(d.body)),
-        ])
-      }),
-      {
-        use delivery_id <- decode.field("delivery_id", decode.string)
-        use event_id <- decode.field("event_id", decode.string)
-        use event_type <- decode.field("event_type", decode.string)
-        use tenant <- decode.field("tenant", decode.string)
-        use subscription_id <- decode.field("subscription_id", decode.string)
-        use body <- decode.field("body", decode.string)
-        decode.success(Delivery(
-          delivery_id:,
-          event_id:,
-          event_type:,
-          tenant:,
-          subscription_id:,
-          body:,
-        ))
-      },
-    )
-  codec
+  worker.codec(
+    worker.infallible(fn(d: Delivery) {
+      json.object([
+        #("delivery_id", json.string(d.delivery_id)),
+        #("event_id", json.string(d.event_id)),
+        #("event_type", json.string(d.event_type)),
+        #("tenant", json.string(d.tenant)),
+        #("subscription_id", json.string(d.subscription_id)),
+        #("body", json.string(d.body)),
+      ])
+    }),
+    {
+      use delivery_id <- decode.field("delivery_id", decode.string)
+      use event_id <- decode.field("event_id", decode.string)
+      use event_type <- decode.field("event_type", decode.string)
+      use tenant <- decode.field("tenant", decode.string)
+      use subscription_id <- decode.field("subscription_id", decode.string)
+      use body <- decode.field("body", decode.string)
+      decode.success(Delivery(
+        delivery_id:,
+        event_id:,
+        event_type:,
+        tenant:,
+        subscription_id:,
+        body:,
+      ))
+    },
+  )
 }
 
 pub fn receipt_codec() -> worker.Codec(Receipt) {
-  let assert Ok(codec) =
-    worker.codec(
-      "receipt-v1",
-      worker.infallible(fn(r: Receipt) {
-        let #(kind, n) = case r.body {
-          BodyRead(bytes) -> #("read", bytes)
-          BodyOverLimit(limit) -> #("over_limit", limit)
-        }
-        json.object([
-          #("status", json.int(r.status)),
-          #("body", json.string(kind)),
-          #("bytes", json.int(n)),
-        ])
-      }),
-      {
-        use status <- decode.field("status", decode.int)
-        use kind <- decode.field("body", decode.string)
-        use n <- decode.field("bytes", decode.int)
-        case kind {
-          "read" -> decode.success(Receipt(status:, body: BodyRead(n)))
-          "over_limit" ->
-            decode.success(Receipt(status:, body: BodyOverLimit(n)))
-          _ -> decode.failure(Receipt(status:, body: BodyRead(n)), "BodyNote")
-        }
-      },
-    )
-  codec
+  worker.codec(
+    worker.infallible(fn(r: Receipt) {
+      let body = case r.body {
+        BodyRead(bytes) -> [#("bytes", json.int(bytes))]
+        BodyIncomplete(reason) -> [#("incomplete", json.string(reason))]
+      }
+      json.object([#("status", json.int(r.status)), ..body])
+    }),
+    {
+      use status <- decode.field("status", decode.int)
+      use body <- decode.then(
+        decode.one_of(decode.at(["bytes"], decode.int) |> decode.map(BodyRead), [
+          decode.at(["incomplete"], decode.string) |> decode.map(BodyIncomplete),
+        ]),
+      )
+      decode.success(Receipt(status:, body:))
+    },
+  )
 }
 
 pub fn error_codec() -> worker.Codec(DeliveryError) {
-  let assert Ok(codec) =
-    worker.codec(
-      "delivery-error-v2",
-      worker.infallible(fn(e: DeliveryError) {
-        let #(kind, status, text) = case e {
-          ServerError(s) -> #("server_error", s, "")
-          ClientError(s) -> #("client_error", s, "")
-          Timeout -> #("timeout", 0, "")
-          Transport(cause) -> #("transport", 0, cause)
-          Unavailable(reason) -> #("unavailable", 0, reason)
-          Internal(reason) -> #("internal", 0, reason)
-        }
-        json.object([
-          #("kind", json.string(kind)),
-          #("status", json.int(status)),
-          #("text", json.string(text)),
-        ])
-      }),
-      {
-        use kind <- decode.field("kind", decode.string)
-        use status <- decode.field("status", decode.int)
-        use text <- decode.field("text", decode.string)
-        case kind {
-          "server_error" -> decode.success(ServerError(status))
-          "client_error" -> decode.success(ClientError(status))
-          "timeout" -> decode.success(Timeout)
-          "transport" -> decode.success(Transport(text))
-          "unavailable" -> decode.success(Unavailable(text))
-          "internal" -> decode.success(Internal(text))
-          _ -> decode.failure(Internal(text), "DeliveryError")
-        }
-      },
-    )
-  codec
+  worker.codec(
+    worker.infallible(fn(e: DeliveryError) {
+      let #(kind, detail) = case e {
+        ServerError(s) -> #("server_error", [#("status", json.int(s))])
+        ClientError(s) -> #("client_error", [#("status", json.int(s))])
+        Timeout -> #("timeout", [])
+        RateLimited -> #("rate_limited", [])
+        Http(failure) -> #("http", [#("failure", error.to_json(failure))])
+        Unavailable(reason) -> #("unavailable", [#("text", json.string(reason))])
+        Internal(reason) -> #("internal", [#("text", json.string(reason))])
+      }
+      json.object([#("kind", json.string(kind)), ..detail])
+    }),
+    {
+      use kind <- decode.field("kind", decode.string)
+      let status = decode.at(["status"], decode.int)
+      let text = decode.at(["text"], decode.string)
+      case kind {
+        "server_error" -> decode.map(status, ServerError)
+        "client_error" -> decode.map(status, ClientError)
+        "timeout" -> decode.success(Timeout)
+        "rate_limited" -> decode.success(RateLimited)
+        "http" -> decode.at(["failure"], error.decoder()) |> decode.map(Http)
+        "unavailable" -> decode.map(text, Unavailable)
+        "internal" -> decode.map(text, Internal)
+        _ -> decode.failure(Internal(kind), "DeliveryError")
+      }
+    },
+  )
 }
 
 pub fn describe_error(e: DeliveryError) -> String {
@@ -158,9 +146,21 @@ pub fn describe_error(e: DeliveryError) -> String {
     ServerError(s) -> "server error " <> int.to_string(s)
     ClientError(s) -> "client error " <> int.to_string(s)
     Timeout -> "timeout"
-    Transport(cause) -> "transport: " <> cause
+    RateLimited -> "rate limited past the snooze budget"
+    Http(failure) -> "http: " <> error.name(failure)
     Unavailable(reason) -> "unavailable: " <> reason
     Internal(reason) -> "internal: " <> reason
+  }
+}
+
+/// Whether another attempt may succeed. Receivers deduplicate on the
+/// `webhook-id` header, so a request that may have been sent is safe to
+/// send again.
+pub fn retryable(e: DeliveryError) -> Bool {
+  case e {
+    ServerError(_) | Timeout | RateLimited | Unavailable(_) -> True
+    ClientError(_) | Internal(_) -> False
+    Http(failure) -> error.is_retryable(failure, idempotent: True)
   }
 }
 
@@ -187,130 +187,73 @@ pub type Disposition {
   Reject(DeliveryError)
 }
 
-/// How long a 429 snoozes when Retry-After is absent or unusable, and the
-/// most it ever waits.
+/// How long a 429 snoozes when Retry-After is absent or unusable, the most
+/// it ever waits, and how many snoozes one delivery gets before a 429 counts
+/// as a failed attempt.
 pub type SnoozePolicy {
-  SnoozePolicy(default_ms: Int, maximum_ms: Int)
+  SnoozePolicy(default_ms: Int, maximum_ms: Int, max_snoozes: Int)
 }
 
 pub fn default_snooze() -> SnoozePolicy {
-  SnoozePolicy(default_ms: 60_000, maximum_ms: 3_600_000)
+  SnoozePolicy(default_ms: 60_000, maximum_ms: 3_600_000, max_snoozes: 10)
 }
 
+/// `snoozes` is how often this delivery has snoozed so far
+/// (`worker.snooze_count`).
 pub fn classify(
   result: Result(Reply, error.Failure),
   snooze: SnoozePolicy,
+  snoozes: Int,
 ) -> Disposition {
   case result {
     Ok(Reply(status:, retry_after:, body:)) ->
-      case status {
-        _ if status >= 200 && status < 300 -> Delivered(Receipt(status, body))
-        410 -> Gone("receiver answered 410 Gone")
-        429 ->
-          Snooze(
-            retry_after_ms(retry_after, snooze),
-            "receiver answered 429; retry-after "
-              <> option.unwrap(retry_after, "absent"),
+      classify_status(status, retry_after, body, snooze, snoozes)
+    // The head arrived before the failure, so the status and its
+    // Retry-After still decide.
+    Error(failure) ->
+      case error.status(failure), error.kind(failure) {
+        Some(status), _ ->
+          classify_status(
+            status,
+            list.key_find(error.headers(failure), "retry-after")
+              |> option.from_result,
+            BodyIncomplete(error.name(failure)),
+            snooze,
+            snoozes,
           )
-        408 -> Retry(Timeout)
-        _ if status >= 500 -> Retry(ServerError(status))
-        _ -> Reject(ClientError(status))
+        None, error.Refused -> Refused("destination rejected by policy")
+        None, _ -> fail(Http(failure))
       }
-    Error(failure) -> classify_failure(failure)
   }
 }
 
-/// Glue: every http_gun `Reason` mapped to a delivery decision. The match is
-/// exhaustive on purpose so a new reason fails compilation here.
-pub fn classify_failure(failure: error.Failure) -> Disposition {
-  let name = failure_name(failure.reason)
-  case failure.reason {
-    error.DestinationRejected -> Refused("destination rejected by policy")
-    error.ResolutionFailed -> Retry(Transport(name))
-    error.ConnectionFailed(_) | error.RequestFailed(_) -> Retry(Transport(name))
-    error.DeadlineExceeded | error.ReadTimeout -> Retry(Timeout)
-    error.AdmissionFull | error.ClientClosed | error.Cancelled | error.Closed ->
-      Retry(Unavailable(name))
-    error.LimitExceeded(kind:, ..) ->
-      case kind {
-        error.RequestBodyBytes
-        | error.RequestHeaderBytes
-        | error.RequestHeaderCount -> Reject(Internal(name))
-        _ -> Retry(Transport(name))
-      }
-    error.InvalidConfig(_)
-    | error.InvalidRequest(_)
-    | error.ReadConflict
-    | error.WrongOwner
-    | error.FixtureMissing
-    | error.FixtureIo(_, _)
-    | error.FixtureCorrupt
-    | error.FixtureVersion(_)
-    | error.FixtureExhausted
-    | error.FixtureMismatch(_)
-    | error.CaptureFailed(_) -> Reject(Internal(name))
+fn classify_status(
+  status: Int,
+  retry_after: Option(String),
+  body: BodyNote,
+  snooze: SnoozePolicy,
+  snoozes: Int,
+) -> Disposition {
+  case status {
+    _ if status >= 200 && status < 300 -> Delivered(Receipt(status, body))
+    410 -> Gone("receiver answered 410 Gone")
+    429 if snoozes >= snooze.max_snoozes -> fail(RateLimited)
+    429 ->
+      Snooze(
+        retry_after_ms(retry_after, snooze),
+        "receiver answered 429; retry-after "
+          <> option.unwrap(retry_after, "absent"),
+      )
+    408 -> fail(Timeout)
+    _ if status >= 500 -> fail(ServerError(status))
+    _ -> fail(ClientError(status))
   }
 }
 
-/// Glue: a stable, persistable name for an http_gun reason. http_gun has one
-/// internally (http_gun/internal/codec.gleam:116) but exposes only
-/// `error.describe`, a log sentence.
-pub fn failure_name(reason: error.Reason) -> String {
-  case reason {
-    error.InvalidConfig(_) -> "invalid_config"
-    error.InvalidRequest(_) -> "invalid_request"
-    error.ClientClosed -> "client_closed"
-    error.AdmissionFull -> "admission_full"
-    error.DestinationRejected -> "destination_rejected"
-    error.ResolutionFailed -> "resolution_failed"
-    error.ConnectionFailed(cause) -> "connection_failed." <> cause_name(cause)
-    error.RequestFailed(cause) -> "request_failed." <> cause_name(cause)
-    error.DeadlineExceeded -> "deadline_exceeded"
-    error.ReadTimeout -> "read_timeout"
-    error.ReadConflict -> "read_conflict"
-    error.WrongOwner -> "wrong_owner"
-    error.Closed -> "closed"
-    error.Cancelled -> "cancelled"
-    error.LimitExceeded(kind:, ..) -> "limit_exceeded." <> limit_name(kind)
-    error.FixtureMissing -> "fixture_missing"
-    error.FixtureIo(_, _) -> "fixture_io"
-    error.FixtureCorrupt -> "fixture_corrupt"
-    error.FixtureVersion(_) -> "fixture_version"
-    error.FixtureExhausted -> "fixture_exhausted"
-    error.FixtureMismatch(position) ->
-      "fixture_mismatch." <> int.to_string(position)
-    error.CaptureFailed(_) -> "capture_failed"
-  }
-}
-
-fn cause_name(cause: error.TransportCause) -> String {
-  case cause {
-    error.NameResolutionFailed -> "name_resolution_failed"
-    error.ConnectionRefused -> "connection_refused"
-    error.CertificateRejected -> "certificate_rejected"
-    error.TlsFailed -> "tls_failed"
-    error.ConnectionReset -> "connection_reset"
-    error.PeerClosed -> "peer_closed"
-    error.PeerDraining -> "peer_draining"
-    error.ProtocolError -> "protocol_error"
-    error.HeaderLimitReached -> "header_limit_reached"
-    error.TransportTimeout -> "transport_timeout"
-    error.UnexpectedProtocol -> "unexpected_protocol"
-    error.UnknownTransport -> "unknown_transport"
-  }
-}
-
-fn limit_name(kind: error.LimitKind) -> String {
-  case kind {
-    error.RequestBodyBytes -> "request_body_bytes"
-    error.RequestHeaderBytes -> "request_header_bytes"
-    error.RequestHeaderCount -> "request_header_count"
-    error.ResponseHeaderBytes -> "response_header_bytes"
-    error.ResponseHeaderCount -> "response_header_count"
-    error.ResponseChunkBytes -> "response_chunk_bytes"
-    error.ResponseQueueBytes -> "response_queue_bytes"
-    error.CollectedBodyBytes -> "collected_body_bytes"
-    error.FixtureBytes -> "fixture_bytes"
+fn fail(e: DeliveryError) -> Disposition {
+  case retryable(e) {
+    True -> Retry(e)
+    False -> Reject(e)
   }
 }
 
@@ -332,17 +275,13 @@ pub fn retry_after_ms(header: Option(String), policy: SnoozePolicy) -> Int {
 /// (disabling the subscription) happen in the worker before this is returned.
 pub fn to_response(
   disposition: Disposition,
-) -> worker.WorkerResponse(Receipt, DeliveryError) {
+) -> worker.Response(Receipt, DeliveryError) {
   case disposition {
-    Delivered(receipt) -> worker.WorkerSucceeded(receipt)
-    Retry(e) | Reject(e) -> worker.WorkerFailed(e)
+    Delivered(receipt) -> worker.Succeeded(receipt)
+    Retry(e) | Reject(e) -> worker.Failed(e)
     Snooze(milliseconds, reason) ->
-      case worker.retry_delay(milliseconds) {
-        Ok(delay) -> worker.WorkerSnoozed(delay, reason)
-        Error(_) -> worker.WorkerFailed(Internal("invalid snooze delay"))
-      }
-    Gone(reason) -> worker.WorkerDiscarded(reason)
-    Refused(reason) -> worker.WorkerDiscarded(reason)
+      worker.Snoozed(after: duration.milliseconds(milliseconds), reason:)
+    Gone(reason) | Refused(reason) -> worker.Discarded(reason)
   }
 }
 
@@ -351,34 +290,24 @@ pub type Backoff {
   Backoff(base_ms: Int, maximum_ms: Int)
 }
 
-pub fn retry_policy(backoff: Backoff) -> worker.RetryPolicy(DeliveryError) {
-  worker.retry_policy(fn(failure, context) {
-    let worker.BusinessFailure(e) = failure
-    case e {
-      ClientError(_) | Internal(_) -> worker.DoNotRetry
-      ServerError(_) | Timeout | Transport(_) | Unavailable(_) -> {
-        let exponent = int.max(context.current_attempt - 1, 0)
-        let delay =
-          int.min(backoff.base_ms * pow2(exponent), backoff.maximum_ms)
-        case worker.retry_delay(delay) {
-          Ok(d) -> worker.RetryAfter(d)
-          Error(_) -> worker.DoNotRetry
-        }
-      }
+pub fn retry_policy(
+  backoff: Backoff,
+) -> fn(DeliveryError, Int) -> worker.RetryDecision {
+  fn(e, attempt) {
+    case retryable(e) {
+      False -> worker.DoNotRetry
+      True ->
+        backoff.base_ms * pow2(int.max(attempt - 1, 0))
+        |> int.min(backoff.maximum_ms)
+        |> duration.milliseconds
+        |> worker.RetryAfter
     }
-  })
+  }
 }
 
 fn pow2(n: Int) -> Int {
   case n {
     0 -> 1
     _ -> 2 * pow2(n - 1)
-  }
-}
-
-pub fn status_of(result: Result(Reply, error.Failure)) -> Option(Int) {
-  case result {
-    Ok(reply) -> Some(reply.status)
-    Error(_) -> None
   }
 }

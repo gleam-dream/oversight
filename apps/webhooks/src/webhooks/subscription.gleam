@@ -1,11 +1,11 @@
 //// Tenants, their egress tier, and registration-time endpoint checks.
 ////
-//// Registration checks are a first, cheap filter only. A host name can
-//// resolve to anything at delivery time (DNS rebinding), so the authoritative
-//// SSRF check is http_gun's destination policy on the tenant's client; see
-//// `webhooks/egress`.
+//// Registration checks apply the tier's destination policy to the URL's
+//// host and port without resolving it. A host name can resolve to anything
+//// at delivery time (DNS rebinding), so the authoritative SSRF check is the
+//// same policy applied to the delivery's client view; see `webhooks/egress`.
 
-import gleam/list
+import gleam/int
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
@@ -46,7 +46,7 @@ pub type EndpointError {
   MissingHost
   /// The host is an IP literal outside the tier's permitted address classes.
   ForbiddenAddress(destination.Class)
-  /// Internal tiers may only name allowlisted hosts.
+  /// Internal tiers may only name allowlisted hosts (and ports); `host:port`.
   HostNotAllowlisted(String)
 }
 
@@ -71,8 +71,18 @@ pub fn class_name(class: destination.Class) -> String {
   }
 }
 
+/// The destinations a tier may reach. The egress client narrows each
+/// delivery to it, and registration checks endpoints against the same value.
+pub fn policy(tier: Tier, internal_hosts: List(String)) -> destination.Policy {
+  case tier {
+    PublicTier -> destination.default()
+    InternalTier ->
+      destination.loopback_only() |> destination.only_hosts(internal_hosts)
+  }
+}
+
 /// Registration-time validation for one tier. `internal_hosts` is the same
-/// allowlist the internal egress client is configured with.
+/// allowlist (`host` or `host:port` entries) the egress client applies.
 pub fn validate_endpoint(
   url: String,
   tier: Tier,
@@ -80,9 +90,9 @@ pub fn validate_endpoint(
 ) -> Result(Uri, EndpointError) {
   use parsed <- result.try(uri.parse(url) |> result.replace_error(MalformedUrl))
   use scheme <- result.try(option.to_result(parsed.scheme, MalformedUrl))
-  use Nil <- result.try(case tier, string.lowercase(scheme) {
-    PublicTier, "https" -> Ok(Nil)
-    InternalTier, "https" | InternalTier, "http" -> Ok(Nil)
+  use port <- result.try(case tier, string.lowercase(scheme) {
+    _, "https" -> Ok(option.unwrap(parsed.port, 443))
+    InternalTier, "http" -> Ok(option.unwrap(parsed.port, 80))
     _, other -> Error(UnsupportedScheme(other))
   })
   use Nil <- result.try(case parsed.userinfo {
@@ -93,37 +103,10 @@ pub fn validate_endpoint(
     Some("") | None -> Error(MissingHost)
     Some(host) -> Ok(string.lowercase(host))
   })
-  case tier {
-    InternalTier ->
-      case list.contains(internal_hosts, host) {
-        True -> Ok(parsed)
-        False -> Error(HostNotAllowlisted(host))
-      }
-    PublicTier ->
-      // Glue: http_gun classifies an `Address` but cannot parse a host.
-      case parse_address(host) {
-        Error(Nil) -> Ok(parsed)
-        Ok(address) ->
-          case destination.classify(address) {
-            destination.Public -> Ok(parsed)
-            class -> Error(ForbiddenAddress(class))
-          }
-      }
+  case destination.check(policy(tier, internal_hosts), host, port) {
+    Ok(Nil) -> Ok(parsed)
+    Error(destination.HostNotAllowed) ->
+      Error(HostNotAllowlisted(host <> ":" <> int.to_string(port)))
+    Error(destination.AddressRefused(class)) -> Error(ForbiddenAddress(class))
   }
 }
-
-/// Parse an IPv4 or IPv6 literal (brackets stripped) into http_gun's Address.
-pub fn parse_address(host: String) -> Result(destination.Address, Nil) {
-  let bare = case string.starts_with(host, "[") && string.ends_with(host, "]") {
-    True -> string.slice(host, 1, string.length(host) - 2)
-    False -> host
-  }
-  case parse_ip(bare) {
-    Ok([a, b, c, d]) -> Ok(destination.Ipv4(a, b, c, d))
-    Ok([a, b, c, d, e, f, g, h]) -> Ok(destination.Ipv6(a, b, c, d, e, f, g, h))
-    _ -> Error(Nil)
-  }
-}
-
-@external(erlang, "webhooks_ffi", "parse_ip")
-fn parse_ip(text: String) -> Result(List(Int), Nil)
