@@ -2,7 +2,7 @@
 ////
 //// This is the app's translation between llm_wire's retry vocabulary
 //// (`retry.assess` + `RetryHint` + `RetryEvidence`), http_gun's failure
-//// reasons, and Grind's `WorkerResponse`. Extraction is a read-only provider
+//// `Kind`, and Grind's `Response`. Extraction is a read-only provider
 //// call, so retrying after `RequestMayHaveReachedProvider` is safe here; an
 //// app whose call has effects would also branch on `RetryEvidence`.
 
@@ -11,6 +11,7 @@ import extractor/llm
 import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import gleam/time/duration
 import grind/worker
 import http_gun/error as http_error
 import llm_wire/retry
@@ -60,7 +61,7 @@ pub fn decide(failure: Failure) -> Decision {
 fn decide_fetch(error: document.FetchError) -> Decision {
   case error {
     document.Transport(failure) ->
-      decide_http(Fetch, failure.reason, document.describe(error))
+      decide_http(Fetch, failure, document.describe(error))
     document.HttpStatus(status) if status == 429 || status >= 500 ->
       Retry(Transient(Fetch, document.describe(error)))
     document.HttpStatus(_)
@@ -77,7 +78,7 @@ fn decide_extract(error: llm.ExtractError) -> Decision {
     llm.Refused(reason) -> Discard("provider refused: " <> reason)
     llm.Truncated -> Discard("structured output hit the token limit")
     llm.UnexpectedToolCall -> Discard("provider asked for an undeclared tool")
-    llm.CallFailed(provider:, error:, evidence: _) ->
+    llm.CallFailed(provider:, error:, evidence:) ->
       case retry.assess(provider, error), error {
         retry.MayHelp, types.HttpStatusError(status_code:, retry_hint:, ..) ->
           Snooze(
@@ -88,10 +89,15 @@ fn decide_extract(error: llm.ExtractError) -> Decision {
           Snooze(default_snooze_ms, "provider reported " <> code)
         retry.MayHelp, _ -> Retry(Transient(Extract, describe(error)))
         retry.WillNotHelpUnchanged, _ -> Discard(describe(error))
-        // llm_wire leaves every http_gun failure `Unknown`; the app
-        // classifies the typed http_gun reason itself.
+        // llm_wire leaves every http_gun failure `Unknown`, and carries the
+        // `Reason` without its `Failure`; the app rebuilds the failure from
+        // llm_wire's own evidence to ask http_gun for the `Kind`.
         retry.Unknown, types.HttpFailure(reason) ->
-          decide_http(Extract, reason, describe(error))
+          decide_http(
+            Extract,
+            http_error.new(reason, submission(evidence)),
+            describe(error),
+          )
         retry.Unknown, types.OutputValidationError(reason) ->
           Discard("invalid structured output: " <> reason)
         retry.Unknown, types.ProtocolError(reason) ->
@@ -101,17 +107,25 @@ fn decide_extract(error: llm.ExtractError) -> Decision {
   }
 }
 
+/// Extraction and fetching are read-only, so a transient failure is retried
+/// whether or not the request was sent; every other kind cannot succeed
+/// unchanged.
 fn decide_http(
   stage: Stage,
-  reason: http_error.Reason,
+  failure: http_error.Failure,
   detail: String,
 ) -> Decision {
-  case reason {
-    http_error.DestinationRejected
-    | http_error.InvalidRequest(_)
-    | http_error.InvalidConfig(_) -> Discard(detail)
-    http_error.LimitExceeded(..) -> Discard(detail)
-    _ -> Retry(Transient(stage, detail))
+  case http_error.is_retryable(failure, idempotent: True) {
+    True -> Retry(Transient(stage, detail))
+    False -> Discard(detail)
+  }
+}
+
+fn submission(evidence: types.RetryEvidence) -> http_error.Evidence {
+  case evidence.classification {
+    types.NoRequestSent -> http_error.NotSent
+    types.RequestMayHaveReachedProvider | types.EffectUnknown ->
+      http_error.MaybeSent
   }
 }
 
@@ -124,24 +138,19 @@ fn hint_ms(hint: Option(types.RetryHint)) -> Int {
   }
 }
 
-pub fn to_response(
-  decision: Decision,
-) -> worker.WorkerResponse(output, JobError) {
+pub fn to_response(decision: Decision) -> worker.Response(output, JobError) {
   case decision {
-    Retry(error) -> worker.WorkerFailed(error)
+    Retry(error) -> worker.Failed(error)
     Snooze(delay_ms, reason) ->
-      case worker.retry_delay(delay_ms) {
-        Ok(delay) -> worker.WorkerSnoozed(delay, reason)
-        Error(_) -> worker.WorkerDiscarded("unrepresentable snooze: " <> reason)
-      }
-    Discard(reason) -> worker.WorkerDiscarded(reason)
+      worker.Snoozed(duration.milliseconds(delay_ms), reason)
+    Discard(reason) -> worker.Discarded(reason)
   }
 }
 
 pub fn describe(error: types.WireError) -> String {
   case error {
     types.HttpFailure(reason) ->
-      http_error.describe(http_error.Failure(reason, http_error.MayHaveBeenSent))
+      http_error.describe(http_error.new(reason, http_error.MaybeSent))
     types.HttpStatusError(status_code:, ..) ->
       "HTTP " <> int.to_string(status_code)
     types.ProviderError(code:, message:) ->

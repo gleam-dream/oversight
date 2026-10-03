@@ -1,11 +1,10 @@
 //// Collects the Sinal events of every package the app uses and joins them
 //// per document.
 ////
-//// The packages share one correlation key only where they carry it. Grind
-//// events carry `job_id`; the worker never learns its job id, so the app maps
-//// job id to document id at submission. http_gun events carry the
-//// `Correlation` the worker attaches to its client views: the document id
-//// itself, so no table is needed. llm_wire events carry only
+//// The app submits each job with `correlation.from_key(document_id)`. Grind
+//// events carry it as `ref.correlation`, the worker reads it from its
+//// context and attaches it to its http_gun client views, so the three
+//// sources need no table. llm_wire events carry only
 //// `stage/provider/outcome`, so the collector attributes them through the
 //// emitting process, which works only when llm_wire emits in a process the
 //// worker registered.
@@ -20,7 +19,8 @@ import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import grind/job
-import grind/observation
+import grind/telemetry as grind_telemetry
+import grind/worker
 import http_gun/telemetry as http_telemetry
 import llm_wire/telemetry as llm_telemetry
 import sinal
@@ -39,24 +39,18 @@ pub type Record {
 
 /// What the event offers for correlation.
 pub type Key {
-  JobId(Int)
-  HttpCorrelation(Option(Correlation))
+  Correlated(Option(Correlation))
   EmitterPid(Pid)
 }
 
 pub opaque type Message {
   Observed(Record)
-  JobSubmitted(job_id: Int, document_id: String)
   WorkerProcess(pid: Pid, document_id: String)
   Snapshot(reply: Subject(State))
 }
 
 pub type State {
-  State(
-    records: List(Record),
-    jobs: Dict(Int, String),
-    processes: Dict(Pid, String),
-  )
+  State(records: List(Record), processes: Dict(Pid, String))
 }
 
 pub type Collector {
@@ -71,7 +65,7 @@ pub type Collector {
 /// one Sinal handler per observed event.
 pub fn start() -> Result(Collector, String) {
   use subject <- result.try(
-    actor.new(State([], dict.new(), dict.new()))
+    actor.new(State([], dict.new()))
     |> actor.on_message(handle)
     |> actor.start
     |> result.map(fn(started) { started.data })
@@ -89,32 +83,36 @@ pub fn start() -> Result(Collector, String) {
     process.send(subject, Observed(Record(source, key, summary)))
   }
   let attachments = [
-    sinal.observe(observation.admitted(), fn(_, meta) {
+    sinal.observe(grind_telemetry.admitted(), fn(_, meta) {
       record(
         Grind,
-        JobId(meta.ref.job_id),
-        "admitted " <> state(meta.committed_state),
+        Correlated(Some(meta.ref.correlation)),
+        "admitted " <> job.state_name(meta.committed_state),
       )
     }),
-    sinal.observe(observation.claimed(), fn(_, meta) {
+    sinal.observe(grind_telemetry.claimed(), fn(_, meta) {
       record(
         Grind,
-        JobId(meta.ref.job_id),
+        Correlated(Some(meta.ref.correlation)),
         "claimed attempt " <> int.to_string(meta.attempt.attempt),
       )
     }),
-    sinal.observe(observation.acknowledged(), fn(_, meta) {
+    sinal.observe(grind_telemetry.acknowledged(), fn(_, meta) {
       record(
         Grind,
-        JobId(meta.ref.job_id),
-        "acknowledged " <> state(meta.committed_state),
+        Correlated(Some(meta.ref.correlation)),
+        "acknowledged " <> job.state_name(meta.committed_state),
       )
     }),
-    sinal.observe(observation.released(), fn(_, meta) {
-      record(Grind, JobId(meta.ref.job_id), "released")
+    sinal.observe(grind_telemetry.released(), fn(_, meta) {
+      record(Grind, Correlated(Some(meta.ref.correlation)), "released")
     }),
     sinal.observe(http_telemetry.event(), fn(_, meta) {
-      record(Http, HttpCorrelation(meta.correlation), milestone(meta.milestone))
+      record(
+        Http,
+        Correlated(meta.correlation),
+        option.unwrap(meta.client, "http") <> " " <> milestone(meta.milestone),
+      )
     }),
     sinal.observe(llm_telemetry.observation_event(), fn(_, meta) {
       record(
@@ -134,23 +132,25 @@ pub fn stop(collector: Collector) -> Nil {
   })
 }
 
-pub fn job_submitted(
-  collector: Collector,
-  job_id: Int,
-  document_id: String,
-) -> Nil {
-  process.send(collector.subject, JobSubmitted(job_id, document_id))
+/// The correlation a document's job carries, in every package's events.
+/// An id that is empty or longer than 128 bytes becomes its SHA-256 digest.
+pub fn document_correlation(document_id: String) -> Correlation {
+  correlation.from_key(document_id)
 }
 
-/// Called by the worker: the correlation for this attempt's http_gun client
-/// views, and the worker process itself for llm_wire attribution. The
-/// correlation is the document id, so every attempt of a document shares it.
-/// An id that is empty or longer than 128 bytes cannot be a correlation;
-/// that attempt's http_gun events get a fresh one and stay unattributed.
-pub fn begin_attempt(collector: Collector, document_id: String) -> Correlation {
-  process.send(collector.subject, WorkerProcess(process.self(), document_id))
-  correlation.from_string(document_id)
-  |> result.lazy_unwrap(correlation.unique)
+/// Called by the worker: registers the worker process for llm_wire
+/// attribution and returns the job's correlation for the http_gun client
+/// views. Every attempt of a job shares the correlation.
+pub fn begin_attempt(
+  collector: Collector,
+  context: worker.Context,
+) -> Correlation {
+  let correlation = worker.correlation(context)
+  process.send(
+    collector.subject,
+    WorkerProcess(process.self(), correlation.to_string(correlation)),
+  )
+  correlation
 }
 
 pub fn snapshot(collector: Collector) -> State {
@@ -165,6 +165,7 @@ pub type Trace {
 
 pub fn trace(collector: Collector, document_id: String) -> Trace {
   let state = snapshot(collector)
+  let document_id = document_correlation(document_id) |> correlation.to_string
   let #(attributed, rest) =
     list.partition(state.records, fn(record) {
       owner(state, record.key) == Some(document_id)
@@ -179,9 +180,8 @@ pub fn trace(collector: Collector, document_id: String) -> Trace {
 
 fn owner(state: State, key: Key) -> Option(String) {
   case key {
-    JobId(id) -> dict.get(state.jobs, id) |> option.from_result
-    HttpCorrelation(Some(id)) -> Some(correlation.to_string(id))
-    HttpCorrelation(None) -> None
+    Correlated(Some(id)) -> Some(correlation.to_string(id))
+    Correlated(None) -> None
     EmitterPid(pid) -> dict.get(state.processes, pid) |> option.from_result
   }
 }
@@ -203,10 +203,6 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
   case message {
     Observed(record) ->
       actor.continue(State(..state, records: [record, ..state.records]))
-    JobSubmitted(job_id, document_id) ->
-      actor.continue(
-        State(..state, jobs: dict.insert(state.jobs, job_id, document_id)),
-      )
     WorkerProcess(pid, document_id) ->
       actor.continue(
         State(
@@ -219,10 +215,6 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
       actor.continue(state)
     }
   }
-}
-
-fn state(state: job.State) -> String {
-  string.lowercase(string.inspect(state))
 }
 
 fn milestone(milestone: http_telemetry.Milestone) -> String {

@@ -13,7 +13,6 @@ import extractor/invoice
 import extractor/jobs
 import extractor/llm
 import extractor/scripted
-import extractor/store
 import extractor/telemetry
 import gleam/int
 import gleam/io
@@ -21,7 +20,9 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
+import grind
 import grind/job
+import http_gun
 
 pub fn main() -> Nil {
   case envoy.get("DATABASE_URL") {
@@ -55,20 +56,17 @@ pub fn run(database_url: String) -> Result(Nil, String) {
   use collector <- result.try(telemetry.start())
   use http <- result.try(
     clients.start(
-      clients.Loopback([fixtures.document_host]),
+      clients.Loopback([fixtures.document_host], services.providers_port),
       Some(collector.http_observations),
     )
-    |> result.map_error(string.inspect),
+    |> result.map_error(http_gun.describe_start_error),
   )
-  use db <- result.try(store.start(database_url))
-  use Nil <- result.try(store.migrate(db) |> result.map_error(string.inspect))
   let env =
     jobs.Env(
       clients: http,
       model: fn(provider) {
         llm.model(provider, scripted.providers_base(services), "sk-scripted")
       },
-      store: db,
       collector:,
       limits: document.default_limits(),
     )
@@ -126,7 +124,7 @@ pub fn run(database_url: String) -> Result(Nil, String) {
 
 fn describe(result: Result(jobs.Finished, String)) -> String {
   case result {
-    Ok(job.SucceededWith(jobs.Extracted(row_id:, invoice:))) ->
+    Ok(grind.Succeeded(jobs.Extracted(row_id:, invoice:))) ->
       "stored row "
       <> int.to_string(row_id)
       <> ": "
@@ -139,8 +137,8 @@ fn describe(result: Result(jobs.Finished, String)) -> String {
       <> int.to_string(invoice.total_cents)
       <> " "
       <> invoice.currency_code(invoice.currency)
-    Ok(job.DiscardedWithReason(reason)) -> "discarded: " <> truncate(reason)
-    Ok(job.Pending(state)) -> "still pending: " <> string.inspect(state)
+    Ok(grind.Discarded(reason)) -> "discarded: " <> truncate(reason)
+    Ok(grind.Pending(state)) -> "still pending: " <> job.state_name(state)
     Ok(other) -> string.inspect(other)
     Error(message) -> "read failed: " <> message
   }
