@@ -89,6 +89,18 @@ cancellation to another, so the app owns the joins (RA-1).
   return the `WorkerResponse`. RA-2, RA-3 and RA-5 are the smallest
   package-side changes that make that adapter possible.
 
+  **Status (wave 3):** partially resolved by grind 749c0dc and saga 1d965bd /
+  2ee5e0a. Three of the five joins are gone: the replay sweep (RA-2), the
+  saga storage adapter (RA-6) and the cancellation fan-out (RA-5). The
+  `research` row stays, but it is now written in the job's own transaction
+  (`grind.submit_in`, app.gleam:217-235), so `job_id` is `NOT NULL` and
+  `db.set_job` is deleted. What remains is Fabric's: the `run_id` column and
+  its write after the run's first commit (RA-3), the job-to-run state machine
+  (`drive_agent`, `start_run`, `follow`: jobs.gleam:187-283, 97 lines, was
+  81; it now also forwards the job's cancellation) and the read-only
+  reconciliation (RA-4). Fabric's sweeper stays unregistered: decision 1 says
+  the job drives the run, which FABRIC-R13 (wave 5) is to encode.
+
 ### RA-2 Grind never redelivers a job whose node died; the app authorizes each replay
 
 - **Packages**: grind. **Kind**: composition. **Severity**: major.
@@ -115,6 +127,17 @@ cancellation to another, so the app owns the joins (RA-1).
   The default stays the conservative `uncertain`. Also add
   `postgres.list(database, queue:, state:, limit:)` for operator sweeps.
 
+  **Status (wave 3):** resolved by grind 749c0dc.
+  `worker.with_abandonment(worker.ReplayAfterLeaseExpiry(max_replays: 3))`
+  (jobs.gleam:107) replaces `jobs.recover_abandoned` (38 lines),
+  `db.unfinished` (11), `app.recover_abandoned` (3) and the test's
+  `release_abandoned` polling loop (10): 62 lines become 1. Both OTP-peer
+  crash tests now kill the peer, start a node and only await the outcome;
+  the claim-time quarantine scan requeues the job once its 6 s lease
+  expires, and the survivor's consumer runs it. `admin.list` shows
+  `replay_count: 1` and the job never in `uncertain`; no `job.resolved`
+  event is emitted. Two defects in the replay path are new (RA-12).
+
 ### RA-3 `fabric.start` issues the run id, so a job cannot start a run idempotently
 
 - **Packages**: fabric. **Kind**: composition. **Severity**: major.
@@ -132,6 +155,9 @@ cancellation to another, so the app owns the joins (RA-1).
   For an id that is already stored, it returns
   `Error(AlreadyStarted(Run(context)))` (or opens it). A job would then use
   `run.parse_id("research-" <> research_id)` and need no join column.
+
+  **Status (wave 3):** unchanged; fabric-owned (FABRIC-R2, wave 5). The
+  `run_id` column, `db.set_run` and `telemetry.bind_run` stay.
 
 ### RA-4 After a crash, even a read-only tool suspends the run until the app reconciles it
 
@@ -153,6 +179,11 @@ cancellation to another, so the app owns the joins (RA-1).
 - **Proposal** (fabric): `tool.with_replay(tool, max_attempts: Int)`,
   mirroring `operation.with_replay`. Recovery dispatches a started invocation
   of such a tool again instead of making it uncertain.
+
+  **Status (wave 3):** unchanged; fabric-owned (FABRIC-R9, wave 5).
+  `researcher.replay_read_only` and `jobs.reconcile_all` (77 lines) stay, and
+  `a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test` still
+  passes through them.
 
 ### RA-5 Cancelling the job does not reach the agent; the app fans the cancellation out
 
@@ -176,6 +207,21 @@ cancellation to another, so the app owns the joins (RA-1).
   `JobContext` exposes `job_id`, `attempt` and `cancellation: process.Selector(Nil)`,
   fired when `cancel` commits for a running job. The handler can select on it
   while it awaits the Fabric run, so the API calls only `postgres.cancel`.
+
+  **Status (wave 3):** resolved by grind 749c0dc. The handler is
+  `worker.responding` and reads `worker.cancellation(job)`; `follow` checks
+  it between 250 ms waits and calls `fabric.cancel(handle)`
+  (jobs.gleam:243-262). `app.cancel_research` is `grind.cancel` alone (37
+  lines of fan-out → 8): no run-id lookup, no `fabric.cancel_stored`, no
+  `Cancellation` record. The test now proves the correct behavior: after
+  `grind.cancel` alone the provider sees the stream close (within the
+  lease / 3 renewal), the job ends `Cancelled`, the run `Finished(Cancelled)`
+  and the row `cancelled`. The window between `fabric.start` and
+  `db.set_run` no longer loses a cancellation, because the handler, not the
+  API, cancels the run it holds. Two points remain: Grind still records the
+  caller's reason (`Cancelled("cancelled by caller")`), not the handler's
+  `Cancelled("research cancelled")` (the test pins it), and `fabric.await`
+  takes no selector, so the handler polls (see the re-run below).
 
 ### RA-6 Durable saga on PostgreSQL needs a 262-line adapter that must track processes
 
@@ -202,6 +248,17 @@ cancellation to another, so the app owns the joins (RA-1).
   `migrate`, `storage(settings, id)`, checked by `conformance.run`. Failing
   that, document in `saga/storage` that ownership is per process and that
   adapters must detect a dead claimer.
+
+  **Status (wave 3):** resolved by saga 1d965bd and 2ee5e0a.
+  `saga_store.gleam` (262 lines), the `pid_to_string`/`string_to_pid` FFI (6)
+  and the `saga_executions` DDL in `db.migrate` (8) are deleted. The storage
+  is `saga_postgres.config(database) |> with_lease(10_000) |> with_schema(..)`,
+  `migrate` and `storage` (app.gleam, 10 lines), built once for every
+  execution. `publish.run` uses `durable.new`, one `Run`,
+  `durable.with_correlation` and `drive(run, timeout: 60_000)`. The
+  conformance test now runs saga's suite against `saga_postgres` on the pool
+  Grind built (Grind's `search_path`, `READ COMMITTED` and
+  idle-in-transaction timeout), with a 1 s lease.
 
 ### RA-7 One request cannot be followed through the model call or the saga
 
@@ -258,6 +315,22 @@ cancellation to another, so the app owns the joins (RA-1).
   `Correlation` itself through `required_field()` (events.gleam 72 → 64
   lines; no `Some(..)`, no `None` arm in the collector).
 
+  **Status (wave 3):** partially resolved by grind 749c0dc and saga
+  89c1aec. Grind events carry the job's correlation, which the app sets to
+  the research id (`job.with_correlation`), and saga events carry the one
+  the handler passes to the durable run (`durable.with_correlation` with
+  `worker.correlation(job)`). The `Job` key, the `BindJob` message, the
+  job-id table and `telemetry.bind_job` are gone (telemetry.gleam 400 → 391,
+  despite a new `http_prefix` route and two key helpers). `gleam run` now
+  joins 30 events from research_agent, grind, fabric, http_gun and saga
+  (was 26 without saga); the 5 saga events per request are attributed and
+  the test asserts that none is left over. `correlation.from_key` (sinal
+  c6e2d36) replaces `from_string` in `events.announce` and
+  `remote.correlated`, so neither swallows an error any more. Still open,
+  fabric-owned (FABRIC-R8, FABRIC-R15, wave 5): the model's 6 http_gun and
+  15 llm_wire events per request stay unattributed, and Fabric events still
+  join through `bind_run`.
+
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
 - **Packages**: grind, saga, json_blueprint. **Kind**: ergonomics.
@@ -295,6 +368,14 @@ cancellation to another, so the app owns the joins (RA-1).
   rejected value is now `submission.InvalidInput` at submit. The bridge itself
   stays: Grind still has no Blueprint-aware constructor, and `worker.codec`
   still returns a `Result` for an empty version, so `let assert Ok` remains.
+
+  **Status (wave 3):** partially resolved by grind 749c0dc and saga
+  1d965bd. `worker.codec` is total, so the `let assert Ok(worker.codec(..))`
+  is gone, and Saga's bridge is `saga_codec.json(version, encoder,
+codec.decoder(c))` instead of a `String` round trip. wire.gleam 38 → 27
+  lines, with one shared encoder. The bridge itself stays: neither Grind nor
+  Saga takes a Blueprint codec, so each value still needs a `wire.grind` or
+  `wire.saga` call with its version.
 
 ### RA-9 The worker drops its error codec to avoid the known snooze/bind defect
 
@@ -340,11 +421,29 @@ codec adds 26 lines of gleam_json glue (see RA-8).
   acknowledgement, so it can say `published` while the job is still
   `executing` after a crash. Replay is idempotent here because Saga
   reconnects to its finished outcome.
+
+  **Status (wave 3):** resolved by grind 749c0dc. One pool:
+  `grind.new(pog.pool_size(pool, 10))` builds it from the app's
+  `pog.Config`, and Fabric's store, the saga storage and the `research`
+  table use it (`fabric_postgres.settings` takes `grind.connection`'s
+  `pog.Connection` unchanged). The Grind settings, registry, policy and
+  consumer start (about 30 lines) become one `grind.new` pipeline (16 lines) and
+  one supervised child. The row and the job now commit together
+  (`submit_in`). The row's later states are still written outside Grind's
+  acknowledgement.
+
 - **Lifecycle** (grind, gleam_otp, nit): `queue.start` links to its caller and
   only that process may stop it. The crash test's peer node therefore needs a
   long-lived owner process (node.gleam:46-58). `static_supervisor` has no
   stop, so `app.stop` calls `exit(Pid, shutdown)` from FFI
   (app.gleam:217-228).
+
+  **Status (wave 3):** partially resolved by grind 749c0dc. Grind runs as
+  `grind.supervised(config, name)` and stops from any process, so the
+  consumer no longer pins the owner. The peer still needs its long-lived
+  owner and `app.stop` still calls the FFI `shutdown`, because
+  `static_supervisor.start` links to its caller and has no stop (gleam_otp).
+
 - **Model failures are strings** (fabric, minor; fabric card concern 3): a
   scripted 404 reached the job as
   `ModelFailed(ModelError("HTTP status 404 (RequestMayHaveReachedProvider)", False))`.
@@ -360,6 +459,16 @@ codec adds 26 lines of gleam_json glue (see RA-8).
   not set an allowlist; using the helper alone would admit every public
   host. One line removed.
 
+  **Status (wave 3):** resolved by http_gun 14eacc6 and llm_wire 576482e.
+  `config.with_destination(destination.loopback_only() |>
+destination.only_hosts([authority]))` replaces the nested update, and it
+  pins the port too. The second client is gone: llm_wire sends each model
+  call through a view with its own budget, so one client with a 5 s request
+  timeout serves the tools, the publisher and the 120 s provider stream.
+  The `observations` argument is gone: http_gun emits through `sinal.emit`,
+  and the app routes `["http_gun"]` to its forwarder. Lines: 16 + 2 starts →
+  18, of which 9 parse the services URL into `host:port` for `only_hosts`.
+
 - **Dependency resolution**: no friction. pog resolved to 4.1.0, since grind
   and fabric_postgres both pin `>= 4.1.0 < 4.2.0` (the pins must widen
   together); mist 6.0.2, gleam_stdlib 0.71.0. Depending on both `fabric` and
@@ -371,6 +480,37 @@ codec adds 26 lines of gleam_json glue (see RA-8).
   1.0.5 (was 0.71.0). pog stays at 4.1.0 (fabric_postgres and grind still
   share `< 4.2.0`); mist moved to 6.0.3, gleam_crypto to 1.6.0. No app code
   changed for the new stdlib, and the app builds with `--warnings-as-errors`.
+
+  **Status (wave 3):** no friction. `saga_postgres` pins the same
+  `pog >= 4.1.0 and < 4.2.0` and `pgo` ranges as grind and fabric_postgres,
+  so the shared pool resolves to pog 4.1.0; the app's own `pog` range is
+  narrowed to match. `gleam_time` became a direct dependency, because
+  every Grind and queue duration is a `gleam/time/duration.Duration`.
+
+### RA-12 A replayed abandoned attempt emits no event and uses a business attempt
+
+- **Packages**: grind. **Kind**: defect. **Severity**: minor (the replay
+  itself works; operators lose its trace and a retry).
+- **Evidence**:
+  - The quarantine `UPDATE` clears `attempt_id` for a replayed row and then
+    returns `job.attempt_id` (grind/src/grind/internal/lease.gleam:61-70);
+    `emit_quarantined` skips a row without an attempt id (:218-220). A
+    replay therefore never emits `[grind, job, quarantined]` with
+    `replayed: True`, the field added for it. Both crash tests pin the
+    absence (research_agent_test.gleam, `crash_and_recover`); only
+    `job.claimed attempt 2` shows the replay.
+  - `worker.with_max_attempts` says a replayed lease does not use an attempt
+    (grind/src/grind/worker.gleam:251). The claim increments
+    `attempt_count` (grind/src/grind/internal/attempt.gleam:589) and the
+    replay does not give it back (lease.gleam:56-70). After one replay the
+    research job reads `attempt: 2, max_attempts: 2` in `admin.list`, so a
+    replayed run that then finds no sources is not retried. The tests pin
+    `attempt: 2`.
+- **Proposal** (grind): return the expired attempt's id from the scan (a
+  CTE that reads it before the update, or `RETURNING` the old value), and
+  decrement `attempt_count` on replay as the release path does
+  (grind/src/grind/internal/sql.gleam:496). grind's own replay test
+  (test/grind/facade/behavior_test.gleam:118) checks neither.
 
 ## Glue measure
 
@@ -616,3 +756,196 @@ c44e4be, http_gun c45adfe.
   including the exact research_agent call sites. Gap: the http_gun guide
   tells apps to drop their join table but not what to do when the app's id is a
   `String` that must be parsed (the `from_string` failure case above).
+
+## Re-run after wave 3
+
+Package heads: grind 008b657 (facade 749c0dc), saga 2ee5e0a (with
+`saga_postgres`), http_gun 1a5f5ef, sinal 44c5395 (`from_key` c6e2d36),
+json_blueprint 74a9a7d, fabric d10635f, llm_wire 576482e.
+
+- **Tests**: 9 passed, no failures (`../scripts/with-postgres.sh gleam test`),
+  including both OTP-peer crash-recovery tests, which now rely on Grind's
+  `ReplayAfterLeaseExpiry` instead of the app's sweep. Three tests changed
+  intent because the redesign removed the gap they proved:
+  - `cancelling_the_job_reaches_the_run_and_closes_the_llm_stream_test` (was
+    `cancellation_reaches_the_run_..`, which asserted that `postgres.cancel`
+    alone left the stream open): `grind.cancel` alone closes it.
+  - `saga_postgres_on_the_shared_pool_passes_saga_conformance_test` (was the
+    conformance test of the deleted adapter): saga's suite against
+    `saga_postgres` on Grind's pool.
+  - The common-path test now expects saga events in the request's trace and
+    none unattributed.
+
+  `gleam run` prints the four scenarios; the trace line reads "30 events from
+  research_agent, grind, fabric, http_gun, saga" (was 26 without saga), and
+  only `http_gun: 6, llm_wire: 15` stay unattributed. The build passes
+  `--warnings-as-errors` and `gleam format --check`.
+
+- **Glue measure, before → after**:
+
+  | Seam                                | Before                                  | After                     | Change                                                                                               |
+  | ----------------------------------- | --------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+  | saga ↔ PostgreSQL (RA-6)            | 262 + 6 pid FFI + 8 DDL                 | 10                        | `saga_store.gleam` deleted; `saga_postgres` config, migrate and storage on the shared pool           |
+  | crash: replay abandoned jobs (RA-2) | 38 + `db.unfinished` 11 + 3 (+ 10 test) | 1                         | `worker.with_abandonment(ReplayAfterLeaseExpiry(max_replays: 3))`                                    |
+  | cancellation fan-out (RA-5)         | 37                                      | 8 + 9 in `follow`         | `grind.cancel`; the handler polls `worker.cancellation` and calls `fabric.cancel`                    |
+  | Grind runtime and pools (RA-11)     | ~30 + a second pool                     | 16 + one supervised child | one pool from the app's `pog.Config`; registry, policy validation and consumer start gone            |
+  | waiting for an outcome              | 13 (sleep and poll)                     | 6                         | `grind.await(within:)`                                                                               |
+  | join index (db.gleam, RA-1)         | 158                                     | 132                       | `set_job`, `unfinished` and the saga DDL gone; the row is inserted in the `submit_in` transaction    |
+  | grind job drives fabric run (RA-1)  | 81                                      | 97                        | + the cancellation arm; `Response` constructors                                                      |
+  | saga drive errors → job response    | 5                                       | 13                        | `durable.error_kind`: `Busy`/`Transient` snooze, the rest `Uncertain`                                |
+  | codec bridges (wire.gleam, RA-8)    | 38                                      | 27                        | total `worker.codec` + `with_codec_version`; `saga_codec.json`                                       |
+  | http_gun clients (RA-11)            | 16 + two clients                        | 18, one client            | `loopback_only() \|> only_hosts([host:port])`; 9 of the 18 lines parse the URL                       |
+  | telemetry joins (RA-7)              | `Job` + `Run` bindings                  | `Run` only                | grind and saga keyed by correlation; telemetry.gleam 400 → 391                                       |
+  | correlation parse (events, remote)  | 2 × `from_string`, error dropped        | 2 × `from_key`            | no silent drop                                                                                       |
+  | publish.gleam                       | 206                                     | 226                       | labelled `durable.recoverable` wraps over more lines; `describe` matches `StepFailed` for the detail |
+  | lifecycle (FFI, peer owner)         | 16 FFI + 13 owner + 6 pid FFI           | 16 FFI + 13 owner         | pid FFI gone; `static_supervisor` still has no stop                                                  |
+
+  Source: 755 lines removed, 377 added (3134 → 2756, −378); tests 434 → 443.
+
+- **Glue that remains, and its owner**:
+  - **RA-1 join row and state machine** (fabric, FABRIC-R2 and FABRIC-R13,
+    wave 5; decision 1): the `run_id` column, `db.set_run` after the run's
+    first commit, `telemetry.bind_run`, and the 97-line `drive_agent` /
+    `start_run` / `follow` loop that starts or recovers the run, recovers
+    again on `Unattended`, restarts after "no sources" and maps each ending.
+    With caller-supplied run ids (`run_id = "research-" <> id`) the column,
+    `set_run`, `bind_run` and the start-or-recover branch go. The loop stays
+    until a `fabric_grind` driver exists, which decision 1 (option B: "the
+    job is the driver and fabric's sweeper stays off") makes the owner's
+    call.
+  - **RA-3 run id issued by Fabric** (FABRIC-R2, wave 5): unchanged; an orphan
+    run is still possible between `fabric.start` and `db.set_run`.
+  - **RA-4 read-only tool reconciliation** (FABRIC-R9, wave 5): 77 lines
+    unchanged.
+  - **RA-7 model calls unattributed** (FABRIC-R8, FABRIC-R15, wave 5): 6
+    http_gun and 15 llm_wire events per request; Fabric's own events join
+    through `bind_run`.
+  - **RA-10 typed answer** (FABRIC-R1, wave 5): the 46-line `TITLE:` parser.
+  - **Model failures as strings** (FABRIC-R4, wave 5).
+  - **RA-8 bridges** (grind, saga; open): `wire.grind` and `wire.saga`, 27
+    lines, because neither takes a Blueprint codec.
+  - **The row's later states** (grind): written outside Grind's
+    acknowledgement; Grind has no acknowledgement inside the handler's
+    transaction.
+  - **Lifecycle** (gleam_otp): the FFI `shutdown` and the peer's owner
+    process.
+
+  Decision 1: with the wave 3 Grind and Saga APIs the app already runs the
+  split option B states. Grind delivers (abandonment policy, cancellation in
+  the job context), Saga runs the publication (one `Run`, its own storage),
+  Fabric holds the conversation, and correlation crosses Grind, Saga and
+  http_gun. Every line of join glue that is left belongs to Fabric's side of
+  that split.
+
+- **New friction**:
+  - **The worker cannot use `grind.connection`.** The worker's handler needs
+    the pool (Fabric's store, the saga storage, the `research` table), the
+    worker must be in Grind's `Config`, and `grind.connection` panics until a
+    runtime is configured. The app names the pool itself and relies on the
+    documented "Grind keeps the config's pool name":
+
+    ```gleam
+    let pool_name = process.new_name("research_pool")
+    use pool <- result.try(pog.url_config(pool_name, url) |> ..)
+    let database = pog.named_connection(pool_name) // = grind.connection, later
+    let deps = jobs.Deps(db: database, runs: .., sagas: saga_postgres.storage(..), ..)
+    let config = grind.new(pool) |> grind.with_worker(jobs.worker(deps)) |> ..
+    ```
+
+    It works, but the guide's "use `grind.connection` for the app's queries
+    and saga storage" cannot be followed for anything a handler captures.
+    `worker.Context` carrying the connection, or a handler that receives
+    the `Grind` handle, would remove the workaround.
+
+    **Status (wave 3 fixes):** partially resolved by grind 9ccbfb5;
+    `worker.connection(context)` replaces the handler's pool name, so
+    `Deps.db` is gone and the handler reads and writes the `research` table
+    through the context. The pool name stays in `app.start` only because
+    Fabric's store and the saga storage are built over a connection before the
+    runtime exists; the constructors need it, the handler does not.
+
+  - **Consumers start before the app is ready.** `grind.supervised` starts the
+    consumers with the pool, and `grind.migrate` needs the running runtime,
+    so the queue polls before Grind's tables, the `research` table, Fabric's
+    tables and the Fabric store exist (app.gleam:159-187). A due job claimed
+    in that window fails its handler. Here only the crash test has such a
+    job, and its 6 s lease keeps it out of reach. A
+    `grind.without_consumers` runtime plus a later `start_consumers`, or a
+    migration hook run before the consumers, would close the window.
+
+    **Status (wave 3 fixes):** resolved by grind 9ccbfb5 for Grind's schema:
+    `grind.supervised(config |> grind.with_startup_migration)` migrates before
+    any consumer polls and `grind.migrate` is gone from `app.start`. The app's
+    own tables (`research`, Fabric, Saga) are now migrated before Grind
+    starts, on a one-connection pool that `app.migrate_app` shuts down, since
+    the runtime cannot start consumers later and a job from a previous version
+    can be due at once (18 lines).
+
+  - **The handler polls for cancellation.** `fabric.await` takes a timeout,
+    not a selector, so the handler cannot wait on the run and on
+    `worker.cancellation` at once and checks the selector between 250 ms
+    waits (jobs.gleam:243-262). The cancellation already arrives only at
+    the lease renewal (≤ 2 s here), so the 250 ms costs little, but it is a
+    loop the app owns. Fabric-owned: an `await` that also returns on a
+    caller's selector.
+  - **The handler's cancel reason is dropped**: the job ends
+    `Cancelled("cancelled by caller")` though the handler returned
+    `Cancelled("research cancelled")` (grind; the test pins it).
+  - **RA-12**: a replay emits no `quarantined` event and uses a business
+    attempt, contrary to `with_max_attempts`'s doc.
+
+    **Status (wave 3 fixes):** resolved by grind 6bd06ec. The crash tests now
+    assert one `[grind, job, quarantined]` event with `replayed: True` and
+    `summary.attempt == 1` after one replay (they pinned "no event" and
+    attempt 2).
+
+  - **`execution.describe_cause` omits the step's error** ("step publish
+    returned an error"), so `publish.describe` matches
+    `StepFailed(_, PublishError(step, detail))` to keep "HTTP 500" in the job's
+    discard reason (6 lines, saga).
+
+    **Status (wave 3 fixes):** resolved by saga 92612fd.
+    `execution.describe_cause(cause, error: ..)` renders the step's error
+    ("step publish returned an error: HTTP 500"), so the `StepFailed` match in
+    `publish.describe` is gone.
+
+  - **`only_hosts` takes `host:port` strings**, and the app has a base URL, so
+    pinning the port needs a 9-line `uri.parse` (http_gun, nit).
+  - **Two bounds to align by hand**: `durable.drive(run, timeout: 60_000)` runs
+    inside a handler whose own timeout is 15 min by default.
+    `worker.deadline(context)` returns an absolute `Timestamp`, so deriving
+    the saga's `timeout:` from the job's budget needs clock arithmetic; the
+    app picks a constant (saga, grind; minor).
+  - **`duration` everywhere**: Grind's and the queue's settings take
+    `Duration`, http_gun's and saga's take `Int` milliseconds, so one
+    `app.start` mixes `duration.milliseconds(1500)`,
+    `http_config.Milliseconds(5000)`, `with_lease(10_000)` and
+    `drive(timeout: 60_000)`, and `gleam_time` became a direct dependency
+    (nit; cross-package).
+- **What worked well in wave 3**: `pog.transaction` around `grind.submit_in`
+  and the app's insert reads like any other write; `grind.await` replaced the
+  polling helper; `ReplayAfterLeaseExpiry` is one line and both crash tests
+  passed unchanged in their assertions on the scripted services;
+  `saga_postgres` dropped in on Grind's pool and passed the conformance suite
+  there; `durable.with_correlation` and `job.with_correlation` attributed
+  every Grind and Saga event with no table; `durable.error_kind` made the
+  saga-to-job mapping a four-arm `case`; llm_wire's per-call view let one
+  http_gun client replace two.
+- **Migration guides**: sufficient. The grind index for research_agent named
+  RA-2, RA-5 and RA-11 with their replacements, and the saga index named
+  every changed call site in `publish.gleam` and `wire.gleam`. Gaps: the
+  grind guide does not say that the worker must exist before
+  `grind.connection` can be called, nor that consumers start before
+  `migrate`; the saga guide's `codec.json` example is exact.
+
+### After the follow-up fixes
+
+Tests: 9 passed (the common-path test gained an assertion that the
+unqualified `research` table lives in the node's schema, which the app's own
+`search_path` now decides, grind 9ccbfb5). `gleam run`, `--warnings-as-errors`
+and `gleam format --check` pass. `saga.define` is total and `durable.new`
+dropped `version:` (no `let assert Ok`, no `result.try`). The `Busy` snooze
+was already 1 s and stays, because the lease is the fallback when the
+runner's node is lost. No `Admission` branch or `unknown_when` step exists in
+this app. Source and tests: about 55 lines removed, 105 added (`migrate_app`,
+`pool_config` and the settings helpers account for most of the additions).

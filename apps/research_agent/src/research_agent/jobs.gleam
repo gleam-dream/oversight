@@ -3,27 +3,27 @@
 ////
 //// Who owns what:
 //// - Grind owns delivery: the job, its lease, its retries and its final
-////   state. A job whose node died becomes `uncertain`; `recover_abandoned`
-////   authorizes its replay, because everything it does is resumable.
+////   state. A job whose node died is replayed after its lease expires
+////   (`ReplayAfterLeaseExpiry`), because everything it does is resumable.
 //// - Fabric owns the conversation: every turn and tool result is committed
 ////   to `fabric_runs` (fabric_postgres) before the next step, so a replayed
 ////   job `recover`s the run and continues from the last commit.
 //// - Saga owns the publication's effects and their compensation, with its
-////   checkpoint in `saga_executions`.
+////   checkpoint in `saga_executions` (saga_postgres).
 //// - The app owns the join: the `research` row that names the job id and
-////   the run id, which none of the three packages can hold for the others.
+////   the run id, because Fabric issues the run id itself.
 
 import fabric
 import fabric/agent.{type Agent}
 import fabric/run
 import fabric/store.{type Store}
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import grind/job
-import grind/postgres
+import gleam/time/duration
 import grind/worker.{type Worker}
 import http_gun
 import json/blueprint/codec
@@ -33,21 +33,22 @@ import research_agent/domain.{type Published, type Research, Article}
 import research_agent/events
 import research_agent/publish
 import research_agent/researcher.{type Context, type Endpoints}
-import research_agent/saga_store.{type SagaStore}
 import research_agent/telemetry.{type Telemetry}
 import research_agent/wire
+import saga/durable
 import saga/execution
+import saga/storage.{type Storage}
 
 pub const queue = "research"
 
-/// Everything a job handler needs, captured when the worker is defined.
+/// Everything a job handler needs, captured when the worker is defined. The
+/// research table is reached through `worker.connection`, Grind's own pool.
 pub type Deps {
   Deps(
-    db: pog.Connection,
     runs: Store,
     agent: Agent(Context),
     http: http_gun.Client,
-    sagas: SagaStore,
+    sagas: Storage,
     endpoints: Endpoints,
     publisher: String,
     telemetry: Option(Telemetry),
@@ -82,88 +83,98 @@ fn research_error_codec() -> codec.Codec(ResearchError) {
 }
 
 pub fn worker(deps: Deps) -> Worker(Research, Published, ResearchError) {
-  let input = wire.grind("research-1", domain.research_codec())
-  let output = wire.grind("published-1", domain.published_codec())
-  let error = wire.grind("research-error-2", research_error_codec())
-  // `define` needs a plain handler even though the queue handler below is
-  // the one Grind calls (EXT-8).
-  let assert Ok(defined) =
-    worker.define_with_error_codec(
-      "research.run",
-      "1",
-      input,
-      output,
-      error,
-      fn(research) {
-        case handle(deps, research) {
-          worker.WorkerSucceeded(published) -> Ok(published)
-          _ -> Error(AgentStopped("see the queue handler"))
-        }
-      },
-    )
-  let assert Ok(defined) = worker.with_max_attempts(defined, 2)
-  defined
-  |> worker.with_queue_handler(handle(deps, _))
-  |> worker.with_retry_policy(
-    worker.retry_policy(fn(failure, _context) {
-      case failure {
-        // A run that found nothing may succeed later, from a fresh run.
-        worker.BusinessFailure(NoSources(_)) -> {
-          let assert Ok(delay) = worker.retry_delay(200)
-          worker.RetryAfter(delay)
-        }
-        worker.BusinessFailure(_) -> worker.DoNotRetry
-      }
-    }),
+  worker.responding(
+    "research.run",
+    input: wire.grind("research-1", domain.research_codec()),
+    output: wire.grind("published-1", domain.published_codec()),
+    handle: fn(job, research) { handle(deps, job, research) },
   )
+  |> worker.with_error_codec(wire.grind(
+    "research-error-2",
+    research_error_codec(),
+  ))
+  |> worker.with_queue(queue)
+  |> worker.with_max_attempts(2)
+  |> worker.with_retry_policy(fn(error, _attempt) {
+    case error {
+      // A run that found nothing may succeed later, from a fresh run.
+      NoSources(_) -> worker.RetryAfter(duration.milliseconds(200))
+      _ -> worker.DoNotRetry
+    }
+  })
+  // Fabric holds the conversation and Saga the publication, so a job whose
+  // node died resumes both when Grind runs it again.
+  |> worker.with_abandonment(worker.ReplayAfterLeaseExpiry(max_replays: 3))
 }
 
 pub fn handle(
   deps: Deps,
+  job: worker.Context,
   research: Research,
-) -> worker.WorkerResponse(Published, ResearchError) {
+) -> worker.Response(Published, ResearchError) {
   let context = researcher.context(deps.http, research.id)
-  case drive_agent(deps, context, research) {
+  let conn = worker.connection(job)
+  case drive_agent(deps, conn, context, worker.cancellation(job), research) {
     Ok(domain.Written(title, body)) -> {
-      let _ = db.set_state(deps.db, research.id, events.Publishing, title)
+      let _ = db.set_state(conn, research.id, events.Publishing, title)
       let article = Article(research.id, title, body)
-      case publish.run(deps.sagas, context.http, deps.publisher, article) {
+      let published =
+        publish.run(
+          deps.sagas,
+          context.http,
+          deps.publisher,
+          article,
+          worker.correlation(job),
+          timeout: 60_000,
+        )
+      case published {
         Ok(execution.Completed(published)) -> {
           let _ =
-            db.set_state(deps.db, research.id, events.Published, published.url)
-          worker.WorkerSucceeded(published)
+            db.set_state(conn, research.id, events.Published, published.url)
+          worker.Succeeded(published)
         }
         Ok(outcome) -> {
           let detail = publish.describe(outcome)
-          let _ = db.set_state(deps.db, research.id, events.Failed, detail)
+          let _ = db.set_state(conn, research.id, events.Failed, detail)
           // Rolled back (or needs a person): a retry would reconnect to the
           // same finished saga, so the job ends here.
-          worker.WorkerDiscarded(detail)
+          worker.Discarded(detail)
         }
         Error(error) -> {
-          let detail = "publication not driven: " <> string.inspect(error)
-          let _ = db.set_state(deps.db, research.id, events.Failed, detail)
-          worker.WorkerUncertain(detail)
+          let detail =
+            "publication not driven: " <> durable.describe_error(error)
+          case durable.error_kind(error) {
+            // Another runner holds the saga, or the database blinked: the
+            // saga's checkpoint is intact, so try again shortly.
+            durable.Busy | durable.Transient ->
+              worker.Snoozed(after: duration.seconds(1), reason: detail)
+            durable.NeedsReconciliation
+            | durable.Incompatible
+            | durable.Defect -> {
+              let _ = db.set_state(conn, research.id, events.Failed, detail)
+              worker.Uncertain(detail)
+            }
+          }
         }
       }
     }
     Ok(domain.NoSources(reason)) -> {
       let _ =
         db.set_state(
-          deps.db,
+          conn,
           research.id,
           events.Researching,
           "no sources: " <> reason,
         )
-      worker.WorkerFailed(NoSources(reason))
+      worker.Failed(NoSources(reason))
     }
     Error(Cancelled) -> {
-      let _ = db.set_state(deps.db, research.id, events.Cancelled, "")
-      worker.WorkerCancelled("research cancelled")
+      let _ = db.set_state(conn, research.id, events.Cancelled, "")
+      worker.Cancelled("research cancelled")
     }
     Error(Stopped(reason)) -> {
-      let _ = db.set_state(deps.db, research.id, events.Failed, reason)
-      worker.WorkerFailed(AgentStopped(reason))
+      let _ = db.set_state(conn, research.id, events.Failed, reason)
+      worker.Failed(AgentStopped(reason))
     }
   }
 }
@@ -176,14 +187,14 @@ type Ending {
 /// Starts the run, or continues the one this research already has.
 fn drive_agent(
   deps: Deps,
+  conn: pog.Connection,
   context: Context,
+  cancellation: process.Selector(Nil),
   research: Research,
 ) -> Result(domain.Answer, Ending) {
-  use row <- result.try(
-    db.get(deps.db, research.id) |> result.map_error(Stopped),
-  )
+  use row <- result.try(db.get(conn, research.id) |> result.map_error(Stopped))
   use handle <- result.try(case row.run_id {
-    None -> start_run(deps, context, research)
+    None -> start_run(deps, conn, context, research)
     Some(id) -> {
       let assert Ok(id) = run.parse_id(id)
       // On a leased store `recover` is safe at any time: it takes over only
@@ -197,7 +208,8 @@ fn drive_agent(
         case fabric.await(handle, 0) {
           Ok(run.Finished(run.Completed(text))) ->
             case domain.parse_answer(text) {
-              Ok(domain.NoSources(_)) -> start_run(deps, context, research)
+              Ok(domain.NoSources(_)) ->
+                start_run(deps, conn, context, research)
               _ -> Ok(handle)
             }
           _ -> Ok(handle)
@@ -205,11 +217,12 @@ fn drive_agent(
       })
     }
   })
-  follow(deps, context, handle)
+  follow(deps, context, cancellation, handle)
 }
 
 fn start_run(
   deps: Deps,
+  conn: pog.Connection,
   context: Context,
   research: Research,
 ) -> Result(fabric.Run(Context), Ending) {
@@ -218,30 +231,44 @@ fn start_run(
     |> result.map_error(fn(e) { Stopped("start: " <> string.inspect(e)) }),
   )
   // Fabric issues the run id, so it is recorded only after the run's first
-  // commit (FEEDBACK RA-2).
+  // commit (FEEDBACK RA-3).
   let id = run.id_to_string(fabric.id(handle))
   telemetry.bind_run(deps.telemetry, id, research.id)
   use Nil <- result.map(
-    db.set_run(deps.db, research.id, id) |> result.map_error(Stopped),
+    db.set_run(conn, research.id, id) |> result.map_error(Stopped),
   )
   handle
 }
 
+/// Waits for the run in short slices, so the job's cancellation reaches it:
+/// `fabric.await` takes no selector, so the handler polls Grind's.
 fn follow(
   deps: Deps,
   context: Context,
+  cancellation: process.Selector(Nil),
   handle: fabric.Run(Context),
 ) -> Result(domain.Answer, Ending) {
-  case fabric.await(handle, 1000) {
-    Ok(run.Working) -> follow(deps, context, handle)
+  let next = fn(handle) { follow(deps, context, cancellation, handle) }
+  case fabric.await(handle, 250) {
+    Ok(run.Working) ->
+      case process.selector_receive(cancellation, 0) {
+        // Grind committed a cancellation of this job: cancel the run, which
+        // kills its model call and closes the LLM stream.
+        Ok(Nil) ->
+          case fabric.cancel(handle) {
+            Ok(run.Finished(run.Cancelled)) -> Error(Cancelled)
+            _ -> next(handle)
+          }
+        Error(Nil) -> next(handle)
+      }
     Ok(run.Unattended) ->
       case fabric.recover(deps.runs, deps.agent, context, fabric.id(handle)) {
-        Ok(handle) -> follow(deps, context, handle)
+        Ok(handle) -> next(handle)
         Error(e) -> Error(Stopped("recover: " <> string.inspect(e)))
       }
     Ok(run.Suspended([], uncertain)) ->
       case reconcile_all(deps, context, handle, uncertain) {
-        Ok(Nil) -> follow(deps, context, handle)
+        Ok(Nil) -> next(handle)
         Error(reason) -> Error(Stopped(reason))
       }
     Ok(run.Suspended(approvals, _)) ->
@@ -275,51 +302,5 @@ fn reconcile_all(
     fabric.reconcile(handle, action.reference, content)
     |> result.replace(Nil)
     |> result.map_error(string.inspect)
-  })
-}
-
-// Abandoned jobs ------------------------------------------------------------
-
-/// Grind never redelivers a job whose node died: the expired attempt is
-/// quarantined as `uncertain` and waits for an audited decision. Research is
-/// resumable (Fabric holds the conversation, Saga the publication), so the
-/// app authorizes the replay of each of its uncertain jobs. Returns how many
-/// jobs it released.
-pub fn recover_abandoned(
-  grind: postgres.Database,
-  research_worker: Worker(Research, Published, ResearchError),
-  database: pog.Connection,
-  node: String,
-) -> Result(Int, String) {
-  use _ <- result.try(
-    postgres.quarantine_expired(grind, limit: 100)
-    |> result.map_error(string.inspect),
-  )
-  use rows <- result.try(db.unfinished(database))
-  list.try_fold(rows, 0, fn(released, row) {
-    let assert Some(job_id) = row.job_id
-    use handle <- result.try(
-      postgres.bind_handle(grind, research_worker, job_id)
-      |> result.map_error(string.inspect),
-    )
-    case postgres.state(grind, handle) {
-      Ok(job.Uncertain) -> {
-        let request =
-          postgres.ResolutionRequest(
-            resolution_id: "replay-"
-              <> row.id
-              <> "-"
-              <> int.to_string(int.random(1_000_000_000)),
-            resolved_by: node,
-            details: "the agent run and the publication are checkpointed; a replay resumes them",
-            decision: postgres.AuthorizeReplay,
-          )
-        postgres.resolve_uncertain(grind, handle, request)
-        |> result.replace(released + 1)
-        |> result.map_error(string.inspect)
-      }
-      Ok(_) -> Ok(released)
-      Error(error) -> Error(string.inspect(error))
-    }
   })
 }

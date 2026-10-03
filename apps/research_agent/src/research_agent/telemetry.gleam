@@ -5,15 +5,14 @@
 ////
 //// - the app itself (`events`): the research id as a `Correlation`, so no
 ////   binding is needed;
-//// - grind: `job_id` (the handler is never told it; the app records job id
-////   to research id at submission);
-//// - fabric: `run` (issued by `fabric.start`; the app records it);
+//// - grind: the job's correlation, which the app sets to the research id at
+////   submission (`job.with_correlation`);
+//// - saga: the correlation the job handler passes to the durable run
+////   (`durable.with_correlation`);
 //// - http_gun: the research id as a `Correlation`, attached with
-////   `with_correlation` (the tool handlers do that per call), so it joins
-////   like the app's own events;
-//// - llm_wire: nothing (stage, provider, outcome);
-//// - saga: `workflow` name and a per-VM `run: Int` that the app never sees
-////   for a durable run (`durable.drive` hides the execution).
+////   `with_correlation` (the tool handlers do that per call);
+//// - fabric: `run` (issued by `fabric.start`; the app records it);
+//// - llm_wire: nothing (stage, provider, outcome).
 
 import fabric/observation as fabric_events
 import gleam/dict.{type Dict}
@@ -25,21 +24,20 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
-import grind/observation as grind_events
+import grind/telemetry as grind_events
 import http_gun/telemetry as http_events
 import llm_wire/telemetry as llm_events
 import research_agent/events
-import saga/observation as saga_events
+import saga/telemetry as saga_events
 import sinal
 import sinal/correlation
 import sinal/forwarder
 
 /// What an event can be joined on.
 pub type Key {
-  /// The research id itself, from the app's own events (`events`) and from
-  /// http_gun requests made on a correlated client.
+  /// The research id itself, from every event that carries the research's
+  /// `Correlation`: the app's own, Grind's, Saga's and http_gun's.
   Research(String)
-  Job(Int)
   Run(String)
   Unkeyed
 }
@@ -54,25 +52,19 @@ pub type Telemetry {
 
 pub opaque type Message {
   Record(Observed)
-  BindJob(Int, String)
   BindRun(String, String)
-  Snapshot(Subject(#(List(Observed), Dict(String, String), Dict(Int, String))))
+  Snapshot(Subject(#(List(Observed), Dict(String, String))))
 }
 
 type State {
-  State(
-    events: List(Observed),
-    runs: Dict(String, String),
-    jobs: Dict(Int, String),
-    echo_events: Bool,
-  )
+  State(events: List(Observed), runs: Dict(String, String), echo_events: Bool)
 }
 
 /// Starts the collector and attaches to every package's events. With
 /// `echo_events`, each event is printed as it arrives.
 pub fn start(echo_events: Bool) -> Telemetry {
   let assert Ok(started) =
-    actor.new(State([], dict.new(), dict.new(), echo_events))
+    actor.new(State([], dict.new(), echo_events))
     |> actor.on_message(handle)
     |> actor.start
   let collector = started.data
@@ -96,7 +88,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "grind",
           "job.admitted",
-          Job(m.ref.job_id),
+          job(m.ref),
           string.inspect(m.committed_state),
         )
       },
@@ -107,7 +99,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "grind",
           "job.claimed",
-          Job(m.ref.job_id),
+          job(m.ref),
           "attempt " <> int.to_string(m.attempt.attempt),
         )
       },
@@ -118,7 +110,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "grind",
           "job.acknowledged",
-          Job(m.ref.job_id),
+          job(m.ref),
           string.inspect(m.committed_state),
         )
       },
@@ -126,18 +118,16 @@ pub fn start(echo_events: Bool) -> Telemetry {
     sinal.observe(
       grind_events.quarantined(),
       fn(_, m: grind_events.QuarantinedMetadata) {
-        record("grind", "job.quarantined", Job(m.ref.job_id), "lease expired")
+        record("grind", "job.quarantined", job(m.ref), case m.replayed {
+          True -> "lease expired, replayed"
+          False -> "lease expired, held uncertain"
+        })
       },
     ),
     sinal.observe(
       grind_events.resolved(),
       fn(_, m: grind_events.ResolvedMetadata) {
-        record(
-          "grind",
-          "job.resolved",
-          Job(m.ref.job_id),
-          string.inspect(m.decision),
-        )
+        record("grind", "job.resolved", job(m.ref), string.inspect(m.decision))
       },
     ),
     sinal.observe(
@@ -146,7 +136,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "grind",
           "job.cancellation_decided",
-          Job(m.ref.job_id),
+          job(m.ref),
           string.inspect(m.outcome),
         )
       },
@@ -157,7 +147,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "grind",
           "job.released",
-          Job(m.ref.job_id),
+          job(m.ref),
           string.inspect(m.restored_state),
         )
       },
@@ -236,8 +226,8 @@ pub fn start(echo_events: Bool) -> Telemetry {
       record(
         "saga",
         "run.start",
-        Unkeyed,
-        m.workflow <> " run " <> int.to_string(m.run),
+        keyed(m.correlation),
+        m.workflow <> " " <> option.unwrap(m.execution, "local"),
       )
     }),
     sinal.observe(
@@ -246,8 +236,8 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "run.stop",
-          Unkeyed,
-          m.workflow <> " " <> string.inspect(m.outcome),
+          keyed(m.correlation),
+          m.workflow <> " " <> saga_events.outcome_kind_name(m.outcome),
         )
       },
     ),
@@ -257,7 +247,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "step.stop",
-          Unkeyed,
+          keyed(m.correlation),
           m.step <> " " <> string.inspect(m.result),
         )
       },
@@ -268,7 +258,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "undo.stop",
-          Unkeyed,
+          keyed(m.correlation),
           m.step <> " " <> string.inspect(m.result),
         )
       },
@@ -277,12 +267,9 @@ pub fn start(echo_events: Bool) -> Telemetry {
     sinal.observe(llm_events.observation_event(), fn(_, m: llm_events.Metadata) {
       record("llm_wire", m.stage, Unkeyed, m.provider <> " " <> m.outcome)
     }),
-    // http_gun (only clients started with `observations: Some(forwarder)`)
+    // http_gun (routed through the app's forwarder, `http_prefix`)
     sinal.observe(http_events.event(), fn(_, m: http_events.Metadata) {
-      let key = case m.correlation {
-        Some(id) -> Research(correlation.to_string(id))
-        None -> Unkeyed
-      }
+      let key = keyed(m.correlation)
       case m.milestone {
         http_events.ResponseHeaders(status) ->
           record("http_gun", "response_headers", key, int.to_string(status))
@@ -309,12 +296,15 @@ pub fn stop(telemetry: Telemetry) -> Nil {
   })
 }
 
-pub fn bind_job(
-  telemetry: Option(Telemetry),
-  job_id: Int,
-  research: String,
-) -> Nil {
-  each(telemetry, BindJob(job_id, research))
+fn job(ref: grind_events.JobRef) -> Key {
+  Research(correlation.to_string(ref.correlation))
+}
+
+fn keyed(correlation: Option(correlation.Correlation)) -> Key {
+  case correlation {
+    Some(id) -> Research(correlation.to_string(id))
+    None -> Unkeyed
+  }
 }
 
 pub fn bind_run(
@@ -341,11 +331,10 @@ pub type Trace {
 pub fn trace(telemetry: Telemetry, research: String) -> Trace {
   // Let in-flight forwarder deliveries land.
   process.sleep(100)
-  let #(events, runs, jobs) = process.call(telemetry.collector, 2000, Snapshot)
+  let #(events, runs) = process.call(telemetry.collector, 2000, Snapshot)
   let owner = fn(key) {
     case key {
       Research(id) -> Ok(id)
-      Job(id) -> dict.get(jobs, id)
       Run(id) -> dict.get(runs, id)
       Unkeyed -> Error(Nil)
     }
@@ -378,16 +367,12 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
       }
       actor.continue(State(..state, events: [observed, ..state.events]))
     }
-    BindJob(id, research) ->
-      actor.continue(
-        State(..state, jobs: dict.insert(state.jobs, id, research)),
-      )
     BindRun(id, research) ->
       actor.continue(
         State(..state, runs: dict.insert(state.runs, id, research)),
       )
     Snapshot(reply) -> {
-      process.send(reply, #(list.reverse(state.events), state.runs, state.jobs))
+      process.send(reply, #(list.reverse(state.events), state.runs))
       actor.continue(state)
     }
   }
@@ -397,4 +382,10 @@ fn handle(state: State, message: Message) -> actor.Next(State, Message) {
 /// handlers out of its runners (see `fabric/observation`).
 pub fn fabric_prefix() -> List(String) {
   ["fabric"]
+}
+
+/// http_gun emits through `sinal.emit`; routing its prefix keeps the
+/// handlers out of the client's pool and body processes.
+pub fn http_prefix() -> List(String) {
+  ["http_gun"]
 }

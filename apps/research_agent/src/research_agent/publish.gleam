@@ -2,24 +2,25 @@
 //// it. A failure after the draft exists rolls back by deleting the draft.
 //// Every step is `recoverable`, so a restarted job reuses saved outputs and
 //// asks the publisher what happened to an interrupted step instead of
-//// repeating it. Checkpoints go to Postgres through `saga_store`.
+//// repeating it. Checkpoints go to Postgres through `saga_postgres`.
 
 import gleam/dynamic/decode
 import gleam/http
 import gleam/json
-import gleam/option.{Some}
+import gleam/list
 import gleam/result
 import gleam/string
 import http_gun
 import json/blueprint/codec
 import research_agent/domain.{type Article, type Published, Published}
 import research_agent/remote
-import research_agent/saga_store.{type SagaStore}
 import research_agent/wire
 import saga
 import saga/codec as saga_codec
 import saga/durable
 import saga/execution
+import saga/storage.{type Storage}
+import sinal/correlation
 
 pub type PublishError {
   PublishError(step: String, detail: String)
@@ -45,12 +46,12 @@ pub fn workflow(
     |> result.map_error(remote.describe)
   }
   let create_draft =
-    saga.effect("create_draft", fn(article: Article, key) {
+    saga.effect("create_draft", fn(article: Article, key: saga.EffectKey) {
       remote.call(
         client,
         http.Post,
         base <> "/drafts",
-        [#("idempotency-key", key)],
+        [#("idempotency-key", key.idempotency)],
         json.to_string(json.object([#("title", json.string(article.title))])),
       )
       |> remote.expect([201])
@@ -60,25 +61,29 @@ pub fn workflow(
       })
       |> result.map_error(failed("create_draft"))
     })
-    |> saga.undo(fn(_article, draft_id) { delete(draft_id) })
-    |> saga.restore_undo(fn(_article, draft_id, _key) {
-      saga.UndoWith(fn() { delete(draft_id) })
+    |> saga.undo(fn(undo) { delete(undo.output) })
+    |> durable.restore_undo(fn(undo) {
+      saga.UndoWith(fn() { delete(undo.output) })
     })
-    |> saga.recoverable("1", article_codec(), text, fn(_article, key) {
-      // The publisher deduplicates on the idempotency key, so it can say
-      // whether an interrupted create happened.
-      case
-        remote.call(client, http.Get, base <> "/drafts?key=" <> key, [], "")
-      {
-        Ok(#(200, body)) ->
-          case json.parse(body, decode.at(["id"], decode.string)) {
-            Ok(id) -> saga.EffectCompleted(id)
-            Error(_) -> saga.EffectUnknown
-          }
-        Ok(#(404, _)) -> saga.EffectAbsent
-        _ -> saga.EffectUnknown
-      }
-    })
+    |> durable.recoverable(
+      version: "1",
+      input: article_codec(),
+      output: text,
+      resolve: fn(_article, key) {
+        // The publisher deduplicates on the idempotency key, so it can say
+        // whether an interrupted create happened.
+        let url = base <> "/drafts?key=" <> key.idempotency
+        case remote.call(client, http.Get, url, [], "") {
+          Ok(#(200, body)) ->
+            case json.parse(body, decode.at(["id"], decode.string)) {
+              Ok(id) -> durable.Completed(id)
+              Error(_) -> durable.MaybeSent
+            }
+          Ok(#(404, _)) -> durable.NotSent
+          _ -> durable.MaybeSent
+        }
+      },
+    )
   let upload =
     saga.step("upload_body", fn(pair: #(Article, String)) {
       let #(article, draft_id) = pair
@@ -94,7 +99,12 @@ pub fn workflow(
       |> result.map_error(failed("upload_body"))
     })
     // A PUT of the same body is idempotent: an interrupted upload may run again.
-    |> saga.recoverable("1", pair_codec(), text, fn(_, _) { saga.EffectAbsent })
+    |> durable.recoverable(
+      version: "1",
+      input: pair_codec(),
+      output: text,
+      resolve: fn(_, _) { durable.NotSent },
+    )
   let publish =
     saga.step("publish", fn(draft_id: String) {
       remote.call(
@@ -112,17 +122,18 @@ pub fn workflow(
       |> result.map(Published(draft_id, _))
       |> result.map_error(failed("publish"))
     })
-    |> saga.recoverable("1", text, published_codec(), fn(_, _) {
-      saga.EffectAbsent
-    })
-  let assert Ok(workflow) =
-    saga.define("publish_article", fn(article) {
-      let draft = article |> saga.perform(create_draft)
-      saga.both(article, draft)
-      |> saga.perform(upload)
-      |> saga.perform(publish)
-    })
-  workflow
+    |> durable.recoverable(
+      version: "1",
+      input: text,
+      output: published_codec(),
+      resolve: fn(_, _) { durable.NotSent },
+    )
+  saga.define("publish_article", fn(article) {
+    let draft = article |> saga.perform(create_draft)
+    saga.both(article, draft)
+    |> saga.perform(upload)
+    |> saga.perform(publish)
+  })
 }
 
 fn failed(step: String) -> fn(remote.Failure) -> PublishError {
@@ -130,36 +141,36 @@ fn failed(step: String) -> fn(remote.Failure) -> PublishError {
 }
 
 /// Starts the publication of `article`, or reconnects to the one already
-/// stored for its research id, and drives it to an outcome.
+/// stored for its research id, and drives it to an outcome for at most
+/// `timeout` milliseconds. Its saga events carry `correlation`.
 pub fn run(
-  store: SagaStore,
+  storage: Storage,
   client: http_gun.Client,
   base: String,
   article: Article,
+  correlation: correlation.Correlation,
+  timeout timeout: Int,
 ) -> Result(Outcome, durable.Error) {
-  let workflow = workflow(client, base)
-  use persistence <- result.try(durable.prepare(
-    workflow,
-    "1",
-    article_codec(),
-    published_codec(),
-    error_codec(),
-    saga_codec.text(),
-  ))
-  let id = execution_id(article.research_id)
-  let storage = saga_store.storage(store, id)
-  use reference <- result.try(durable.start_or_reconnect(
-    storage,
-    id,
+  let persistence =
+    durable.new(
+      workflow(client, base),
+      input: article_codec(),
+      output: published_codec(),
+      error: error_codec(),
+      undo_error: saga_codec.text(),
+    )
+    |> durable.with_config(
+      execution.config() |> execution.with_step_timeout(5000),
+    )
+  use run <- result.try(durable.start_or_reconnect(
     persistence,
-    article,
-  ))
-  durable.drive(
     storage,
-    reference,
-    persistence,
-    execution.Config(..execution.config(), step_timeout: Some(5000)),
-  )
+    id: execution_id(article.research_id),
+    input: article,
+  ))
+  run
+  |> durable.with_correlation(correlation)
+  |> durable.drive(timeout:)
 }
 
 // Saga codecs: the Blueprint codecs of `domain`, versioned for Saga. ------
@@ -196,11 +207,12 @@ fn error_codec() -> saga_codec.Codec(PublishError) {
 pub fn describe(outcome: Outcome) -> String {
   case outcome {
     execution.Completed(published) -> "published " <> published.url
-    execution.Failed(cause, settlement) ->
-      "failed ("
-      <> string.inspect(cause)
-      <> "), undone: "
-      <> string.inspect(settlement.undone)
+    execution.Failed(cause, settlement) -> {
+      let reason =
+        execution.describe_cause(cause, error: fn(e: PublishError) { e.detail })
+      let undone = list.map(settlement.undone, saga.address_to_string)
+      "failed (" <> reason <> "), undone: " <> string.join(undone, ", ")
+    }
     other -> string.inspect(other)
   }
 }

@@ -1,5 +1,5 @@
 -module(research_agent_ffi).
--export([shutdown/1, start_peer/0, peer_call/4, kill_peer/1, pid_to_string/1, string_to_pid/1]).
+-export([shutdown/1, start_peer/0, peer_call/4, kill_peer/1]).
 
 %% Stops a linked supervisor the way its parent would, without taking the
 %% caller down with it.
@@ -45,10 +45,3 @@ kill_peer(Peer) ->
     OsPid = peer:call(Peer, os, getpid, [], 5000),
     os:cmd("kill -9 " ++ OsPid),
     nil.
-
-pid_to_string(Pid) -> list_to_binary(pid_to_list(Pid)).
-
-string_to_pid(Text) ->
-    try {ok, list_to_pid(binary_to_list(Text))}
-    catch _:_ -> {error, nil}
-    end.
