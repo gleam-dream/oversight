@@ -266,6 +266,15 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `Dict(Pid, Correlation)`, `Link`, `AddWarden` and the emission-time pid
   resolution (`telemetry.gleam:60-65,84-106,148-170,215-238`, about 45
   lines). Only the second key the wave 2 re-run feared never appeared.
+- **Status (wave 3):** partially resolved by http_gun e55fa1d. Events now
+  always go through `sinal.emit`, so Warden's private http_gun client
+  (previously `observations: None`) shows its provider calls in the app's
+  `[http_gun, lifecycle]` handler: discovery, JWKS and `/token` each appear as
+  six milestones (checked: 57 records for one login, the 401 trace unchanged).
+  They are uncorrelated, because Warden cannot take a `Correlation`, and the
+  pid link for `[warden, http, request]` is unchanged (about 45 lines). The
+  same default also delivers the test browser's own client to the handler,
+  which is noise here (see "Re-run after wave 3").
 
 ### SSO-8 gleam_http interop: Warden's web boundary is strings
 
@@ -319,6 +328,16 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `allow_loopback` too, but it is loopback-only, and denying public hosts still
   needs the nested record update (`app.gleam:198-211`), so it did not get
   shorter. The two vocabularies (Warden's enum, http_gun's record) remain.
+- **Status (wave 3):** partially resolved by http_gun e55fa1d.
+  `destination.loopback_only()` replaces the nested record update, so the
+  billing client's "no helper for denying public hosts" workaround and the
+  comment that explained it are gone (`start_billing_client` 21 → 13 lines),
+  and the browser client sets its policy in one pipeline step
+  (`browser.new` 11 → 9 lines, with `destination` imported again because
+  `config.allow_loopback` would have kept public hosts allowed). The two
+  vocabularies remain: Warden still takes the `DestinationPolicy` enum
+  (`app.gleam`, `AllowLoopbackForTesting`) while the billing and browser
+  clients take `destination.Policy`.
 
 ### SSO-10 `redirect_uri` must be known before Warden starts, and `start` needs the provider up
 
@@ -509,3 +528,93 @@ New friction:
 - No breaking change beyond `with_correlation`'s argument type had to be
   absorbed, and the migration guide's before/after snippet matched the app's
   one call site.
+
+## Re-run after wave 3
+
+Packages: http_gun e55fa1d (14eacc6), sinal 42dd684, warden 57e1f54. All 10
+tests pass under `../scripts/with-postgres.sh gleam test`, and `gleam run`
+prints the full narrative with the same four steps and the same step 2 trace.
+`warden.stop` now waits up to 5 s for its supervisor; `restart_warden` and
+`app.stop` need no change and the suite still runs in about 5 s. Step 4 still
+reports one provider refresh token active after logout (SSO-2). No finding
+besides SSO-7 and SSO-9 is touched: the blockers named in the wave 3 brief
+(pool, transactional submit, abandonment, job context, saga storage) belong to
+saga and grind, which this app does not use, and SSO-1 (durable custody) is a
+Warden port that wave 3 did not add.
+
+What changed (5 files, 66 added and 61 removed, of which about 40 on each side
+are `gleam format` re-indenting the three observers):
+
+| Seam                                                                               | Glue before                                                                                                                                                                  | Glue after                                                                                                                    |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Billing client config (`app.gleam`)                                                | 21 lines: `Config(..)` update, `allow_loopback`, then a second `Config(..)` update with a nested `Policy(..)` to deny public hosts, plus a comment saying there is no helper | 13: `default() \|> with_request_timeout \|> with_connect_timeout \|> with_observations \|> with_destination(loopback_only())` |
+| Browser client (`browser.gleam`)                                                   | 11: `Config(..)` update with `trust` and `deadline_ms`, then `allow_loopback`                                                                                                | 9: three setters; `loopback_only()` is the intent, not `allow_loopback`                                                       |
+| `Failure` reads (3 places)                                                         | `string.inspect(failure.reason)` printed constructor names (`ConnectionFailed(..)`)                                                                                          | `error.describe(failure)`: a one-line message that never leaks URL or headers                                                 |
+| `stop` results (2 places)                                                          | `let _ = http_gun.stop(..)` and a `Nil` after it                                                                                                                             | `http_gun.stop(..)` returns `Nil`; 1 line removed                                                                             |
+| Handler ids (3 observers)                                                          | automatic `{sinal_handler, N}` ids (the "Automatic ids lose attribution" friction)                                                                                           | `observe_labelled(event, "sso_portal_warden", ..)`; `list_handlers` is readable again, no `Result`, no suffix                 |
+| Correlation join with Warden                                                       | about 45 lines                                                                                                                                                               | about 45, unchanged (SSO-7)                                                                                                   |
+| Everything else (session store, access policy, logout, fake provider, PKI, routes) | unchanged                                                                                                                                                                    | unchanged                                                                                                                     |
+
+Net: about 10 lines of glue removed from the two config sites plus the
+`Failure` and `stop` call sites, and 0 added. The app uses no
+`correlation.from_key` (it makes request keys with `unique()`), no
+`fields.check` (it defines no Sinal events), no views, no `supervised`/`named`
+(the clients are owned by `App`, not a supervisor) and no json_blueprint, saga
+or grind.
+
+Seams that still need glue:
+
+- **Warden correlation (warden, SSO-7)**: the pid-to-`Correlation` map, `Link`,
+  `AddWarden` and the emission-time lookup stay until `[warden, http, request]`
+  carries a correlation or `restore_session`/`refresh_session` accept one.
+- **Durable custody (warden, SSO-1)**, **logout revocation (warden, SSO-2)**,
+  **refresh race polling (warden, SSO-3, `access.gleam`)**, **stale-revision
+  logout (warden, SSO-4)**, **test provider and PKI (warden, SSO-6)**,
+  **string boundary (warden, SSO-8)**: untouched by wave 3.
+- **Two destination vocabularies (warden and http_gun, SSO-9)**: Warden's
+  enum versus `destination.Policy`.
+
+New friction:
+
+- **The new default emits to every handler, including clients the app does not
+  care about.** Before wave 3 a client with no `observations` was silent. Now the
+  test browser's http_gun client (a harness, not part of the portal) and
+  Warden's private client both emit into the app's node-wide
+  `[http_gun, lifecycle]` handler. One login produces 57 records, and all but 6
+  of them are uncorrelated browser and Warden traffic. `last_request_trace`
+  still filters by correlation, so the narrative is unchanged, but
+  `telemetry.records` is no longer "the portal's traffic". There is no
+  per-client opt-out short of `config.with_observations(some_forwarder)`
+  pointing at a forwarder nobody listens to, or an app-level `forwarder.route`.
+  A `config.without_observations` (or an observation target of `Silent`)
+  would say it directly. Owner: http_gun. Minor, and arguably the right default
+  for production.
+- **Synchronous handlers now run in the pool and body processes** for any
+  client without `with_observations` (the migration guide says so). The app's
+  handler only does `process.send`, so it is safe; a handler that did more
+  would slow requests, and nothing at the `sinal.observe` call site says which
+  emitter processes it will run in.
+- **`error.describe` changes what the page prints.** The dashboard used to show
+  `ConnectionFailed(ConnectionRefused)` and the test matched on the constructor
+  name; it now shows "Connection failed: connection refused; not sent". The
+  test asserts the new message and `not sent`. The correct stable key for a
+  test or a log is `error.name` (`connection_failed.connection_refused`), but
+  the page shows the human line. Nothing to fix, only a test that had pinned
+  the old inspect text and was brittle for that reason.
+- **Shadowing in the app, not a package problem.** `web.billing_error`'s
+  parameter is called `error`, so the natural `import http_gun/error` needed an
+  alias (`as gun_error`). Every other app that imports it will hit the same name
+  collision with a variable called `error`.
+- **`observe_labelled` with a formatter**: three arguments push the closure to a
+  hanging indent, so the 12-line observers grew by about 12 lines of
+  whitespace-only diff. No logic grew.
+
+Migration guides: the http_gun guide named sso_portal's seams exactly
+(`loopback_only()`, `.reason`) and its before/after for `Config` updates
+applied as written. It does not say that a `config.allow_loopback` replacement
+for the old `allow_loopback` plus nested `Policy` update would leave public
+hosts allowed; `loopback_only()` is the equivalent, and a note under the
+destination table would save the next reader a security-relevant slip. The
+sinal guide's `observe_labelled` snippet matched line for line. Warden's
+CHANGELOG entry on `stop` was the only warden change that mattered and needed
+no code.

@@ -8,6 +8,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import http_gun
+import http_gun/error as gun_error
 import pog
 import sso_portal/access
 import sso_portal/billing
@@ -291,7 +292,7 @@ fn access_error(error: access.AccessError) -> DashboardError {
 fn billing_error(error: billing.BillingError) -> DashboardError {
   case error {
     billing.Unauthorized -> SignInAgain("billing still refuses the token")
-    billing.Unavailable(failure) -> BillingDown(string.inspect(failure.reason))
+    billing.Unavailable(failure) -> BillingDown(gun_error.describe(failure))
     billing.UnexpectedStatus(status) ->
       BillingDown("billing answered " <> int.to_string(status))
     billing.MalformedBody -> BillingDown("billing answered nonsense")
