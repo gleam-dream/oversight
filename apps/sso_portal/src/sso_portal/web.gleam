@@ -25,10 +25,6 @@ pub type Context {
     billing: http_gun.Client,
     billing_url: String,
     telemetry: Telemetry,
-    /// Turns the 303 for a started login into the response sent to the
-    /// browser. Production: `warden.login_response`. The tests replace the
-    /// provider's login page, which `warden/testing` does not serve.
-    login_response: fn(Response, warden.LoginRedirect) -> Response,
   )
 }
 
@@ -67,7 +63,7 @@ fn traced(context: Context, next: fn(Context) -> Response) -> Response {
 
 fn login(request: Request, context: Context) -> Response {
   case warden.begin_login(context.warden, request, warden.default_login()) {
-    Ok(redirect) -> context.login_response(wisp.response(303), redirect)
+    Ok(redirect) -> warden.login_response(wisp.response(303), redirect)
     Error(error) ->
       page(
         503,

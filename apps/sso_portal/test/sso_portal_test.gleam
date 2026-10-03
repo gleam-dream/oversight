@@ -185,9 +185,11 @@ pub fn provider_clock_ahead_needs_tolerance_test() {
 pub fn tampered_callback_state_is_rejected_test() {
   use portal, b <- with_app(options())
   let assert Ok(#(b, login)) = browser.get(b, portal.portal_url <> "/login")
-  // The test provider approves at once, so the login redirect is the
-  // callback URL.
-  let assert Some(callback) = login.location
+  // The login redirect goes to the provider's /authorize, which signs the
+  // scripted user in and redirects to the callback.
+  let assert Some(authorize) = login.location
+  let assert Ok(#(b, approved)) = browser.get(b, authorize)
+  let assert Some(callback) = approved.location
   let assert Ok(#(before, after)) = string.split_once(callback, "state=")
   let tampered = before <> "state=x" <> after
   let assert Ok(#(_, page)) = browser.get(b, tampered)
