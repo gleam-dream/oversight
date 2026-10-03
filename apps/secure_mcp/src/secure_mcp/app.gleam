@@ -1,14 +1,15 @@
 //// Starts and stops the whole system: scripted provider, Warden client,
-//// Grind database and consumer, Relay server and the wisp/mist listener.
+//// Grind runtime, Relay server and the wisp/mist listener.
 
 import gleam/erlang/process
 import gleam/int
 import gleam/result
 import gleam/string
-import grind/postgres
+import gleam/time/duration
+import grind
 import grind/queue
-import grind/registry
 import mist
+import pog
 import relay/authorization
 import relay/server
 import secure_mcp/dev_provider
@@ -26,23 +27,26 @@ const client_secret = "dev-only-client-secret"
 pub type Options {
   Options(
     database_url: String,
-    /// Grind polling interval.
-    poll_ms: Int,
+    /// How often Grind polls its queue.
+    poll_interval: duration.Duration,
     /// Endpoint scope every MCP request must carry.
     required_scope: String,
   )
 }
 
 pub fn options(database_url: String) -> Options {
-  Options(database_url:, poll_ms: 50, required_scope: "reports")
+  Options(
+    database_url:,
+    poll_interval: duration.milliseconds(50),
+    required_scope: "reports",
+  )
 }
 
 pub type Running {
   Running(
     provider: dev_provider.Provider,
     warden: warden.Client,
-    database: postgres.Database,
-    consumer: queue.Consumer,
+    jobs: grind.Grind,
     report_worker: ReportWorker,
     listener: process.Pid,
     base_url: String,
@@ -61,8 +65,9 @@ pub fn start(options: Options) -> Result(Running, String) {
     tls_dir,
   ))
   use warden_client <- result.try(start_warden(provider, redirect_uri))
-  use #(database, consumer, report_worker) <- result.try(start_jobs(options))
-  use registry <- result.try(tools.registry(database, report_worker))
+  let report_worker = tools.report_worker()
+  use jobs <- result.try(start_jobs(options, report_worker))
+  use registry <- result.try(tools.registry(jobs, report_worker))
   use protection <- result.try(protection(mcp_url, options.required_scope))
   let context =
     web.Context(
@@ -85,8 +90,7 @@ pub fn start(options: Options) -> Result(Running, String) {
   Ok(Running(
     provider:,
     warden: warden_client,
-    database:,
-    consumer:,
+    jobs:,
     report_worker:,
     listener: started.pid,
     base_url:,
@@ -122,35 +126,23 @@ fn start_warden(
 
 fn start_jobs(
   options: Options,
-) -> Result(#(postgres.Database, queue.Consumer, ReportWorker), String) {
-  use report_worker <- result.try(tools.report_worker())
-  use settings <- result.try(
-    postgres.settings(options.database_url)
-    |> postgres.validate
-    |> result.map_error(describe("grind settings")),
+  report_worker: ReportWorker,
+) -> Result(grind.Grind, String) {
+  use pool <- result.try(
+    pog.url_config(process.new_name("secure_mcp_pool"), options.database_url)
+    |> result.replace_error("grind: DATABASE_URL is not a postgres url"),
   )
-  use database <- result.try(
-    postgres.start(settings) |> result.map_error(describe("grind start")),
-  )
-  use Nil <- result.try(
-    postgres.migrate(database) |> result.map_error(describe("grind migrate")),
-  )
-  use workers <- result.try(
-    registry.new(tools.queue)
-    |> result.try(registry.register(_, report_worker))
-    |> result.map_error(describe("grind registry")),
-  )
-  use policy <- result.try(
-    queue.default_policy()
-    |> queue.with_poll_interval(options.poll_ms)
-    |> queue.validate_policy
-    |> result.map_error(describe("grind policy")),
-  )
-  use consumer <- result.try(
-    queue.start(database, workers, policy)
-    |> result.map_error(describe("grind consumer")),
-  )
-  Ok(#(database, consumer, report_worker))
+  let config =
+    grind.new(pool)
+    |> grind.with_startup_migration
+    |> grind.with_worker(report_worker)
+    |> grind.with_queue(
+      queue.new(tools.queue) |> queue.with_poll_interval(options.poll_interval),
+    )
+  grind.start(config, process.new_name("secure_mcp_jobs"))
+  |> result.map_error(fn(error) {
+    "grind start: " <> grind.describe_start_error(error)
+  })
 }
 
 fn protection(
@@ -166,18 +158,12 @@ fn protection(
   Ok(authorization.protection_config(resource, [scope]))
 }
 
-/// Stops everything in reverse order. Must run in the process that called
-/// `start`: Grind's consumer accepts `stop` only from its starting process.
+/// Stops everything in reverse order. Grind drains its running jobs first.
 pub fn stop(running: Running) -> Nil {
   shutdown(running.listener)
-  let _ = queue.stop(running.consumer)
-  let _ = postgres.close(running.database)
+  let _ = grind.stop(running.jobs)
   warden.stop(running.warden)
   dev_provider.stop(running.provider)
-}
-
-fn describe(label: String) -> fn(a) -> String {
-  fn(error) { label <> ": " <> string.inspect(error) }
 }
 
 @external(erlang, "secure_mcp_dev_ffi", "shutdown")

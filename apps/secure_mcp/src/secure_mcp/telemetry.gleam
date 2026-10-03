@@ -1,5 +1,5 @@
-//// Sinal subscriptions for every package the app uses, plus two app events
-//// that bridge the ids the packages do not share.
+//// Sinal subscriptions for every package the app uses, plus one app event
+//// that bridges the id Relay does not share.
 ////
 //// Correlation of one `/mcp` request across packages:
 //// - app `[secure_mcp, mcp, request]`: correlation, Relay exchange_id, subject
@@ -9,9 +9,9 @@
 //// - warden `[warden, http, request]`: no request or token id at all; it is
 ////   emitted synchronously in the wisp request process, so only the emitting
 ////   pid links it to the request;
-//// - app `[secure_mcp, report, submitted]`: correlation -> job_id (Relay's
-////   handler context carries neither exchange nor invocation id);
-//// - grind `[grind, job, admitted | claimed | acknowledged]`: job_id.
+//// - grind `[grind, job, admitted | claimed | acknowledged]`: the request's
+////   correlation, because the tool submits its job with
+////   `job.with_correlation`; no bridge event is needed.
 
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -20,7 +20,7 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import grind/job
-import grind/observation as grind_observation
+import grind/telemetry as grind_telemetry
 import relay/telemetry as relay_telemetry
 import sinal
 import sinal/correlation.{type Correlation}
@@ -30,10 +30,6 @@ import warden/observation as warden_observation
 
 pub type McpRequest {
   McpRequest(correlation: Correlation, exchange_id: Int, subject: String)
-}
-
-pub type ReportSubmitted {
-  ReportSubmitted(correlation: Correlation, job_id: Int)
 }
 
 pub fn mcp_request_event() -> sinal.Event(Nil, McpRequest) {
@@ -51,16 +47,6 @@ pub fn mcp_request_event() -> sinal.Event(Nil, McpRequest) {
   })
 }
 
-pub fn report_submitted_event() -> sinal.Event(Nil, ReportSubmitted) {
-  sinal.event(["secure_mcp", "report", "submitted"], fields.empty(), {
-    use correlation <- fields.include(correlation.required_field(), get: fn(m) {
-      m.correlation
-    })
-    use job_id <- fields.include(fields.int("job_id"), get: fn(m) { m.job_id })
-    fields.success(ReportSubmitted(correlation:, job_id:))
-  })
-}
-
 pub fn mcp_request(
   correlation: Correlation,
   exchange_id: Int,
@@ -70,14 +56,6 @@ pub fn mcp_request(
     mcp_request_event(),
     Nil,
     McpRequest(correlation:, exchange_id:, subject:),
-  )
-}
-
-pub fn report_submitted(correlation: Correlation, job_id: Int) -> Nil {
-  sinal.emit(
-    report_submitted_event(),
-    Nil,
-    ReportSubmitted(correlation:, job_id:),
   )
 }
 
@@ -189,31 +167,40 @@ pub fn start() -> Result(Collector, String) {
           <> " ms)",
       )
     }),
-    sinal.observe(grind_observation.admitted(), fn(_, m) {
+    sinal.observe(grind_telemetry.admitted(), fn(_, m) {
       record(
         "grind",
         "job.admitted",
-        "job=" <> int.to_string(m.ref.job_id) <> " queue=" <> m.ref.queue,
+        "job="
+          <> int.to_string(m.ref.job_id)
+          <> " queue="
+          <> m.ref.queue
+          <> " correlation="
+          <> correlation.to_string(m.ref.correlation),
       )
     }),
-    sinal.observe(grind_observation.claimed(), fn(_, m) {
+    sinal.observe(grind_telemetry.claimed(), fn(_, m) {
       record(
         "grind",
         "job.claimed",
         "job="
           <> int.to_string(m.ref.job_id)
           <> " attempt="
-          <> int.to_string(m.attempt.attempt),
+          <> int.to_string(m.attempt.attempt)
+          <> " correlation="
+          <> correlation.to_string(m.ref.correlation),
       )
     }),
-    sinal.observe(grind_observation.acknowledged(), fn(_, m) {
+    sinal.observe(grind_telemetry.acknowledged(), fn(_, m) {
       record(
         "grind",
         "job.acknowledged",
         "job="
           <> int.to_string(m.ref.job_id)
           <> " state="
-          <> state_label(m.committed_state),
+          <> job.state_name(m.committed_state)
+          <> " correlation="
+          <> correlation.to_string(m.ref.correlation),
       )
     }),
     sinal.observe(forwarder.dropped_event(), fn(d, m) {
@@ -235,16 +222,6 @@ pub fn start() -> Result(Collector, String) {
           <> m.subject,
       )
     }),
-    sinal.observe(report_submitted_event(), fn(_, m) {
-      record(
-        "app",
-        "report.submitted",
-        "correlation="
-          <> correlation.to_string(m.correlation)
-          <> " job="
-          <> int.to_string(m.job_id),
-      )
-    }),
   ]
   Ok(Collector(subject, attachments))
 }
@@ -259,8 +236,4 @@ pub fn stop(collector: Collector) -> Nil {
 
 pub fn format(line: Line) -> String {
   "  [" <> line.package <> "] " <> line.event <> " " <> line.detail
-}
-
-fn state_label(state: job.State) -> String {
-  string.lowercase(string.inspect(state))
 }

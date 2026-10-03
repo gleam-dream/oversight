@@ -6,18 +6,16 @@ import gleam/httpc
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/result
 import gleam/string
+import gleam/time/duration
 import gleeunit
+import grind
 import grind/job
-import grind/postgres
-import grind/queue
-import grind/registry
-import grind/worker
 import relay/client as relay_client
 import secure_mcp/app
 import secure_mcp/client.{Other, Refused, Structured, ToolError}
 import secure_mcp/dev_provider
+import secure_mcp/reports
 import secure_mcp/telemetry
 
 pub fn main() -> Nil {
@@ -48,26 +46,28 @@ fn generate(running: app.Running, token: String, period: String) -> Int {
   job_id
 }
 
-/// Polls `report_status` until the job leaves the queue; returns the state
-/// and the summary when present.
+/// Waits in Grind, not over MCP, until the job leaves its pending states.
+fn await_job(
+  running: app.Running,
+  job_id: Int,
+) -> grind.Outcome(reports.Report, String) {
+  let assert Ok(handle) =
+    grind.bind(running.jobs, running.report_worker, job_id)
+  let assert Ok(outcome) =
+    grind.await(running.jobs, handle, within: duration.seconds(10))
+  outcome
+}
+
+/// The job's `report_status` once it has finished: its state and summary.
 fn await_status(
   running: app.Running,
   token: String,
   job_id: Int,
 ) -> #(String, option.Option(String)) {
-  await_loop(running, token, job_id, 100)
-}
-
-fn await_loop(running, token, job_id, attempts) {
+  let _ = await_job(running, job_id)
   let assert Ok(Structured(value)) = status(running, token, job_id)
-  let assert Ok(#(state, summary)) = decode.run(value, status_decoder())
-  case state, attempts {
-    "queued", n | "executing", n | "retryable", n if n > 0 -> {
-      process.sleep(50)
-      await_loop(running, token, job_id, n - 1)
-    }
-    _, _ -> #(state, summary)
-  }
+  let assert Ok(result) = decode.run(value, status_decoder())
+  result
 }
 
 fn status(running: app.Running, token: String, job_id: Int) {
@@ -116,10 +116,33 @@ pub fn failed_report_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
   let job_id = generate(running, alice.access_token, "never")
+  // The typed outcome carries the worker's own error, and the retry policy
+  // that declined another attempt.
+  assert await_job(running, job_id)
+    == grind.Failed(
+      grind.Business("no data for period"),
+      option.Some(job.RetryDeclined),
+      "worker returned an application error",
+    )
   let #(state, summary) = await_status(running, alice.access_token, job_id)
   assert summary == None
-  // The worker's error codec keeps its own reason through `bind_handle`.
+  // The worker's error codec keeps its own reason through `grind.bind`.
   assert state == "failed: no data for period"
+}
+
+/// The job's input codec is stricter than the tool's: Grind refuses a report
+/// without a title at `submit`, and the caller reads why.
+pub fn invalid_report_is_refused_at_submit_test() {
+  use running <- with_app
+  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let assert Ok(ToolError(message)) =
+    client.call_tool(
+      running.mcp_url,
+      Some(alice.access_token),
+      "generate_report",
+      json.object([#("title", json.string("")), #("period", json.string("Q1"))]),
+    )
+  assert message == "The report was refused: $[\"title\"]: must not be empty"
 }
 
 // --- Failure paths -------------------------------------------------------------
@@ -227,7 +250,8 @@ pub fn insufficient_scope_test() {
 }
 
 /// One `/mcp` request followed across packages through Sinal: the app's
-/// bridge events join Relay's exchange id and Grind's job id.
+/// bridge event joins Relay's exchange id, and the correlation the tool gave
+/// the job joins Grind's events with no bridge at all.
 pub fn telemetry_correlation_test() {
   let assert Ok(collector) = telemetry.start()
   let #(job_id, lines) = {
@@ -240,28 +264,43 @@ pub fn telemetry_correlation_test() {
   }
   telemetry.stop(collector)
   let job = "job=" <> string.inspect(job_id)
-  let assert Ok(submitted) =
-    list.find(lines, fn(l) {
-      l.event == "report.submitted" && string.ends_with(l.detail, job)
+  let grind_lines = fn(event) {
+    list.filter(lines, fn(l) {
+      l.package == "grind"
+      && l.event == event
+      && string.starts_with(l.detail, job <> " ")
     })
-  // request=R job=J -> the app's mcp.request event for R names the exchange.
-  let assert Ok(#(request_part, _)) = string.split_once(submitted.detail, " ")
+  }
+  let assert [admitted] = grind_lines("job.admitted")
+  let assert Ok(request_id) = field(admitted.detail, "correlation")
+  // Every Grind event of the job names the request that submitted it.
+  let assert [claimed] = grind_lines("job.claimed")
+  assert field(claimed.detail, "correlation") == Ok(request_id)
+  let assert [acknowledged] = grind_lines("job.acknowledged")
+  assert field(acknowledged.detail, "correlation") == Ok(request_id)
+  // The app's request event for that correlation names the Relay exchange.
   let assert Ok(mcp_request) =
     list.find(lines, fn(l) {
-      l.event == "mcp.request" && string.starts_with(l.detail, request_part)
+      l.event == "mcp.request"
+      && field(l.detail, "correlation") == Ok(request_id)
     })
-  let assert [_, exchange, _] = string.split(mcp_request.detail, " ")
+  let assert Ok(exchange) = field(mcp_request.detail, "exchange")
   assert list.any(lines, fn(l) {
-    l.event == "request.admitted"
-    && string.starts_with(l.detail, exchange <> " ")
-  })
-  assert list.any(lines, fn(l) {
-    l.package == "grind"
-    && l.event == "job.admitted"
-    && string.starts_with(l.detail, job <> " ")
+    l.event == "request.admitted" && field(l.detail, "exchange") == Ok(exchange)
   })
   assert list.any(lines, fn(l) {
     l.package == "warden" && string.contains(l.detail, "/introspect")
+  })
+}
+
+/// The value after `key=` in a collector line's detail.
+fn field(detail: String, key: String) -> Result(String, Nil) {
+  string.split(detail, " ")
+  |> list.find_map(fn(part) {
+    case string.split_once(part, "=") {
+      Ok(#(name, value)) if name == key -> Ok(value)
+      _ -> Error(Nil)
+    }
   })
 }
 
@@ -296,12 +335,13 @@ pub fn request_id_header_correlation_test() {
   let correlations =
     lines
     |> list.filter(fn(l) { l.event == "mcp.request" })
-    |> list.filter_map(fn(l) {
-      string.split(l.detail, " ")
-      |> list.first
-      |> result.map(string.replace(_, "correlation=", ""))
-    })
+    |> list.filter_map(fn(l) { field(l.detail, "correlation") })
   assert list.contains(correlations, "trace-abc-123")
+  // The job inherits it, so Grind's events carry the caller's request id.
+  assert list.any(lines, fn(l) {
+    l.event == "job.admitted"
+    && field(l.detail, "correlation") == Ok("trace-abc-123")
+  })
   assert !list.contains(correlations, string.repeat("x", 129))
   assert list.any(correlations, fn(c) { string.length(c) == 32 })
 }
@@ -320,51 +360,4 @@ pub fn relay_client_cannot_authenticate_test() {
   let assert Error(reason) = outcome
   // The 401 reaches the caller only as prose; the challenge is dropped.
   assert reason == "server discovery returned HTTP 401"
-}
-
-/// SMCP-7 (fixed by grind 7a04831): a job of a worker defined with
-/// `define_with_error_codec` re-binds by id after it succeeds or fails, and
-/// the re-bound handle reads the typed result or the typed reason.
-pub fn grind_bind_handle_after_terminal_write_test() {
-  use running <- with_app
-  let assert Ok(text) =
-    worker.codec("text-v1", worker.infallible(json.string), decode.string)
-  let assert Ok(echo_worker) =
-    worker.define_with_error_codec("probe.echo", "v1", text, text, text, fn(s) {
-      case s {
-        "fail" -> Error("refused")
-        _ -> Ok(s)
-      }
-    })
-  let echo_worker =
-    worker.with_retry_policy(
-      echo_worker,
-      worker.retry_policy(fn(_failure, _context) { worker.DoNotRetry }),
-    )
-  let assert Ok(workers) =
-    registry.new("probe") |> result.try(registry.register(_, echo_worker))
-  let assert Ok(policy) =
-    queue.default_policy() |> queue.with_manual_polling |> queue.validate_policy
-  let assert Ok(consumer) = queue.start(running.database, workers, policy)
-  let assert Ok(succeeded) =
-    postgres.submit(running.database, "probe", echo_worker, "hello")
-  let assert Ok(True) = queue.process_one(consumer)
-  let assert Ok(failed) =
-    postgres.submit(running.database, "probe", echo_worker, "fail")
-  let assert Ok(True) = queue.process_one(consumer)
-  let _ = queue.stop(consumer)
-  // Handles re-bound from the ids alone (as after a restart) read the results.
-  let assert Ok(rebound) =
-    postgres.bind_handle(running.database, echo_worker, job.id_value(succeeded))
-  let assert Ok(job.SucceededWith("hello")) =
-    postgres.outcome(running.database, rebound)
-  let assert Ok(rebound) =
-    postgres.bind_handle(running.database, echo_worker, job.id_value(failed))
-  let assert Ok(outcome) = postgres.outcome(running.database, rebound)
-  let reason = case outcome {
-    job.BusinessFailedWith(reason) | job.BusinessFailedWithCause(reason, _) ->
-      reason
-    other -> string.inspect(other)
-  }
-  assert reason == "refused"
 }
