@@ -11,39 +11,52 @@ import gleam/time/duration
 import gleeunit
 import grind
 import grind/job
-import relay/client as relay_client
+import relay/client as mcp
+import relay/http as mcp_http
+import relay/subscriptions
 import secure_mcp/app
-import secure_mcp/client.{Other, Refused, Structured, ToolError}
-import secure_mcp/dev_provider
-import secure_mcp/reports
+import secure_mcp/client
+import secure_mcp/reports.{ReportRequest, ReportStatus, StatusRequest}
 import secure_mcp/telemetry
+import secure_mcp/tools
+import warden/testing
 
 pub fn main() -> Nil {
   gleeunit.main()
 }
 
 fn with_app(run: fn(app.Running) -> a) -> a {
+  with_app_options(fn(options) { options }, run)
+}
+
+fn with_app_options(
+  change: fn(app.Options) -> app.Options,
+  run: fn(app.Running) -> a,
+) -> a {
   let assert Ok(url) = envoy.get("DATABASE_URL")
-  let assert Ok(running) = app.start(app.options(url))
+  let assert Ok(running) = app.start(change(app.options(url)))
   let result = run(running)
   app.stop(running)
   result
 }
 
-fn generate(running: app.Running, token: String, period: String) -> Int {
-  let assert Ok(Structured(value)) =
-    client.call_tool(
-      running.mcp_url,
-      Some(token),
-      "generate_report",
-      json.object([
-        #("title", json.string("Revenue")),
-        #("period", json.string(period)),
-      ]),
+fn connect(running: app.Running, token: String) -> mcp.Client {
+  let assert Ok(peer) = client.connect(running.mcp_url, Some(token), [])
+  peer
+}
+
+fn generate(peer: mcp.Client, period: String) -> Int {
+  let assert Ok(mcp.Succeeded(submitted, _)) =
+    mcp.call(
+      peer,
+      tools.generate_definition(),
+      ReportRequest(title: "Revenue", period:),
     )
-  let assert Ok(job_id) =
-    decode.run(value, decode.field("job_id", decode.int, decode.success))
-  job_id
+  submitted.job_id
+}
+
+fn status(peer: mcp.Client, job_id: Int) {
+  mcp.call(peer, tools.status_definition(), StatusRequest(job_id))
 }
 
 /// Waits in Grind, not over MCP, until the job leaves its pending states.
@@ -58,64 +71,61 @@ fn await_job(
   outcome
 }
 
-/// The job's `report_status` once it has finished: its state and summary.
+/// The job's `report_status` once it has finished.
 fn await_status(
   running: app.Running,
-  token: String,
+  peer: mcp.Client,
   job_id: Int,
-) -> #(String, option.Option(String)) {
+) -> reports.ReportStatus {
   let _ = await_job(running, job_id)
-  let assert Ok(Structured(value)) = status(running, token, job_id)
-  let assert Ok(result) = decode.run(value, status_decoder())
-  result
+  let assert Ok(mcp.Succeeded(report_status, _)) = status(peer, job_id)
+  report_status
 }
 
-fn status(running: app.Running, token: String, job_id: Int) {
-  client.call_tool(
-    running.mcp_url,
-    Some(token),
-    "report_status",
-    json.object([#("job_id", json.int(job_id))]),
-  )
+/// The refusal of a `server/discover` with this token (or none).
+fn refusal(running: app.Running, token: option.Option(String)) -> mcp.Error {
+  let assert Ok(peer) = client.connect(running.mcp_url, token, [])
+  let assert Error(error) = mcp.discover(peer)
+  mcp.close(peer)
+  error
 }
 
-fn status_decoder() -> decode.Decoder(#(String, option.Option(String))) {
-  use state <- decode.field("state", decode.string)
-  use summary <- decode.optional_field(
-    "report",
-    None,
-    decode.optional(decode.field("summary", decode.string, decode.success)),
-  )
-  decode.success(#(state, summary))
+fn minted(running: app.Running) -> testing.TokenSpec {
+  testing.access_token("alice")
+  |> testing.with_audiences([running.mcp_url])
+  |> testing.with_scopes(["reports"])
 }
 
 // --- Common path ---------------------------------------------------------------
 
 /// Browser login through Warden, then tool -> Grind job -> result, as the
-/// signed-in user.
+/// signed-in user, through Relay's own client with a bearer header.
 pub fn report_round_trip_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
   assert alice.subject == "alice"
   assert alice.mcp_url == running.mcp_url
+  let peer = connect(running, alice.access_token)
 
-  let assert Ok(Other(listing)) =
-    client.list_tools(running.mcp_url, alice.access_token)
-  assert string.contains(listing, "generate_report")
-  assert string.contains(listing, "report_status")
+  let assert Ok(listing) = mcp.list_tools(peer)
+  assert list.map(listing, fn(d) { d.name })
+    == ["generate_report", "report_status"]
 
-  let job_id = generate(running, alice.access_token, "2026-Q3")
-  let #(state, summary) = await_status(running, alice.access_token, job_id)
-  assert state == "succeeded"
+  let job_id = generate(peer, "2026-Q3")
+  let report_status = await_status(running, peer, job_id)
+  mcp.close(peer)
+  assert report_status.state == "succeeded"
   // The handler took the owner from the authenticated principal.
-  assert summary == Some("REVENUE for 2026-Q3: 42 rows, prepared for alice")
+  let assert Some(report) = report_status.report
+  assert report.summary == "REVENUE for 2026-Q3: 42 rows, prepared for alice"
 }
 
 /// A business failure in the worker reaches the MCP client as a state.
 pub fn failed_report_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-  let job_id = generate(running, alice.access_token, "never")
+  let peer = connect(running, alice.access_token)
+  let job_id = generate(peer, "never")
   // The typed outcome carries the worker's own error, and the retry policy
   // that declined another attempt.
   assert await_job(running, job_id)
@@ -124,10 +134,10 @@ pub fn failed_report_test() {
       option.Some(job.RetryDeclined),
       "worker returned an application error",
     )
-  let #(state, summary) = await_status(running, alice.access_token, job_id)
-  assert summary == None
-  // The worker's error codec keeps its own reason through `grind.bind`.
-  assert state == "failed: no data for period"
+  let report_status = await_status(running, peer, job_id)
+  mcp.close(peer)
+  assert report_status
+    == ReportStatus(job_id, "failed: no data for period", None)
 }
 
 /// The job's input codec is stricter than the tool's: Grind refuses a report
@@ -135,27 +145,31 @@ pub fn failed_report_test() {
 pub fn invalid_report_is_refused_at_submit_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-  let assert Ok(ToolError(message)) =
-    client.call_tool(
-      running.mcp_url,
-      Some(alice.access_token),
-      "generate_report",
-      json.object([#("title", json.string("")), #("period", json.string("Q1"))]),
+  let peer = connect(running, alice.access_token)
+  let assert Ok(mcp.ToolFailed(content, _)) =
+    mcp.call(
+      peer,
+      tools.generate_definition(),
+      ReportRequest(title: "", period: "Q1"),
     )
-  assert message == "The report was refused: $[\"title\"]: must not be empty"
+  mcp.close(peer)
+  assert client.text(content)
+    == "The report was refused: $[\"title\"]: must not be empty"
 }
 
 // --- Failure paths -------------------------------------------------------------
 
-/// No token: 401 with an RFC 6750 challenge (no error code) that points at
-/// the RFC 9728 metadata, which names the resource and the provider.
+/// No token: Relay's client reads a typed 401 whose RFC 6750 challenge (no
+/// error code) points at the RFC 9728 metadata, which Relay serves.
 pub fn no_token_test() {
   use running <- with_app
-  let assert Ok(Refused(401, Some(challenge))) =
-    client.discover(running.mcp_url, None)
   let metadata_url =
     running.base_url <> "/.well-known/oauth-protected-resource/mcp"
-  assert challenge == "Bearer resource_metadata=\"" <> metadata_url <> "\""
+  assert refusal(running, None)
+    == mcp.HttpStatus(
+      401,
+      Some("Bearer resource_metadata=\"" <> metadata_url <> "\""),
+    )
 
   let assert Ok(req) = request.to(metadata_url)
   let assert Ok(resp) = httpc.send(req)
@@ -165,28 +179,30 @@ pub fn no_token_test() {
       "authorization_servers",
       decode.list(decode.string),
     )
-    decode.success(#(resource, servers))
+    use scopes <- decode.field("scopes_supported", decode.list(decode.string))
+    decode.success(#(resource, servers, scopes))
   }
-  let assert Ok(#(resource, servers)) = json.parse(resp.body, decoder)
-  assert resource == running.mcp_url
-  assert servers == [dev_provider.issuer(running.provider)]
+  assert json.parse(resp.body, decoder)
+    == Ok(#(running.mcp_url, [testing.issuer(running.provider)], ["reports"]))
 }
 
-/// An active token whose audience is another resource is refused.
+/// A token whose audience is another resource is refused by the JWT
+/// validator before Relay compares the resource, so the challenge is the
+/// generic `invalid_token`.
 pub fn token_for_another_audience_test() {
   use running <- with_app
   let token =
-    dev_provider.mint(
+    testing.issue_access_token(
       running.provider,
-      subject: "alice",
-      audience: "https://reports.other.example/mcp",
-      scopes: ["reports"],
-      ttl_seconds: 300,
+      minted(running)
+        |> testing.with_audiences(["https://reports.other.example/mcp"]),
     )
-  let assert Ok(Refused(401, Some(challenge))) =
-    client.discover(running.mcp_url, Some(token))
-  assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
-  assert string.contains(challenge, "another resource")
+  let assert mcp.HttpStatus(401, Some(challenge)) =
+    refusal(running, Some(token))
+  assert string.starts_with(
+    challenge,
+    "Bearer error=\"invalid_token\", error_description=\"The access token is invalid or expired\"",
+  )
 }
 
 /// Users only see their own reports: another user's job id is "not found".
@@ -194,71 +210,142 @@ pub fn other_users_job_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
   let assert Ok(bob) = client.sign_in(running.base_url, "bob")
-  let job_id = generate(running, alice.access_token, "2026-Q2")
-  let assert Ok(ToolError(message)) = status(running, bob.access_token, job_id)
-  assert message == "No such report job for this user."
+  let alice_peer = connect(running, alice.access_token)
+  let bob_peer = connect(running, bob.access_token)
+  let job_id = generate(alice_peer, "2026-Q2")
+  let assert Ok(mcp.ToolFailed(content, _)) = status(bob_peer, job_id)
+  assert client.text(content) == "No such report job for this user."
   // The same message as a job id that does not exist.
-  let assert Ok(ToolError(missing)) =
-    status(running, bob.access_token, 999_999_999)
-  assert missing == message
+  let assert Ok(mcp.ToolFailed(missing, _)) = status(bob_peer, 999_999_999)
+  assert missing == content
+  mcp.close(alice_peer)
+  mcp.close(bob_peer)
 }
 
-// --- Advanced configuration ----------------------------------------------------
-
-/// Expired or revoked tokens: 401 `invalid_token` with the metadata pointer.
-pub fn expired_and_revoked_tokens_test() {
+/// Expired, unsigned, algorithm-confused, unknown-key, untyped and
+/// foreign-issuer tokens: each 401 `invalid_token` with the metadata pointer.
+pub fn rejected_jwt_tokens_test() {
   use running <- with_app
-  let expired =
-    dev_provider.mint(
-      running.provider,
-      subject: "alice",
-      audience: running.mcp_url,
-      scopes: ["reports"],
-      ttl_seconds: -5,
-    )
-  let assert Ok(Refused(401, Some(challenge))) =
-    client.discover(running.mcp_url, Some(expired))
-  assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
-  assert string.contains(challenge, "resource_metadata=")
-
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-  let assert Ok(Other(_)) =
-    client.discover(running.mcp_url, Some(alice.access_token))
-  dev_provider.revoke(running.provider, alice.access_token)
-  let assert Ok(Refused(401, Some(challenge))) =
-    client.discover(running.mcp_url, Some(alice.access_token))
-  assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
+  let specs = [
+    minted(running) |> testing.with_ttl(duration.seconds(-5)),
+    minted(running) |> testing.forged(testing.UnsignedToken),
+    minted(running) |> testing.forged(testing.HmacWithPublicKey),
+    minted(running) |> testing.forged(testing.UnknownKey),
+    minted(running) |> testing.with_token_type(None),
+    minted(running) |> testing.with_issuer("https://issuer.other.example"),
+  ]
+  list.each(specs, fn(spec) {
+    let token = testing.issue_access_token(running.provider, spec)
+    let assert mcp.HttpStatus(401, Some(challenge)) =
+      refusal(running, Some(token))
+    assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
+    assert string.contains(challenge, "resource_metadata=")
+  })
 }
 
 /// The endpoint scope is enforced by Relay's `admit`: 403 insufficient_scope.
 pub fn insufficient_scope_test() {
   use running <- with_app
   let token =
-    dev_provider.mint(
+    testing.issue_access_token(
       running.provider,
-      subject: "alice",
-      audience: running.mcp_url,
-      scopes: ["profile"],
-      ttl_seconds: 300,
+      minted(running) |> testing.with_scopes(["profile"]),
     )
-  let assert Ok(Refused(403, Some(challenge))) =
-    client.discover(running.mcp_url, Some(token))
+  let assert mcp.HttpStatus(403, Some(challenge)) =
+    refusal(running, Some(token))
   assert string.starts_with(
     challenge,
     "Bearer error=\"insufficient_scope\", scope=\"reports\"",
   )
 }
 
-/// One `/mcp` request followed across packages through Sinal: the app's
-/// bridge event joins Relay's exchange id, and the correlation the tool gave
-/// the job joins Grind's events with no bridge at all.
+// --- Advanced configuration ----------------------------------------------------
+
+/// Local JWT validation sends no request per token, so a token revoked at
+/// the provider stays usable until it expires.
+pub fn revoked_token_still_valid_locally_test() {
+  use running <- with_app
+  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  revoke(running, alice.access_token)
+  let peer = connect(running, alice.access_token)
+  let assert Ok(_) = mcp.discover(peer)
+  mcp.close(peer)
+  assert testing.requests(running.provider).introspections == 0
+}
+
+/// The introspection mode: revocation takes effect at once, and Relay's own
+/// audience check names the wrong resource.
+pub fn introspection_mode_test() {
+  use running <- with_app_options(fn(options) {
+    app.Options(..options, verification: app.Introspection)
+  })
+  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let peer = connect(running, alice.access_token)
+  let job_id = generate(peer, "2026-Q4")
+  assert await_status(running, peer, job_id).state == "succeeded"
+  mcp.close(peer)
+
+  let foreign =
+    testing.issue_access_token(
+      running.provider,
+      minted(running) |> testing.with_audiences(["https://other.example/mcp"]),
+    )
+  let assert mcp.HttpStatus(401, Some(challenge)) =
+    refusal(running, Some(foreign))
+  assert string.contains(challenge, "issued for another resource")
+
+  let expired =
+    testing.issue_access_token(
+      running.provider,
+      minted(running) |> testing.with_ttl(duration.seconds(-5)),
+    )
+  let assert mcp.HttpStatus(401, _) = refusal(running, Some(expired))
+
+  revoke(running, alice.access_token)
+  let assert mcp.HttpStatus(401, Some(challenge)) =
+    refusal(running, Some(alice.access_token))
+  assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
+  assert testing.requests(running.provider).introspections >= 4
+}
+
+fn revoke(running: app.Running, token: String) -> Nil {
+  let assert Ok(Nil) =
+    client.revoke_access_token(
+      testing.issuer(running.provider),
+      app.client_id,
+      app.client_secret,
+      token,
+    )
+  Nil
+}
+
+/// `subscriptions/listen` streams server-sent events through the protected
+/// mount: the endpoint is Relay's own streaming handler.
+pub fn subscription_stream_through_protected_mount_test() {
+  use running <- with_app
+  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let peer = connect(running, alice.access_token)
+  let assert Ok(subscription) =
+    mcp.listen(peer, [subscriptions.ToolsListChanged])
+  mcp_http.notify(running.mcp, subscriptions.ToolsListChanged)
+  let assert Ok(Some(subscriptions.ToolsListChanged)) =
+    mcp.next_notification(subscription, duration.seconds(2))
+  mcp.close_subscription(subscription)
+  mcp.close(peer)
+}
+
+/// One `/mcp` request followed across packages through Sinal with no app
+/// event: Relay's admission and invocation events and Grind's job events
+/// carry the same correlation.
 pub fn telemetry_correlation_test() {
   let assert Ok(collector) = telemetry.start()
   let #(job_id, lines) = {
     use running <- with_app
     let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-    let job_id = generate(running, alice.access_token, "2026-Q1")
-    let _ = await_status(running, alice.access_token, job_id)
+    let peer = connect(running, alice.access_token)
+    let job_id = generate(peer, "2026-Q1")
+    let _ = await_status(running, peer, job_id)
+    mcp.close(peer)
     process.sleep(100)
     #(job_id, telemetry.lines(collector))
   }
@@ -278,17 +365,20 @@ pub fn telemetry_correlation_test() {
   assert field(claimed.detail, "correlation") == Ok(request_id)
   let assert [acknowledged] = grind_lines("job.acknowledged")
   assert field(acknowledged.detail, "correlation") == Ok(request_id)
-  // The app's request event for that correlation names the Relay exchange.
-  let assert Ok(mcp_request) =
-    list.find(lines, fn(l) {
-      l.event == "mcp.request"
-      && field(l.detail, "correlation") == Ok(request_id)
+  // Relay's events for that request carry the same correlation.
+  let relay_events =
+    list.filter(lines, fn(l) {
+      l.package == "relay" && field(l.detail, "correlation") == Ok(request_id)
     })
-  let assert Ok(exchange) = field(mcp_request.detail, "exchange")
+    |> list.map(fn(l) { l.event })
+  assert relay_events
+    == ["authorization.decided", "request.admitted", "invocation.started"]
   assert list.any(lines, fn(l) {
-    l.event == "request.admitted" && field(l.detail, "exchange") == Ok(exchange)
+    l.event == "invocation.started"
+    && field(l.detail, "tool") == Ok("generate_report")
   })
-  assert list.any(lines, fn(l) {
+  // Local validation sends nothing to the provider per request.
+  assert !list.any(lines, fn(l) {
     l.package == "warden" && string.contains(l.detail, "/introspect")
   })
 }
@@ -304,8 +394,8 @@ fn field(detail: String, key: String) -> Result(String, Nil) {
   })
 }
 
-/// The caller's `x-request-id` becomes the correlation of the app's events
-/// when it is a valid `Correlation`; an oversized one is replaced by a fresh
+/// The caller's `x-request-id` becomes the request's correlation when it is
+/// a valid `Correlation`; an oversized one is replaced by a fresh
 /// 32-character id instead of reaching telemetry.
 pub fn request_id_header_correlation_test() {
   let assert Ok(collector) = telemetry.start()
@@ -313,18 +403,12 @@ pub fn request_id_header_correlation_test() {
     use running <- with_app
     let assert Ok(alice) = client.sign_in(running.base_url, "alice")
     let call = fn(request_id) {
-      let assert Ok(Structured(_)) =
-        client.call_tool_with_headers(
-          running.mcp_url,
-          Some(alice.access_token),
-          "generate_report",
-          json.object([
-            #("title", json.string("Revenue")),
-            #("period", json.string("2026-Q2")),
-          ]),
-          [#("x-request-id", request_id)],
-        )
-      Nil
+      let assert Ok(peer) =
+        client.connect(running.mcp_url, Some(alice.access_token), [
+          #("x-request-id", request_id),
+        ])
+      let _ = generate(peer, "2026-Q2")
+      mcp.close(peer)
     }
     call("trace-abc-123")
     call(string.repeat("x", 129))
@@ -334,7 +418,7 @@ pub fn request_id_header_correlation_test() {
   telemetry.stop(collector)
   let correlations =
     lines
-    |> list.filter(fn(l) { l.event == "mcp.request" })
+    |> list.filter(fn(l) { l.event == "request.admitted" })
     |> list.filter_map(fn(l) { field(l.detail, "correlation") })
   assert list.contains(correlations, "trace-abc-123")
   // The job inherits it, so Grind's events carry the caller's request id.
@@ -344,20 +428,4 @@ pub fn request_id_header_correlation_test() {
   })
   assert !list.contains(correlations, string.repeat("x", 129))
   assert list.any(correlations, fn(c) { string.length(c) == 32 })
-}
-
-// --- Evidence for FEEDBACK -----------------------------------------------------
-
-/// SMCP-6: Relay's own client has no way to attach a bearer token, so it
-/// cannot talk to this (or any) protected MCP server.
-pub fn relay_client_cannot_authenticate_test() {
-  use running <- with_app
-  let assert Ok(config) = relay_client.http_config(running.mcp_url)
-  let assert Ok(peer) =
-    config |> relay_client.with_timeout(2000) |> relay_client.connect_http
-  let outcome = relay_client.discover(peer)
-  relay_client.close(peer)
-  let assert Error(reason) = outcome
-  // The 401 reaches the caller only as prose; the challenge is dropped.
-  assert reason == "server discovery returned HTTP 401"
 }

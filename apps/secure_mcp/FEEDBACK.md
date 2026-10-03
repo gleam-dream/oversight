@@ -2,6 +2,12 @@
 
 ## Verdict
 
+**Wave 4:** relay ffb6d37 and warden 6ed8fb5 remove the mount, the
+challenges, the raw client, the provider and the telemetry bridge; about 45
+lines of glue remain, most of it around `warden/testing` (see
+[Re-run after wave 4](#re-run-after-wave-4)). The text below is the original
+verdict.
+
 The combination works with about 480 lines of adapter glue and a 459-line
 scripted OpenID provider; since 2 Oct 2026 it resolves from its manifest with
 no dependency workaround. A user signs in through Warden in a wisp app, the MCP endpoint
@@ -154,6 +160,20 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `OutputWrite`/`OutputClose`) and `relay/server` (`fresh_exchange`,
   `http_admission_failure`), none of which changed shape. 114 lines remain.
 
+- **Status (wave 4):** resolved by relay ffb6d37. `mcp_mount.gleam` (114
+  lines) is deleted. `http.new_protected(server.new(tools), verifier, protection, fn(_request, grant) { Ok(grant_principal(grant)) })`
+  `|> http.with_correlation(..) |> http.handler` is built once in
+  app.gleam, and the one mist listener sends `/mcp` and the metadata path to
+  `http.mist_handler(mcp)` and everything else to wisp (a 6-line path
+  dispatch). Host/Origin policy, routing-header checks, status mapping, the
+  concurrency caps, SSE and disconnect cancellation are Relay's again:
+  `subscription_stream_through_protected_mount_test` opens a
+  `subscriptions/listen` stream with a bearer token and receives
+  `ToolsListChanged`. The guide's wisp recipe (`http.handle` inside the wisp
+  router) would not have restored SSE: `handle` buffers, answers
+  `subscriptions/listen` with 406 and does not see a disconnect. Streaming
+  needs the mist-level mount, which the migration guide does not say.
+
 ### SMCP-3 Relay's authorization values cannot be read, so a verifier cannot see its token
 
 - **Packages**: relay. **Kind**: ergonomics. **Severity**: major.
@@ -178,6 +198,16 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `authorization.resource_metadata(ProtectionConfig, authorization_servers: List(String)) -> json.Json`.
 - **Status (2 Oct 2026):** still open (relay 5caff50 changed no public API).
 
+- **Status (wave 4):** resolved by relay ffb6d37. The verifier is built once
+  and reads its token with `authorization.token_value`; the per-request
+  verifier, the bearer parser (`parse_authorization` inside
+  `new_protected`), the `scope_name` comparison workaround and the 41 lines
+  of challenge and metadata rendering are deleted. Relay renders
+  `Challenge(status, www_authenticate)` and serves
+  `resource_metadata(protection)` with `authorization_servers` from
+  `with_authorization_servers([issuer])`; `no_token_test` asserts both
+  byte for byte. auth.gleam is 60 lines (175 before).
+
 ### SMCP-4 Warden introspection is not ready for a resource-server decision: no audience, no `exp` check
 
 - **Packages**: warden, relay. **Kind**: composition. **Severity**: major.
@@ -198,6 +228,14 @@ tool handlers receive the authenticated principal, and `generate_report` /
   return `InactiveToken` when `exp` is past the configured clock tolerance.
   Optionally `decode_token_claims(TokenInfo, decoder)`, matching
   `decode_claims`/`decode_userinfo`.
+
+- **Status (wave 4):** resolved by warden 6ed8fb5. `TokenInfo.audiences` and
+  the strict `exp` check replace the `aud` decoder and the app's `exp`
+  re-check; the introspection verifier is 15 lines with no decoder, no clock
+  and an `IntrospectionTokenTooLarge` arm (`introspection_mode_test`: wrong
+  audience, expired and revoked tokens are refused). The default mode is now
+  local RFC 9068 validation with `warden/resource`, through warden's
+  `resource.verifier` adapter (18 lines with `attest`).
 
 ### SMCP-5 Warden ships no testing support; the app writes its own OpenID provider
 
@@ -220,6 +258,21 @@ tool handlers receive the authenticated principal, and `generate_report` /
   `issuer`, `trust_anchor_pem`, `issue_access_token(subject, audience, scopes, ttl)`,
   `revoke` and `stop`, built on OTP `public_key` so it needs no test-only
   Hex dependencies.
+
+- **Status (wave 4):** resolved by warden 6ed8fb5 (`warden/testing`).
+  `dev_provider.gleam` (404) and `secure_mcp_dev_ffi.erl` (55 of 80 lines)
+  are deleted; the provider is `testing.start_provider` with
+  `with_client(client_id:, secret:)` and `with_access_token_audiences([mcp_url])`,
+  Warden's configurations are `testing.config(provider, redirect_uri)` and
+  `config.resource_server(issuer:) |> testing.trusting(provider)`, and tests
+  mint tokens with `testing.issue_access_token` (expired, wrong audience,
+  wrong scope, `alg: none`, HS256 with the public key, unknown key, no `typ`,
+  foreign issuer: `rejected_jwt_tokens_test`). Three pieces of glue remain
+  (29 lines, see the re-run section): `/login` answers for the provider
+  because `testing.authorize` needs the in-process `LoginRedirect` (9),
+  revoking one access token posts to `/revoke` by hand (20), and the app
+  still picks a free port before starting so the token audience can name it
+  (5 lines of Erlang, kept from the old FFI).
 
 ### SMCP-6 Relay's client cannot authenticate, and a 401 reaches the caller as prose
 
@@ -251,6 +304,16 @@ tool handlers receive the authenticated principal, and `generate_report` /
 - **Status (2 Oct 2026):** still open (relay 5caff50 changed no public API);
   `relay_client_cannot_authenticate_test` (secure_mcp_test.gleam:272) still
   observes the prose 401.
+
+- **Status (wave 4):** resolved for the client by relay ffb6d37. The 109-line
+  raw JSON-RPC client is deleted; the tests and `gleam run` call the typed
+  tool definitions through `client.http(url) |> client.with_headers(fn() { [#("authorization", "Bearer " <> token)] }) |> client.connect`
+  (client.gleam `connect`, 14 lines including `x-request-id`). A 401 is
+  `Error(client.HttpStatus(401, Some(challenge)))`; `no_token_test` compares
+  the whole value. `relay_client_cannot_authenticate_test` is deleted: every
+  test now goes through Relay's client. Token acquisition by an MCP client
+  is still open (relay's deferred client authorization); the app still hands
+  the user's token out at `/me/token`.
 
 ### SMCP-7 `bind_handle` rejects a succeeded job when the worker has an error codec
 
@@ -403,6 +466,20 @@ period` status). The 41-line probe test
   only in http_gun events, which this app cannot attach to without adding
   `http_gun` as a dependency.
 
+- **Status (wave 4):** resolved for relay by ffb6d37. `http.with_correlation`
+  reads `x-request-id` (or mints) once per request, and the same value
+  reaches `[relay, authorization, decided]`, `request.admitted`,
+  `invocation.started` (which now names the tool) and the handler
+  (`tool.correlation(call)`), which passes it to `job.with_correlation`. The
+  app's `[secure_mcp, mcp, request]` bridge event (type, codec, emitter,
+  collector line: 53 lines) and `McpContext` are deleted;
+  `telemetry_correlation_test` asserts that one correlation names Relay's
+  three events and Grind's three. Still open (warden + relay): in
+  introspection mode the `[warden, http, request]` line for `/introspect`
+  has no correlation, because a Relay verifier receives only the
+  `BearerToken` and so cannot apply `warden.with_correlation`. Local JWT
+  mode sends no provider request per token, so nothing is left to join there.
+
 ### SMCP-10 Small gaps found on the way
 
 - **Packages**: grind, relay. **Kind**: ergonomics. **Severity**: nit.
@@ -423,6 +500,11 @@ period` status). The 41-line probe test
   `job.state_name(state)` replaces the 15-line `state_name` in tools.gleam
   (the collector's `state_label` helper is gone too, using the same
   function). The two relay items are unchanged: relay did not change in wave 3.
+
+- **Status (wave 4):** both relay items resolved by ffb6d37. `admit` is
+  documented as exactly one audience ("names exactly the protected resource
+  as its only audience"), and `server.with_tool_access(visible:, callable:)`
+  decides `tools/list` per context. This app needed neither change.
 
 ## Glue measure
 
@@ -805,3 +887,171 @@ and `gleam format` and the build are clean. The fixes touched `tools.gleam` and
 `Admission` case, the `migrate` branch; `with_startup_migration`, the inline
 `CommitUnknown` case and `grind.handle` added). No test pinned a fixed defect,
 so none changed.
+
+## Re-run after wave 4
+
+Against relay ffb6d37 (docs 3f88ef1) and warden 6ed8fb5 (docs 5a7da27);
+grind, sinal and json_blueprint unchanged since wave 3.
+`../scripts/with-postgres.sh gleam test`: 13 passed, no failures (11
+before). Deleted: `relay_client_cannot_authenticate_test` (every test now
+uses Relay's client) and `expired_and_revoked_tokens_test` (split by mode).
+Added: `rejected_jwt_tokens_test`, `revoked_token_still_valid_locally_test`,
+`introspection_mode_test` and `subscription_stream_through_protected_mount_test`.
+`gleam run` exits 0 and narrates eight steps; the telemetry shows
+`authorization.decided`, `request.admitted`, `invocation.started tool=...`
+and the three Grind events under one correlation. `gleam format --check` is
+clean and the build has no warnings. No stored or wire format of the app
+changed: reports.gleam and the Grind codecs are untouched, so jobs stored by
+the wave 3 app decode as before.
+
+| Seam                                      | Before (wave 3)                                         | After (wave 4)                                                                                   |
+| ----------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| MCP mounted beside wisp (SMCP-2)          | 114 (`mcp_mount.gleam`); no Host/Origin, headers or SSE | 6: a path dispatch to `http.mist_handler` in the mist handler; the endpoint is 8 lines of config |
+| Bearer verification (SMCP-3, SMCP-4)      | 89 (per-request verifier, `aud` decoder, `exp` check)   | 18 (JWT: `resource.verifier` + `attest`) and 15 (introspection, the second mode)                 |
+| Challenges and RFC 9728 metadata (SMCP-3) | 41                                                      | 0                                                                                                |
+| Authenticated MCP client (SMCP-6)         | 109 (raw JSON-RPC over httpc)                           | 0; `connect` is 14 lines of `client.with_headers` configuration                                  |
+| Scripted OpenID provider (SMCP-5)         | 459 (`dev_provider.gleam` 404, FFI 55)                  | 29: `/login` answers for the provider (9), access-token revoke (20); free port FFI kept (5)      |
+| Telemetry bridge (SMCP-9)                 | 53 (`[secure_mcp, mcp, request]`, `McpContext`)         | 0                                                                                                |
+| Principal into tool handlers              | 3 (`McpContext` built by the mount)                     | 1 (`Ok(authorization.grant_principal(grant))`)                                                   |
+| Second codec set for Grind (SMCP-8)       | 28 + 10-line bridge                                     | unchanged (grind × json_blueprint)                                                               |
+
+Net `git diff --numstat` for the app: 719 lines added and 1,559 removed
+(src: 491 added and 1,399 removed, plus the 20-line `secure_mcp_ffi.erl`).
+
+### The Warden ↔ Relay verifier recipe as written here
+
+```gleam
+pub fn jwt_verifier(validator: resource.Validator) -> Verifier(Principal) {
+  authorization.verifier(
+    "warden-jwt",
+    resource.verifier(
+      validator,
+      authorization.token_value,
+      attest,
+      authorization.BearerRejected,
+      authorization.VerifierUnavailable,
+    ),
+  )
+}
+
+fn attest(claims: resource.AccessClaims) -> Attestation(Principal) {
+  let scopes = resource.scopes(claims)
+  authorization.attestation(
+    Principal(resource.subject(claims), resource.client_id(claims), scopes),
+    resource.audiences(claims),
+    scopes,
+  )
+}
+```
+
+with `resource.new(resource_server, audience: mcp_url)` over a started
+`config.resource_server(issuer:)` client, and no `with_required_scopes`
+(Relay checks the endpoint scope).
+
+Relay's contract is `authorization.verifier(name, fn(BearerToken) -> Result(Attestation(p), VerificationError))`
+and `authorization.attestation(principal, audiences, scopes)` with
+`List(String)` arguments and no labels; `authorization.token_value` exists
+(relay/src/relay/authorization.gleam:85), so Warden's assumption of a token
+reader is right. Checked by compiling each recipe verbatim in a scratch
+package:
+
+- **Relay's README (relay/README.md:122-152) is correct as written.** It
+  compiles; `use token <- authorization.verifier("jwt")` works because the
+  verify function is the last argument.
+- **Warden's README (warden/README.md:159-168) and the identical
+  `warden/resource` module doc (resource.gleam:44-53) do not compile.** Three
+  errors:
+  - `authorization.verifier("warden", "1", resource.verifier(..))`: "Expected
+    2 arguments, got 3". Relay dropped the version argument in wave 4.
+  - `list.filter_map(resource.audiences(claims), authorization.resource)`:
+    "The module `relay/authorization` does not have a `resource` value". It
+    is `protected_resource` now, and the attestation takes strings anyway,
+    so the line is `resource.audiences(claims)`.
+  - `list.filter_map(resource.scopes(claims), authorization.scope)`: expected
+    `List(String)`, found `List(authorization.Scope)`; the line is
+    `resource.scopes(claims)`.
+- **Warden's migration guide (docs/migration-wave-4.md, introspection
+  section) has the same stale call:**
+  `let audiences = list.filter_map(info.audiences, authorization.resource)`;
+  with wave 4 Relay it is `info.audiences` as is.
+- The labelled form `authorization.attestation(principal, audiences:, scopes:)`
+  does not compile either ("Unexpected labelled argument"): Relay's
+  parameters are unlabelled. Relay's migration table writes
+  `attestation(principal, audiences: List(String), scopes: List(String))`,
+  which reads like labels.
+
+### Seams that still need glue
+
+| Glue                                                                                                                     | Lines | Owner                        |
+| ------------------------------------------------------------------------------------------------------------------------ | ----- | ---------------------------- |
+| `/login` plays the provider: `testing.authorize` needs the `LoginRedirect` value and the provider serves no `/authorize` | 9     | warden (`warden/testing`)    |
+| Revoke one access token: raw RFC 7009 POST with the client's secret                                                      | 20    | warden (`warden/testing`)    |
+| Free port before start: the audience is fixed at provider start and ignores the RFC 8707 `resource` parameter            | 5     | warden (`warden/testing`)    |
+| Path dispatch so `/mcp` streams beside wisp                                                                              | 6     | relay (docs), wisp           |
+| Introspection request uncorrelated with the MCP request                                                                  | —     | relay (verifier input)       |
+| Grind codec bridge (SMCP-8)                                                                                              | 10    | grind × json_blueprint       |
+| Token for an MCP client: `/me/token` hands out the user's token                                                          | —     | relay (client authorization) |
+
+### New friction
+
+- **The two audience checks hide Relay's precise answer.** Warden's validator
+  defaults to `ExactAudience` and refuses a token for another resource as
+  `AudienceMismatch`, which `resource.verifier` maps to `BearerRejected`.
+  Relay never reaches its own `ResourceNotGranted`, so in JWT mode the
+  challenge says "The access token is invalid or expired" and the telemetry
+  decision is `InvalidToken`, not `WrongResource`
+  (`token_for_another_audience_test`); in introspection mode the same token
+  gets "issued for another resource". `AudienceIncluded` does not help: a
+  token that does not name this resource still fails in Warden. Either
+  `resource.verifier` should accept an `audience_mismatch` error, or the
+  docs should say that Relay's resource check is a second line only.
+- **`resource.verifier` cannot express a 403.** It folds `Forbidden` into
+  `rejected`, so a validator with `with_required_scopes` turns a missing
+  scope into 401 `invalid_token` instead of 403. The README says to leave
+  scopes to Relay, which works, but nothing in the types stops it, and its
+  two error arguments have the same type `e`, so swapping
+  `BearerRejected`/`VerifierUnavailable` compiles and inverts 401 and 503.
+- **The wisp mount in Relay's guide drops streaming.** The guide's recipe is
+  `http.handle` inside the wisp router; `handle` is buffered (listen gets
+  406, no disconnect cancellation). The app dispatches `/mcp` at the mist
+  level to `http.mist_handler` instead. Relay's README says this in its
+  "`handle` buffers" paragraph; the migration guide's secure_mcp row and the
+  "Mounting in wisp" recipe do not.
+- **A Relay verifier cannot correlate its own provider call.** It receives
+  only a `BearerToken`, while Relay already holds the request's correlation;
+  `warden.with_correlation` therefore cannot be applied per request, and the
+  introspection line in Warden's telemetry stands alone. Proposal (relay):
+  pass `Option(Correlation)` to the verify function, or offer
+  `authorization.verifier_with_correlation`.
+- **`warden/testing` assumes an in-process browser.** `authorize(provider, redirect, subject:)`
+  takes the opaque `LoginRedirect`, which only the app holds, and the
+  provider answers 404 for `/authorize`. A black-box browser (this app's
+  scripted httpc browser, or a real one) cannot complete a login without the
+  app answering for the provider. Proposal: serve `GET /authorize?…&login_hint=<subject>`
+  that redirects to the callback, or `authorize_url(provider, url, subject:)`.
+- **`warden/testing` has `revoke_refresh_tokens(subject)` but no
+  `revoke_access_token(token)`.** Its own `/revoke` endpoint handles access
+  tokens, so the app posts there with Basic credentials (20 lines, and the
+  test must know the client secret, so the app fixes it with `with_client`).
+- **The provider's audience is fixed at start.** `with_access_token_audiences`
+  ignores the login's RFC 8707 `resource`, so the app must know its own port
+  before the provider starts; the `free_port` FFI (and its small race)
+  stays. Honouring `resource` would remove both.
+- **Two Warden clients.** The resource server gets its own
+  `config.resource_server` client, which repeats discovery and the key fetch
+  at start (two `openid-configuration`/`jwks` pairs in the telemetry). The
+  relying-party client would also validate (`resource.new` takes any
+  started client); the docs do not say which is intended.
+- **What worked first time.** All 13 tests passed on the first run after the
+  rewrite; the typed `HttpStatus(401, Some(challenge))`, `with_headers`,
+  `tool.correlation(call)`, the forged-token helpers and
+  `authorization_decided_event` needed no second attempt.
+
+### Migration guides
+
+Sufficient for relay: every changed symbol in this app had a row, and the
+secure_mcp table names the right replacements. Gaps: the wisp recipe loses
+SSE (above), and `attestation`'s table cell reads as labelled. Warden's
+guide is sufficient for login, sessions and introspection, but its two
+Relay snippets (the introspection example and, by reference, the README
+recipe) still use wave 3 Relay names and do not compile.

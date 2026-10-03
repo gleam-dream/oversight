@@ -1,32 +1,25 @@
 //// MCP tools that act for the authenticated principal, backed by Grind jobs.
 
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/string
 import grind.{type Grind}
 import grind/job
 import grind/worker.{type Worker}
 import relay/tool
 import secure_mcp/auth.{type Principal}
 import secure_mcp/reports.{
-  type Report, type ReportJob, ReportJob, ReportStatus, Submitted,
+  type Report, type ReportJob, type ReportRequest, type ReportStatus,
+  type StatusRequest, type Submitted, ReportJob, ReportStatus, Submitted,
 }
 import sinal/correlation.{type Correlation}
 
 pub const queue = "reports"
 
-/// Per-request context the `/mcp` mount hands to Relay. Relay's own HTTP
-/// listener builds context from `fn() -> context`, which cannot see the
-/// request; the mount builds this value after authentication.
-pub type McpContext {
-  McpContext(correlation: Correlation, principal: Principal)
-}
-
 pub type ReportWorker =
   Worker(ReportJob, Report, String)
 
 /// Application errors of the tools. Only the rendered text reaches clients.
-pub type ToolError {
+pub type ReportError {
   ReportNotFound
   /// Grind's input codec refused the report; the reason names the field.
   InvalidReport(reason: String)
@@ -47,82 +40,81 @@ pub fn report_worker() -> ReportWorker {
   |> worker.with_queue(queue)
 }
 
-pub fn registry(
+/// The tool definitions; an MCP client calls them with the same values.
+pub fn generate_definition() -> tool.Definition(ReportRequest, Submitted) {
+  tool.define(
+    "generate_report",
+    reports.request_codec(),
+    reports.submitted_codec(),
+  )
+  |> tool.with_description(
+    "Queue a report for the signed-in user; returns a job id.",
+  )
+}
+
+pub fn status_definition() -> tool.Definition(StatusRequest, ReportStatus) {
+  tool.define(
+    "report_status",
+    reports.status_request_codec(),
+    reports.status_codec(),
+  )
+  |> tool.with_description(
+    "Read the state and result of one of your own report jobs.",
+  )
+  |> tool.with_read_only_hint(True)
+}
+
+/// The tools bound to Grind. The context is the principal Relay admitted;
+/// the request's correlation comes from the call.
+pub fn tools(
   jobs: Grind,
   report_worker: ReportWorker,
-) -> Result(tool.Registry(McpContext), String) {
-  use generate_name <- result.try(
-    tool.tool_name("generate_report") |> result.map_error(describe),
-  )
-  use status_name <- result.try(
-    tool.tool_name("report_status") |> result.map_error(describe),
-  )
-  use generate <- result.try(
-    tool.definition(
-      generate_name,
-      reports.request_codec(),
-      reports.submitted_codec(),
-    )
-    |> result.map_error(describe),
-  )
-  use status <- result.try(
-    tool.definition(
-      status_name,
-      reports.status_request_codec(),
-      reports.status_codec(),
-    )
-    |> result.map_error(describe),
-  )
-  let generate =
-    generate
-    |> tool.with_description(
-      "Queue a report for the signed-in user; returns a job id.",
-    )
-  let status =
-    status
-    |> tool.with_description(
-      "Read the state and result of one of your own report jobs.",
-    )
-    |> tool.with_annotations(
-      tool.empty_annotations() |> tool.with_read_only_hint(Some(True)),
-    )
-  tool.registry([
-    tool.handle_advanced_with_error_renderer(
-      generate,
-      fn(call, request) {
-        generate_report(jobs, report_worker, call.application, request)
-      },
-      render,
-    ),
-    tool.handle_advanced_with_error_renderer(
-      status,
-      fn(call, request) {
-        report_status(jobs, report_worker, call.application, request)
-      },
-      render,
-    ),
-  ])
-  |> result.map_error(describe)
+) -> List(tool.Tool(Principal)) {
+  [
+    tool.handle_call(generate_definition(), fn(call, request) {
+      generate_report(
+        jobs,
+        report_worker,
+        tool.context(call),
+        tool.correlation(call),
+        request,
+      )
+      |> reply
+    }),
+    tool.handle_call(status_definition(), fn(call, request) {
+      report_status(jobs, report_worker, tool.context(call), request) |> reply
+    }),
+  ]
+}
+
+fn reply(
+  result: Result(output, ReportError),
+) -> Result(tool.Reply(output), tool.ToolError) {
+  result |> result.map(tool.complete) |> result.map_error(render)
 }
 
 fn generate_report(
   jobs: Grind,
   report_worker: ReportWorker,
-  context: McpContext,
-  request: reports.ReportRequest,
-) -> Result(tool.HandlerResult(reports.Submitted), ToolError) {
+  principal: Principal,
+  correlation: Option(Correlation),
+  request: ReportRequest,
+) -> Result(Submitted, ReportError) {
   // The request's correlation travels with the job: Grind's admitted, claimed
   // and acknowledged events carry it, so no bridge event is needed.
   let report =
     job.new(
       report_worker,
       ReportJob(
-        owner: context.principal.subject,
+        owner: principal.subject,
         title: request.title,
         period: request.period,
       ),
     )
-    |> job.with_correlation(context.correlation)
+  let report = case correlation {
+    Some(correlation) -> job.with_correlation(report, correlation)
+    None -> report
+  }
   // A lost reply is settled from the submission's receipt.
   use admission <- result.try(
     case grind.submit(jobs, report) {
@@ -133,12 +125,12 @@ fn generate_report(
     |> result.map_error(submit_failed),
   )
   let job_id = job.id(grind.handle(admission))
-  Ok(tool.Complete(Submitted(job_id:, state: "queued"), []))
+  Ok(Submitted(job_id:, state: "queued"))
 }
 
 fn submit_failed(
   error: grind.SubmitError(input, output, failure),
-) -> ToolError {
+) -> ReportError {
   case error {
     grind.InvalidInput(reason) -> InvalidReport(reason)
     grind.PayloadTooLarge(..) -> InvalidReport("the report is too large")
@@ -149,9 +141,9 @@ fn submit_failed(
 fn report_status(
   jobs: Grind,
   report_worker: ReportWorker,
-  context: McpContext,
-  request: reports.StatusRequest,
-) -> Result(tool.HandlerResult(reports.ReportStatus), ToolError) {
+  principal: Principal,
+  request: StatusRequest,
+) -> Result(ReportStatus, ReportError) {
   let job_id = request.job_id
   // Another user's job and a missing job are indistinguishable to the caller,
   // and so is an id that belongs to another worker.
@@ -161,7 +153,7 @@ fn report_status(
   use owned <- result.try(
     grind.arguments(jobs, handle) |> result.map_error(read_failed),
   )
-  use <- guard(owned.owner == context.principal.subject, ReportNotFound)
+  use <- guard(owned.owner == principal.subject, ReportNotFound)
   use outcome <- result.try(
     grind.outcome(jobs, handle) |> result.map_error(read_failed),
   )
@@ -176,10 +168,10 @@ fn report_status(
     grind.Cancelled(_) -> ReportStatus(job_id, "cancelled", None)
     grind.Uncertain(_) -> ReportStatus(job_id, "needs reconciliation", None)
   }
-  Ok(tool.Complete(status, []))
+  Ok(status)
 }
 
-fn read_failed(error: grind.ReadError) -> ToolError {
+fn read_failed(error: grind.ReadError) -> ReportError {
   case grind.read_error_kind(error) {
     grind.NotFound | grind.Mismatch -> ReportNotFound
     _ -> ReadFailed
@@ -188,24 +180,20 @@ fn read_failed(error: grind.ReadError) -> ToolError {
 
 fn guard(
   condition: Bool,
-  error: ToolError,
-  next: fn() -> Result(a, ToolError),
-) -> Result(a, ToolError) {
+  error: ReportError,
+  next: fn() -> Result(a, ReportError),
+) -> Result(a, ReportError) {
   case condition {
     True -> next()
     False -> Error(error)
   }
 }
 
-fn render(error: ToolError) -> String {
-  case error {
+fn render(error: ReportError) -> tool.ToolError {
+  tool.error_message(case error {
     ReportNotFound -> "No such report job for this user."
     InvalidReport(reason) -> "The report was refused: " <> reason
     SubmitFailed -> "The report could not be queued; try again."
     ReadFailed -> "The report state could not be read; try again."
-  }
-}
-
-fn describe(error: a) -> String {
-  string.inspect(error)
+  })
 }

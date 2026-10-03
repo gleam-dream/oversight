@@ -1,21 +1,20 @@
-//// Sinal subscriptions for every package the app uses, plus one app event
-//// that bridges the id Relay does not share.
+//// Sinal subscriptions for every package the app uses.
 ////
-//// Correlation of one `/mcp` request across packages:
-//// - app `[secure_mcp, mcp, request]`: correlation, Relay exchange_id, subject
-////   (the app chose the exchange id, so it can join Relay's events);
-//// - relay `[relay, request, admitted]` / `[relay, invocation, *]`:
-////   exchange_id -> invocation_id; `tool_name` carries the JSON-RPC method;
-//// - warden `[warden, http, request]`: no request or token id at all; it is
-////   emitted synchronously in the wisp request process, so only the emitting
-////   pid links it to the request;
-//// - grind `[grind, job, admitted | claimed | acknowledged]`: the request's
+//// Correlation of one `/mcp` request across packages, with no app event:
+//// - relay `[relay, authorization, decided]`, `[relay, request, admitted]`
+////   and `[relay, invocation, *]` carry the request's correlation, which
+////   `http.with_correlation` reads from `x-request-id` (or mints);
+//// - grind `[grind, job, admitted | claimed | acknowledged]` carry the same
 ////   correlation, because the tool submits its job with
-////   `job.with_correlation`; no bridge event is needed.
+////   `job.with_correlation(tool.correlation(call))`;
+//// - warden `[warden, http, request]` carries a correlation only for a client
+////   view made with `warden.with_correlation`; local JWT validation sends no
+////   request per token at all.
 
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
+import gleam/option.{type Option}
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -24,40 +23,8 @@ import grind/telemetry as grind_telemetry
 import relay/telemetry as relay_telemetry
 import sinal
 import sinal/correlation.{type Correlation}
-import sinal/fields
 import sinal/forwarder
-import warden/observation as warden_observation
-
-pub type McpRequest {
-  McpRequest(correlation: Correlation, exchange_id: Int, subject: String)
-}
-
-pub fn mcp_request_event() -> sinal.Event(Nil, McpRequest) {
-  sinal.event(["secure_mcp", "mcp", "request"], fields.empty(), {
-    use correlation <- fields.include(correlation.required_field(), get: fn(m) {
-      m.correlation
-    })
-    use exchange_id <- fields.include(fields.int("exchange_id"), get: fn(m) {
-      m.exchange_id
-    })
-    use subject <- fields.include(fields.string("subject"), get: fn(m) {
-      m.subject
-    })
-    fields.success(McpRequest(correlation:, exchange_id:, subject:))
-  })
-}
-
-pub fn mcp_request(
-  correlation: Correlation,
-  exchange_id: Int,
-  subject: String,
-) -> Nil {
-  sinal.emit(
-    mcp_request_event(),
-    Nil,
-    McpRequest(correlation:, exchange_id:, subject:),
-  )
-}
+import warden/telemetry as warden_telemetry
 
 // --- Collection --------------------------------------------------------------
 
@@ -98,11 +65,40 @@ pub fn start() -> Result(Collector, String) {
     )
   }
   let attachments = [
+    sinal.observe(relay_telemetry.authorization_decided_event(), fn(_, m) {
+      record(
+        "relay",
+        "authorization.decided",
+        "verifier="
+          <> m.verifier
+          <> " decision="
+          <> string.inspect(m.decision)
+          <> " correlation="
+          <> optional(m.correlation),
+      )
+    }),
+    sinal.observe(relay_telemetry.http_rejected_event(), fn(_, m) {
+      record(
+        "relay",
+        "http.rejected",
+        "status="
+          <> int.to_string(m.status)
+          <> " reason="
+          <> string.inspect(m.reason)
+          <> " correlation="
+          <> optional(m.correlation),
+      )
+    }),
     sinal.observe(relay_telemetry.request_admitted_event(), fn(_, m) {
       record(
         "relay",
         "request.admitted",
-        "exchange=" <> int.to_string(m.exchange_id) <> " method=" <> m.method,
+        "exchange="
+          <> int.to_string(m.exchange_id)
+          <> " method="
+          <> m.method
+          <> " correlation="
+          <> optional(m.correlation),
       )
     }),
     sinal.observe(relay_telemetry.invocation_started_event(), fn(_, m) {
@@ -113,8 +109,10 @@ pub fn start() -> Result(Collector, String) {
           <> int.to_string(m.exchange_id)
           <> " invocation="
           <> int.to_string(m.invocation_id)
-          <> " tool_name="
-          <> m.tool_name,
+          <> " tool="
+          <> option.unwrap(m.tool, "-")
+          <> " correlation="
+          <> optional(m.correlation),
       )
     }),
     sinal.observe(
@@ -123,12 +121,10 @@ pub fn start() -> Result(Collector, String) {
         record(
           "relay",
           "invocation.completed",
-          "exchange="
-            <> int.to_string(m.exchange_id)
-            <> " invocation="
+          "invocation="
             <> int.to_string(m.invocation_id)
             <> " status="
-            <> m.status
+            <> string.inspect(m.status)
             <> " duration_ms="
             <> int.to_string(measurements.duration_ms),
         )
@@ -138,21 +134,30 @@ pub fn start() -> Result(Collector, String) {
       record(
         "relay",
         "frame.rejected",
-        "exchange=" <> int.to_string(m.exchange_id) <> " reason=" <> m.reason,
+        "exchange="
+          <> int.to_string(m.exchange_id)
+          <> " problem="
+          <> string.inspect(m.problem),
       )
     }),
     sinal.observe(relay_telemetry.invocation_crashed_event(), fn(_, m) {
       record(
         "relay",
         "invocation.crashed",
-        "invocation=" <> int.to_string(m.invocation_id),
+        "invocation="
+          <> int.to_string(m.invocation_id)
+          <> " reason="
+          <> string.inspect(m.reason),
       )
     }),
-    sinal.observe(warden_observation.http_request(), fn(measure, r) {
+    sinal.observe(warden_telemetry.http_request(), fn(measure, r) {
       let outcome = case r.outcome {
-        warden_observation.Status(code) -> int.to_string(code)
-        warden_observation.Failed(sent, class) ->
-          "failed sent=" <> string.inspect(sent) <> " class=" <> class
+        warden_telemetry.Status(code) -> int.to_string(code)
+        warden_telemetry.Failed(evidence:, reason:) ->
+          "failed "
+          <> string.inspect(evidence)
+          <> " "
+          <> warden_telemetry.transport_reason_name(reason)
       }
       record(
         "warden",
@@ -210,18 +215,6 @@ pub fn start() -> Result(Collector, String) {
         m.forwarder <> " rejected=" <> int.to_string(d.rejected),
       )
     }),
-    sinal.observe(mcp_request_event(), fn(_, m) {
-      record(
-        "app",
-        "mcp.request",
-        "correlation="
-          <> correlation.to_string(m.correlation)
-          <> " exchange="
-          <> int.to_string(m.exchange_id)
-          <> " subject="
-          <> m.subject,
-      )
-    }),
   ]
   Ok(Collector(subject, attachments))
 }
@@ -232,6 +225,10 @@ pub fn lines(collector: Collector) -> List(Line) {
 
 pub fn stop(collector: Collector) -> Nil {
   list.each(collector.attachments, sinal.detach)
+}
+
+fn optional(value: Option(Correlation)) -> String {
+  option.map(value, correlation.to_string) |> option.unwrap("-")
 }
 
 pub fn format(line: Line) -> String {
