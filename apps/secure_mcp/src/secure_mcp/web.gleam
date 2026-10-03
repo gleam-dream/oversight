@@ -7,19 +7,14 @@ import gleam/http/request
 import gleam/json
 import gleam/option
 import gleam/result
-import gleam/string
 import gleam/time/calendar
 import gleam/time/timestamp
-import gleam/uri
 import warden
-import warden/testing
 import wisp.{type Request, type Response}
 
 pub type Context {
   Context(
     warden: warden.Client,
-    /// The scripted provider plays the provider's login page.
-    provider: testing.Provider,
     /// The MCP endpoint URL; also the token audience (RFC 8707 resource).
     mcp_url: String,
   )
@@ -41,37 +36,29 @@ pub fn handle(req: Request, context: Context) -> Response {
 
 // --- Browser login (Warden relying party) -------------------------------------
 
-/// Starts a login and, because the provider is scripted, signs in as `as` at
-/// once: the redirect goes straight to the callback the provider would
-/// send, with Warden's binding cookie.
+/// Starts a login: the browser follows Warden's redirect to the provider's
+/// `/authorize`. `?as=<user>` goes along as the OpenID `login_hint`, which the
+/// scripted provider signs in as.
 fn login(req: Request, context: Context) -> Response {
   // The MCP endpoint is the token audience: RFC 8707 `resource` travels as a
   // Warden extension parameter.
+  let hint = case wisp.get_query(req) {
+    [#("as", user)] -> option.Some(user)
+    _ -> option.None
+  }
   let options =
-    warden.LoginOptions(..warden.default_login(), extra_parameters: [
-      #("resource", context.mcp_url),
-    ])
-  case wisp.get_query(req), warden.begin_login(context.warden, req, options) {
-    _, Error(error) ->
+    warden.LoginOptions(
+      ..warden.default_login(),
+      login_hint: hint,
+      extra_parameters: [#("resource", context.mcp_url)],
+    )
+  case warden.begin_login(context.warden, req, options) {
+    Ok(redirect) -> warden.login_response(wisp.response(303), redirect)
+    Error(error) ->
       wisp.response(503)
       |> wisp.string_body(
         "sign-in unavailable: " <> warden.describe_login_error(error),
       )
-    [#("as", user)], Ok(redirect) ->
-      // GLUE (warden/testing): `authorize` takes the in-process
-      // `LoginRedirect`, and the provider serves no `/authorize` page, so the
-      // app answers for the provider instead of redirecting the browser there.
-      case testing.authorize(context.provider, redirect, subject: user) {
-        Ok(callback) ->
-          warden.login_response(wisp.response(303), redirect)
-          |> wisp.set_header(
-            "location",
-            uri.to_string(request.to_uri(callback)),
-          )
-        Error(error) ->
-          wisp.response(502) |> wisp.string_body(string.inspect(error))
-      }
-    _, Ok(_) -> wisp.bad_request("sign in with /login?as=<user>")
   }
 }
 

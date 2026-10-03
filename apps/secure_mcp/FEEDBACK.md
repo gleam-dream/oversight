@@ -992,6 +992,21 @@ package:
 | Grind codec bridge (SMCP-8)                                                                                              | 10    | grind × json_blueprint       |
 | Token for an MCP client: `/me/token` hands out the user's token                                                          | —     | relay (client authorization) |
 
+**Status (round 5):** the first two rows and the audience half of the third
+are resolved by warden b9d799f/1e507d4 (`warden/testing`). `/login` is now
+`login_hint` plus `warden.login_response` (the 9-line provider answer is
+gone; the test browser follows the 303 to the provider's HTTPS `/authorize`
+and back to `/auth/callback`), the 20-line `client.revoke_access_token` is
+`testing.revoke_access_token(provider, token)`, and `Context.provider` is
+gone. The free-port FFI (5 lines) stays: it was not only for the audience,
+because Warden's redirect URI (fixed at `warden.new`) and the MCP URL both
+name the port before the listener exists. Net for src and test:
+35 lines added, 89 removed. relay 2a2c0ec and json_blueprint 06b8e36 needed
+no change here: the app reads no `Schema` and has no `value()` root input, so
+the opaque `Schema`, `codec.view` and `from_schema` returning `Contract` do
+not touch it. 13 tests pass, `gleam run` exits 0, `gleam format --check` is
+clean.
+
 ### New friction
 
 - **The two audience checks hide Relay's precise answer.** Warden's validator
@@ -1029,14 +1044,32 @@ package:
   scripted httpc browser, or a real one) cannot complete a login without the
   app answering for the provider. Proposal: serve `GET /authorize?…&login_hint=<subject>`
   that redirects to the callback, or `authorize_url(provider, url, subject:)`.
+
+  **Status (round 5):** resolved by warden b9d799f. The provider serves `GET`/`POST /authorize`
+  and signs in as the request's `login_hint`; the app passes `login_hint: Some(user)` and
+  redirects, and the scripted httpc browser follows `/login` -> `/authorize` -> `/auth/callback`.
+
 - **`warden/testing` has `revoke_refresh_tokens(subject)` but no
   `revoke_access_token(token)`.** Its own `/revoke` endpoint handles access
   tokens, so the app posts there with Basic credentials (20 lines, and the
   test must know the client secret, so the app fixes it with `with_client`).
+
+  **Status (round 5):** resolved by warden b9d799f (`testing.revoke_access_token`). The
+  test no longer posts to `/revoke`; a revoked token is inactive at introspection at
+  once, while `warden/resource` keeps accepting it until `exp`. `revoked_token_still_valid_locally_test`
+  now shows both (`/mcp` accepts it, `warden.introspect` says `InactiveToken`), and
+  `introspection_mode_test` shows the refusal.
+
 - **The provider's audience is fixed at start.** `with_access_token_audiences`
   ignores the login's RFC 8707 `resource`, so the app must know its own port
   before the provider starts; the `free_port` FFI (and its small race)
   stays. Honouring `resource` would remove both.
+
+  **Status (round 5):** partly resolved by warden b9d799f: `testing.set_access_token_audiences`
+  changes the audience after start. It does not remove `free_port` here, because Warden's
+  redirect URI is fixed at `warden.new` (D37) and also names the port. The provider still ignores the
+  login's `resource` parameter.
+
 - **Two Warden clients.** The resource server gets its own
   `config.resource_server` client, which repeats discovery and the key fetch
   at start (two `openid-configuration`/`jwks` pairs in the telemetry). The

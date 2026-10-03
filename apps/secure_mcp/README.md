@@ -4,7 +4,9 @@ An MCP server for reports whose tools act for a signed-in user.
 
 - A user signs in through the browser with OpenID Connect: Warden's
   relying-party flow (`/login?as=<user>`, `/auth/callback`) in a wisp app,
-  against `warden/testing`'s scripted provider on loopback HTTPS. The login
+  against `warden/testing`'s scripted provider on loopback HTTPS: `as` becomes
+  the `login_hint`, and the browser follows the redirect to the provider's
+  `/authorize` and back to the callback. The login
   asks for the RFC 8707 `resource` of the MCP endpoint, and the provider
   issues `at+jwt` access tokens whose audience is `/mcp`.
 - `/me/token` hands the signed-in user that access token to paste into an

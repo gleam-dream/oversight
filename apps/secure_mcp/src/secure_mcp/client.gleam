@@ -1,9 +1,7 @@
 //// The two external actors, scripted: a browser that signs in through the
 //// app, and an MCP client (Relay's own) that presents a bearer token.
 
-import gleam/bit_array
 import gleam/dynamic/decode
-import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response}
 import gleam/httpc
@@ -23,12 +21,16 @@ pub type SignedIn {
   SignedIn(subject: String, access_token: String, mcp_url: String)
 }
 
-/// Follows `/login` -> `/auth/callback` -> `/me/token`, carrying the app's cookies like a browser would.
+/// Follows `/login` -> the provider's `/authorize` -> `/auth/callback` ->
+/// `/me/token` like a browser: every redirect is followed, and each host
+/// gets only the cookies it set. The scripted provider signs in as the
+/// `login_hint` the app forwards from `?as=`.
 pub fn sign_in(base_url: String, user: String) -> Result(SignedIn, String) {
   use login <- result.try(get(base_url <> "/login?as=" <> user, []))
-  // The scripted provider approved at once: the redirect is the callback.
-  use callback_url <- result.try(location(login))
   let cookies = set_cookies(login)
+  use authorize_url <- result.try(location(login))
+  use authorize <- result.try(get(authorize_url, []))
+  use callback_url <- result.try(location(authorize))
   use callback <- result.try(get(callback_url, cookies))
   use _ <- result.try(location(callback))
   let cookies = list.append(cookies, set_cookies(callback))
@@ -128,36 +130,4 @@ pub fn text(blocks: List(content.ContentBlock)) -> String {
     }
   })
   |> string.join(" ")
-}
-
-// --- Provider ------------------------------------------------------------------
-
-// GLUE (warden/testing): the provider can revoke refresh tokens by subject
-// (`revoke_refresh_tokens`) but has no call for one access token, so this
-// posts to its `/revoke` endpoint with the client's credentials.
-
-/// Revokes an access token at the scripted provider (RFC 7009), as its
-/// administrator would.
-pub fn revoke_access_token(
-  issuer: String,
-  client_id: String,
-  client_secret: String,
-  token: String,
-) -> Result(Nil, String) {
-  use req <- result.try(
-    request.to(issuer <> "/revoke") |> result.replace_error("bad issuer"),
-  )
-  let credentials =
-    bit_array.base64_encode(<<client_id:utf8, ":", client_secret:utf8>>, True)
-  let req =
-    req
-    |> request.set_method(http.Post)
-    |> request.set_header("authorization", "Basic " <> credentials)
-    |> request.set_header("content-type", "application/x-www-form-urlencoded")
-    |> request.set_body("token=" <> token)
-  case send(req) {
-    Ok(resp) if resp.status == 200 -> Ok(Nil)
-    Ok(resp) -> Error("revoke answered " <> int.to_string(resp.status))
-    Error(reason) -> Error(reason)
-  }
 }

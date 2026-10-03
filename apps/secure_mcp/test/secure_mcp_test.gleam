@@ -19,6 +19,7 @@ import secure_mcp/client
 import secure_mcp/reports.{ReportRequest, ReportStatus, StatusRequest}
 import secure_mcp/telemetry
 import secure_mcp/tools
+import warden
 import warden/testing
 
 pub fn main() -> Nil {
@@ -261,16 +262,21 @@ pub fn insufficient_scope_test() {
 
 // --- Advanced configuration ----------------------------------------------------
 
-/// Local JWT validation sends no request per token, so a token revoked at
-/// the provider stays usable until it expires.
+/// Local JWT validation sends no request per token, and an RFC 9068 token
+/// carries no revocation channel, so a token revoked at the provider stays
+/// usable until `exp`. The provider itself does consider it revoked, which
+/// introspection shows; `introspection_mode_test` covers refusal at once.
 pub fn revoked_token_still_valid_locally_test() {
   use running <- with_app
   let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-  revoke(running, alice.access_token)
+  testing.revoke_access_token(running.provider, alice.access_token)
   let peer = connect(running, alice.access_token)
   let assert Ok(_) = mcp.discover(peer)
   mcp.close(peer)
   assert testing.requests(running.provider).introspections == 0
+  // Revoked at the provider all the same.
+  let assert Ok(warden.InactiveToken) =
+    warden.introspect(running.warden, alice.access_token)
 }
 
 /// The introspection mode: revocation takes effect at once, and Relay's own
@@ -301,22 +307,11 @@ pub fn introspection_mode_test() {
     )
   let assert mcp.HttpStatus(401, _) = refusal(running, Some(expired))
 
-  revoke(running, alice.access_token)
+  testing.revoke_access_token(running.provider, alice.access_token)
   let assert mcp.HttpStatus(401, Some(challenge)) =
     refusal(running, Some(alice.access_token))
   assert string.starts_with(challenge, "Bearer error=\"invalid_token\"")
   assert testing.requests(running.provider).introspections >= 4
-}
-
-fn revoke(running: app.Running, token: String) -> Nil {
-  let assert Ok(Nil) =
-    client.revoke_access_token(
-      testing.issuer(running.provider),
-      app.client_id,
-      app.client_secret,
-      token,
-    )
-  Nil
 }
 
 /// `subscriptions/listen` streams server-sent events through the protected

@@ -110,13 +110,7 @@ fn narrate(running: app.Running, collector: telemetry.Collector) -> Nil {
     <> refusal(running, Some(forged)),
   )
 
-  let assert Ok(Nil) =
-    client.revoke_access_token(
-      testing.issuer(running.provider),
-      app.client_id,
-      app.client_secret,
-      alice.access_token,
-    )
+  testing.revoke_access_token(running.provider, alice.access_token)
   let still = case mcp.discover(peer) {
     Ok(_) -> "still accepted: local JWT validation sees no revocation"
     Error(error) -> mcp.describe_error(error)
