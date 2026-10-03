@@ -92,6 +92,24 @@ gose 2.2.0, kryptos 1.5.0, telemetry 1.4.2).
   logins need the same treatment (`with_transactions`) for multi-node use.
   Separately, return `SessionUnknownToCustody` distinct from
   `SessionEnded`/`SessionExpired`.
+- **Status (wave 4):** resolved by warden 6ed8fb5 (`warden/store`). The port is
+  three functions over one table of sealed records
+  (`get`, `put(record, expected_version)`, `delete_expired`). The app's pog
+  adapter is `warden_records.gleam` (146 lines with comments and an identifier
+  guard, about 60 of SQL and decoding) and passes `testing.check_store`
+  (`the_postgres_store_passes_warden_conformance_test`).
+  `config.with_custody_store`, `with_transaction_store` and `with_sealing_key`
+  wire it in (`app.gleam:start_warden`). The reproduction became
+  `sessions_survive_web_and_warden_restarts_test`: after `app.restart_warden`
+  (a new `Client`, empty processes) the same browser cookie still serves
+  `/dashboard`, the provider saw one code grant in total, and the restarted
+  Warden then refreshes and logs out the session. With
+  `with_custody_store` removed the same test fails (303 to `/login`), so it
+  tests the store and not the harness. A second test reads
+  `warden_records.sealed`: the access token, the custody reference and the
+  subject appear in no row. The portal's own `portal_sessions` row stays (it
+  maps the cookie to the reference and carries the subject for counting), but
+  it is no longer a workaround for custody.
 
 ### SSO-2 Logout cannot revoke tokens; the refresh token stays live at the provider
 
@@ -115,6 +133,12 @@ revoke: RevokeRefreshToken | RevokeAll | NoRevocation)` with a
   `default_logout()` (also the card's concern 6). Return a
   `RevocationFailed(ProviderFailure)` warning variant that does not undo
   local removal.
+- **Status (wave 4):** resolved by warden 6ed8fb5. `default_logout()` revokes
+  the refresh token (RFC 7009) and `logout` returns
+  `LoggedOut(revocation: Revoked, ..)`. `login_dashboard_logout_test` now
+  asserts `revocations == 1` and `active_refresh_tokens == 0` at the provider;
+  `gleam run` step 5 prints `provider refresh tokens active after logout: 0`
+  (it was 1). No app code beyond using `default_logout()`.
 
 ### SSO-3 Concurrent refresh: the loser gets `RefreshInProgress` and must poll
 
@@ -142,6 +166,12 @@ revoke: RevokeRefreshToken | RevokeAll | NoRevocation)` with a
   refreshes, or waits on the in-flight reservation and returns the session
   it publishes, and it restores past a stale revision. `refresh_session`
   remains for forced refresh (the 401 case).
+- **Status (wave 4):** resolved by warden 6ed8fb5. `warden.access_token`
+  refreshes inside the margin and a concurrent caller waits for the in-flight
+  refresh (`with_refresh_wait`, default 5 s) instead of polling. The 160-line
+  `access.gleam` (policy type, margin check, 20 ms poll, stale-revision
+  restore) is deleted. `concurrent_requests_share_one_refresh_test` passes
+  unchanged in intent: one refresh grant, none rejected.
 
 ### SSO-4 `logout` refuses a stale session revision and leaves the session in custody
 
@@ -170,6 +200,10 @@ revoke: RevokeRefreshToken | RevokeAll | NoRevocation)` with a
   `logout_with_a_stale_session_revision_ends_custody_test`
   (`test/sso_portal_test.gleam:235-258`): logout with the pre-refresh revision
   returns `Ok`, and `restore_session` then returns `SessionNotFound`.
+- **Status (wave 4):** unchanged and still resolved. The test now holds a
+  session across `warden.refresh` and logs out with the stale value; it gets
+  `LoggedOut(revocation: Revoked, ..)` and `restore_session` then answers
+  `SessionNotFound`.
 
 ### SSO-5 Refresh outcomes need a 40-line map to reach three decisions
 
@@ -188,6 +222,12 @@ revoke: RevokeRefreshToken | RevokeAll | NoRevocation)` with a
   with `UseSession(Session) | Reauthenticate | RetryLater | JoinInFlight`.
   Alternatively, fold this into SSO-3's `fresh_access_token`, which would
   return that type directly.
+- **Status (wave 4):** resolved by warden 6ed8fb5. `session_error_action`
+  returns `Reauthenticate | RetryLater | Recover | ..`; the 40-line outcome map
+  is `settled` in `web.gleam` (18 lines, of which 4 recover an unconfirmed
+  refresh and 5 map the action to the page decision). `RefreshUnconfirmed` is
+  the one case the app still handles and cannot test, since neither
+  `warden/testing` nor `testing.memory_store` injects a lost publication.
 
 ### SSO-6 No public test provider or test PKI; a consumer writes 644 lines first
 
@@ -215,6 +255,13 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `set_clock_skew`, `stats`. Or let `warden.start` accept an `http_gun.Client`
   through a test-only `config.with_http_client`, so that `http_gun/testing`
   scripts can play the provider.
+- **Status (wave 4):** resolved by warden 6ed8fb5 (`warden/testing`).
+  `fake_idp.gleam` (584), `pki.gleam` (36) and `sso_portal_pki_ffi.erl` (24)
+  are deleted: 644 lines. `testing.start_provider`, `testing.config`,
+  `with_refresh_delay`, `with_access_token_ttl`, `set_clock_skew`,
+  `revoke_refresh_tokens` and `requests` cover the knobs the tests used. Not
+  covered, so the app still carries glue (see "Re-run after wave 4"): no HTTP
+  `/authorize`, no access-token revocation, a PEM-only trust anchor.
 
 ### SSO-7 One request cannot be followed across Warden and http_gun without pid bookkeeping
 
@@ -275,6 +322,13 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   pid link for `[warden, http, request]` is unchanged (about 45 lines). The
   same default also delivers the test browser's own client to the handler,
   which is noise here (see "Re-run after wave 3").
+- **Status (wave 4):** resolved by warden 6ed8fb5. One
+  `correlation.unique()` per request goes to `warden.with_correlation` and
+  `http_gun.with_correlation` (`web.gleam:traced`, 10 lines).
+  `[warden, http, request]`, `[warden, login]`, `[warden, refresh]` and
+  `[warden, logout]` carry it, and Warden's `/token` call now appears among the
+  correlated `[http_gun, lifecycle]` events. The pid map, `Link`, `AddWarden`
+  and the emission-time lookup (about 45 lines) are gone from `telemetry.gleam`.
 
 ### SSO-8 gleam_http interop: Warden's web boundary is strings
 
@@ -297,6 +351,14 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   - `warden.callback_from_request(request.Request(String)) -> Callback`,
     which picks query or form-post by method.
   - `warden.authorize(request.Request(a), AccessToken) -> request.Request(a)`.
+- **Status (wave 4):** resolved by warden 6ed8fb5. `begin_login(client,
+request, options)` takes the wisp request, `login_response` writes the 303
+  and the `__Host-warden_binding` cookie, `complete_login` takes the request,
+  `authorize(request, token)` sets the header, and `logout_response` builds the
+  redirect. The binding cookie code, the raw-query handling and the header tuple
+  are gone (about 14 lines). One line remains: `request.set_body(request, "")`,
+  because `complete_login` wants `Request(String)` and wisp's request carries a
+  `Connection`.
 
 ### SSO-9 Two destination vocabularies, and no client to share
 
@@ -338,6 +400,11 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   vocabularies remain: Warden still takes the `DestinationPolicy` enum
   (`app.gleam`, `AllowLoopbackForTesting`) while the billing and browser
   clients take `destination.Policy`.
+- **Status (wave 4):** unchanged. `testing.config` and `testing.trusting` set
+  `AllowLoopbackForTesting` for Warden (the app no longer names it), while the
+  billing and browser clients still take `destination.loopback_only()`. Two
+  vocabularies for one intent remain; they are just no longer in app code for
+  Warden.
 
 ### SSO-10 `redirect_uri` must be known before Warden starts, and `start` needs the provider up
 
@@ -353,6 +420,12 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   (`LoginOptions(redirect_uri: Option(String))`, validated against a
   configured allowlist), and a `start` mode that defers discovery to the
   first `begin_login` (`ProviderNotReady` already exists).
+- **Status (wave 4):** not offered. `LoginOptions` has no `redirect_uri` and
+  `warden.new` still validates a fixed `redirect_uri`, so `server.free_port`
+  and the port reservation remain (18 lines, `server.gleam`, `app.gleam`).
+  `warden.supervised` starts without the provider, which covers the outage
+  half of the finding, but the app starts Warden directly with `warden.start`
+  and has not exercised that path.
 
 ## What worked well
 
@@ -618,3 +691,91 @@ destination table would save the next reader a security-relevant slip. The
 sinal guide's `observe_labelled` snippet matched line for line. Warden's
 CHANGELOG entry on `stop` was the only warden change that mattered and needed
 no code.
+
+## Re-run after wave 4
+
+Packages: warden 6ed8fb5/5a7da27, http_gun dcfbc07/4a6eeb0, sinal at head.
+All 13 tests pass under `../scripts/with-postgres.sh gleam test` (10 before:
+`sessions_survive_web_restart_but_not_warden_restart_test` became
+`sessions_survive_web_and_warden_restarts_test`, and three tests are new:
+sealed rows, the pog store against `testing.check_store`, and a session ended
+elsewhere). `gleam run` prints a five-step narrative: step 2 is new (Warden
+restarts, the dashboard still loads, the provider has seen one code grant) and
+step 5 reports `0` active provider refresh tokens after logout. The suite runs
+in about 3 s.
+
+The app diff, excluding docs: 15 tracked files, 603 added and 1156 removed,
+plus the new `warden_records.gleam` (146 lines). `FEEDBACK.md` and `README.md`
+are not in that count.
+
+| Seam                                                       | Glue before                          | Glue after                                                                                                              |
+| ---------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Warden ↔ wisp/gleam_http strings                           | ~14, plus a 31-line `LoginError` map | 1 (`request.set_body(request, "")`); `login_failure` is 9 lines on `login_error_action`                                 |
+| Durable custody (pog)                                      | ~164 and not durable                 | 146 in `warden_records.gleam` (~60 real) and 3 in `app.gleam`; durable, sealed, conformance-checked                     |
+| Refresh policy and race                                    | 160 (`access.gleam`)                 | 0; `settled` in `web.gleam` is 18 (unconfirmed-refresh recovery and the action → page decision)                         |
+| Logout revocation                                          | impossible                           | 0                                                                                                                       |
+| Warden token → http_gun request                            | 2 + 23 for 401 → refresh → retry     | 1 + 8 (the retry stays, as the API's decision to refuse a live token)                                                   |
+| Telemetry correlation across packages                      | ~45                                  | 10 (`traced`); the collector lost its pid map, `Link` and `AddWarden`                                                   |
+| Test provider + PKI for Warden                             | 644                                  | 0 for the provider; 18 for the login-page hook, 10 for PEM → DER in the browser, +73 in `billing_api.gleam` (see below) |
+| Startup ordering (`redirect_uri` before the port is bound) | 18                                   | 18, unchanged (SSO-10 not offered)                                                                                      |
+
+Net: 644 lines of test provider and PKI, the 160-line `access.gleam`, the pid
+link and the string seams are gone. What was added is the pog adapter, the
+billing resource server with its deny list, the login-page hook and three new
+telemetry observers; the tests grew by 71 lines for three new tests.
+
+Seams that still need glue:
+
+- **Login page for HTTP-level tests (warden, `warden/testing`).** The test
+  provider serves no `/authorize`, and `testing.authorize` takes the opaque
+  `LoginRedirect`, which only the portal's `/login` handler holds. A browser
+  that talks HTTP to the portal cannot use it. The app added `Context.login_response`
+  (production: `warden.login_response`) and a test-only replacement that
+  registers the login with the provider and points `Location` at the callback.
+  The hook is test scaffolding in production code, and the scripted browser never
+  visits the provider's login page. Proposal: `testing.authorize_url(provider,
+url, subject:)`, or serve `/authorize` for a configured subject.
+- **Access-token revocation (warden, `warden/testing`).** `resource.verify` is
+  local, so nothing the provider does to a live token reaches the billing API.
+  The 401 → refresh path needs a revocation the validator can see, so
+  `billing_api.gleam` keeps its own deny list (an actor, about 35 lines). The provider's
+  `/revoke` marks access tokens revoked only for introspection and userinfo. This
+  is correct for a local validator and needs saying in the `resource` docs:
+  revocation is introspection's job.
+- **Trust anchor format (warden, http_gun).** `testing.trust_anchor_pem` is PEM;
+  http_gun's `Anchors` takes DER and `CustomCa` takes a file path. The browser
+  client decodes the PEM itself (10 lines). Proposal: `testing.trust_anchor_der`.
+- **pog and `timestamptz` (pog).** `pog.timestamp_decoder()` fails on a
+  `timestamptz` column under pog 4.1.0 (`Int` expected, `Array` found), so the
+  adapter selects `extract(epoch ...)::bigint` and writes with `to_timestamp`.
+  The `warden/store` documentation's SQL sketch uses `timestamptz`, so every pog
+  adapter will meet this. The workaround is about 12 lines; a published pog adapter
+  (or the fix) would save every consumer the rediscovery.
+- **Sealing key custody (app).** The key that opens every record lives in the
+  `App` value here (random at start). In production it is a secret-manager value
+  that must survive deploys, and losing it turns every session into
+  `SessionRecordUnreadable`. Warden documents this; the app does not demonstrate
+  `with_previous_sealing_keys` rotation.
+- **Unconfirmed refresh (warden).** `RefreshUnconfirmed` and
+  `CustodyUnconfirmed` recovery are wired and untested: no provider or store
+  option injects a lost publication.
+
+New friction:
+
+- **`complete_login` is `Request(String)`, `begin_login` is `Request(a)`.** wisp's
+  request carries a `Connection`, so a GET callback needs `set_body`, and a
+  form-post callback would need `wisp.read_body` first. One line here; a
+  `form_post` configuration would add the body read to every app.
+- **The binding cookie is `Secure` and `__Host-`.** The test browser's jar
+  ignores both, but a developer's browser over `http://127.0.0.1` depends on the
+  browser treating loopback as secure. The README of the portal says nothing about it.
+- **Outcome names in the portal's trace use `string.inspect`.** `[warden, login]`
+  and `[warden, refresh]` expose closed outcome types but no name function (only
+  `transport_reason_name` exists), so the observers print constructor names.
+  Proposal: `login_outcome_name`, `refresh_outcome_name`, `revocation_name`.
+- **Warden's provider calls make the trace 7 events longer.** With correlation
+  they are now `(correlated)` http_gun events (6 for `/token`, plus `[warden.refresh]`). That is what the
+  finding asked for, but `last_request_trace` in the narrative is 20 lines.
+- No warden call had to change meaning: the migration guide's sso_portal table
+  matched the files it named, including the expected `[warden.http.request]
+POST /token -> 200` line.

@@ -1,10 +1,9 @@
-//// The portal's durable session table in Postgres (pog).
+//// The portal's browser-session table in Postgres (pog).
 ////
-//// Warden's custody owner is an in-memory actor with no storage port, so the
-//// application keeps its own durable record: who signed in, when, and the
-//// Warden custody reference that maps the browser session to Warden's
-//// tokens. Tokens themselves cannot be stored here: Warden never reveals the
-//// refresh token, and the access token alone is not a session.
+//// One row maps the browser's signed session cookie to Warden's custody
+//// reference, with the facts the portal lists and revokes by (subject,
+//// email, last seen). Tokens are not here: Warden keeps them, sealed, in its
+//// own table (`warden_records.gleam`).
 
 import gleam/dynamic/decode
 import gleam/option.{type Option}

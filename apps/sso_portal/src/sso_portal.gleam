@@ -9,54 +9,64 @@ import gleam/string
 import sso_portal/app
 import sso_portal/billing_api
 import sso_portal/browser
-import sso_portal/fake_idp
 import sso_portal/session_store
 import sso_portal/telemetry
+import warden/testing
 
 pub fn main() -> Nil {
   let assert Ok(portal) = app.start(app.default_options())
   io.println("sso_portal")
   io.println(
     "  provider  "
-    <> fake_idp.issuer(portal.idp)
-    <> " (TLS, test root from public_key)",
+    <> testing.issuer(portal.provider)
+    <> " (warden/testing, TLS)",
   )
   io.println("  billing   " <> portal.billing_api.base_url)
   io.println("  portal    " <> portal.portal_url)
 
-  let b = browser.new(portal.pki)
+  let b = browser.new(testing.trust_anchor_pem(portal.provider))
   step("1. Anonymous visit to /dashboard: login via Warden, then billing")
   let assert Ok(#(b, page)) =
     browser.visit(b, portal.portal_url <> "/dashboard")
   show(page)
   io.println("   postgres sessions for user-42: " <> sessions(portal))
 
-  step("2. Billing rejects the token (revoked early): 401, refresh, retry")
-  fake_idp.revoke_access_tokens(portal.idp)
+  step("2. Warden restarts: custody comes back from Postgres, no new login")
+  let assert Ok(portal) = app.restart_warden(portal)
+  let assert Ok(#(b, page)) =
+    browser.visit(b, portal.portal_url <> "/dashboard")
+  show(page)
+  io.println(
+    "   code grants at provider: "
+    <> int.to_string(testing.requests(portal.provider).code_grants),
+  )
+
+  step("3. Billing rejects the token (revoked early): 401, refresh, retry")
+  billing_api.deny_accepted_tokens(portal.billing_api)
   let assert Ok(#(b, page)) =
     browser.visit(b, portal.portal_url <> "/dashboard")
   show(page)
   io.println(
     "   refresh grants at provider: "
-    <> int.to_string(fake_idp.stats(portal.idp).refresh_grants),
+    <> int.to_string(testing.requests(portal.provider).refresh_grants),
   )
   io.println("   one request, followed across packages:")
   telemetry.last_request_trace(portal.telemetry)
   |> list.each(fn(r) { io.println("     " <> telemetry.describe(r)) })
 
-  step("3. Billing API goes down")
+  step("4. Billing API goes down")
   billing_api.stop(portal.billing_api)
   let assert Ok(#(b, page)) =
     browser.visit(b, portal.portal_url <> "/dashboard")
   show(page)
 
-  step("4. Sign out: custody removed, row deleted, provider end-session")
+  step("5. Sign out: custody removed, token revoked, row deleted, end-session")
   let assert Ok(#(b, page)) = browser.post(b, portal.portal_url <> "/logout")
   show(page)
   io.println("   postgres sessions for user-42: " <> sessions(portal))
   io.println(
-    "   provider refresh tokens still active after logout: "
-    <> int.to_string(fake_idp.stats(portal.idp).active_refresh_tokens),
+    "   provider refresh tokens active after logout: "
+    <> int.to_string(testing.requests(portal.provider).active_refresh_tokens),
   )
 
   browser.close(b)

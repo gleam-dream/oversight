@@ -9,23 +9,24 @@ Findings are in [FEEDBACK.md](FEEDBACK.md).
 
 ## What it does
 
-| Route            | Behaviour                                                                                                                |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `GET /login`     | `warden.begin_login`; the browser binding goes in a cookie; redirect to the provider                                     |
-| `GET /callback`  | `warden.complete_login` from the raw query string; a row in `portal_sessions` maps a signed cookie to Warden's reference |
-| `GET /dashboard` | restore the session, get a usable access token (refresh near expiry), call `GET /invoices` over http_gun, refresh on 401 |
-| `POST /logout`   | `warden.logout` (custody removed), delete the row, redirect to the provider's end-session endpoint                       |
+| Route            | Behaviour                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /login`     | `warden.begin_login(request)`; `warden.login_response` sets the binding cookie and redirects to the provider                    |
+| `GET /callback`  | `warden.complete_login(request)`; a row in `portal_sessions` maps a signed cookie to Warden's reference                         |
+| `GET /dashboard` | restore the session, `warden.access_token` (refreshes near expiry), call `GET /invoices` over http_gun, `warden.refresh` on 401 |
+| `POST /logout`   | `warden.logout` (custody removed, refresh token revoked), delete the row, redirect to the provider's end-session endpoint       |
 
-Everything external is scripted on loopback:
+Warden keeps its sessions and pending logins in Postgres
+(`src/sso_portal/warden_records.gleam`, a `warden/store` adapter on pog), sealed
+with a key the app holds, so a Warden restart keeps every session.
 
-- `src/sso_portal/fake_idp.gleam`: a minimal OpenID provider over TLS
-  (discovery, JWKS, auto-approving `/authorize`, `/token` with S256 PKCE and
-  rotating refresh tokens, `/userinfo`, `/logout`), ES256 ID tokens signed with
-  gose. Knobs: access-token lifetime, `iat` skew, refresh delay, revocation.
-- `src/sso_portal_pki_ffi.erl`: a disposable root and `localhost` leaf from
-  OTP's `public_key:pkix_test_data/1`.
-- `src/sso_portal/billing_api.gleam`: plain-HTTP API that accepts only live
-  tokens from the provider.
+Everything external runs on loopback:
+
+- `warden/testing`: the OpenID provider over TLS with its own test root
+  (discovery, keys, PKCE token endpoint with rotating refresh tokens, revocation,
+  end-session). The app writes no provider and no PKI.
+- `src/sso_portal/billing_api.gleam`: plain-HTTP API that validates bearer
+  tokens locally with `warden/resource`, plus a deny list the tests fill.
 - `src/sso_portal/browser.gleam`: an http_gun "browser" with a cookie jar that
   follows redirects between portal and provider.
 
@@ -34,26 +35,29 @@ Everything external is scripted on loopback:
 From `apps/sso_portal`, inside the oversight dev shell:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 10 tests
+../scripts/with-postgres.sh gleam test   # 13 tests
 ../scripts/with-postgres.sh gleam run    # narrative: login, 401 + refresh, billing down, logout
 ```
 
 ## Seams exercised
 
-| Seam                               | Where                                                     |
-| ---------------------------------- | --------------------------------------------------------- |
-| Warden in an ordinary wisp app     | `src/sso_portal/web.gleam` (login, callback, logout)      |
-| Durable session custody (pog)      | `src/sso_portal/session_store.gleam`, `web.gleam` current |
-| Warden token → http_gun request    | `src/sso_portal/billing.gleam`, `web.gleam` invoices      |
-| Refresh policy and refresh races   | `src/sso_portal/access.gleam`                             |
-| Sharing (not) an http_gun client   | `src/sso_portal/app.gleam` `start_billing_client`         |
-| Following one request across Sinal | `src/sso_portal/telemetry.gleam`                          |
-| Test provider and TLS for Warden   | `fake_idp.gleam`, `pki.gleam`, `sso_portal_pki_ffi.erl`   |
+| Seam                               | Where                                                       |
+| ---------------------------------- | ----------------------------------------------------------- |
+| Warden in an ordinary wisp app     | `src/sso_portal/web.gleam` (login, callback, logout)        |
+| Durable custody (pog)              | `src/sso_portal/warden_records.gleam`, `app.gleam`          |
+| Warden token → http_gun request    | `src/sso_portal/billing.gleam`, `web.gleam` invoices        |
+| Refresh policy and refresh races   | `warden.access_token` and `warden.refresh`, `web.gleam`     |
+| Sharing (not) an http_gun client   | `src/sso_portal/app.gleam` `start_billing_client`           |
+| Following one request across Sinal | `warden.with_correlation`, `src/sso_portal/telemetry.gleam` |
+| Test provider and TLS for Warden   | `warden/testing`; `app.gleam` `provider_login_page`         |
+| Resource server                    | `src/sso_portal/billing_api.gleam` (`warden/resource`)      |
 
-Tests (`test/sso_portal_test.gleam`): common path; proactive refresh near
-expiry (advanced policy); 401 → refresh → retry with a cross-package trace;
-two concurrent requests racing one refresh (advanced); provider clock ahead
-with and without `with_clock_tolerance` (advanced); tampered callback state;
-revoked refresh token → forced re-login; billing API down; sessions across a
-web-tier restart and a Warden restart (advanced, durability); logout with a
-stale session revision.
+Tests (`test/sso_portal_test.gleam`): common path including RFC 7009
+revocation at logout; proactive refresh near expiry (advanced policy); 401 →
+refresh → retry with a cross-package trace; two concurrent requests racing one
+refresh (advanced); provider clock ahead with and without
+`config.with_clock_tolerance` (advanced); tampered callback state; revoked
+refresh token → forced re-login; billing API down; sessions across a web-tier
+restart and a Warden restart (durability); Warden's rows hold nothing readable;
+the Postgres store passes `testing.check_store`; a session ended elsewhere;
+logout with a stale session revision.

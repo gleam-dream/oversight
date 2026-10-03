@@ -29,12 +29,10 @@ pub fn invoices(
   base_url: String,
   token: warden.AccessToken,
 ) -> Result(List(Invoice), BillingError) {
-  // Seam: Warden hands out `#(name, value)`; gleam_http takes it directly.
-  let #(name, value) = warden.authorization_header(token)
   let assert Ok(base) = request.to(base_url <> "/invoices")
   let req =
     base
-    |> request.set_header(name, value)
+    |> warden.authorize(token)
     |> request.set_header("accept", "application/json")
     |> request.set_body(<<>>)
   use buffered <- result.try(

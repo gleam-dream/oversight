@@ -1,43 +1,61 @@
-//// Wiring: the scripted provider, the billing API, Postgres, Warden, the
-//// billing http_gun client, telemetry and the portal itself.
+//// Wiring: `warden/testing`'s provider, the billing API, Postgres, Warden
+//// with its records in Postgres, the billing http_gun client, telemetry and
+//// the portal itself.
 
 import envoy
+import gleam/crypto
 import gleam/erlang/process
+import gleam/http/request
+import gleam/http/response
 import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
+import gleam/uri
 import http_gun
 import http_gun/config as gun_config
 import http_gun/destination
 import pog
-import sso_portal/access
 import sso_portal/billing_api.{type BillingApi}
-import sso_portal/fake_idp.{type Idp}
-import sso_portal/pki.{type Pki}
-import sso_portal/server.{type Server}
+import sso_portal/server.{type Server, Server}
 import sso_portal/session_store
 import sso_portal/telemetry.{type Telemetry}
+import sso_portal/warden_records
 import sso_portal/web
 import warden
 import warden/config
+import warden/store.{type Store}
+import warden/testing.{type Provider}
 import wisp
+
+/// The audience the provider puts in access tokens and the billing API
+/// requires.
+const billing_audience = "https://billing.test"
+
+/// The table of Warden's sealed custody and login records.
+const records_table = "warden_records"
 
 pub type Options {
   Options(
-    idp: fake_idp.Settings,
+    provider: testing.ProviderOptions,
+    /// Who the test provider signs in.
+    subject: String,
     /// `None` keeps Warden's default (5 s).
-    clock_tolerance_seconds: Option(Int),
-    access_policy: access.Policy,
+    clock_tolerance: Option(Duration),
+    /// `None` keeps Warden's default (30 s).
+    refresh_margin: Option(Duration),
     print_telemetry: Bool,
   )
 }
 
 pub fn default_options() -> Options {
   Options(
-    idp: fake_idp.default_settings(),
-    clock_tolerance_seconds: None,
-    access_policy: access.default_policy(),
+    provider: testing.provider_options()
+      |> testing.with_access_token_audiences([billing_audience]),
+    subject: "user-42",
+    clock_tolerance: None,
+    refresh_margin: None,
     print_telemetry: False,
   )
 }
@@ -45,11 +63,14 @@ pub fn default_options() -> Options {
 pub type App {
   App(
     options: Options,
-    pki: Pki,
-    idp: Idp,
+    provider: Provider,
     billing_api: BillingApi,
     telemetry: Telemetry,
     db: pog.Connection,
+    /// Warden's records in Postgres, and the key that seals them. Both
+    /// outlive a Warden client.
+    records: Store,
+    sealing_key: config.SealingKey,
     warden: warden.Client,
     billing_client: http_gun.Client,
     portal: Server,
@@ -59,55 +80,56 @@ pub type App {
 }
 
 pub fn start(options: Options) -> Result(App, String) {
-  let tmp = envoy.get("TMPDIR") |> result.unwrap("/tmp")
-  use pki <- result.try(pki.generate(tmp))
   use telemetry <- result.try(telemetry.start(options.print_telemetry))
-  use idp <- result.try(fake_idp.start(options.idp, pki))
-  use billing_api <- result.try(billing_api.start(idp))
+  use provider <- result.try(
+    testing.start_provider(options.provider)
+    |> result.replace_error("test provider did not start"),
+  )
   use db <- result.try(connect_database())
+  let records = warden_records.new(db, records_table)
+  use sealing_key <- result.try(
+    config.sealing_key(crypto.strong_random_bytes(32))
+    |> result.replace_error("sealing key"),
+  )
+  use billing_api <- result.try(start_billing_api(options, provider))
   use port <- result.try(
     server.free_port() |> result.replace_error("no free port"),
   )
   let portal_url = "http://127.0.0.1:" <> int.to_string(port)
-  use warden <- result.try(start_warden(options, idp, pki, portal_url))
+  use warden <- result.try(start_warden(
+    options,
+    provider,
+    records,
+    sealing_key,
+    portal_url,
+  ))
   use billing_client <- result.try(start_billing_client(telemetry))
-  let secret_key_base = wisp.random_string(64)
-  let context =
-    web.Context(
-      warden:,
-      db:,
-      billing: billing_client,
-      billing_url: billing_api.base_url,
+  let app =
+    App(
+      options:,
+      provider:,
+      billing_api:,
       telemetry:,
-      access_policy: options.access_policy,
+      db:,
+      records:,
+      sealing_key:,
+      warden:,
+      billing_client:,
+      // Placeholder: `serve_portal` starts the listener on this port.
+      portal: Server(pid: process.self(), port:),
+      portal_url:,
+      secret_key_base: wisp.random_string(64),
     )
-  use portal <- result.try(server.start_on(
-    web.handle(_, context),
-    secret_key_base,
-    port,
-    None,
-  ))
-  Ok(App(
-    options:,
-    pki:,
-    idp:,
-    billing_api:,
-    telemetry:,
-    db:,
-    warden:,
-    billing_client:,
-    portal:,
-    portal_url:,
-    secret_key_base:,
-  ))
+  serve_portal(app)
 }
 
 pub fn stop(app: App) -> Nil {
   server.stop(app.portal)
   warden.stop(app.warden)
-  let _ = http_gun.stop(app.billing_client)
+  http_gun.stop(app.billing_client)
   billing_api.stop(app.billing_api)
-  fake_idp.stop(app.idp)
+  warden.stop(app.billing_api.warden)
+  testing.stop_provider(app.provider)
   telemetry.stop(app.telemetry)
 }
 
@@ -118,13 +140,16 @@ pub fn restart_portal(app: App) -> Result(App, String) {
   serve_portal(app)
 }
 
-/// Restart Warden (a deploy, or a node crash): its in-memory custody is gone.
+/// Restart Warden (a deploy, or a node crash): a new client over the same
+/// Postgres records and sealing key. Its processes start empty; custody
+/// comes back from the table.
 pub fn restart_warden(app: App) -> Result(App, String) {
   warden.stop(app.warden)
   use warden <- result.try(start_warden(
     app.options,
-    app.idp,
-    app.pki,
+    app.provider,
+    app.records,
+    app.sealing_key,
     app.portal_url,
   ))
   server.stop(app.portal)
@@ -139,7 +164,7 @@ fn serve_portal(app: App) -> Result(App, String) {
       billing: app.billing_client,
       billing_url: app.billing_api.base_url,
       telemetry: app.telemetry,
-      access_policy: app.options.access_policy,
+      login_response: provider_login_page(app.provider, app.options.subject),
     )
   // The OS may hold the port briefly after the old listener closes.
   use portal <- result.try(
@@ -157,36 +182,80 @@ fn serve_portal(app: App) -> Result(App, String) {
 
 fn start_warden(
   options: Options,
-  idp: Idp,
-  pki: Pki,
+  provider: Provider,
+  records: Store,
+  sealing_key: config.SealingKey,
   portal_url: String,
 ) -> Result(warden.Client, String) {
-  let idp_settings = options.idp
-  let settings =
-    config.new(
-      issuer: fake_idp.issuer(idp),
-      client_id: idp_settings.client_id,
-      redirect_uri: portal_url <> "/callback",
-      authentication: config.ClientSecretBasic(config.secret(
-        idp_settings.client_secret,
-      )),
-    )
+  let configuration =
+    testing.config(provider, portal_url <> "/callback")
     |> config.with_scopes(["email"])
-    // The scripted provider is on loopback with a self-signed certificate.
-    |> config.with_trust(config.TrustAnchorsPem(pki.certificate_pem))
-    |> config.with_destinations(config.AllowLoopbackForTesting)
-  let settings = case options.clock_tolerance_seconds {
-    Some(seconds) -> config.with_clock_tolerance(settings, seconds)
-    None -> settings
+    |> config.with_custody_store(records)
+    |> config.with_transaction_store(records)
+    |> config.with_sealing_key(sealing_key)
+  let configuration = case options.clock_tolerance {
+    Some(tolerance) -> config.with_clock_tolerance(configuration, tolerance)
+    None -> configuration
   }
-  use validated <- result.try(
-    config.validate(settings)
-    |> result.map_error(fn(errors) {
-      "warden config: " <> string.inspect(errors)
-    }),
+  let configuration = case options.refresh_margin {
+    Some(margin) -> config.with_refresh_margin(configuration, margin)
+    None -> configuration
+  }
+  use client <- result.try(
+    warden.new(configuration)
+    |> result.map_error(fn(e) { "warden: " <> warden.describe_start_error(e) }),
   )
-  warden.start(validated)
-  |> result.map_error(fn(error) { "warden start: " <> string.inspect(error) })
+  warden.start(client)
+  |> result.map(fn(_) { client })
+  |> result.map_error(fn(e) { "warden: " <> warden.describe_start_error(e) })
+}
+
+/// The billing API validates tokens as a resource server of the provider.
+fn start_billing_api(
+  options: Options,
+  provider: Provider,
+) -> Result(BillingApi, String) {
+  let configuration =
+    config.resource_server(issuer: testing.issuer(provider))
+    |> testing.trusting(provider)
+  // The billing API lives with the same provider clock.
+  let configuration = case options.clock_tolerance {
+    Some(tolerance) -> config.with_clock_tolerance(configuration, tolerance)
+    None -> configuration
+  }
+  use client <- result.try(
+    configuration
+    |> warden.new
+    |> result.map_error(fn(e) { "billing: " <> warden.describe_start_error(e) }),
+  )
+  use _ <- result.try(
+    warden.start(client)
+    |> result.map_error(fn(e) { "billing: " <> warden.describe_start_error(e) }),
+  )
+  billing_api.start(client, audience: billing_audience)
+}
+
+/// The provider's login page, played by the test provider: it approves the
+/// authorization request for the configured subject and sends the browser
+/// straight back to the portal's callback.
+/// `warden/testing` serves no `/authorize`, so the portal's redirect is
+/// taken here, where the opaque `LoginRedirect` is still in hand.
+fn provider_login_page(
+  provider: Provider,
+  subject: String,
+) -> fn(wisp.Response, warden.LoginRedirect) -> wisp.Response {
+  fn(res, redirect) {
+    let res = warden.login_response(res, redirect)
+    case testing.authorize(provider, redirect, subject:) {
+      Ok(callback) ->
+        response.set_header(
+          res,
+          "location",
+          uri.to_string(request.to_uri(callback)),
+        )
+      Error(_) -> res
+    }
+  }
 }
 
 /// The billing API's own http_gun client. Warden cannot share it (Warden
@@ -196,17 +265,17 @@ fn start_billing_client(
   telemetry: Telemetry,
 ) -> Result(http_gun.Client, String) {
   gun_config.default()
-  |> gun_config.with_request_timeout(gun_config.Milliseconds(5000))
-  |> gun_config.with_connect_timeout(1000)
+  |> gun_config.with_request_timeout(gun_config.After(duration.seconds(5)))
+  |> gun_config.with_connect_timeout(duration.seconds(1))
   |> gun_config.with_observations(telemetry.forwarder(telemetry))
   |> gun_config.with_destination(destination.loopback_only())
   |> http_gun.start
   |> result.map_error(fn(failure) {
-    "billing client: " <> string.inspect(failure)
+    "billing client: " <> http_gun.describe_start_error(failure)
   })
 }
 
-fn connect_database() -> Result(pog.Connection, String) {
+pub fn connect_database() -> Result(pog.Connection, String) {
   use url <- result.try(
     envoy.get("DATABASE_URL")
     |> result.replace_error("DATABASE_URL is not set (use with-postgres.sh)"),
@@ -224,6 +293,10 @@ fn connect_database() -> Result(pog.Connection, String) {
   let db = started.data
   use _ <- result.try(
     session_store.migrate(db)
+    |> result.map_error(fn(e) { "migrate: " <> string.inspect(e) }),
+  )
+  use _ <- result.try(
+    warden_records.migrate(db, records_table)
     |> result.map_error(fn(e) { "migrate: " <> string.inspect(e) }),
   )
   Ok(db)
