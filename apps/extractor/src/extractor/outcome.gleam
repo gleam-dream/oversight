@@ -8,8 +8,7 @@
 
 import extractor/document
 import extractor/llm
-import gleam/int
-import gleam/option.{Some}
+import gleam/order
 import gleam/string
 import gleam/time/duration.{type Duration}
 import grind/worker
@@ -47,9 +46,10 @@ pub type Decision {
   Discard(reason: String)
 }
 
-/// Delay used when a provider asks to back off without a usable hint.
-pub fn default_snooze() -> Duration {
-  duration.seconds(5)
+/// The longest a provider's `Retry-After` can park a job. llm_wire does not
+/// cap the hint, so the app bounds it before it reaches the queue.
+pub fn longest_snooze() -> Duration {
+  duration.minutes(5)
 }
 
 pub fn decide(failure: Failure) -> Decision {
@@ -97,19 +97,24 @@ fn decide_call(failure: llm_wire.Failure) -> Decision {
       )
     error.Protocol(problem), _ ->
       Discard("provider protocol error: " <> problem)
-    error.Status(code:, ..), llm_wire.RetryAdvice(llm_wire.MayHelp, after:) ->
-      Snooze(
-        option.unwrap(after, default_snooze()),
-        "provider answered " <> int.to_string(code),
+    _,
+      llm_wire.RetryAdvice(
+        llm_wire.MayHelp,
+        delay: llm_wire.ProviderDelay(wait),
       )
-    error.Provider(code: Some(code), ..),
-      llm_wire.RetryAdvice(llm_wire.MayHelp, ..)
-    -> Snooze(default_snooze(), "provider reported " <> code)
-    _, llm_wire.RetryAdvice(llm_wire.MayHelp, ..)
+    -> Snooze(bounded(wait), detail)
+    _, llm_wire.RetryAdvice(llm_wire.MayHelp, delay: llm_wire.Backoff)
     | _, llm_wire.RetryAdvice(llm_wire.Unknown, ..)
     -> Retry(Transient(Extract, detail))
     _, llm_wire.RetryAdvice(llm_wire.WillNotHelpUnchanged, ..) ->
       Discard(detail)
+  }
+}
+
+fn bounded(wait: Duration) -> Duration {
+  case duration.compare(wait, longest_snooze()) {
+    order.Gt -> longest_snooze()
+    order.Lt | order.Eq -> wait
   }
 }
 

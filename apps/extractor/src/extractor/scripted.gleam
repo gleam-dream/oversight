@@ -11,11 +11,11 @@ import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
 import llm_wire/message.{type Provider}
 import llm_wire/testing
 import mist
@@ -163,7 +163,8 @@ fn providers_handler(
       let document_id = marker(text)
       let attempt = process.call(calls, 1000, Record(document_id, _))
       case dict.get(table, document_id) {
-        Error(Nil) -> provider_error(wire, 400, "unknown document")
+        Error(Nil) ->
+          serve_reply(wire, testing.http_status(wire, 400, "unknown document"))
         Ok(document) -> answer(wire, document.behavior, attempt)
       }
     }
@@ -188,78 +189,40 @@ fn answer(
   attempt: Int,
 ) -> Response(mist.ResponseData) {
   case behavior {
-    Answer(output) -> sse(wire, output)
+    Answer(output) -> serve_reply(wire, text_reply(output))
     RateLimitedOnce(seconds, _) if attempt == 1 ->
-      provider_error(wire, 429, "rate limited")
-      |> response.set_header("retry-after", int.to_string(seconds))
-    RateLimitedOnce(_, output) -> sse(wire, output)
-    AlwaysStatus(429) ->
-      provider_error(wire, 429, "rate limited")
-      |> response.set_header("retry-after", "2")
-    AlwaysStatus(status) -> provider_error(wire, status, "unavailable")
+      rate_limited(wire, duration.seconds(seconds))
+    RateLimitedOnce(_, output) -> serve_reply(wire, text_reply(output))
+    AlwaysStatus(429) -> rate_limited(wire, duration.seconds(2))
+    AlwaysStatus(status) ->
+      serve_reply(wire, testing.http_status(wire, status, "unavailable"))
   }
 }
 
-/// The provider's own wire for a text answer, lowered by llm_wire's testing
-/// module instead of written event by event.
-fn sse(wire: Provider, output: String) -> Response(mist.ResponseData) {
-  let reply =
-    testing.text(output)
-    |> testing.with_usage(message.Usage(120, 80, 200))
-    |> testing.events_for(wire, _)
-  let chunks = case reply {
-    testing.Events(chunks) | testing.Interrupted(chunks) -> chunks
-    testing.Status(..) -> []
-  }
-  response.new(200)
-  |> response.set_header("content-type", "text/event-stream")
-  |> response.set_body(
-    mist.Bytes(bytes_tree.from_string(string.concat(chunks))),
-  )
-}
-
-fn provider_error(
+fn rate_limited(
   wire: Provider,
-  status: Int,
-  message: String,
+  delay: Duration,
 ) -> Response(mist.ResponseData) {
-  let body = case wire {
-    message.OpenAI | message.Custom(_) ->
-      json.object([
-        #(
-          "error",
-          json.object([
-            #("message", json.string(message)),
-            #("type", json.string("rate_limit_error")),
-          ]),
-        ),
-      ])
-    message.Anthropic ->
-      json.object([
-        #("type", json.string("error")),
-        #(
-          "error",
-          json.object([
-            #("type", json.string("rate_limit_error")),
-            #("message", json.string(message)),
-          ]),
-        ),
-      ])
-    message.Google ->
-      json.object([
-        #(
-          "error",
-          json.object([
-            #("code", json.int(status)),
-            #("message", json.string(message)),
-            #("status", json.string("RESOURCE_EXHAUSTED")),
-          ]),
-        ),
-      ])
-  }
-  response.new(status)
-  |> response.set_header("content-type", "application/json")
-  |> response.set_body(mist.Bytes(bytes_tree.from_string(json.to_string(body))))
+  testing.http_response(wire, testing.rate_limited(wire))
+  |> testing.with_retry_after_header(delay)
+  |> to_mist
+}
+
+fn text_reply(output: String) -> testing.Reply {
+  testing.text(output) |> testing.with_usage(message.Usage(120, 80, 200))
+}
+
+/// A reply in `wire`'s own format, lowered by llm_wire's testing module:
+/// status, content type and body for a success, an error status or a stream.
+fn serve_reply(
+  wire: Provider,
+  reply: testing.Reply,
+) -> Response(mist.ResponseData) {
+  to_mist(testing.http_response(wire, reply))
+}
+
+fn to_mist(http: Response(String)) -> Response(mist.ResponseData) {
+  response.map(http, fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
 }
 
 fn text_response(status: Int, text: String) -> Response(mist.ResponseData) {

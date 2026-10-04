@@ -29,6 +29,7 @@ import json/blueprint/codec
 import llm_wire
 import llm_wire/error
 import llm_wire/message
+import llm_wire/testing as wire_testing
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -172,19 +173,17 @@ pub fn same_extraction_runs_on_three_providers_test() {
     == [Ok(fixtures.acme()), Ok(fixtures.acme()), Ok(fixtures.acme())]
   assert scripted.provider_calls(services, "acme") == 3
   // A 429 from each provider wire becomes the same Grind decision.
-  let decisions =
+  let delays =
     list.map([llm.OpenAi, llm.Anthropic, llm.Google], fn(provider) {
       let model =
         llm.model(provider, scripted.providers_base(services), "sk-scripted")
       let assert Error(failure) =
         llm.extract(http.llm, model, "throttled", text)
-      outcome.decide(outcome.ExtractFailed(failure))
+      let assert outcome.Snooze(delay, _) =
+        outcome.decide(outcome.ExtractFailed(failure))
+      delay
     })
-  assert decisions
-    == list.repeat(
-      outcome.Snooze(duration.seconds(2), "provider answered 429"),
-      3,
-    )
+  assert delays == list.repeat(duration.seconds(2), 3)
   clients.stop(http)
 }
 
@@ -216,21 +215,30 @@ pub fn nullable_output_field_is_not_portable_to_google_test() {
 pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
   // The pure mapping: llm_wire's typed hint becomes a Grind snooze.
   let rate_limited =
-    llm.CallFailed(llm_wire.Failure(
-      error: error.Status(429, "{}", Some(duration.seconds(1))),
-      sent: llm_wire.Completed,
-      partial_output: False,
-      provider: message.Anthropic,
-      usage: None,
-    ))
-  assert outcome.decide(outcome.ExtractFailed(rate_limited))
-    == outcome.Snooze(duration.seconds(1), "provider answered 429")
+    wire_testing.failure(
+      message.Anthropic,
+      error.Status(429, "{}", Some(duration.seconds(1))),
+    )
+  let assert outcome.Snooze(delay, _) =
+    outcome.decide(outcome.ExtractFailed(llm.CallFailed(rate_limited)))
+  assert delay == duration.seconds(1)
   let assert worker.Snoozed(after:, ..) =
-    outcome.to_response(outcome.Snooze(
-      duration.seconds(1),
-      "provider answered 429",
-    ))
+    outcome.to_response(outcome.Snooze(delay, "provider answered 429"))
   assert after == duration.seconds(1)
+
+  // No hint means backoff, which spends an attempt; an unbounded hint is cut.
+  let overloaded =
+    wire_testing.failure(message.OpenAI, error.Status(503, "{}", None))
+  let assert outcome.Retry(outcome.Transient(outcome.Extract, _)) =
+    outcome.decide(outcome.ExtractFailed(llm.CallFailed(overloaded)))
+  let parked =
+    wire_testing.failure(
+      message.OpenAI,
+      error.Status(429, "{}", Some(duration.hours(3))),
+    )
+  let assert outcome.Snooze(delay, _) =
+    outcome.decide(outcome.ExtractFailed(llm.CallFailed(parked)))
+  assert delay == outcome.longest_snooze()
 
   // End to end: the first call is refused, the job is snoozed, the second
   // call succeeds.
@@ -529,12 +537,9 @@ pub fn http_failures_are_decided_by_kind_test() {
   let extract = fn(reason, evidence) {
     outcome.decide(
       outcome.ExtractFailed(
-        llm.CallFailed(llm_wire.Failure(
-          error: error.Http(http_error.new(reason, evidence)),
-          sent: llm_wire.NotSent,
-          partial_output: False,
-          provider: message.OpenAI,
-          usage: None,
+        llm.CallFailed(wire_testing.failure(
+          message.OpenAI,
+          error.Http(http_error.new(reason, evidence)),
         )),
       ),
     )
