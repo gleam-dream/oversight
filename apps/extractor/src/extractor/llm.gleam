@@ -63,7 +63,7 @@ pub fn model(provider: Provider, base_url: String, api_key: String) -> Model {
     Google -> #(
       google.new(api_key) |> google.config,
       "/google/v1beta",
-      "gemini-2.5-flash",
+      "gemini-3.8-flash",
     )
   }
   Model(

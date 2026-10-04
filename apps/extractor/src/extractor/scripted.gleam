@@ -27,6 +27,12 @@ pub type Behavior {
   RateLimitedOnce(retry_after_seconds: Int, output: String)
   /// Every call gets this HTTP status (429 carries `Retry-After: 2`).
   AlwaysStatus(status: Int)
+  /// The provider's content filter stops the output after `partial_text`.
+  ContentFiltered(partial_text: String)
+  /// The provider's content filter blocks the prompt. Only Gemini's wire
+  /// carries this as a stop; OpenAI and Anthropic reject such a prompt with
+  /// HTTP 400, which is a plain status error.
+  PromptBlocked
 }
 
 pub type Body {
@@ -193,6 +199,14 @@ fn answer(
     RateLimitedOnce(seconds, _) if attempt == 1 ->
       rate_limited(wire, duration.seconds(seconds))
     RateLimitedOnce(_, output) -> serve_reply(wire, text_reply(output))
+    ContentFiltered(partial_text) ->
+      serve_reply(wire, testing.content_filtered(partial_text))
+    PromptBlocked ->
+      case wire {
+        message.Google -> serve_reply(wire, testing.prompt_blocked())
+        message.OpenAI | message.Anthropic | message.Custom(_) ->
+          serve_reply(wire, testing.http_status(wire, 400, "prompt rejected"))
+      }
     AlwaysStatus(429) -> rate_limited(wire, duration.seconds(2))
     AlwaysStatus(status) ->
       serve_reply(wire, testing.http_status(wire, status, "unavailable"))
