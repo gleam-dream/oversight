@@ -4,13 +4,18 @@ The [release API review](README.md) left five decisions that block the most
 work. Each section states the context, the options with their trade-offs, and
 a recommendation.
 
-| Decision                | Status (2 October 2026)                                                                   |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| 1. Durability ownership | Deferred. The owner explores 1 and 2 together before deciding.                            |
-| 2. Graph runtime in 1.0 | Deferred with decision 1.                                                                 |
-| 3. Correlation shape    | Accepted: opaque string up to 128 bytes, W3C trace id valid, `causation` deferred.        |
-| 4. Definition bugs      | Accepted: panic for source definitions; typed errors and `check` for runtime definitions. |
-| 5. Default numbers      | Accepted: the table in section 5.                                                         |
+| Decision                | Status                                                                                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Durability ownership | Deferred. Option B (the graph runtime leaves fabric) is ruled out by decision 2.                                                                                                                      |
+| 2. Graph runtime in 1.0 | Decided (3 October 2026): the graph runtime stays in fabric and ships in fabric 1.0, under the same semver promise. FABRIC-R5 (one vocabulary) and the graph parts of R4, R7 and R15 must land first. |
+| 3. Correlation shape    | Accepted: opaque string up to 128 bytes, W3C trace id valid, `causation` deferred.                                                                                                                    |
+| 4. Definition bugs      | Accepted: panic for source definitions; typed errors and `check` for runtime definitions.                                                                                                             |
+| 5. Default numbers      | Accepted: the table in section 5. Approval and graph waits default to 7 days for new runs; records stored without a deadline keep none (3 October 2026).                                              |
+
+Package decisions taken with these (3 October 2026):
+
+- **fabric reviewer:** a typed caller identity, not a string. An answer to an approval names its reviewer with a fabric `Reviewer` value, built by the application from an authenticated identity.
+- **fabric approval expiry:** 7 days by default (decision 5). An expired approval rejects the action, and the model sees the rejection. The default is configurable, with an explicit `Infinity`.
 
 ## 1. Durability ownership
 
@@ -67,7 +72,9 @@ same semver promise; a module cannot be marked experimental.
 | **Ship it as `fabric_graph` 0.x**, depending on fabric for the shared types. | The agent API stabilizes first. The graph API can still change freely. The fabric 1.0 surface is about 112 functions. | One more package. Graph users add a dependency. The failure, policy and approval types must live in fabric core so both packages share them. |
 | **Keep it in fabric, documented as unstable.**                               | No package split.                                                                                                     | The semver promise still covers it. Breaking it in a minor release violates semver, and holding it stable is the first option.               |
 
-**Recommendation: `fabric_graph` at 0.x**, consistent with decision 1. Do the
+**Outcome.** The owner chose the first option: ship it in fabric 1.0.
+
+**Recommendation at the time: `fabric_graph` at 0.x**, consistent with decision 1. Do the
 vocabulary work of fabric R5 in fabric core first: one `tool.Failure`, one
 `policy.Action`, one approval and cancel shape, and `fn(RunId) -> context`.
 The graph package then reuses those types, and moving it later costs only an

@@ -179,17 +179,20 @@ and a panic with the offending key (sinal Q2, json_blueprint Q2).
 
 ### 9. Shared vocabulary
 
-| Concept                       | Name                                                                                     |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| configuration                 | `config` (not `settings`)                                                                |
-| setters                       | `with_<option>`                                                                          |
-| telemetry module              | `<pkg>/telemetry` (not `observation`)                                                    |
-| test support                  | `<pkg>/testing`, with an in-process fake of every external party                         |
-| machinery                     | `<pkg>/internal/…`; no `@internal pub` functions in public modules (grind 59, fabric 72) |
-| correlation                   | `sinal/correlation.Correlation`, carried as the `correlation` metadata field             |
-| JSON                          | `gleam/json.Json` and `gleam/dynamic/decode.Decoder` as the shared currency              |
-| submission evidence           | `NotSent`, `MaybeSent`, `Completed`                                                      |
-| durable reference and run ids | accepted from the caller wherever a caller needs idempotency                             |
+| Concept                       | Name                                                                                                                                                          |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| configuration                 | `config` (not `settings`)                                                                                                                                     |
+| setters                       | `with_<option>`                                                                                                                                               |
+| telemetry module              | `<pkg>/telemetry` (not `observation`)                                                                                                                         |
+| test support                  | `<pkg>/testing`, with an in-process fake of every external party                                                                                              |
+| machinery                     | `<pkg>/internal/…`; no `@internal pub` functions in public modules (grind 59, fabric 72)                                                                      |
+| correlation                   | `sinal/correlation.Correlation`, carried as the `correlation` metadata field                                                                                  |
+| JSON                          | `gleam/json.Json` and `gleam/dynamic/decode.Decoder` as the shared currency                                                                                   |
+| submission evidence           | `NotSent`, `MaybeSent`, `Completed`                                                                                                                           |
+| durable reference and run ids | accepted from the caller wherever a caller needs idempotency                                                                                                  |
+| correlation on the wire       | `x-correlation-id` header; `io.github.gleam-dream/correlation` in MCP `_meta`. Untrusted input, never used to authorize. Not sent to third parties by default |
+| idempotency key on the wire   | `io.github.gleam-dream/idempotency-key` in MCP `_meta`: 1–128 visible ASCII, keyed by the authenticated principal                                             |
+| stored-record growth          | new fields are optional on read, so records an earlier release wrote keep reading (saga checkpoint format 2, fabric fixtures)                                 |
 
 ### 10. Docs are part of the API
 
