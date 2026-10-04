@@ -15,7 +15,6 @@ import gleam/string
 import gleam/time/duration
 import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
-import support_desk/approvers
 import support_desk/desk
 import support_desk/domain.{type Resolution}
 import support_desk/ledger
@@ -30,6 +29,9 @@ pub type Approver {
   RejectBecause(String)
   /// Tries to answer with no credential first (refused), then does this.
   AnonymousFirst(Approver)
+  /// Signs in as this subject, who lacks the approver scope, and tries to
+  /// approve (refused), then does the next.
+  UnscopedFirst(String, Approver)
 }
 
 pub fn main() -> Nil {
@@ -56,7 +58,12 @@ pub fn main() -> Nil {
     "Order A-300 never worked, refund it.",
     ApproveAs("alice"),
   )
-  handle_ticket(app, "T-4", "Refund order A-400 please.", ApproveAs("bob"))
+  handle_ticket(
+    app,
+    "T-4",
+    "Refund order A-400 please.",
+    UnscopedFirst("mallory", ApproveAs("bob")),
+  )
   handle_ticket(
     app,
     "T-5",
@@ -138,11 +145,13 @@ fn drive(
       let answered = answer(app, handle, pending, session, approver)
       case answered {
         Ok(_) -> drive(app, handle, session, approver)
-        Error(desk.NotAuthenticated(error)) -> {
-          io.println("  refused, still pending: " <> approvers.describe(error))
+        Error(desk.Refused(error)) -> refused(error)
+        Error(error) -> {
+          io.println(
+            "  refused, still pending: " <> desk.describe_answer_error(error),
+          )
           drive(app, handle, session, retry(approver))
         }
-        Error(desk.Refused(error)) -> refused(error)
       }
     }
     Ok(run.Suspended([], [uncertain, ..])) -> {
@@ -179,7 +188,12 @@ fn answer(
   case approver {
     AnonymousFirst(_) -> {
       io.println("  someone with no sign-in tries to approve")
-      desk.approve(app.desk, handle, pending, approvers.Anonymous, session)
+      desk.approve(app.desk, handle, pending, app.anonymous, session)
+    }
+    UnscopedFirst(subject, _) -> {
+      io.println("  " <> subject <> " signs in and tries to approve")
+      let assert Ok(credential) = app.sign_in(app, subject)
+      desk.approve(app.desk, handle, pending, credential, session)
     }
     ApproveAs(subject) -> {
       let assert Ok(credential) = app.sign_in(app, subject)
@@ -212,6 +226,7 @@ fn answer(
 fn retry(approver: Approver) -> Approver {
   case approver {
     AnonymousFirst(next) -> next
+    UnscopedFirst(_, next) -> next
     other -> other
   }
 }

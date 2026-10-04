@@ -11,7 +11,7 @@ import gleam/time/duration.{type Duration}
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
-import support_desk/approvers.{type Credential}
+import support_desk/approvers
 import support_desk/desk.{type Desk, type Session}
 import support_desk/domain.{type Resolution}
 import support_desk/ledger.{type Ledger}
@@ -45,6 +45,16 @@ pub const audience = "https://support-desk.test"
 
 const callback = "https://support-desk.test/callback"
 
+/// What a signed-in approver is granted: `openid` and the scope that lets
+/// them answer the desk's refund requirement.
+fn approver_scopes() -> List(String) {
+  ["openid", "approve:" <> desk.approver.name]
+}
+
+/// The credential of a caller who presented nothing. `check` refuses it as
+/// not authenticated.
+pub const anonymous = ""
+
 /// The ordinary configuration: default agent limits and a one-second
 /// budget for the shop's APIs.
 pub fn start() -> Result(App, String) {
@@ -74,6 +84,12 @@ pub fn start_with(
   use identity <- result.try(
     testing.provider_options()
     |> testing.with_access_token_audiences([audience])
+    // The scope `approve:<requirement name>` is what lets an approver
+    // answer; mallory signs in but may not.
+    |> testing.with_granted_scopes("alice", approver_scopes())
+    |> testing.with_granted_scopes("bob", approver_scopes())
+    |> testing.with_granted_scopes("carol", approver_scopes())
+    |> testing.with_granted_scopes("mallory", ["openid"])
     |> testing.start_provider
     |> result.replace_error("identity provider did not start"),
   )
@@ -98,7 +114,7 @@ pub fn start_with(
       provider_url: provider.base_url,
       shop:,
       ledger:,
-      approvers: approvers.new(resource.new(warden, audience:)),
+      approvers: approvers.warden_approvers(resource.new(warden, audience:)),
       tune:,
     )),
   )
@@ -109,7 +125,7 @@ pub fn start_with(
 /// desk. The scripted provider's login page signs `subject` in; the request
 /// the browser would make is played in process, as Warden's reference
 /// consumer does.
-pub fn sign_in(app: App, subject: String) -> Result(Credential, String) {
+pub fn sign_in(app: App, subject: String) -> Result(String, String) {
   use redirect <- result.try(
     warden.begin_login(app.warden, request.new(), warden.default_login())
     |> result.map_error(warden.describe_login_error),
@@ -126,7 +142,7 @@ pub fn sign_in(app: App, subject: String) -> Result(Credential, String) {
     warden.access_token(app.warden, session)
     |> result.map_error(warden.describe_session_error),
   )
-  approvers.Bearer(warden.access_token_value(access.token))
+  warden.access_token_value(access.token)
 }
 
 pub fn stop(app: App) -> Nil {

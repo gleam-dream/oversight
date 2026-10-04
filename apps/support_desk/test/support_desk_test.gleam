@@ -1,5 +1,6 @@
 import fabric
 import fabric/agent
+import fabric/approvers as fabric_approvers
 import fabric/reviewer
 import fabric/run
 import gleam/list
@@ -22,6 +23,7 @@ import support_desk/refund
 import support_desk/services
 import support_desk/shop
 import support_desk/telemetry
+import warden/resource
 import warden/testing
 
 pub fn main() -> Nil {
@@ -45,7 +47,7 @@ fn open(
 
 /// The approver signs in at the scripted OIDC provider and holds the
 /// access token it issued.
-fn signed_in(app: App, subject: String) -> approvers.Credential {
+fn signed_in(app: App, subject: String) -> String {
   let assert Ok(credential) = app.sign_in(app, subject)
   credential
 }
@@ -102,10 +104,18 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
     list.find(snapshot.actions, fn(action) {
       action.call.name == "issue_refund"
     })
-  let assert [run.Approval(reviewer: Some(who), answer: run.Approve, ..)] =
-    refund.approvals
+  let assert [
+    run.Approval(
+      reviewer: Some(who),
+      answer: run.Approve,
+      verifier: Some(verifier),
+      ..,
+    ),
+  ] = refund.approvals
   assert reviewer.subject(who) == "alice"
   assert reviewer.issuer(who) == Some(testing.issuer(app.identity))
+  // The name the approvers were built with.
+  assert verifier == "warden"
   app.stop(app)
 }
 
@@ -277,10 +287,10 @@ fn refused_and_still_pending(
   app: App,
   handle: fabric.Run(desk.Session, Resolution),
   session: desk.Session,
-  credential: approvers.Credential,
-) -> approvers.Error {
+  credential: String,
+) -> desk.AnswerError {
   let pending = awaiting_refund_approval(handle)
-  let assert Error(desk.NotAuthenticated(error)) =
+  let assert Error(error) =
     desk.approve(app.desk, handle, pending, credential, session)
   // The same approval can still be answered: fabric never saw the refusal.
   let _ = awaiting_refund_approval(handle)
@@ -297,13 +307,12 @@ fn refused_and_still_pending(
 pub fn an_approval_without_a_credential_is_refused_test() {
   let assert Ok(app) = app.start()
   let #(session, handle) = open(app, "T-16", "Refund order A-100.", 0)
-  let error =
-    refused_and_still_pending(app, handle, session, approvers.Anonymous)
-  assert error == approvers.NotSignedIn
+  let assert desk.NotAuthenticated(_) =
+    refused_and_still_pending(app, handle, session, app.anonymous)
   // Rejecting needs the same authentication.
   let pending = awaiting_refund_approval(handle)
-  let assert Error(desk.NotAuthenticated(approvers.NotSignedIn)) =
-    desk.reject(app.desk, handle, pending, approvers.Anonymous, reason: "no")
+  let assert Error(desk.NotAuthenticated(_)) =
+    desk.reject(app.desk, handle, pending, app.anonymous, reason: "no")
   // A signed-in approver then answers it.
   let assert Ok(_) =
     desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
@@ -317,10 +326,11 @@ pub fn an_expired_token_is_refused_test() {
   let expired =
     testing.access_token("alice")
     |> testing.with_audiences([app.audience])
+    |> testing.with_scopes(["approve:" <> desk.approver.name])
     |> testing.with_ttl(duration.seconds(-60))
     |> testing.issue_access_token(app.identity, _)
-  let assert approvers.Rejected(reason) =
-    refused_and_still_pending(app, handle, session, approvers.Bearer(expired))
+  let assert desk.NotAuthenticated(reason) =
+    refused_and_still_pending(app, handle, session, expired)
   assert string.contains(reason, "expired")
   app.stop(app)
 }
@@ -328,46 +338,69 @@ pub fn an_expired_token_is_refused_test() {
 pub fn invalid_tokens_are_refused_test() {
   let assert Ok(app) = app.start()
   let #(session, handle) = open(app, "T-18", "Refund order A-100.", 0)
-  let mint = fn(spec) {
-    approvers.Bearer(testing.issue_access_token(app.identity, spec))
-  }
+  let mint = fn(spec) { testing.issue_access_token(app.identity, spec) }
+  // Carries the approver scope, so only the forgery is at fault.
   let valid = fn() {
     testing.access_token("mallory")
     |> testing.with_audiences([app.audience])
+    |> testing.with_scopes(["approve:" <> desk.approver.name])
+  }
+  let refuse = fn(token) {
+    let assert desk.NotAuthenticated(_) =
+      refused_and_still_pending(app, handle, session, token)
+    Nil
   }
   // Unsigned, signed by an unpublished key, and not a token at all.
-  let assert approvers.Rejected(_) =
-    refused_and_still_pending(
-      app,
-      handle,
-      session,
-      mint(testing.forged(valid(), testing.UnsignedToken)),
-    )
-  let assert approvers.Rejected(_) =
-    refused_and_still_pending(
-      app,
-      handle,
-      session,
-      mint(testing.forged(valid(), testing.UnknownKey)),
-    )
-  let assert approvers.Rejected(_) =
-    refused_and_still_pending(app, handle, session, approvers.Bearer("alice"))
+  refuse(mint(testing.forged(valid(), testing.UnsignedToken)))
+  refuse(mint(testing.forged(valid(), testing.UnknownKey)))
+  refuse("alice")
   // A token that claims another issuer.
-  let assert approvers.Rejected(_) =
-    refused_and_still_pending(
-      app,
-      handle,
-      session,
-      mint(testing.with_issuer(valid(), "https://evil.test")),
-    )
+  refuse(mint(testing.with_issuer(valid(), "https://evil.test")))
   // A genuine token minted for another resource.
-  assert refused_and_still_pending(
-      app,
-      handle,
-      session,
-      mint(testing.with_audiences(valid(), ["https://billing.test"])),
+  refuse(mint(testing.with_audiences(valid(), ["https://billing.test"])))
+  app.stop(app)
+}
+
+pub fn a_signed_in_approver_without_the_scope_is_not_authorized_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-19", "Refund order A-100.", 0)
+  // mallory signs in at the provider like anyone, but is granted `openid`
+  // only. The token is genuine; it may not answer `refund-approver`.
+  let mallory = signed_in(app, "mallory")
+  let assert desk.NotAuthorized(reason) =
+    refused_and_still_pending(app, handle, session, mallory)
+  assert string.contains(reason, "approve:refund-approver")
+  // Rejecting is refused the same way, and the approval stays pending.
+  let pending = awaiting_refund_approval(handle)
+  let assert Error(desk.NotAuthorized(_)) =
+    desk.reject(app.desk, handle, pending, mallory, reason: "no")
+  let _ = awaiting_refund_approval(handle)
+  assert services.calls_matching(app.services, "POST") == []
+  // alice, granted the scope, answers it.
+  let assert Ok(_) =
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
+  assert finish(handle).outcome == domain.Refunded
+  app.stop(app)
+}
+
+pub fn a_proof_from_other_approvers_is_refused_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-20", "Refund order A-100.", 0)
+  let pending = awaiting_refund_approval(handle)
+  // The same recipe built again over the same validator is other approvers:
+  // only the value the agent was given answers.
+  let again =
+    approvers.warden_approvers(resource.new(app.warden, audience: app.audience))
+  let assert Ok(proof) =
+    fabric_approvers.check(
+      again,
+      signed_in(app, "alice"),
+      pending.reference.requirement,
     )
-    == approvers.WrongAudience
+  let assert Error(fabric.ProofRefused(fabric_approvers.OtherApprovers("warden"))) =
+    fabric.approve(handle, pending.reference, proof:, context: session)
+  let _ = awaiting_refund_approval(handle)
+  assert services.calls_matching(app.services, "POST") == []
   app.stop(app)
 }
 
