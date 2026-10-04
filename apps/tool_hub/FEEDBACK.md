@@ -517,6 +517,16 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   not an `Option`; `ExchangeKey` and the `Option` fallback in `key_of`
   remain only for `frame.rejected`.
 
+  **Status (round 7):** the failure side of the join is resolved by relay
+  a46a3da and 166ddd6. `client.Error` is opaque and
+  `client.error_correlation(error)` returns the correlation the call was
+  sent with, which here is the question's own (`client.with_correlation`), so
+  a cancelled or timed-out call joins the server's events. The two tests that
+  matched `Cancelled(MaybeSent)` and `TimedOut(MaybeSent)` now match
+  `client.reason(error)` (test lines 692 and 727); the app code logs no client
+  failure, so nothing else changed. 15 tests pass, `gleam run` prints the
+  same trail.
+
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
 - **Packages**: fabric, relay. **Kind**: ergonomics. **Severity**: minor.
