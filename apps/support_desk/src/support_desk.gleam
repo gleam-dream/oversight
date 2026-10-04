@@ -1,16 +1,21 @@
-//// `gleam run`: five support tickets through the desk, with the approver's
-//// decisions scripted, then one ticket's telemetry trail.
+//// `gleam run`: five support tickets through the desk. Each approver signs
+//// in through a scripted OIDC provider, and their decisions are scripted.
+//// Then one ticket's telemetry trail.
 
 import fabric
+import fabric/reviewer.{type Reviewer}
 import fabric/run
 import fabric/tool
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option
+import gleam/result
 import gleam/string
 import gleam/time/duration
 import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
+import support_desk/approvers
 import support_desk/desk
 import support_desk/domain.{type Resolution}
 import support_desk/ledger
@@ -19,8 +24,12 @@ import support_desk/telemetry
 
 /// What the human approver does with a pending refund.
 pub type Approver {
+  /// Signs in as this subject, then approves.
   ApproveAs(String)
+  /// Signs in as "carol", then rejects.
   RejectBecause(String)
+  /// Tries to answer with no credential first (refused), then does this.
+  AnonymousFirst(Approver)
 }
 
 pub fn main() -> Nil {
@@ -33,7 +42,7 @@ pub fn main() -> Nil {
       app,
       "T-1",
       "Please refund order A-100, it arrived broken.",
-      ApproveAs("alice"),
+      AnonymousFirst(ApproveAs("alice")),
     )
   handle_ticket(
     app,
@@ -111,11 +120,12 @@ pub fn handle_ticket(
     _ -> Nil
   }
   let run_id = run.id_to_string(fabric.id(handle))
-  drive(handle, session, approver)
+  drive(app, handle, session, approver)
   #(ticket, run_id)
 }
 
 fn drive(
+  app: App,
   handle: fabric.Run(desk.Session, Resolution),
   session: desk.Session,
   approver: Approver,
@@ -125,28 +135,21 @@ fn drive(
       io.println(
         "  approval needed: " <> pending.tool <> " " <> pending.arguments_json,
       )
-      let answered = case approver {
-        ApproveAs(name) -> {
-          io.println("  " <> name <> " approves")
-          let assert Ok(reviewer) = desk.approver_named(name)
-          fabric.approve(handle, pending.reference, reviewer:, context: session)
-        }
-        RejectBecause(reason) -> {
-          io.println("  approver rejects: " <> reason)
-          let assert Ok(reviewer) = desk.approver_named("carol")
-          fabric.reject(handle, pending.reference, reason:, reviewer:)
-        }
-      }
+      let answered = answer(app, handle, pending, session, approver)
       case answered {
-        Ok(_) -> drive(handle, session, approver)
-        Error(error) -> refused(error)
+        Ok(_) -> drive(app, handle, session, approver)
+        Error(desk.NotAuthenticated(error)) -> {
+          io.println("  refused, still pending: " <> approvers.describe(error))
+          drive(app, handle, session, retry(approver))
+        }
+        Error(desk.Refused(error)) -> refused(error)
       }
     }
     Ok(run.Suspended([], [uncertain, ..])) -> {
       io.println("  uncertain effect, run paused: " <> uncertain.evidence)
       io.println("  operator reconciles: refund unconfirmed, finance checking")
       case fabric.reconcile(handle, uncertain.reference, unconfirmed()) {
-        Ok(_) -> drive(handle, session, approver)
+        Ok(_) -> drive(app, handle, session, approver)
         Error(error) -> refused(error)
       }
     }
@@ -163,6 +166,61 @@ fn drive(
     Ok(other) -> io.println("  stuck: " <> string.inspect(other))
     Error(error) -> refused(error)
   }
+}
+
+/// One approver's attempt at the pending approval.
+fn answer(
+  app: App,
+  handle: fabric.Run(desk.Session, Resolution),
+  pending: run.PendingApproval,
+  session: desk.Session,
+  approver: Approver,
+) -> Result(Reviewer, desk.AnswerError) {
+  case approver {
+    AnonymousFirst(_) -> {
+      io.println("  someone with no sign-in tries to approve")
+      desk.approve(app.desk, handle, pending, approvers.Anonymous, session)
+    }
+    ApproveAs(subject) -> {
+      let assert Ok(credential) = app.sign_in(app, subject)
+      use reviewer <- result.map(desk.approve(
+        app.desk,
+        handle,
+        pending,
+        credential,
+        session,
+      ))
+      io.println("  approved by " <> who(reviewer))
+      reviewer
+    }
+    RejectBecause(reason) -> {
+      let assert Ok(credential) = app.sign_in(app, "carol")
+      use reviewer <- result.map(desk.reject(
+        app.desk,
+        handle,
+        pending,
+        credential,
+        reason,
+      ))
+      io.println("  rejected by " <> who(reviewer) <> ": " <> reason)
+      reviewer
+    }
+  }
+}
+
+/// The attempt that follows a refused one.
+fn retry(approver: Approver) -> Approver {
+  case approver {
+    AnonymousFirst(next) -> next
+    other -> other
+  }
+}
+
+fn who(person: Reviewer) -> String {
+  reviewer.subject(person)
+  <> " (issuer "
+  <> option.unwrap(reviewer.issuer(person), "none")
+  <> ")"
 }
 
 /// A command Fabric refused: retry what may succeed later, report the rest.

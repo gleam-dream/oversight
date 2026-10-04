@@ -274,13 +274,17 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
           )),
         )
       }
-      case m.milestone {
+      case m.client, m.milestone {
+        // Warden's own client ("warden") sends the approvers' sign-in and
+        // key requests. They belong to a person's sign-in, which spans
+        // tickets, so they are not a ticket's events.
+        Some("warden"), _ -> Nil
         // Only the outcome-bearing milestones; admission steps are noise.
-        http_obs.ResponseHeaders(status) ->
+        _, http_obs.ResponseHeaders(status) ->
           http("response.headers", int.to_string(status))
-        http_obs.HttpTerminated(outcome) ->
+        _, http_obs.HttpTerminated(outcome) ->
           http("terminated", string.inspect(outcome))
-        _ -> Nil
+        _, _ -> Nil
       }
     }),
     sinal.observe(llm_obs.event(), fn(_, m) {

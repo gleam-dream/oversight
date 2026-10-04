@@ -26,6 +26,7 @@ import http_gun
 import llm_wire
 import llm_wire/openai
 import sinal/correlation.{type Correlation}
+import support_desk/approvers.{type Approvers, type Credential}
 import support_desk/domain.{
   type Eligibility, type OrderQuery, type Resolution, Eligibility,
 }
@@ -55,6 +56,7 @@ pub type Desk {
     agent: Agent(Session, Resolution),
     shop: Shop,
     ledger: Ledger,
+    approvers: Approvers,
   )
 }
 
@@ -69,6 +71,8 @@ pub type Settings {
     provider_url: String,
     shop: Shop,
     ledger: Ledger,
+    /// Who may answer an approval.
+    approvers: Approvers,
     /// Adjusts the agent's spec before it is built: the limits, for one.
     tune: fn(agent.Spec(Session, Resolution)) -> agent.Spec(Session, Resolution),
   )
@@ -81,7 +85,7 @@ pub fn start(settings: Settings) -> Result(Desk, String) {
     |> result.map_error(fn(error) { "store: " <> string.inspect(error) }),
   )
   use agent <- result.map(build(settings))
-  Desk(runs, agent, settings.shop, settings.ledger)
+  Desk(runs, agent, settings.shop, settings.ledger, settings.approvers)
 }
 
 /// The one agent every ticket runs on. Each turn's request names its run's
@@ -208,14 +212,59 @@ pub fn close(
   events.answered(session.ticket, run.id_to_string(fabric.id(handle)), kind)
 }
 
-/// The approver the desk names on an answer. The desk has no sign-in: the
-/// name is whatever the operator console passes, so the reviewer carries no
-/// issuer, because nothing here vouches for the person. An application with
-/// an authenticated session builds this from its claims
-/// (`reviewer.with_issuer`).
-pub fn approver_named(name: String) -> Result(Reviewer, String) {
-  reviewer.new(name)
-  |> result.map_error(reviewer.describe_error)
+/// Why the desk did not record an answer to an approval.
+pub type AnswerError {
+  /// The credential did not authenticate an approver: nothing was sent to
+  /// fabric, and the approval is still pending.
+  NotAuthenticated(approvers.Error)
+  /// The approver is authenticated, and fabric refused the command.
+  Refused(fabric.Error)
+}
+
+pub fn describe_answer_error(error: AnswerError) -> String {
+  case error {
+    NotAuthenticated(error) -> approvers.describe(error)
+    Refused(error) -> fabric.describe_error(error)
+  }
+}
+
+/// Approves a pending refund as the person the credential authenticates.
+/// The reviewer is built from the token's validated `sub` and `iss`; a
+/// credential that does not validate never reaches fabric. Returns the
+/// reviewer that fabric recorded.
+pub fn approve(
+  desk: Desk,
+  handle: fabric.Run(Session, Resolution),
+  pending: run.PendingApproval,
+  credential credential: Credential,
+  context session: Session,
+) -> Result(Reviewer, AnswerError) {
+  use reviewer <- result.try(authenticate(desk, credential))
+  fabric.approve(handle, pending.reference, reviewer:, context: session)
+  |> result.map(fn(_) { reviewer })
+  |> result.map_error(Refused)
+}
+
+/// Rejects a pending refund as the person the credential authenticates.
+pub fn reject(
+  desk: Desk,
+  handle: fabric.Run(Session, Resolution),
+  pending: run.PendingApproval,
+  credential credential: Credential,
+  reason reason: String,
+) -> Result(Reviewer, AnswerError) {
+  use reviewer <- result.try(authenticate(desk, credential))
+  fabric.reject(handle, pending.reference, reason:, reviewer:)
+  |> result.map(fn(_) { reviewer })
+  |> result.map_error(Refused)
+}
+
+fn authenticate(
+  desk: Desk,
+  credential: Credential,
+) -> Result(Reviewer, AnswerError) {
+  approvers.authenticate(desk.approvers, credential)
+  |> result.map_error(NotAuthenticated)
 }
 
 /// Refunds at or above the session's threshold wait for an approver.
