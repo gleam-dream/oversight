@@ -340,6 +340,25 @@ Round 6 fixed the wave 5 API inconsistencies and verified structured output agai
 | llm_wire | Gemini's `codec.nullable` is still refused and was not tried live. `gemini-2.5-flash` is no longer offered to new users; the pinned fixtures still name it. | —    |
 | apps     | extractor discards a `ContentFiltered` job, but no test scripts it.                                                                                         | —    |
 
+### Round 7 results (4 October 2026)
+
+Round 7 closed the minor follow-ups. The owner approved a second set of live provider calls; no key was read into the conversation, and neither key appears in llm_wire's history or working tree.
+
+| Package or app | Result                                                                                                                                                                                                                                                                                                                                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| llm_wire       | Gemini structured output now accepts nullable values, optional fields, number ranges, pairs and `codec.value()`, verified live on `gemini-3.8-flash` (7 requests, all HTTP 200). Three new cassettes; the round 6 Google cassettes were re-recorded with the same results. Tests and the extractor app moved off the retired `gemini-2.5-flash`. 357 tests. |
+| relay          | `client.Error` is opaque and carries the call's context. Callers match `client.reason(error)` (`client.Reason`, the 16 variants with their original arities) and read `client.error_correlation(error)`, so a refused 401 names the correlation the server logged. Future per-call context won't break matches. 306 tests; conformance 108/108.             |
+| fabric         | A sub-agent or graph child record stored without `root` walks its parent chain (at most 64 links) to the exact root, and the next commit writes it back. A missing or unreadable ancestor falls back to the topmost readable one, flagged by `telemetry.root_inferred` and never stored. Core 777 tests; 44/44 checks.                                      |
+| support_desk   | Approvers sign in through warden. The typed reviewer is built from the validated token's `sub` and `iss`, and unauthenticated, expired, forged, foreign-issuer and wrong-audience approvals are refused. 19 tests.                                                                                                                                          |
+| extractor      | Content-filtered and prompt-blocked jobs are discarded after one call, with the provider's reason kept, across OpenAI, Anthropic and Google. 16 tests.                                                                                                                                                                                                      |
+
+**Follow-ups found during round 7:**
+
+| Package | Item                                                                                                                                  | Wave |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| fabric  | A hand-built `reviewer.new("x")` is accepted; fabric can't know whether a subject was authenticated. Documented as the caller's duty. | —    |
+| apps    | support_desk authenticates approvers but does not authorize them (any signed-in user may approve). That's app policy.                 | —    |
+
 ## sinal
 
 | Id        | Change                                                                                              | Breaks              | Effort | Wave | Status                                                     |
