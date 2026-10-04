@@ -480,6 +480,15 @@ period` status). The 41-line probe test
   `BearerToken` and so cannot apply `warden.with_correlation`. Local JWT
   mode sends no provider request per token, so nothing is left to join there.
 
+  **Status (wave 5):** resolved by relay db1d6e9 and warden 77da944. The
+  introspection verifier is `use token, correlation <- authorization.verifier(..)`
+  plus `warden.with_correlation(client, correlation)` (2 lines), and
+  `introspection_joins_mcp_request_test` shows the `[warden, http, request]`
+  line for `/introspect` carrying the MCP request's correlation next to
+  `authorization.decided`. A Relay client's own correlation now reaches the
+  server too (`client_correlation_reaches_server_test`: 9 events, see
+  "After wave 5"). One gap remains: the login flow's Warden calls carry no correlation.
+
 ### SMCP-10 Small gaps found on the way
 
 - **Packages**: grind, relay. **Kind**: ergonomics. **Severity**: nit.
@@ -1020,12 +1029,29 @@ clean.
   token that does not name this resource still fails in Warden. Either
   `resource.verifier` should accept an `audience_mismatch` error, or the
   docs should say that Relay's resource check is a second line only.
+
+  **Status (wave 5):** resolved by warden 77da944 and relay db1d6e9.
+  `resource.verifier(.., on_error: refuse)` maps `WrongAudience` to
+  `IssuedForAnotherResource`; `token_for_another_audience_test` now expects
+  "The access token was issued for another resource" with the metadata URL,
+  and the `gleam run` step 6 prints it. The telemetry decision is
+  `WrongResource`. One mapping function (`refuse`, 7 lines) replaces the two
+  positional error values.
+
 - **`resource.verifier` cannot express a 403.** It folds `Forbidden` into
   `rejected`, so a validator with `with_required_scopes` turns a missing
   scope into 401 `invalid_token` instead of 403. The README says to leave
   scopes to Relay, which works, but nothing in the types stops it, and its
   two error arguments have the same type `e`, so swapping
   `BearerRejected`/`VerifierUnavailable` compiles and inverts 401 and 503.
+
+  **Status (wave 5):** partly resolved by warden 77da944. `on_error: fn(ErrorKind) -> e`
+  is a total `case` over `Rejected | Forbidden | WrongAudience | Unavailable`, so the
+  compiler now checks the mapping and a swapped 401/503 needs a visibly wrong
+  arm. `Forbidden` still has no Relay variant to map to (it goes to
+  `BearerRejected`), so a validator with `with_required_scopes` still cannot
+  produce a 403 through a verifier.
+
 - **The wisp mount in Relay's guide drops streaming.** The guide's recipe is
   `http.handle` inside the wisp router; `handle` is buffered (listen gets
   406, no disconnect cancellation). The app dispatches `/mcp` at the mist
@@ -1038,6 +1064,11 @@ clean.
   introspection line in Warden's telemetry stands alone. Proposal (relay):
   pass `Option(Correlation)` to the verify function, or offer
   `authorization.verifier_with_correlation`.
+
+  **Status (wave 5):** resolved by relay db1d6e9: the verify function takes
+  `(BearerToken, Correlation)`. The JWT verifier ignores it
+  (`use token, _correlation <-`).
+
 - **`warden/testing` assumes an in-process browser.** `authorize(provider, redirect, subject:)`
   takes the opaque `LoginRedirect`, which only the app holds, and the
   provider answers 404 for `/authorize`. A black-box browser (this app's
@@ -1088,3 +1119,110 @@ SSE (above), and `attestation`'s table cell reads as labelled. Warden's
 guide is sufficient for login, sessions and introspection, but its two
 Relay snippets (the introspection example and, by reference, the README
 recipe) still use wave 3 Relay names and do not compile.
+
+## Re-run after wave 5
+
+Against relay db1d6e9, warden 77da944, llm_wire 727ab54 and saga 5c0d30b
+(local, unpushed); grind, sinal and json_blueprint unchanged. The app uses
+neither llm_wire nor saga, so only the relay and warden rows apply.
+
+### After wave 5
+
+**Tests.** `../scripts/with-postgres.sh gleam test`: 15 passed, no failures
+(13 before). `gleam format --check` is clean, the build has no warnings, and
+`gleam run` exits 0 and narrates the same eight steps; step 6 now prints
+"issued for another resource". Changed: `token_for_another_audience_test`
+(precise challenge), `telemetry_correlation_test` (Relay's events for the
+request are now five: `invocation.completed` and `exchange.closed` carry its
+correlation). Added: `client_correlation_reaches_server_test` and
+`introspection_joins_mcp_request_test`. After relay ca38f75,
+`telemetry_correlation_test` expects `client.call` among the request's six
+events (the client mints one per call).
+
+**Lines** (src and test, blank lines and comments included; `diff` against a
+copy taken before the change):
+
+| File              | Added | Removed | What                                                                            |
+| ----------------- | ----- | ------- | ------------------------------------------------------------------------------- |
+| `auth.gleam`      | 17    | 8       | `refuse` (7 lines), two-argument verifiers, `with_correlation` (1 line)         |
+| `tools.gleam`     | 3     | 6       | `Option(Correlation)` and its `case` gone; `job.with_correlation(report, c)`    |
+| `app.gleam`       | 5     | 6       | `request_correlation` returns `None` instead of minting                         |
+| `telemetry.gleam` | 36    | 8       | collector observers for `exchange.closed` and `client.call`; correlation fields |
+| tests             | 81    | 5       | two new tests, one reworded                                                     |
+| **Total**         | 142   | 33      |                                                                                 |
+
+(Figures from before ca38f75; that change swapped `optional(m.correlation)`
+for `correlation.to_string(m.correlation)` in eight observers, no net lines.)
+Of the 142 added lines 36 are telemetry observers (needed to measure the
+join, not to run the app), and 81 are tests. The migration itself is a net
++9 lines in `auth.gleam` and -3 in `tools.gleam`: wave 5 here adds
+correctness (the precise challenge, a joined introspection call), not
+deletions. The glue it removes is small: the `Option` unwrap in the tool
+(3 lines) and the "mint if absent" fallback in `request_correlation`
+(2 lines). The llm_wire, saga and `trust_anchor_der` changes touch nothing in
+this app (no hand-built failures, no per-step HTTP clients, no PEM decoding).
+
+**Measured: does a client's correlation join the server's events?** Yes, when
+the client sets one. With `mcp.with_correlation(peer, "client-trace-7")` and
+no `x-request-id`, one `generate_report` call yields 9 events under that
+value: relay `authorization.decided`, `request.admitted`,
+`invocation.started`, `invocation.completed`, `exchange.closed`, the client's
+own `client.call`, and grind `job.admitted`, `job.claimed`,
+`job.acknowledged`. In introspection mode the warden `/introspect` request
+joins it too (a `discover` call yields the provider call, `decided`,
+`admitted`, `exchange.closed` and `client.call` under one value). Grind's three events arrive through its forwarder,
+so their order against Relay's is not fixed; the test compares as a set.
+
+**Unattributed events** in the `gleam run` narration (40 lines, local JWT
+mode; relay ca38f75 makes the request-scoped `correlation` a `Correlation`,
+and the client mints one per call since b83486b): 6 carry none, down from 13.
+
+- 0 are `relay client.call`. The narrating client never calls
+  `with_correlation`, yet each of its 7 calls now shares its correlation with
+  the server's events for that request (3 to 9 events per value; the
+  `generate_report` call has 9). The earlier 7 unattributed client events
+  were the cost of the `Option` and the missing client mint.
+- 6 are `warden http.request`: discovery and `/jwks` twice (start-up, once per
+  Warden client) and two `/token` exchanges during sign-in. None belong to
+  an MCP request. The two `/token` calls could carry the browser request's
+  id through `warden.with_correlation` in `web.gleam`; this app does not do
+  it, because no wisp request id is available there without more glue.
+- 0 server-side events are unattributed: all 24 Relay server events and the 3
+  Grind events carry the request's correlation.
+
+**Remaining gaps.**
+
+- `Forbidden` has no Relay `VerificationError`, so a verifier cannot answer
+  403; the app relies on `admit` for scopes.
+- The app's `x-request-id` builder stays: Relay's default reads only
+  `x-correlation-id`, so the builder is now the one place that accepts
+  another proxy's header. It could be deleted if the app standardised on
+  `x-correlation-id`; the test for `x-request-id` would go with it.
+- Warden's own start-up and login calls have no MCP request to join.
+
+**New friction.**
+
+- **A refused request still hides the server's correlation from the caller.**
+  The client now mints one per call, so `client.call` joins; but a failing
+  `HttpStatus(401, _)` carries only the challenge, so a caller that did not
+  keep the minted value (it is on `client.call` only) cannot name the failed
+  request to an operator. Echoing it in a response header or in the error
+  would close it.
+- **The correlation is untrusted client input, and the verifier now receives
+  it.** `warden.with_correlation(client, correlation)` puts it on a provider
+  request and into warden's events. Relay says it never decides admission;
+  nothing says what Warden does with a 128-byte value from a stranger beyond
+  logging it. The doc recipe is right to apply it, but a one-line note on
+  both sides ("tags the provider call, not sent to the provider") would
+  close it. Not checked here: whether `with_correlation` adds a header to the
+  provider request.
+- **Ordering is not deterministic across forwarders.** Relay's events are
+  emitted in the request process; Grind's reach the collector through its
+  forwarder, so a trace with both packages must be compared as a set. Fine
+  for correlation, but the "one request, one ordered trace" reading of the
+  telemetry does not hold.
+- **`telemetry.gleam` grew** (+28 net) because every new Relay event wants its
+  own observer and each one repeats the `record(..)` call and `optional`
+  correlation formatting. A generic "observe all events of a package"
+  attachment, or a correlation accessor common to all metas, would remove
+  roughly half of it.

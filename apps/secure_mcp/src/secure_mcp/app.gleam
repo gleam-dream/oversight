@@ -5,7 +5,7 @@
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/int
-import gleam/option.{type Option, Some}
+import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -163,16 +163,15 @@ fn start_warden(configuration: config.Config) -> Result(warden.Client, String) {
 }
 
 /// The caller's `x-request-id` when it is a valid correlation (1 to 128
-/// bytes); otherwise a fresh one. The header is untrusted input, so it is
-/// validated where it enters the app. Relay puts it on its events and on
-/// each tool call.
+/// bytes). The header is untrusted input, so it is validated where it enters
+/// the app. Otherwise Relay falls back to the client's `x-correlation-id`
+/// (what `relay/client.with_correlation` sends), then to a fresh value.
 fn request_correlation(req: Request(BitArray)) -> Option(Correlation) {
   request.get_header(req, "x-request-id")
   |> result.try(fn(value) {
     correlation.from_string(value) |> result.replace_error(Nil)
   })
-  |> result.lazy_unwrap(correlation.unique)
-  |> Some
+  |> option.from_result
 }
 
 fn start_jobs(

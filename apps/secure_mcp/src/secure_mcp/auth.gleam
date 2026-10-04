@@ -17,16 +17,23 @@ pub type Principal {
 /// `typ` `at+jwt`, issuer, exact audience, `exp`, `nbf`/`iat`. No request per
 /// token, so a revoked token stays valid until it expires.
 pub fn jwt_verifier(validator: resource.Validator) -> Verifier(Principal) {
-  authorization.verifier(
-    "warden-jwt",
+  let verify =
     resource.verifier(
       validator,
       authorization.token_value,
       attest,
-      authorization.BearerRejected,
-      authorization.VerifierUnavailable,
-    ),
-  )
+      on_error: refuse,
+    )
+  use token, _correlation <- authorization.verifier("warden-jwt")
+  verify(token)
+}
+
+fn refuse(kind: resource.ErrorKind) -> authorization.VerificationError {
+  case kind {
+    resource.Rejected | resource.Forbidden -> authorization.BearerRejected
+    resource.WrongAudience -> authorization.IssuedForAnotherResource
+    resource.Unavailable -> authorization.VerifierUnavailable
+  }
 }
 
 fn attest(claims: resource.AccessClaims) -> Attestation(Principal) {
@@ -39,9 +46,11 @@ fn attest(claims: resource.AccessClaims) -> Attestation(Principal) {
 }
 
 /// RFC 7662 introspection: one provider request per MCP request, so a token
-/// revoked at the provider is refused at once.
+/// revoked at the provider is refused at once. The request's correlation tags
+/// the provider call, so it joins the MCP request in telemetry.
 pub fn introspection_verifier(client: warden.Client) -> Verifier(Principal) {
-  use token <- authorization.verifier("warden-introspection")
+  use token, correlation <- authorization.verifier("warden-introspection")
+  let client = warden.with_correlation(client, correlation)
   case warden.introspect(client, authorization.token_value(token)) {
     Ok(warden.ActiveToken(warden.TokenInfo(subject: Some(subject), ..) as info)) ->
       Ok(authorization.attestation(

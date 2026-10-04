@@ -69,7 +69,8 @@ event it collected.
   `codec.decoder`.
 - sinal: one collector attached to every package's descriptors; Relay and
   Grind events carry the request's `sinal/correlation`, taken from a valid
-  `x-request-id` header or generated.
+  `x-request-id` header, else the Relay client's `x-correlation-id`, else
+  generated; introspection mode puts it on the provider call as well.
 - wisp, mist: one listener for browser routes and MCP. pog: only through
   Grind, which owns the pool.
 

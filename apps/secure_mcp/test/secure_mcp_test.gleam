@@ -19,6 +19,7 @@ import secure_mcp/client
 import secure_mcp/reports.{ReportRequest, ReportStatus, StatusRequest}
 import secure_mcp/telemetry
 import secure_mcp/tools
+import sinal/correlation
 import warden
 import warden/testing
 
@@ -187,9 +188,9 @@ pub fn no_token_test() {
     == Ok(#(running.mcp_url, [testing.issuer(running.provider)], ["reports"]))
 }
 
-/// A token whose audience is another resource is refused by the JWT
-/// validator before Relay compares the resource, so the challenge is the
-/// generic `invalid_token`.
+/// A token whose audience is another resource is valid but not for this
+/// server: the JWT verifier maps Warden's `WrongAudience` to Relay's
+/// `IssuedForAnotherResource`, so the challenge names the precise cause.
 pub fn token_for_another_audience_test() {
   use running <- with_app
   let token =
@@ -202,8 +203,9 @@ pub fn token_for_another_audience_test() {
     refusal(running, Some(token))
   assert string.starts_with(
     challenge,
-    "Bearer error=\"invalid_token\", error_description=\"The access token is invalid or expired\"",
+    "Bearer error=\"invalid_token\", error_description=\"The access token was issued for another resource\"",
   )
+  assert string.contains(challenge, "resource_metadata=")
 }
 
 /// Users only see their own reports: another user's job id is "not found".
@@ -366,8 +368,17 @@ pub fn telemetry_correlation_test() {
       l.package == "relay" && field(l.detail, "correlation") == Ok(request_id)
     })
     |> list.map(fn(l) { l.event })
-  assert relay_events
-    == ["authorization.decided", "request.admitted", "invocation.started"]
+  // The client mints a correlation per call and sends it, so its own
+  // `client.call` joins the server's five events.
+  assert list.sort(relay_events, string.compare)
+    == [
+      "authorization.decided",
+      "client.call",
+      "exchange.closed",
+      "invocation.completed",
+      "invocation.started",
+      "request.admitted",
+    ]
   assert list.any(lines, fn(l) {
     l.event == "invocation.started"
     && field(l.detail, "tool") == Ok("generate_report")
@@ -423,4 +434,72 @@ pub fn request_id_header_correlation_test() {
   })
   assert !list.contains(correlations, string.repeat("x", 129))
   assert list.any(correlations, fn(c) { string.length(c) == 32 })
+}
+
+/// A Relay client's correlation reaches the server: with no `x-request-id`,
+/// the server's authorization, admission, invocation and exchange events, the
+/// client's own call event and the Grind job all carry the client's value.
+pub fn client_correlation_reaches_server_test() {
+  let assert Ok(collector) = telemetry.start()
+  let lines = {
+    use running <- with_app
+    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let assert Ok(trace) = correlation.from_string("client-trace-7")
+    let peer = mcp.with_correlation(connect(running, alice.access_token), trace)
+    let job_id = generate(peer, "2026-Q1")
+    let _ = await_job(running, job_id)
+    mcp.close(peer)
+    process.sleep(100)
+    telemetry.lines(collector)
+  }
+  telemetry.stop(collector)
+  let events =
+    lines
+    |> list.filter(fn(l) {
+      field(l.detail, "correlation") == Ok("client-trace-7")
+    })
+    |> list.map(fn(l) { l.package <> " " <> l.event })
+  // Grind's events arrive through its asynchronous forwarder, so compare as
+  // a set.
+  assert list.sort(events, string.compare)
+    == [
+      "grind job.acknowledged",
+      "grind job.admitted",
+      "grind job.claimed",
+      "relay authorization.decided",
+      "relay client.call",
+      "relay exchange.closed",
+      "relay invocation.completed",
+      "relay invocation.started",
+      "relay request.admitted",
+    ]
+}
+
+/// Introspection mode joins the provider call to the MCP request: the
+/// `/introspect` request carries the request's correlation.
+pub fn introspection_joins_mcp_request_test() {
+  let assert Ok(collector) = telemetry.start()
+  let lines = {
+    use running <- with_app_options(fn(options) {
+      app.Options(..options, verification: app.Introspection)
+    })
+    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let assert Ok(trace) = correlation.from_string("introspect-trace-1")
+    let peer = mcp.with_correlation(connect(running, alice.access_token), trace)
+    let assert Ok(_) = mcp.discover(peer)
+    mcp.close(peer)
+    process.sleep(100)
+    telemetry.lines(collector)
+  }
+  telemetry.stop(collector)
+  let joined =
+    list.filter(lines, fn(l) {
+      field(l.detail, "correlation") == Ok("introspect-trace-1")
+    })
+  assert list.any(joined, fn(l) {
+    l.package == "warden" && string.contains(l.detail, "/introspect")
+  })
+  assert list.any(joined, fn(l) {
+    l.package == "relay" && l.event == "authorization.decided"
+  })
 }
