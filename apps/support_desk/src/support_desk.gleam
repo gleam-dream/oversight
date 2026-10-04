@@ -3,15 +3,16 @@
 
 import fabric
 import fabric/run
+import fabric/tool
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{Some}
 import gleam/string
 import gleam/time/duration
 import sinal/correlation.{type Correlation}
 import support_desk/app.{type App}
 import support_desk/desk
+import support_desk/domain.{type Resolution}
 import support_desk/ledger
 import support_desk/services
 import support_desk/telemetry
@@ -101,15 +102,21 @@ pub fn handle_ticket(
 ) -> #(Correlation, String) {
   io.println("\n" <> ticket <> ": " <> message)
   let assert Ok(ticket) = correlation.from_string(ticket)
-  let session = desk.session(app.desk, ticket, 0)
-  let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
+  let session = desk.session(ticket, 0)
+  let assert Ok(desk.Opened(run: handle, message: applied)) =
+    desk.open_ticket(app.desk, session, message)
+  case applied {
+    desk.NotApplied ->
+      io.println("  this ticket already has a run; the message was not applied")
+    _ -> Nil
+  }
   let run_id = run.id_to_string(fabric.id(handle))
   drive(handle, session, approver)
   #(ticket, run_id)
 }
 
 fn drive(
-  handle: fabric.Run(desk.Session),
+  handle: fabric.Run(desk.Session, Resolution),
   session: desk.Session,
   approver: Approver,
 ) -> Nil {
@@ -118,46 +125,59 @@ fn drive(
       io.println(
         "  approval needed: " <> pending.tool <> " " <> pending.arguments_json,
       )
-      let _ = case approver {
+      let answered = case approver {
         ApproveAs(name) -> {
           io.println("  " <> name <> " approves")
-          fabric.approve(
-            handle,
-            pending.reference,
-            reviewer: Some(name),
-            context: session,
-          )
+          let assert Ok(reviewer) = desk.approver_named(name)
+          fabric.approve(handle, pending.reference, reviewer:, context: session)
         }
         RejectBecause(reason) -> {
           io.println("  approver rejects: " <> reason)
-          fabric.reject(
-            handle,
-            pending.reference,
-            reason:,
-            reviewer: Some("carol"),
-          )
+          let assert Ok(reviewer) = desk.approver_named("carol")
+          fabric.reject(handle, pending.reference, reason:, reviewer:)
         }
       }
-      drive(handle, session, approver)
+      case answered {
+        Ok(_) -> drive(handle, session, approver)
+        Error(error) -> refused(error)
+      }
     }
     Ok(run.Suspended([], [uncertain, ..])) -> {
       io.println("  uncertain effect, run paused: " <> uncertain.evidence)
       io.println("  operator reconciles: refund unconfirmed, finance checking")
-      let _ = fabric.reconcile(handle, uncertain.reference, unconfirmed)
-      drive(handle, session, approver)
-    }
-    Ok(run.Finished(outcome)) ->
-      case desk.close(session, handle, outcome) {
-        desk.Resolved(resolution) ->
-          io.println("  resolved: " <> desk.describe(resolution))
-        desk.Untyped(text, problem) ->
-          io.println("  untyped answer (" <> problem <> "): " <> text)
-        desk.Ended(other) -> io.println("  ended: " <> string.inspect(other))
+      case fabric.reconcile(handle, uncertain.reference, unconfirmed()) {
+        Ok(_) -> drive(handle, session, approver)
+        Error(error) -> refused(error)
       }
-    other -> io.println("  stuck: " <> string.inspect(other))
+    }
+    Ok(run.Finished(outcome)) -> {
+      desk.close(session, handle, outcome)
+      case outcome {
+        run.Completed(resolution) ->
+          io.println("  resolved: " <> desk.describe(resolution))
+        run.AnswerInvalid(raw:, reason:) ->
+          io.println("  invalid answer (" <> reason <> "): " <> raw)
+        other -> io.println("  ended: " <> run.describe_outcome(other))
+      }
+    }
+    Ok(other) -> io.println("  stuck: " <> string.inspect(other))
+    Error(error) -> refused(error)
   }
+}
+
+/// A command Fabric refused: retry what may succeed later, report the rest.
+fn refused(error: fabric.Error) -> Nil {
+  let advice = case fabric.error_kind(error) {
+    fabric.Retry | fabric.Unavailable -> "try again"
+    _ -> "do not retry"
+  }
+  io.println("  refused (" <> advice <> "): " <> fabric.describe_error(error))
 }
 
 /// What an operator tells the model about a refund whose outcome the
 /// payment provider never confirmed.
-pub const unconfirmed = "{\"status\":\"unconfirmed\",\"note\":\"finance is checking with the payment provider\"}"
+pub fn unconfirmed() -> String {
+  tool.unconfirmed_reconciliation(
+    "finance is checking with the payment provider",
+  )
+}

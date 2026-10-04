@@ -31,7 +31,7 @@ Seams under test:
   `saga.unknown_when`, then a fabric `Uncertain` effect, then an operator
   reconciliation (`refund.gleam`).
 - The approval gate: approve, reject, and cancel while waiting.
-- A typed final answer decoded from the agent's text (`desk.answer`).
+- A typed final answer: `agent.with_answer` gives the model the `Resolution` schema as its output format and the run completes with the decoded value. A refused answer gets one corrective turn (`A-600`).
 - Telemetry correlation from agent to tool to saga to HTTP: the desk's own
   `sinal/correlation` ticket id is the fabric run's correlation (`fabric.start(.., correlation: Some(ticket))`), so one agent serves every ticket and each fabric, llm_wire, http_gun and saga event carries the ticket: the model calls through `fabric/llm`, the tools' and the refund saga's HTTP calls through `tool.Call.correlation`. The run id is derived from the ticket, so opening a ticket twice returns its one run.
 
@@ -52,13 +52,13 @@ Seams under test:
 From this directory, inside the oversight dev shell:
 
 ```sh
-gleam test   # 14 tests
+gleam test   # 16 tests
 gleam run    # prints each ticket, the ledger, and one ticket's telemetry trail
 ```
 
 Order ids select the scripted behavior: `A-100` succeeds, `A-200` is used
 for a rejection, `A-300` fails notification (compensation), `A-400` stalls
 the payment API past the client deadline (unknown outcome), `A-500` makes the
-model send an invalid amount, and `A-600` was already refunded.
+model send an invalid amount, and `A-600` was already refunded (and the model first answers in prose).
 
 Findings are in [FEEDBACK.md](FEEDBACK.md).

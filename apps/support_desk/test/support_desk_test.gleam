@@ -1,8 +1,9 @@
 import fabric
 import fabric/agent
+import fabric/reviewer.{type Reviewer}
 import fabric/run
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/string
 import gleam/time/duration
 import gleeunit
@@ -12,7 +13,7 @@ import sinal/fields
 import support_desk
 import support_desk/app.{type App}
 import support_desk/desk
-import support_desk/domain
+import support_desk/domain.{type Resolution}
 import support_desk/events
 import support_desk/ledger
 import support_desk/provider
@@ -32,15 +33,21 @@ fn open(
   ticket: String,
   message: String,
   approval_from_cents: Int,
-) -> #(desk.Session, fabric.Run(desk.Session)) {
+) -> #(desk.Session, fabric.Run(desk.Session, Resolution)) {
   let assert Ok(ticket) = correlation.from_string(ticket)
-  let session = desk.session(app.desk, ticket, approval_from_cents)
-  let assert Ok(handle) = desk.open_ticket(app.desk, session, message)
+  let session = desk.session(ticket, approval_from_cents)
+  let assert Ok(desk.Opened(run: handle, message: desk.Applied)) =
+    desk.open_ticket(app.desk, session, message)
   #(session, handle)
 }
 
+fn approver(name: String) -> Reviewer {
+  let assert Ok(reviewer) = desk.approver_named(name)
+  reviewer
+}
+
 fn awaiting_refund_approval(
-  handle: fabric.Run(desk.Session),
+  handle: fabric.Run(desk.Session, Resolution),
 ) -> run.PendingApproval {
   let assert Ok(run.Suspended([pending], [])) =
     fabric.await(handle, within: duration.seconds(10))
@@ -49,10 +56,9 @@ fn awaiting_refund_approval(
   pending
 }
 
-fn finish(handle: fabric.Run(desk.Session)) -> domain.Resolution {
-  let assert Ok(run.Finished(outcome)) =
+fn finish(handle: fabric.Run(desk.Session, Resolution)) -> Resolution {
+  let assert Ok(run.Finished(run.Completed(resolution))) =
     fabric.await(handle, within: duration.seconds(10))
-  let assert desk.Resolved(resolution) = desk.answer(outcome)
   resolution
 }
 
@@ -70,7 +76,7 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
     fabric.approve(
       handle,
       pending.reference,
-      reviewer: Some("alice"),
+      reviewer: approver("alice"),
       context: session,
     )
   let resolved = finish(handle)
@@ -86,23 +92,30 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
   let assert [first, ..] = provider.requests(app.provider)
   assert string.contains(first, "\"name\":\"issue_refund\"")
   assert string.contains(first, "\"minimum\":1")
+  // The answer's schema reached the provider as its output format, not as
+  // prose in the prompt.
+  assert string.contains(first, "\"type\":\"json_schema\"")
+  assert !string.contains(first, "JSON Schema")
   // The approver is on the record, not in the saga's ledger entry.
   let assert Ok(snapshot) = fabric.snapshot(handle)
   let assert Ok(refund) =
     list.find(snapshot.actions, fn(action) {
       action.call.name == "issue_refund"
     })
-  let assert [run.Approval(reviewer: Some("alice"), answer: run.Approve, ..)] =
+  let assert [run.Approval(reviewer: Some(who), answer: run.Approve, ..)] =
     refund.approvals
+  assert reviewer.subject(who) == "alice"
   app.stop(app)
 }
 
 // Advanced configuration ----------------------------------------------------
 
 pub fn refunds_below_the_threshold_skip_approval_test() {
-  let limits = agent.Limits(..agent.default_limits(), max_turns: 6)
   let assert Ok(app) =
-    app.start_with(limits, shop_deadline: duration.seconds(1))
+    app.start_with(
+      agent.with_max_turns(_, 6),
+      shop_deadline: duration.seconds(1),
+    )
   let #(_, handle) =
     open(app, "T-2", "Please refund order A-100, it arrived broken.", 5000)
   let resolved = finish(handle)
@@ -112,14 +125,48 @@ pub fn refunds_below_the_threshold_skip_approval_test() {
 }
 
 pub fn a_turn_limit_ends_the_run_without_a_typed_answer_test() {
-  let limits = agent.Limits(..agent.default_limits(), max_turns: 2)
   let assert Ok(app) =
-    app.start_with(limits, shop_deadline: duration.seconds(1))
+    app.start_with(
+      agent.with_max_turns(_, 2),
+      shop_deadline: duration.seconds(1),
+    )
   let #(_, handle) = open(app, "T-3", "Refund order A-100.", 0)
   let assert Ok(run.Finished(outcome)) =
     fabric.await(handle, within: duration.seconds(10))
-  assert desk.answer(outcome)
-    == desk.Ended(run.BudgetExhausted(run.TurnLimit(2)))
+  assert outcome == run.BudgetExhausted(run.TurnLimit(2))
+  app.stop(app)
+}
+
+pub fn a_refused_answer_gets_one_corrective_turn_test() {
+  let assert Ok(app) = app.start()
+  let #(_, handle) = open(app, "T-14", "Refund order A-600 please.", 0)
+  let resolved = finish(handle)
+  assert resolved.outcome == domain.NotEligible
+  // lookup, eligibility, the prose answer, and the corrected answer
+  let requests = provider.requests(app.provider)
+  assert list.length(requests) == 4
+  let assert Ok(last) = list.last(requests)
+  assert string.contains(last, "Your final answer could not be read")
+  app.stop(app)
+}
+
+pub fn one_answer_attempt_ends_on_the_refused_answer_test() {
+  let assert Ok(app) =
+    app.start_with(
+      fn(spec) { spec |> agent.with_answer_attempts(1) },
+      shop_deadline: duration.seconds(1),
+    )
+  let #(session, handle) = open(app, "T-15", "Refund order A-600 please.", 0)
+  let assert Ok(run.Finished(outcome)) =
+    fabric.await(handle, within: duration.seconds(10))
+  let assert run.AnswerInvalid(raw:, reason:) = outcome
+  assert string.contains(raw, "cannot be refunded")
+  assert reason != ""
+  desk.close(session, handle, outcome)
+  let assert Ok(answered) =
+    telemetry.trail(app.telemetry, session.ticket)
+    |> list.find(fn(o) { o.name == "ticket.answered" })
+  assert answered.detail == "AnsweredUntyped"
   app.stop(app)
 }
 
@@ -134,7 +181,7 @@ pub fn rejected_refund_is_explained_by_the_agent_test() {
       handle,
       pending.reference,
       reason: "over the goodwill limit",
-      reviewer: Some("carol"),
+      reviewer: approver("carol"),
     )
   let resolved = finish(handle)
   assert resolved.outcome == domain.Declined
@@ -148,7 +195,12 @@ pub fn failed_notification_compensates_the_refund_test() {
   let #(session, handle) = open(app, "T-5", "Order A-300 never worked.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(handle, pending.reference, reviewer: None, context: session)
+    fabric.approve(
+      handle,
+      pending.reference,
+      reviewer: approver("alice"),
+      context: session,
+    )
   let resolved = finish(handle)
   // The saga rolled back in reverse: ledger entry removed, refund voided,
   // and fabric_saga reported it as a definite failure the model explains.
@@ -169,7 +221,12 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   let #(session, handle) = open(app, "T-6", "Refund order A-400 please.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(handle, pending.reference, reviewer: None, context: session)
+    fabric.approve(
+      handle,
+      pending.reference,
+      reviewer: approver("alice"),
+      context: session,
+    )
   // http_gun's deadline fired after the request may have been sent; the
   // step marks that error with `saga.unknown_when`, and fabric_saga turns
   // the unknown effect into an uncertain one: no model turn until reconciled.
@@ -181,7 +238,7 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   assert services.calls_matching(app.services, "POST /payments/void") == []
 
   let assert Ok(_) =
-    fabric.reconcile(handle, uncertain.reference, support_desk.unconfirmed)
+    fabric.reconcile(handle, uncertain.reference, support_desk.unconfirmed())
   let resolved = finish(handle)
   assert resolved.outcome == domain.Unconfirmed
   assert resolved.refunded_cents == 0
@@ -211,13 +268,15 @@ pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
   let pending = awaiting_refund_approval(handle)
   let assert Ok(run.Finished(run.Cancelled)) = fabric.cancel(handle)
   // The pending approval is void: a late approver changes nothing.
-  let assert Error(fabric.RunEnded) =
+  let assert Error(error) =
     fabric.approve(
       handle,
       pending.reference,
-      reviewer: Some("alice"),
+      reviewer: approver("alice"),
       context: session,
     )
+  assert error == fabric.RunEnded
+  assert fabric.error_kind(error) == fabric.Refused
   assert services.calls_matching(app.services, "POST") == []
   assert ledger.entries(app.ledger) == []
   app.stop(app)
@@ -230,10 +289,16 @@ pub fn telemetry_follows_the_ticket_through_every_package_test() {
   let #(session, handle) = open(app, "T-9", "Please refund order A-100.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(handle, pending.reference, reviewer: None, context: session)
+    fabric.approve(
+      handle,
+      pending.reference,
+      reviewer: approver("alice"),
+      context: session,
+    )
   let assert Ok(run.Finished(outcome)) =
     fabric.await(handle, within: duration.seconds(10))
-  let assert desk.Resolved(_) = desk.close(session, handle, outcome)
+  let assert run.Completed(_) = outcome
+  desk.close(session, handle, outcome)
   let trail = telemetry.trail(app.telemetry, session.ticket)
   let names = list.map(trail, fn(o) { o.name })
   assert list.contains(names, "ticket.opened")
@@ -261,9 +326,19 @@ pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
   let one_pending = awaiting_refund_approval(one)
   let two_pending = awaiting_refund_approval(two)
   let assert Ok(_) =
-    fabric.approve(one, one_pending.reference, reviewer: None, context: first)
+    fabric.approve(
+      one,
+      one_pending.reference,
+      reviewer: approver("alice"),
+      context: first,
+    )
   let assert Ok(_) =
-    fabric.approve(two, two_pending.reference, reviewer: None, context: second)
+    fabric.approve(
+      two,
+      two_pending.reference,
+      reviewer: approver("alice"),
+      context: second,
+    )
   let _ = finish(one)
   let _ = finish(two)
   let all = telemetry.observations(app.telemetry)
@@ -281,7 +356,13 @@ pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
 pub fn opening_a_ticket_twice_returns_its_one_run_test() {
   let assert Ok(app) = app.start()
   let #(session, handle) = open(app, "T-13", "Please refund order A-100.", 0)
-  let assert Ok(again) = desk.open_ticket(app.desk, session, "a second try")
+  // The same message again is a retried open; another one is a follow-up
+  // that Fabric cannot add to the run, and the desk says so.
+  let assert Ok(desk.Opened(run: retried, message: desk.Repeated)) =
+    desk.open_ticket(app.desk, session, "Please refund order A-100.")
+  assert fabric.id(retried) == fabric.id(handle)
+  let assert Ok(desk.Opened(run: again, message: desk.NotApplied)) =
+    desk.open_ticket(app.desk, session, "a second try")
   assert fabric.id(again) == fabric.id(handle)
   let opened =
     telemetry.trail(app.telemetry, session.ticket)
@@ -303,13 +384,15 @@ pub fn every_answer_kind_round_trips_through_the_event_fields_test() {
 }
 
 pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
-  let limits = agent.Limits(..agent.default_limits(), max_turns: 2)
   let assert Ok(app) =
-    app.start_with(limits, shop_deadline: duration.seconds(1))
+    app.start_with(
+      agent.with_max_turns(_, 2),
+      shop_deadline: duration.seconds(1),
+    )
   let #(session, handle) = open(app, "T-10", "Refund order A-100.", 0)
   let assert Ok(run.Finished(outcome)) =
     fabric.await(handle, within: duration.seconds(10))
-  let assert desk.Ended(_) = desk.close(session, handle, outcome)
+  desk.close(session, handle, outcome)
   let trail = telemetry.trail(app.telemetry, session.ticket)
   let assert Ok(answered) =
     list.find(trail, fn(o) { o.name == "ticket.answered" })
@@ -322,13 +405,8 @@ pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
 pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   let assert Ok(app) = app.start()
   let request = domain.RefundRequest("A-400", 3000, "late provider")
-  let workflow = refund.workflow(app.ledger)
-  let assert Ok(outcome) =
-    execution.run(
-      workflow,
-      refund.Refund(app.desk.shop, request),
-      refund.config(),
-    )
+  let workflow = refund.workflow(app.desk.shop, app.ledger)
+  let assert Ok(outcome) = execution.run(workflow, request, refund.config())
   // The provider took the refund and answered after the client deadline.
   // The step marks that error with `saga.unknown_when`, so saga records the
   // attempt as an unknown effect and, with no decider and no `on_unknown`,

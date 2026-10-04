@@ -3,12 +3,14 @@
 //// and the agent.
 
 import fabric/agent
+import gleam/function
 import gleam/result
 import gleam/time/duration.{type Duration}
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
-import support_desk/desk.{type Desk}
+import support_desk/desk.{type Desk, type Session}
+import support_desk/domain.{type Resolution}
 import support_desk/ledger.{type Ledger}
 import support_desk/provider.{type Provider}
 import support_desk/services.{type Services}
@@ -26,14 +28,15 @@ pub type App {
   )
 }
 
-/// The ordinary configuration: every refund needs approval, default
-/// agent limits, and a one-second budget for the shop's APIs.
+/// The ordinary configuration: default agent limits and a one-second
+/// budget for the shop's APIs.
 pub fn start() -> Result(App, String) {
-  start_with(agent.default_limits(), shop_deadline: duration.seconds(1))
+  start_with(function.identity, shop_deadline: duration.seconds(1))
 }
 
+/// `tune` adjusts the agent's spec, for example with `agent.with_max_turns`.
 pub fn start_with(
-  limits: agent.Limits,
+  tune: fn(agent.Spec(Session, Resolution)) -> agent.Spec(Session, Resolution),
   shop_deadline shop_deadline: Duration,
 ) -> Result(App, String) {
   use telemetry <- result.try(telemetry.start())
@@ -62,7 +65,7 @@ pub fn start_with(
       provider_url: provider.base_url,
       shop:,
       ledger:,
-      limits:,
+      tune:,
     )),
   )
   App(desk, ledger, services, provider, telemetry, client)

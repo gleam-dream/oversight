@@ -3,7 +3,7 @@
 //// Each codec is declared once here and used for everything: the fabric
 //// tool definitions (which derive the schema the model sees), the policy's
 //// typed match on a refund, the scripted services' wire bodies, and the
-//// typed final `Resolution` parsed out of the agent's answer.
+//// agent's typed final `Resolution` (`agent.with_answer`).
 
 import fabric/tool
 import json/blueprint/codec.{type Codec}
