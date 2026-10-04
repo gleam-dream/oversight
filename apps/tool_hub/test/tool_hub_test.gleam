@@ -1,5 +1,6 @@
 import fabric
 import fabric/run
+import fabric_relay
 import gleam/erlang/process
 import gleam/http as gleam_http
 import gleam/http/request
@@ -21,6 +22,7 @@ import relay/content
 import relay/http
 import relay/testing as relay_testing
 import relay/tool as relay_tool
+import sinal/correlation.{type Correlation}
 import tool_hub
 import tool_hub/assistant
 import tool_hub/inventory
@@ -40,6 +42,23 @@ fn ask(
   let assert Ok(mcp) = tool_hub.assistant_client(hub, duration.seconds(15))
   let outcome =
     client.call(mcp, assistant.ask_assistant(), assistant.Question(question))
+  client.close(mcp)
+  outcome
+}
+
+/// The question under a correlation the caller chose, to follow it.
+fn ask_as(
+  hub: tool_hub.Hub,
+  correlation: Correlation,
+  question: String,
+) -> Result(client.ToolResult(assistant.Answer), client.Error) {
+  let assert Ok(mcp) = tool_hub.assistant_client(hub, duration.seconds(15))
+  let outcome =
+    client.call(
+      client.with_correlation(mcp, correlation),
+      assistant.ask_assistant(),
+      assistant.Question(question),
+    )
   client.close(mcp)
   outcome
 }
@@ -164,8 +183,14 @@ fn run_later(action: process.Subject(Later)) -> fn() -> Nil {
 pub fn common_path_answers_through_both_mcp_servers_test() {
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("common"), tool_hub.demo_script())
-  let assert Ok(client.Succeeded(answer, _)) = ask(hub, tool_hub.demo_question)
+  let question = correlation.unique()
+  let assert Ok(result) = ask_as(hub, question, tool_hub.demo_question)
+  let assert client.Succeeded(answer, _) = result
   let assert True = string.contains(answer.answer, "reservation R-1")
+  // The result names its run, so a caller needs no side channel.
+  let assert [run_id] = run_ids(telemetry.records(hub.telemetry))
+  let assert Some(named) = fabric_relay.run_of(result)
+  let assert True = run.id_to_string(named) == run_id
 
   // The reservation really happened on the inventory server.
   let assert Ok(client.Succeeded(stock, _)) =
@@ -182,7 +207,7 @@ pub fn common_path_answers_through_both_mcp_servers_test() {
 
   // Telemetry: fabric joins on the run id; http_gun, llm_wire and the
   // assistant server's relay events join on the question's correlation.
-  let followed = telemetry.follow(hub.telemetry, answer.run_id)
+  let followed = telemetry.follow(hub.telemetry, question)
   let assert True = telemetry.has(followed.joined, "fabric", "run.stop")
   // The scripted provider reports no usage: every turn says so, not zero.
   let turns =
@@ -196,45 +221,59 @@ pub fn common_path_answers_through_both_mcp_servers_test() {
       string.contains(event, "4 turns, 4 without usage")
     })
   let assert True = telemetry.count(followed.joined, "http_gun") >= 24
-  // The client labels say which HTTP events came from the model provider
-  // and which from the agent's Relay client for the inventory, which runs on
-  // HTTP Gun and carries the same correlation.
+  // The client labels say which HTTP events came from the MCP caller, the
+  // model provider and the agent's Relay client for the inventory, which all
+  // run on HTTP Gun and carry the same correlation.
   let labels =
     followed.joined
     |> list.filter(fn(record) { record.package == "http_gun" })
     |> list.map(fn(record) { list.first(string.split(record.detail, ": ")) })
     |> list.unique
-  let assert [Ok("tool_hub_provider"), Ok("inventory_peer")] = labels
+  let assert [
+    Ok("assistant_caller"),
+    Ok("tool_hub_provider"),
+    Ok("inventory_peer"),
+  ] = labels
   // Every llm_wire event reads the correlation from the HTTP Gun view.
   let assert True = telemetry.count(followed.joined, "llm_wire") >= 16
   let assert 0 = telemetry.count(followed.unjoined, "llm_wire")
-  // Relay: the ask_assistant invocation and the agent's three inventory
-  // calls join; the inventory server's own events do not, because the
-  // client's correlation does not cross the wire.
+  // Relay: the caller's correlation crosses the wire to the assistant
+  // server, and the agent's inventory client carries the run's on to the
+  // inventory server, so every Relay event of the question joins, on the
+  // client and server side alike.
+  let started = fn(records) {
+    events(records, "relay")
+    |> list.filter(fn(event) { string.starts_with(event, "invocation.started") })
+  }
   let assert [
-    "request.admitted assistant: tools/call",
     "invocation.started assistant: tools/call tool=ask_assistant",
-    ..
-  ] = events(followed.joined, "relay")
-  let assert [
-    "client.call inventory_peer: tools/call tool=search_products",
-    "client.call inventory_peer: tools/call tool=get_stock",
-    "client.call inventory_peer: tools/call tool=reserve_stock",
-  ] =
+    "invocation.started inventory: tools/call tool=search_products",
+    "invocation.started inventory: tools/call tool=get_stock",
+    "invocation.started inventory: tools/call tool=reserve_stock",
+  ] = started(followed.joined)
+  let calls =
     events(followed.joined, "relay")
     |> list.filter(fn(event) { string.starts_with(event, "client.call") })
     |> list.map(fn(event) {
       string.split(event, " CallCompleted") |> list.first |> unwrap_text
     })
   let assert [
-    "invocation.started inventory: tools/call tool=search_products",
-    "invocation.started inventory: tools/call tool=get_stock",
-    "invocation.started inventory: tools/call tool=reserve_stock",
-    // The test's own stock check, on the hub's peer without a correlation.
-    "invocation.started inventory: tools/call tool=get_stock",
-  ] =
+    "client.call inventory_peer: tools/call tool=search_products",
+    "client.call inventory_peer: tools/call tool=get_stock",
+    "client.call inventory_peer: tools/call tool=reserve_stock",
+    "client.call assistant_caller: tools/call tool=ask_assistant",
+  ] = calls
+  // What does not join is the test's own stock check on the hub's peer,
+  // which mints a correlation of its own.
+  let assert ["client.call inventory_peer: tools/call tool=get_stock"] =
     events(followed.unjoined, "relay")
-    |> list.filter(fn(event) { string.starts_with(event, "invocation.started") })
+    |> list.filter(fn(event) { string.starts_with(event, "client.call") })
+    |> list.map(fn(event) {
+      string.split(event, " CallCompleted") |> list.first |> unwrap_text
+    })
+  let assert ["invocation.started inventory: tools/call tool=get_stock"] =
+    started(followed.unjoined)
+  let assert 0 = telemetry.count(followed.unjoined, "llm_wire")
   tool_hub.stop(hub)
 }
 
@@ -292,7 +331,9 @@ pub fn discovered_tools_work_without_native_types_test() {
     Reply(
       testing.tool_calls("", [call("c3", "get_stock", "{\"sku\":\"MS-300\"}")]),
     ),
-    Reply(testing.text("The Wireless mouse (MS-300) has 40 units in Porto.")),
+    Reply(scripted_llm.answer(
+      "The Wireless mouse (MS-300) has 40 units in Porto.",
+    )),
   ]
   let settings =
     tool_hub.Settings(
@@ -328,7 +369,7 @@ pub fn remote_tool_error_is_shown_to_the_model_test() {
     Reply(
       testing.tool_calls("", [call("c1", "get_stock", "{\"sku\":\"ZZ-999\"}")]),
     ),
-    Reply(testing.text("There is no product ZZ-999.")),
+    Reply(scripted_llm.answer("There is no product ZZ-999.")),
   ]
   let assert Ok(hub) = tool_hub.start(tool_hub.settings("is_error"), script)
   let assert Ok(client.Succeeded(answer, _)) = ask(hub, "Stock of ZZ-999?")
@@ -361,7 +402,7 @@ pub fn unreachable_server_before_a_reservation_is_explained_test() {
         call("c2", "reserve_stock", "{\"sku\":\"KB-101\",\"quantity\":1}"),
       ]),
     ),
-    Reply(testing.text("The inventory is down; nothing was reserved.")),
+    Reply(scripted_llm.answer("The inventory is down; nothing was reserved.")),
   ]
   let assert Ok(hub) = tool_hub.start(tool_hub.settings("unreachable"), script)
   process.send(stop, SetAction(fn() { http.stop(hub.inventory) }))
@@ -369,7 +410,7 @@ pub fn unreachable_server_before_a_reservation_is_explained_test() {
   let assert "The inventory is down; nothing was reserved." = answer.answer
   let assert [_, _, third] =
     scripted_llm.requests(scripted_llm.drain(hub.notices))
-  let assert True = string.contains(third, "the inventory is unavailable")
+  let assert True = string.contains(third, "the MCP call failed")
   // `ConnectFailed`, whose evidence is `NotSent`.
   let assert True = string.contains(third, "(connect_failed)")
   let assert True =
@@ -397,7 +438,7 @@ pub fn timed_out_reservation_is_uncertain_test() {
         call("c2", "reserve_stock", "{\"sku\":\"KB-101\",\"quantity\":1}"),
       ]),
     ),
-    Reply(testing.text("unreachable")),
+    Reply(scripted_llm.answer("unreachable")),
   ]
   let settings =
     tool_hub.Settings(
@@ -411,9 +452,7 @@ pub fn timed_out_reservation_is_uncertain_test() {
   )
   let assert Ok(client.ToolFailed(blocks, Some(facts))) =
     ask(hub, "Reserve a keyboard.")
-  let text = text_of(blocks)
-  let assert True = string.starts_with(text, "outcome unknown: reserve_stock")
-  let assert True = string.contains(text, "timed_out.maybe_sent")
+  let assert True = string.contains(text_of(blocks), "unknown status")
   // The run to reconcile is data, not only prose.
   let assert [run_id] = run_ids(telemetry.records(hub.telemetry))
   let assert value.Object(fields) = facts
@@ -424,6 +463,8 @@ pub fn timed_out_reservation_is_uncertain_test() {
   let assert Ok(value.Array([value.Object(effect)])) =
     list.key_find(fields, "uncertain")
   let assert Ok(value.String("reserve_stock")) = list.key_find(effect, "tool")
+  let assert Ok(value.String(evidence)) = list.key_find(effect, "evidence")
+  let assert True = string.contains(evidence, "timed_out.maybe_sent")
   // The model was never asked again: the run waits for a person.
   let assert 2 =
     list.length(scripted_llm.requests(scripted_llm.drain(hub.notices)))
@@ -443,7 +484,7 @@ pub fn unreachable_server_on_a_read_only_tool_is_explained_test() {
       run_later(stop),
       testing.tool_calls("", [call("c1", "get_stock", "{\"sku\":\"KB-101\"}")]),
     ),
-    Reply(testing.text("The inventory is down; try later.")),
+    Reply(scripted_llm.answer("The inventory is down; try later.")),
   ]
   let assert Ok(hub) =
     tool_hub.start(tool_hub.settings("read_only_down"), script)
@@ -452,7 +493,7 @@ pub fn unreachable_server_on_a_read_only_tool_is_explained_test() {
   let assert "The inventory is down; try later." = answer.answer
   let assert [_, second] =
     scripted_llm.requests(scripted_llm.drain(hub.notices))
-  let assert True = string.contains(second, "the inventory is unavailable")
+  let assert True = string.contains(second, "the MCP call failed")
   tool_hub.stop(hub)
 }
 
@@ -464,7 +505,7 @@ pub fn invalid_model_arguments_never_reach_the_server_test() {
     Reply(
       testing.tool_calls("", [call("c2", "get_stock", "{\"sku\":\"KB-101\"}")]),
     ),
-    Reply(testing.text("KB-101: 12 units.")),
+    Reply(scripted_llm.answer("KB-101: 12 units.")),
   ]
   let assert Ok(hub) = tool_hub.start(tool_hub.settings("invalid_args"), script)
   let assert Ok(client.Succeeded(answer, _)) = ask(hub, "Stock of KB-101?")
@@ -513,7 +554,7 @@ fn same(mcp: client.Client) -> client.Client {
   mcp
 }
 
-fn cancelled_run(hub: tool_hub.Hub) -> run.Status {
+fn cancelled_run(hub: tool_hub.Hub) -> run.Status(assistant.Answer) {
   let assert [id] = run_ids(telemetry.records(hub.telemetry))
   let assert Ok(parsed) = run.parse_id(id)
   let assert Ok(handle) =
@@ -541,25 +582,68 @@ pub fn disconnecting_mcp_client_cancels_run_and_model_stream_test() {
   tool_hub.stop(hub)
 }
 
-/// A handler that ignores `tool.cancelled` leaves the fabric run and its
-/// model stream going after the same disconnect.
-pub fn disconnect_without_the_bridge_leaves_the_run_running_test() {
-  let settings =
-    tool_hub.Settings(
-      ..tool_hub.settings("cancel_unbridged"),
-      cancel_with_caller: False,
-    )
-  let assert Ok(hub) = tool_hub.start(settings, [Hold])
-  let #(mcp, _caller) = ask_in_background(hub, same)
+/// A call with an idempotency key names its run, so the run outlives the
+/// call: the same disconnect that cancels an unkeyed call leaves this one
+/// going, and the model stream open.
+pub fn keyed_call_outlives_its_disconnect_test() {
+  let assert Ok(hub) = tool_hub.start(tool_hub.settings("cancel_keyed"), [Hold])
+  let #(mcp, _caller) =
+    ask_in_background(hub, client.with_idempotency_key(_, "question-1"))
   client.close(mcp)
   let assert False = stream_closed_within(hub.notices, 1000)
   let records = telemetry.records(hub.telemetry)
   let assert True = telemetry.has(records, "relay", "invocation.cancelled")
   let assert False = telemetry.has(records, "fabric", "run.cancel")
-  let assert [id] = run_ids(records)
-  let assert Ok(parsed) = run.parse_id(id)
-  let assert Ok(_) = fabric.cancel_stored(hub.store, parsed)
+  // The key names the run, so the application can find it.
+  let id =
+    fabric_relay.run_id(
+      assistant.ask_assistant(),
+      principal: fabric_relay.anonymous,
+      key: "question-1",
+    )
+  let assert [started] = run_ids(records)
+  let assert True = started == run.id_to_string(id)
+  let assert Ok(_) = fabric.cancel_stored(hub.store, id)
   let assert True = stream_closed_within(hub.notices, 3000)
+  tool_hub.stop(hub)
+}
+
+/// The caller disconnects while the model is still answering and calls again
+/// with the same key: the retry reaches the same run, which the provider
+/// served once.
+pub fn retried_keyed_call_reaches_the_same_run_test() {
+  let script = [
+    After(fn() { process.sleep(600) }, scripted_llm.answer("KB-101: 12 units.")),
+  ]
+  let assert Ok(hub) = tool_hub.start(tool_hub.settings("retry_keyed"), script)
+  let keyed = client.with_idempotency_key(_, "question-2")
+  let assert Ok(first) = tool_hub.assistant_client(hub, duration.seconds(15))
+  let caller = process.new_subject()
+  process.spawn(fn() {
+    process.send(
+      caller,
+      client.call(
+        keyed(first),
+        assistant.ask_assistant(),
+        assistant.Question("Stock of KB-101?"),
+      ),
+    )
+  })
+  process.sleep(200)
+  client.close(first)
+  let assert Ok(Error(_)) = process.receive(caller, 2000)
+  let assert Ok(second) = tool_hub.assistant_client(hub, duration.seconds(15))
+  let assert Ok(client.Succeeded(answer, _)) =
+    client.call(
+      keyed(second),
+      assistant.ask_assistant(),
+      assistant.Question("Stock of KB-101?"),
+    )
+  let assert "KB-101: 12 units." = answer.answer
+  client.close(second)
+  let assert [_] = run_ids(telemetry.records(hub.telemetry))
+  let assert 1 =
+    list.length(scripted_llm.requests(scripted_llm.drain(hub.notices)))
   tool_hub.stop(hub)
 }
 
