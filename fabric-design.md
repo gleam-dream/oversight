@@ -8,6 +8,11 @@
   facade. Typed tool registrations should retain caller-owned values and errors;
   an optional public-error renderer belongs to the deliberate exposure path.
 
+## Release decisions (3 October 2026)
+
+- **The graph runtime stays in Fabric and ships in Fabric 1.0**, under the same semver promise as the agent runtime ([release decision 2](docs/release-api/DECISIONS.md#2-fabrics-graph-runtime-in-10)). Fabric therefore owns durable graph execution (records, leases, a sweeper, signals, job polling, subgraphs and forks), which sections 1 and 2 below assign to Saga; the two runtimes share one vocabulary for failures, policy actions, approvals, cancellation and context (FABRIC-R5). Where sections 1 and 2 and the ownership table say Saga owns durable graphs, this decision governs Fabric's release.
+- **Durability ownership is still open** ([release decision 1](docs/release-api/DECISIONS.md#1-durability-ownership), deferred). Option B, moving the graph runtime out of Fabric, is ruled out by decision 2; how Grind, Saga and Fabric divide durable execution, and whether they converge on shared leases, is not decided. Fabric's leased stores coordinate several nodes sharing one database, which section 2's exclusion of multi-node coordination predates.
+
 ## Package ownership and dependency direction
 
 | Baseline concern                | Current owner                             | Fabric integration requirement                                                                |
