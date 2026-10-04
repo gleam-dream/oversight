@@ -595,7 +595,7 @@ fn reply(scripted: testing.Reply) -> String {
 fn tool_call(step: Int, name: String, arguments: json.Json) -> String {
   reply(
     testing.tool_calls("", [
-      testing.ScriptedCall(
+      testing.tool_call(
         id: "call_" <> int.to_string(step),
         name:,
         arguments_json: json.to_string(arguments),
