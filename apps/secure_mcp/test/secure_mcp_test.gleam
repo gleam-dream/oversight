@@ -85,7 +85,12 @@ fn await_status(
 }
 
 /// The refusal of a `server/discover` with this token (or none).
-fn refusal(running: app.Running, token: option.Option(String)) -> mcp.Error {
+fn refusal(running: app.Running, token: option.Option(String)) -> mcp.Reason {
+  mcp.reason(refused(running, token))
+}
+
+/// The whole failure, for tests that read its correlation.
+fn refused(running: app.Running, token: option.Option(String)) -> mcp.Error {
   let assert Ok(peer) = client.connect(running.mcp_url, token, [])
   let assert Error(error) = mcp.discover(peer)
   mcp.close(peer)
@@ -387,6 +392,29 @@ pub fn telemetry_correlation_test() {
   assert !list.any(lines, fn(l) {
     l.package == "warden" && string.contains(l.detail, "/introspect")
   })
+}
+
+/// A refused call names its correlation: the client's error carries the one
+/// the call was sent with, so the failure joins the server's rejection event.
+pub fn refused_call_error_names_its_correlation_test() {
+  let assert Ok(collector) = telemetry.start()
+  let #(error, lines) = {
+    use running <- with_app
+    let error = refused(running, None)
+    process.sleep(100)
+    #(error, telemetry.lines(collector))
+  }
+  telemetry.stop(collector)
+  let assert mcp.HttpStatus(401, _) = mcp.reason(error)
+  let id = correlation.to_string(mcp.error_correlation(error))
+  let relay_events =
+    list.filter(lines, fn(l) {
+      l.package == "relay" && field(l.detail, "correlation") == Ok(id)
+    })
+    |> list.map(fn(l) { l.event })
+  // The client's own event and the server's rejection carry that value.
+  assert list.contains(relay_events, "client.call")
+  assert list.contains(relay_events, "authorization.decided")
 }
 
 /// The value after `key=` in a collector line's detail.
