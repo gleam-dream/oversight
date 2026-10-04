@@ -16,6 +16,7 @@ import secure_mcp/client
 import secure_mcp/reports.{ReportRequest, StatusRequest}
 import secure_mcp/telemetry
 import secure_mcp/tools
+import sinal/correlation
 import warden/testing
 
 pub fn main() {
@@ -133,10 +134,16 @@ fn refusal(running: app.Running, token: option.Option(String)) -> String {
   let outcome = mcp.discover(peer)
   mcp.close(peer)
   case outcome {
-    Error(mcp.HttpStatus(status, challenge)) ->
-      int.to_string(status)
-      <> " WWW-Authenticate: "
-      <> option.unwrap(challenge, "-")
-    other -> "unexpected " <> string.inspect(other)
+    Error(error) ->
+      case mcp.reason(error) {
+        mcp.HttpStatus(status, challenge) ->
+          int.to_string(status)
+          <> " WWW-Authenticate: "
+          <> option.unwrap(challenge, "-")
+          <> " correlation="
+          <> correlation.to_string(mcp.error_correlation(error))
+        _ -> "unexpected " <> mcp.describe_error(error)
+      }
+    Ok(_) -> "unexpected success"
   }
 }

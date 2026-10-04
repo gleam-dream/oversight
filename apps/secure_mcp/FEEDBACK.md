@@ -1208,6 +1208,15 @@ and the client mints one per call since b83486b): 6 carry none, down from 13.
   keep the minted value (it is on `client.call` only) cannot name the failed
   request to an operator. Echoing it in a response header or in the error
   would close it.
+
+  **Status (round 7):** resolved by relay a46a3da and 166ddd6. `client.Error`
+  is opaque; `client.reason` gives the old variants (`refusal` in the tests
+  and `gleam run` now match `mcp.reason(error)`), and `client.error_correlation`
+  names the value the refused call was sent with. `gleam run` prints it on
+  each refused line, and `refused_call_error_names_its_correlation_test`
+  asserts it equals the correlation of the server's `authorization.decided`
+  event and of the client's own `client.call` event. The 16 tests pass.
+
 - **The correlation is untrusted client input, and the verifier now receives
   it.** `warden.with_correlation(client, correlation)` puts it on a provider
   request and into warden's events. Relay says it never decides admission;
