@@ -102,7 +102,11 @@ pub fn serve(
       },
     )
     |> fabric_relay.with_wait(assistant.budget)
-  server.new([fabric_relay.serve(service)])
+  use tool <- result.try(
+    fabric_relay.serve(service)
+    |> result.map_error(fabric_relay.describe_config_errors),
+  )
+  server.new([tool])
   |> http.new
   |> http.with_label("assistant")
   |> configure
