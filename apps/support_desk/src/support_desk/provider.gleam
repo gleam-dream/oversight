@@ -86,6 +86,7 @@ fn respond(body: String) -> Response(mist.ResponseData) {
     Ok(items) -> {
       let calls = list.count(items, is_call)
       let order_id = order_id(items)
+      let refused = order_id == "A-600" && !corrected(items)
       case decide(order_id, results(items)) {
         CallTool(name, arguments) ->
           sse(
@@ -97,6 +98,9 @@ fn respond(body: String) -> Response(mist.ResponseData) {
               ),
             ]),
           )
+        // Order A-600 is where the model answers in prose until told why
+        // that cannot be read.
+        Answer(_, _, message) if refused -> sse(testing.text(message))
         Answer(outcome, refunded, message) -> {
           let assert Ok(text) =
             codec.encode_json(
@@ -156,8 +160,7 @@ fn decide(order_id: String, results: List(#(String, String))) -> Turn {
 fn settle_refund(output: String) -> Turn {
   let receipt = codec.decode_json(domain.refund_receipt(), output)
   let unconfirmed =
-    json.parse(output, decode.at(["status"], decode.string))
-    == Ok("unconfirmed")
+    result.is_ok(json.parse(output, decode.at(["unconfirmed"], decode.string)))
   case receipt, unconfirmed, error_kind(output) {
     Ok(receipt), _, _ ->
       Answer(
@@ -196,6 +199,17 @@ fn error_kind(output: String) -> Result(#(String, String), Nil) {
     decode.success(#(kind, detail))
   })
   |> result.replace_error(Nil)
+}
+
+/// Whether Fabric already sent the corrective message for a refused answer.
+fn corrected(items: List(Item)) -> Bool {
+  list.any(items, fn(item) {
+    case item {
+      Said("user", text) ->
+        string.starts_with(text, "Your final answer could not be read")
+      _ -> False
+    }
+  })
 }
 
 fn is_call(item: Item) -> Bool {

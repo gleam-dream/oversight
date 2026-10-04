@@ -11,6 +11,7 @@ import fabric
 import fabric/agent.{type Agent}
 import fabric/llm
 import fabric/policy
+import fabric/reviewer.{type Reviewer}
 import fabric/run
 import fabric/store.{type Store}
 import fabric/tool
@@ -22,7 +23,6 @@ import gleam/result
 import gleam/string
 import gleam/time/duration
 import http_gun
-import json/blueprint/codec
 import llm_wire
 import llm_wire/openai
 import sinal/correlation.{type Correlation}
@@ -46,12 +46,16 @@ pub type Session {
     /// Refunds of at least this many cents need a human approver; 0 means
     /// every refund does.
     approval_from_cents: Int,
-    shop: Shop,
   )
 }
 
 pub type Desk {
-  Desk(store: Store, agent: Agent(Session), shop: Shop, ledger: Ledger)
+  Desk(
+    store: Store,
+    agent: Agent(Session, Resolution),
+    shop: Shop,
+    ledger: Ledger,
+  )
 }
 
 /// The requirement a refund approver answers.
@@ -65,7 +69,8 @@ pub type Settings {
     provider_url: String,
     shop: Shop,
     ledger: Ledger,
-    limits: agent.Limits,
+    /// Adjusts the agent's spec before it is built: the limits, for one.
+    tune: fn(agent.Spec(Session, Resolution)) -> agent.Spec(Session, Resolution),
   )
 }
 
@@ -81,7 +86,7 @@ pub fn start(settings: Settings) -> Result(Desk, String) {
 
 /// The one agent every ticket runs on. Each turn's request names its run's
 /// correlation, and `fabric/llm.model` tags the client view with it.
-pub fn build(settings: Settings) -> Result(Agent(Session), String) {
+pub fn build(settings: Settings) -> Result(Agent(Session, Resolution), String) {
   let config =
     openai.new("sk-scripted")
     |> openai.config
@@ -90,69 +95,79 @@ pub fn build(settings: Settings) -> Result(Agent(Session), String) {
   let issue_refund =
     fabric_saga.tool(
       domain.issue_refund(),
-      refund.workflow(settings.ledger),
+      refund.workflow(settings.shop, settings.ledger),
       refund.config(),
-      input: fn(session: Session, call, request) {
-        refund.Refund(shop.correlated(session.shop, call.correlation), request)
-      },
+      input: fn(_, _, request) { request },
       explain: refund.explain,
       rollback_within: duration.seconds(5),
     )
   let tools = [
     tool.bind(
       domain.lookup_order(),
-      fn(session: Session, call, query: OrderQuery) {
+      fn(_, call, query: OrderQuery) {
         shop.get_order(
-          shop.correlated(session.shop, call.correlation),
+          shop.correlated(settings.shop, call.correlation),
           query.order_id,
         )
       },
       explain_lookup,
-    ),
+    )
+      // A read is safe to start again after a crash.
+      |> tool.with_replay(3),
     tool.bind(
       domain.check_refund_eligibility(),
-      fn(session: Session, call, query: OrderQuery) {
+      fn(_, call, query: OrderQuery) {
         shop.get_order(
-          shop.correlated(session.shop, call.correlation),
+          shop.correlated(settings.shop, call.correlation),
           query.order_id,
         )
         |> result.map(eligibility)
       },
       explain_lookup,
-    ),
+    )
+      |> tool.with_replay(3),
     issue_refund,
   ]
   agent.new("support_desk", model, tools, refund_policy)
-  |> agent.with_system_prompt(system_prompt())
-  |> agent.with_limits(settings.limits)
+  |> agent.with_system_prompt(system_prompt)
+  |> agent.with_answer(domain.resolution())
+  |> settings.tune
   |> agent.build
-  |> result.map_error(fn(errors) { "agent: " <> string.inspect(errors) })
+  |> result.map_error(fn(errors) {
+    "agent: " <> agent.describe_config_errors(errors)
+  })
 }
 
 /// A new ticket's session.
-pub fn session(
-  desk: Desk,
-  ticket: Correlation,
-  approval_from_cents: Int,
-) -> Session {
-  Session(ticket, approval_from_cents, desk.shop)
+pub fn session(ticket: Correlation, approval_from_cents: Int) -> Session {
+  Session(ticket, approval_from_cents)
+}
+
+/// What `open_ticket` did with the message.
+pub type Message {
+  /// The ticket had no run: this message started it.
+  Applied
+  /// The ticket's run was started by this same message: a retried open.
+  Repeated
+  /// The ticket's run was started by another message. This one was not
+  /// applied: Fabric has no command to add a message to a run, so the
+  /// caller must tell the customer or open a new ticket.
+  NotApplied
+}
+
+pub type Opened {
+  Opened(run: fabric.Run(Session, Resolution), message: Message)
 }
 
 /// Starts the ticket's run under an id derived from the ticket, with the
-/// ticket as its correlation. Opening a ticket twice returns the one run:
-/// the second start is `AlreadyStarted` and stores nothing.
+/// ticket as its correlation. Opening a ticket twice returns its one run
+/// and stores nothing; `message` says whether this call's text reached it.
 pub fn open_ticket(
   desk: Desk,
   session: Session,
   message: String,
-) -> Result(fabric.Run(Session), fabric.StartError) {
-  let key = "ticket-" <> correlation.to_string(session.ticket)
-  use id <- result.try(
-    run.parse_id(key)
-    |> result.replace_error(fabric.StartRefused(
-      "the ticket id is not a valid run id: " <> key,
-    )),
-  )
+) -> Result(Opened, fabric.Error) {
+  let id = run.id_from_parts("ticket", [correlation.to_string(session.ticket)])
   case
     fabric.start(
       desk.store,
@@ -165,34 +180,42 @@ pub fn open_ticket(
   {
     Ok(handle) -> {
       events.opened(session.ticket, run.id_to_string(id))
-      Ok(handle)
+      Ok(Opened(handle, Applied))
     }
-    Error(fabric.AlreadyStarted(id)) ->
+    Error(fabric.AlreadyStarted(id, same_input:)) ->
       fabric.open(desk.store, desk.agent, session, id)
-      |> result.map_error(fn(error) {
-        fabric.StartRefused(
-          "the ticket's run cannot be opened: " <> string.inspect(error),
-        )
-      })
+      |> result.map(
+        Opened(_, case same_input {
+          True -> Repeated
+          False -> NotApplied
+        }),
+      )
     Error(error) -> Error(error)
   }
 }
 
-/// The run's final answer, decoded with `answer`, recorded as the ticket's
-/// `ticket.answered` event.
+/// Records the run's end as the ticket's `ticket.answered` event.
 pub fn close(
   session: Session,
-  handle: fabric.Run(Session),
-  outcome: run.Outcome,
-) -> Answer {
-  let decoded = answer(outcome)
-  let kind = case decoded {
-    Resolved(_) -> events.AnsweredTyped
-    Untyped(..) -> events.AnsweredUntyped
-    Ended(_) -> events.AnsweredNothing
+  handle: fabric.Run(Session, Resolution),
+  outcome: run.Outcome(Resolution),
+) -> Nil {
+  let kind = case outcome {
+    run.Completed(_) -> events.AnsweredTyped
+    run.AnswerInvalid(..) -> events.AnsweredUntyped
+    _ -> events.AnsweredNothing
   }
   events.answered(session.ticket, run.id_to_string(fabric.id(handle)), kind)
-  decoded
+}
+
+/// The approver the desk names on an answer. The desk has no sign-in: the
+/// name is whatever the operator console passes, so the reviewer carries no
+/// issuer, because nothing here vouches for the person. An application with
+/// an authenticated session builds this from its claims
+/// (`reviewer.with_issuer`).
+pub fn approver_named(name: String) -> Result(Reviewer, String) {
+  reviewer.new(name)
+  |> result.map_error(reviewer.describe_error)
 }
 
 /// Refunds at or above the session's threshold wait for an approver.
@@ -225,38 +248,7 @@ fn explain_lookup(error: LookupError) -> tool.Failure {
   }
 }
 
-// Typed final answer ------------------------------------------------------
-
-pub type Answer {
-  /// The agent finished with a `Resolution`.
-  Resolved(Resolution)
-  /// The agent finished with text that is not a `Resolution`.
-  Untyped(text: String, problem: String)
-  /// The run ended some other way.
-  Ended(run.Outcome)
-}
-
-fn system_prompt() -> String {
-  let assert Ok(schema) = codec.schema_json(domain.resolution())
-  "You are a customer-support agent. Look the order up, check refund "
-  <> "eligibility, and refund only when eligible. Never resubmit a refund "
-  <> "whose outcome is unknown. Finish with one JSON object, and nothing "
-  <> "else, matching this JSON Schema: "
-  <> schema
-}
-
-/// The run's outcome as the desk's typed answer: Fabric returns text, so
-/// the app decodes it with the same codec the schema came from.
-pub fn answer(outcome: run.Outcome) -> Answer {
-  case outcome {
-    run.Completed(text) ->
-      case codec.decode_json(domain.resolution(), text) {
-        Ok(resolution) -> Resolved(resolution)
-        Error(error) -> Untyped(text, codec.describe_decode_error(error))
-      }
-    other -> Ended(other)
-  }
-}
+const system_prompt = "You are a customer-support agent. Look the order up, check refund eligibility, and refund only when eligible. Never resubmit a refund whose outcome is unknown."
 
 pub fn describe(resolution: Resolution) -> String {
   let outcome = case resolution.outcome {

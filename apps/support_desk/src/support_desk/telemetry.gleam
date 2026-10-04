@@ -18,7 +18,7 @@
 //// Every event of a ticket therefore carries the ticket's `Correlation`
 //// and needs no join.
 
-import fabric/observation as fabric_obs
+import fabric/telemetry as fabric_obs
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
@@ -48,7 +48,7 @@ pub type Key {
   /// One of the desk's own ticket events: the ticket and its fabric run.
   TicketRun(ticket: Correlation, run: String)
   /// Saga's own run number, with the ticket its run was configured with.
-  SagaRun(workflow: String, run: Int, ticket: Option(Correlation))
+  SagaRun(workflow: String, run: Int, ticket: Correlation)
   /// An HTTP request, with the ticket its client was correlated with.
   HttpRequest(ticket: Option(Correlation))
   /// A model call, with the ticket its client view was correlated with.
@@ -92,7 +92,7 @@ pub fn ticket_of(observation: Observation) -> Option(Correlation) {
   case observation.key {
     TicketRun(owner, _) -> Some(owner)
     FabricRun(_, owner) -> Some(owner)
-    SagaRun(_, _, owner) -> owner
+    SagaRun(_, _, owner) -> Some(owner)
     HttpRequest(owner) -> owner
     ModelCall(owner) -> owner
   }

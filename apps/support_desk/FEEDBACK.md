@@ -106,6 +106,8 @@ telemetry trail.
 
 - **Status (round 5):** resolved by fabric fd60851/409f1a7: `fabric_saga.tool` takes `input: fn(context, call, input)`. `desk.build` passes `fn(session, call, request) { refund.Refund(shop.correlated(session.shop, call.correlation), request) }`, so the workflow input carries a per-ticket shop and `refund.workflow` no longer captures one (`workflow(shop, ledger)` becomes `workflow(ledger)`). The cost is a wrapper type: `Refund(shop, request)` (7 lines) and each step reads `refund.shop`; the void step reaches it through `undo.input`. The approver is still not on the ledger entry, because the app does not use it.
 
+- **Status (wave 5):** resolved for good by saga 9a0b1d8 (`saga.effect` and `saga.correlation_of(key)`). The `Refund(shop, request)` wrapper is deleted: the tool's `input:` is `fn(_, _, request) { request }`, `refund.workflow(shop, ledger)` takes the one shop when the agent is built, and each step tags it from its key (`shop.correlated(shop, saga.correlation_of(key))`, a 3-line helper in `refund.gleam`). The undo reads the same from `undo.key`. `Session.shop` goes too, since the tools close over `settings.shop`. The approver is still not on the ledger entry.
+
 ### SD-3 One ticket cannot be followed from the tool into the saga or into model calls
 
 - **Packages**: fabric, saga, http_gun, llm_wire, sinal. **Kind**: composition. **Severity**: major.
@@ -150,6 +152,8 @@ telemetry trail.
 
 - **Status (round 5):** resolved by fabric fd60851/409f1a7 (`fabric.start(.., correlation: Some(ticket))`, `model.Request.correlation`, `tool.Call.correlation`, and saga events configured per call). The demo prints `not attributable to any ticket: 0 of 267 events`, where wave 4 left 22 saga events plus the refund, notify and void HTTP events unattributed. The T-1 trail is 60 events (fabric 14, llm_wire 20, http_gun 16, saga 8, desk 2), and `telemetry.trail` is one filter on the event's correlation: the `ticket.opened` run-id join is deleted from it. `desk.open_ticket` builds no agent; `Desk` keeps one `Agent(Session)` again. Test `telemetry_follows_the_ticket_through_every_package_test` asserts `unattributed == []` and a trail equal to all events, and `one_agent_serves_two_tickets_and_keeps_their_events_apart_test` runs two tickets at once on the one agent.
 
+- **Status (wave 5):** the join is complete and now cheap to keep. `telemetry.gleam` changes in three lines: the import is `fabric/telemetry`, and `SagaRun.ticket` is a `Correlation`, not an `Option` (saga's six observers pass `m.correlation` straight in; `ticket_of` wraps it in `Some` to keep one return type). http_gun and llm_wire events still carry `Option(Correlation)`, so `HttpRequest` and `ModelCall` keep their `Option`. The demo prints `not attributable to any ticket: 0 of 267 events`, the same as round 5.
+
 ### SD-4 The typed final answer is parsed text; the schema reaches the model only in the prompt
 
 - **Packages**: fabric, llm_wire, json_blueprint. **Kind**: composition. **Severity**: major (known: fabric card concern 5).
@@ -170,6 +174,8 @@ telemetry trail.
   adapter requests structured output for a final answer, and fabric checks
   the text against the schema before it records `Completed`. Callers keep
   decoding with their codec. This needs no new type parameter on `Agent`.
+
+- **Status (wave 5):** resolved by fabric F3/F4 (`agent.with_answer`, `run.Completed(answer:)`, `run.AnswerInvalid`, the corrective turn). The 23-line JSON parser (`answer`, `Answer`, `Untyped`) and the schema-in-prompt (`system_prompt()` with `codec.schema_json`) are deleted; the prompt is a constant. The provider now receives the schema as `text.format` (`json_schema`, `strict: true`), and `approved_refund_runs_the_saga_and_resolves_typed_test` asserts that and that the prompt no longer says "JSON Schema". A refused answer gets a corrective turn: provider order `A-600` answers in prose until the corrective user message arrives (`a_refused_answer_gets_one_corrective_turn_test`, 4 model requests), and `with_answer_attempts(1)` ends on `AnswerInvalid` (`one_answer_attempt_ends_on_the_refused_answer_test`, the first test of the `AnsweredUntyped` path through a real run). The turn-limit run still has no answer: `run.BudgetExhausted(run.TurnLimit(2))`.
 
 ### SD-5 The operator reconciling an uncertain refund gets no application evidence
 
@@ -192,6 +198,8 @@ telemetry trail.
   helper would render reconcile content through the tool's codec.
 
 - **Status (wave 3):** partially resolved by fabric d10635f. With `unknown_when` the operator's evidence now reads "attempt 1 of step refund_payment returned an error after which its effect is unknown", where a held step gave only "the workflow held the effects of step refund_payment unresolved". It still omits the application's reason (a deadline after the request was sent), and the reconciliation is still a hand-written JSON string (`support_desk.gleam`, `unconfirmed`).
+
+- **Status (wave 5):** resolved for the reconciliation by fabric F6 (ee83046): `tool.unconfirmed_reconciliation(note)` replaces the hand-written JSON string, which `support_desk.unconfirmed` (a `const`) now builds as a one-line function. The model sees `{"unconfirmed": note}`, so the scripted provider reads that key instead of `status`. The operator-evidence half is resolved too: F6 renders the held error with the tool's `explain`, and the demo's evidence now reads "held the effects of step refund_payment unresolved: the payment outcome is unknown (Request deadline exceeded; request may have been sent)".
 
 ### SD-6 Four of six records need a hand-written `record4`
 
@@ -748,3 +756,45 @@ Sufficient. The round 5 guide's support_desk row named every compile error
 (`start`, `_call`, `input:`, `Duration`) and predicted the single agent. It
 says "the ticket's saga events now join it" but not that the saga's HTTP
 calls still need the app to put a correlated client in the workflow input.
+
+### After wave 5
+
+Package heads: fabric a19b48c (local), saga 9a0b1d8, llm_wire 2c32d5e. 16 tests pass (14 before: two tests added for the corrective answer turn; an assertion on the schema and one on `error_kind` added to existing tests); `gleam run` prints the five tickets, the ledger and the T-1 trail; `gleam format --check` is clean and the app builds with `--warnings-as-errors`.
+
+| Seam                         | Before                                                                | After                                                                         | Change                                          |
+| ---------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------- |
+| Final answer                 | `answer` parser, `Answer` type, schema in the prompt (about 35 lines) | `agent.with_answer(domain.resolution())`; tests match `run.Completed`         | `desk.gleam` -35; `close` returns `Nil`         |
+| Saga step context            | `Refund(shop, request)` wrapper, per-call shop in `input:`            | `saga.effect` + `correlation_of(key)`; `input: fn(_, _, request) { request }` | wrapper type (7) gone; `correlated` helper (+4) |
+| Start errors                 | `StartError`, `StartRefused` x2, `run.parse_id` (14 lines)            | `fabric.Error`, `run.id_from_parts`, `AlreadyStarted(id, ..)`                 | `open_ticket` 40 to 30 lines with its doc       |
+| Reviewer                     | `Some("alice")`, `None` in 6 tests                                    | `desk.approver_named(name)`: `reviewer.new` and a `Result`                    | +9 lines in `desk`, +5 in the test helper       |
+| Limits                       | `Settings.limits: agent.Limits`, `default_limits()`, `with_limits`    | `Settings.tune: fn(Spec) -> Spec`; tests pass `agent.with_max_turns(_, n)`    | -2 lines; no record update in 3 tests           |
+| Read tools after a crash     | uncertain effect                                                      | `tool.with_replay(3)` on both lookups                                         | +2 lines, no test (see gaps)                    |
+| Command failures in the demo | `let _ = fabric.approve(..)`, errors dropped                          | `refused(error)` branches on `fabric.error_kind`                              | +9 lines in `support_desk.gleam`                |
+
+Lines in `src/`: 139 added, 136 removed (net +3). Production code (`desk`, `refund`, `app`, `telemetry`) is 88 added, 109 removed (net -21). The additions elsewhere are the demo's error handling (+9) and the test provider's `A-600` quirk (+15). Tests: 103 added, 34 removed, of which about 30 added lines are the two new tests.
+
+- **Unattributed events per request: 0 of 267** in the demo, as in round 5. Nothing moved because round 5 had already joined every event; wave 5 only made the saga half total (`Correlation`, not `Option`). The caveat from round 5 holds: the measure counts events with no correlation, and a run started with `correlation: None` would still report 0 (its events carry a correlation derived from the run id). The trail-equals-all test assertions are what detect that.
+
+### Gaps left
+
+- **No authenticated approver.** The desk has no sign-in. The approver is a name the scripted console passes (`ApproveAs("alice")`), so `desk.approver_named` builds `reviewer.new(name)` with no issuer, because an issuer would claim a vouching party that does not exist. The typed reviewer is therefore as honest as the console, and `reviewer.subject(who) == "alice"` proves only that the string made the round trip. The new API fits an app that has claims; here it is a typed wrapper around a string, plus a `Result` the demo must `let assert`.
+- **A second message on a ticket is reported, not applied (F6).** `open_ticket` now returns `Opened(run:, message:)` with `Applied`, `Repeated` (`same_input: True`, a retried open) or `NotApplied` (`same_input: False`), and the demo prints "the message was not applied" for the last. That is the whole fix the desk can make: fabric has no command to add a message to a running run, so a follow-up still cannot reach the agent, and the caller must tell the customer or open another ticket. Cost: +15 lines in `desk.gleam` for the two types, a one-arm change in `main` and in the test helper; `opening_a_ticket_twice_returns_its_one_run_test` now asserts `Repeated` and `NotApplied`.
+- **`tool.with_replay` is untested here.** Proving it needs a crash of the runner mid-lookup; the app has no such harness. It is a one-line declaration backed by fabric's own tests.
+- **`Session.ticket` and `call.correlation` are still two sources** for one value (`close`, `events.opened` and `events.answered` read the session's). Nothing in wave 5 touched that.
+- **`ticket.answered` repeats fabric's `run.stop`.** Fabric's `OutcomeKind` now has `AnswerInvalid`, so the desk's `AnsweredTyped/Untyped/Nothing` event adds no information a fabric event lacks. It stays because `telemetry.trail` and the tests use it, but it could be deleted with `events.Answered`.
+- **F6 helpers with nothing to replace.** `run.describe_action_state`, `describe_host_failure` and the two `*_kind` functions have no use here: the app never matches an `ActionState` to log it, and `run.Status` has no `describe_status`, so the demo's "stuck" line is still `string.inspect(status)`.
+- **An unreadable record on a taken id** now returns the read's error (F6) instead of `AlreadyStarted(_, False)`. `open_ticket`'s catch-all passes it through, so a corrupt stored ticket is no longer reported as `NotApplied`; no test provokes it.
+- **A start whose result is unknown.** `fabric.Error` has `StartUnconfirmed(id, reason)`; `open_ticket` returns it as is. Calling `open_ticket` again would find the run by its id, so the caller's retry is sound, but the demo has no test of it.
+
+### New friction
+
+- **`Settings.tune` is a type to spell.** Keeping a general hook needs `fn(agent.Spec(Session, Resolution)) -> agent.Spec(Session, Resolution)` in the record and in `app.start_with`. The alternative, one field per knob (`max_turns: Int`), is shorter but then every new limit is a new field. Setters on a spec are good for a pipeline and awkward to pass through an app's settings; an `agent.Tuning` or a documented pattern would help.
+- **`Spec(context, answer)` leaks into every signature.** `Desk`, `build`, `open_ticket`, `close`, `drive` and the test helpers all name `Resolution` next to `Session`. It is correct, and the compiler found each one, but a type alias in the app (`type Ticket = fabric.Run(Session, Resolution)`) is the natural fix and the guide does not mention it.
+- **`reviewer.new` returns a `Result` for a value the app wrote in source.** The demo's names are literals and the `let assert Ok(..)` is noise; a literal could not exceed 256 bytes. Where a name comes from a token the `Result` is right, which is the case the guide describes.
+- **`describe_config_errors` (F6) removed the per-error join** in `desk.build`, and the `gleam/list` import with it.
+- **`Completed` and `AnswerInvalid` are siblings of the budget and cancel outcomes.** Every caller that wants the typed answer writes `Ok(run.Finished(run.Completed(resolution)))`, and one that wants to explain a failure needs a catch-all (`run.describe_outcome` covers it well). The `finish` test helper is the one place that asserts all of it.
+- **The corrective turn changes what a scripted provider must do.** The stateless test provider decides from the conversation, and the corrective message is the only signal that a refusal happened. It matches the message's text (`Your final answer could not be read`), which fabric's guide documents but does not export as a constant.
+
+### Migration guide
+
+Sufficient, and the order of its slices matched the order of compile errors. It named every break in this app: `desk.gleam`, `app.gleam`, `support_desk.gleam`, the tests and `telemetry.gleam:224-261`. Two things it did not predict: `agent.Spec` now has two type parameters, so a `Settings` field that holds a spec hook needs both; and `fabric.Run(Session)` and `Agent(Session)` in the tests each needed the answer type added. The saga guide's "after" snippet for `saga.effect` still matches `saga.correlation_of(key)` as an `Option` (`Some(correlation) -> .. None -> ..`); the function returns a plain `Correlation`, as the text below it says, and that snippet does not compile.
