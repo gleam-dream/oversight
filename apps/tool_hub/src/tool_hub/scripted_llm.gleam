@@ -15,6 +15,7 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import llm_wire
+import llm_wire/message
 import llm_wire/testing
 import mist
 
@@ -111,7 +112,7 @@ pub fn call(
   name: String,
   arguments: String,
 ) -> testing.ScriptedCall {
-  testing.ScriptedCall(id:, name:, arguments_json: arguments)
+  testing.tool_call(id:, name:, arguments_json: arguments)
 }
 
 fn handle(
@@ -125,7 +126,12 @@ fn handle(
   }
   process.send(notices, Received(body))
   case process.call(script, 1000, Next) {
-    None -> respond(testing.Status(500, "script exhausted"))
+    None ->
+      respond(testing.http_status(
+        message.Custom("scripted"),
+        500,
+        "script exhausted",
+      ))
     Some(Reply(reply)) -> respond(reply)
     Some(After(effect, reply)) -> {
       effect()
@@ -136,15 +142,10 @@ fn handle(
 }
 
 fn respond(reply: testing.Reply) -> response.Response(mist.ResponseData) {
-  let #(status, chunks) = case reply {
-    testing.Events(chunks) -> #(200, chunks)
-    testing.Interrupted(chunks) -> #(200, chunks)
-    testing.Status(code, text) -> #(code, [text])
-  }
-  response.new(status)
+  response.new(testing.status(reply))
   |> response.set_header("content-type", "text/event-stream")
   |> response.set_body(
-    mist.Bytes(bytes_tree.from_string(string.concat(chunks))),
+    mist.Bytes(bytes_tree.from_string(string.concat(testing.chunks(reply)))),
   )
 }
 
@@ -156,9 +157,9 @@ fn hold(
   req: Request(mist.Connection),
   notices: Subject(Notice),
 ) -> response.Response(mist.ResponseData) {
-  let first = case testing.text("Checking the inventory") {
-    testing.Events([event, ..]) -> event
-    _ -> ""
+  let first = case testing.chunks(testing.text("Checking the inventory")) {
+    [event, ..] -> event
+    [] -> ""
   }
   mist.chunked(
     req,

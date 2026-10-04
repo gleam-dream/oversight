@@ -908,6 +908,14 @@ re-implements the now-private `testing.http_reply` (8 lines) to serve a
 `Reply` from mist; a public `testing.body(reply) -> #(Int, String)` would
 remove that.
 
+**Status (round 6):** resolved by llm_wire 36c341c. `respond` now reads
+`testing.status(reply)` and `testing.chunks(reply)` (no re-implemented
+lowering), and the held stream takes its first event from
+`testing.chunks(testing.text(..))`. `Reply` and `ScriptedCall` are opaque, so
+the app builds them with `testing.tool_call(id:, name:, arguments_json:)` and
+`testing.http_status(message.Custom("scripted"), 500, ..)`; the other 19
+`testing.*` call sites (`text`, `tool_calls`) compiled unchanged.
+
 New friction:
 
 - **`tool.cancelled` is useless over HTTP (relay, major).** This is the
@@ -1128,3 +1136,24 @@ New:
 - **The remaining gaps are unchanged:** `working`, `timed_out`, `key_reused`
   and `awaiting_approval` are untested here; the `with_wait` against Relay's
   30 s invocation timeout still needs a manual check.
+
+#### Catch-up: fabric 3d4b840 and llm_wire 36c341c (round 6)
+
+Two edits, three lines of app code each at most. `fabric_relay.serve` returns
+`Result(Tool, List(ConfigError))`, so `assistant.serve` maps the error with
+`fabric_relay.describe_config_errors` into its existing `String` error
+(`with_wait` only stores; `budget` is range-checked there now). The opaque
+`Reply` replaced the `ScriptedCall` constructor, the `Status(500, ..)` reply
+and the three-way `case` in `scripted_llm.respond` (now two accessors).
+15 tests pass, format and `--warnings-as-errors` are clean, `gleam run`
+prints the same trail.
+
+New friction:
+
+- **A scripted HTTP status needs a provider name.** `testing.http_status`
+  takes a `message.Custom("scripted")` provider even though the app's reply
+  is only the "script exhausted" 500; one more import (`llm_wire/message`)
+  for a value the scripted wire ignores.
+- **`serve`'s error has no home in this app's `String` errors.** The
+  `with_wait` range is now reported at `serve` and the app's `budget` still
+  has no guard against Relay's 30 s invocation timeout (unchanged gap).
