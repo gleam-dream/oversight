@@ -116,12 +116,12 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
   }
   [
     sinal.observe(saga_telemetry.run_started(), fn(_m, d) {
-      record(Saga, d.correlation, "run start " <> d.workflow)
+      record(Saga, Some(d.correlation), "run start " <> d.workflow)
     }),
     sinal.observe(saga_telemetry.run_stopped(), fn(m, d) {
       record(
         Saga,
-        d.correlation,
+        Some(d.correlation),
         "run stop "
           <> saga_telemetry.outcome_kind_name(d.outcome)
           <> " undone="
@@ -131,14 +131,14 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
     sinal.observe(saga_telemetry.step_started(), fn(_m, d) {
       record(
         Saga,
-        d.correlation,
+        Some(d.correlation),
         "step start " <> d.step <> " attempt=" <> int.to_string(d.attempt),
       )
     }),
     sinal.observe(saga_telemetry.step_stopped(), fn(_m, d) {
       record(
         Saga,
-        d.correlation,
+        Some(d.correlation),
         "step stop "
           <> d.step
           <> " attempt="
@@ -150,14 +150,14 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
     sinal.observe(saga_telemetry.compensation_stopped(), fn(_m, d) {
       record(
         Saga,
-        d.correlation,
+        Some(d.correlation),
         "compensate " <> d.step <> " " <> string.inspect(d.decision),
       )
     }),
     sinal.observe(saga_telemetry.undo_stopped(), fn(_m, d) {
       record(
         Saga,
-        d.correlation,
+        Some(d.correlation),
         "undo " <> d.step <> " " <> string.inspect(d.result),
       )
     }),

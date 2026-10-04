@@ -296,6 +296,13 @@ the web-layer correlation check (5; `from_key` cannot fail).
 (five `with_correlation` calls and `order`). The wave-2 `forwarder.route`
 hazard is gone: nothing depends on which process runs a handler.
 
+**Status (wave 5):** the last by-hand step of CHK-5 is gone. `Deps.client_for`
+and its closure in `app.gleam` are deleted; the three steps are `saga.effect`
+and take their client from `saga.correlation_of(key)` (saga 5c0d30b), so a step
+reads the correlation its own `saga/telemetry` events carry. The durable
+correlation is saved on the first drive, so the redelivered drive after a
+killed runner or a crashed handler cannot use a different one.
+
 ### CHK-6 A crashed grind attempt leaves the saga runner alive, and recovery needs an operator
 
 - **Packages**: grind, saga. **Kind**: composition. **Severity**: major.
@@ -405,6 +412,10 @@ derives `idempotency` from its run id (saga/src/saga.gleam:84-87): a second
 `POST /orders` for the same order is a new run and would charge again. The
 order id is the business key across runs; saga has no way to take one. 0
 lines removed.
+
+**Status (wave 5):** unchanged. `EffectKey` is opaque (`saga.idempotency_key`);
+the doc comment at `workflow.gleam:6` now names the accessor. The app still
+derives `pay-<order>` and `ship-<order>`, for the same reason as in wave 3.
 
 ### CHK-9 Saga and grind cap `gleam_stdlib < 1.0`
 
@@ -961,3 +972,52 @@ Friction: the Int-to-`Duration` conversion between grind and saga is gone,
 but one `to_milliseconds` remains at the `gleam/erlang/process` receive
 calls. The migration note says the `+ 1000` moves onto a `Duration`; it
 cannot reach the receive without that conversion.
+
+### After wave 5
+
+Packages: saga 5c0d30b (opaque `EffectKey`, `correlation_of`, durable
+correlation saved on the first drive) and 9a0b1d8 (`correlation_of` and the
+`correlation` field of the six saga telemetry records are `Correlation`, not
+`Option`). The relay, warden and llm_wire changes
+do not touch this app.
+
+- **Tests:** 12 pass under `../scripts/with-postgres.sh gleam test`; format and
+  `--warnings-as-errors` are clean; `gleam run` ends with `Unattributed events: 0`.
+- **What changed:** `Deps.client_for` is deleted (`workflow.gleam`, `app.gleam`
+  -3). `charge_card` and `book_shipment` are `saga.effect`; their undo,
+  `restore_undo`, `compensate` and the two resolvers pass `undo.key`,
+  `failed.key` or the resolver's key to one private `client_for(deps, key)`
+  (5 lines, one `http_gun.with_correlation(.., saga.correlation_of(key))` since
+  9a0b1d8 removed the `Some`/`None` arm). The doc comment at `workflow.gleam:6`
+  names `saga.idempotency_key` and documents where correlation comes from.
+- **Lines:** code lines in `src` (blanks and comments excluded) net +1
+  (`workflow.gleam` 221 to 225, `app.gleam` 175 to 172, `telemetry.gleam` 154
+  unchanged after 9a0b1d8). The glue did not
+  shrink: the correlated client is no longer built by the app, but every
+  closure that calls a provider (`void`, `lookup`, `cancel`) now takes a key,
+  and a hand-correlated `client_for(order_id)` was one line per call.
+  What improved is the source of truth, not the line count.
+- **Restart and recovery:** the existing tests only counted saga `run start`
+  events under the order's correlation. The killed-runner and crashed-handler
+  tests now also assert that provider (http_gun) events exist under the order's
+  correlation and that `telemetry.unattributed` is empty after the redelivered
+  drive (+12 test lines). Both pass: one correlation per order across both
+  drives. Caveat: `jobs.gleam:86` still sets `durable.with_correlation` on every
+  handle with the order's `from_key`, so these tests cannot distinguish "read
+  back from the checkpoint" from "the handle supplied the same value again".
+  A test that drives a handle without `with_correlation` would pin the
+  saved-correlation rule; the app has none, and saga's own tests are the
+  evidence.
+- **Remaining gaps:** `pay-<order>`/`ship-<order>` (CHK-8) because a local run's
+  idempotency key derives from its run id; `Option(Correlation)` still handled
+  in `telemetry.gleam` for http_gun events, and `Entry.order` is still an
+  `Option` because of them, so the six saga observers wrap `Some(d.correlation)`;
+  `telemetry.order` is still the app's function and
+  `jobs.gleam` and `orders.gleam` still call `with_correlation` themselves.
+- **New friction:** with saga 9a0b1d8 the `None` arm in `client_for` is gone, but
+  `Entry.order: Option(Correlation)` now exists only for http_gun, whose
+  `metadata.correlation` is still optional (the six saga observers add `Some`).
+  `Gateway` already holds the client, so `Deps.gateway.client` is the base
+  client; the app now has two ways to reach a client (`gateway.client` for
+  uncorrelated, `client_for` for correlated) and nothing stops a step from
+  using the first.
