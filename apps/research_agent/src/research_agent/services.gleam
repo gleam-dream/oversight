@@ -39,6 +39,9 @@ pub type Step {
   Stall
   /// Stall the first time this step is reached, then behave as `then`.
   StallOnce(then: Step)
+  /// Answer with text the answer codec refuses the first time this step is
+  /// reached, then behave as `then`: the corrective turn gets `then`.
+  GarbledOnce(then: Step)
 }
 
 /// What the world reports to whoever listens (tests, the narrative).
@@ -87,12 +90,15 @@ pub opaque type Message {
   Watch(Subject(Notice))
   Notify(Notice)
   GetCounts(reply: Subject(Counts))
+  LlmBody(topic: String, body: String)
+  GetLlmBodies(topic: String, reply: Subject(List(String)))
   GetDrafts(reply: Subject(List(#(String, DraftState))))
 }
 
 type World {
   World(
     scripts: Dict(String, List(Step)),
+    llm_bodies: Dict(String, List(String)),
     hits: Dict(#(String, Int), Int),
     search_failures: Int,
     search_down: Bool,
@@ -109,6 +115,7 @@ pub fn start() -> Result(Services, String) {
   use world <- result.try(
     actor.new(World(
       scripts: dict.new(),
+      llm_bodies: dict.new(),
       hits: dict.new(),
       search_failures: 0,
       search_down: False,
@@ -156,17 +163,46 @@ pub fn script(services: Services, topic: String, steps: List(Step)) -> Nil {
   process.send(services.world, SetScript(topic, steps))
 }
 
+/// A final answer that found an article, in the shape the agent's answer
+/// codec reads. The provider replies with the schema's wrapper, `{"answer":
+/// ..}`, which `fabric/llm` unwraps.
+pub fn article(title: String, body: String) -> Step {
+  answer_json(
+    json.object([
+      #("tag", json.string("written")),
+      #(
+        "value",
+        json.object([
+          #("title", json.string(title)),
+          #("body", json.string(body)),
+        ]),
+      ),
+    ]),
+  )
+}
+
+/// A final answer that found nothing to write about.
+pub fn no_sources(reason: String) -> Step {
+  answer_json(
+    json.object([
+      #("tag", json.string("no_sources")),
+      #("value", json.string(reason)),
+    ]),
+  )
+}
+
+fn answer_json(answer: json.Json) -> Step {
+  Answer(json.to_string(json.object([#("answer", answer)])))
+}
+
 /// The ordinary script: search, read the first hit, answer.
 pub fn happy_script(services: Services, topic: String) -> List(Step) {
   [
     CallSearch(topic),
     CallRead(page_url(services, topic <> "-1")),
-    Answer(
-      "TITLE: All about "
-      <> topic
-      <> "\n"
-      <> topic
-      <> " is well documented; this article summarises one source.",
+    article(
+      "All about " <> topic,
+      topic <> " is well documented; this article summarises one source.",
     ),
   ]
 }
@@ -197,6 +233,12 @@ pub fn counts(services: Services) -> Counts {
   process.call(services.world, 1000, GetCounts)
 }
 
+/// The request bodies the scripted provider received for `topic`, oldest
+/// first.
+pub fn llm_requests(services: Services, topic: String) -> List(String) {
+  process.call(services.world, 1000, GetLlmBodies(topic, _))
+}
+
 pub fn drafts(services: Services) -> List(#(String, DraftState)) {
   process.call(services.world, 1000, GetDrafts)
 }
@@ -217,10 +259,12 @@ fn handle(world: World, message: Message) -> actor.Next(World, Message) {
         |> result.unwrap([])
         |> list.drop(step)
         |> list.first
-        |> result.unwrap(Answer("NO SOURCES no script for " <> topic))
+        |> result.unwrap(no_sources("no script for " <> topic))
       let chosen = case chosen {
         StallOnce(_) if seen == 0 -> Stall
         StallOnce(then) -> then
+        GarbledOnce(_) if seen == 0 -> Answer("I could not format this.")
+        GarbledOnce(then) -> then
         other -> other
       }
       process.send(reply, chosen)
@@ -362,6 +406,22 @@ fn handle(world: World, message: Message) -> actor.Next(World, Message) {
       notify(world.watchers, notice)
       actor.continue(world)
     }
+    LlmBody(topic, body) ->
+      actor.continue(
+        World(
+          ..world,
+          llm_bodies: dict.upsert(world.llm_bodies, topic, fn(bodies) {
+            [body, ..option.unwrap(bodies, [])]
+          }),
+        ),
+      )
+    GetLlmBodies(topic, reply) -> {
+      process.send(
+        reply,
+        dict.get(world.llm_bodies, topic) |> result.unwrap([]) |> list.reverse,
+      )
+      actor.continue(world)
+    }
     GetCounts(reply) -> {
       process.send(reply, counts)
       actor.continue(world)
@@ -494,6 +554,7 @@ fn llm(
   }
   let topic = marker(body)
   let step = count(body, "function_call_output")
+  process.send(world, LlmBody(topic, body))
   case process.call(world, 1000, LlmTurn(topic, step, _)) {
     CallSearch(query) ->
       sse([
@@ -502,7 +563,9 @@ fn llm(
     CallRead(url) ->
       sse([tool_call(step, "read", json.object([#("url", json.string(url))]))])
     Answer(text) -> sse([answer(text)])
-    Stall | StallOnce(_) -> stall(world, req, topic, step)
+    Stall -> stall(world, req, topic, step)
+    // The world resolves these to the step to play before it replies.
+    StallOnce(_) | GarbledOnce(_) -> stall(world, req, topic, step)
   }
 }
 
@@ -523,12 +586,10 @@ fn count(haystack: String, needle: String) -> Int {
 /// One scripted reply on the OpenAI Responses wire, with the usage the
 /// scripted provider always reports.
 fn reply(scripted: testing.Reply) -> String {
-  let assert testing.Events(chunks) =
-    testing.events_for(
-      message.OpenAI,
-      scripted |> testing.with_usage(message.Usage(120, 40, 160)),
-    )
-  string.concat(chunks)
+  testing.http_response(
+    message.OpenAI,
+    scripted |> testing.with_usage(message.Usage(120, 40, 160)),
+  ).body
 }
 
 fn tool_call(step: Int, name: String, arguments: json.Json) -> String {

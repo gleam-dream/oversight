@@ -16,7 +16,7 @@
 //// - llm_wire: the correlation of the HTTP client view `fabric/llm` tags
 ////   each model turn with, which is the run's, hence the research id.
 
-import fabric/observation as fabric_events
+import fabric/telemetry as fabric_events
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -225,14 +225,19 @@ pub fn start(echo_events: Bool) -> Telemetry {
       },
     ),
     sinal.observe(fabric_events.lease_lost(), fn(_, m: fabric_events.LeaseLost) {
-      record("fabric", "lease.lose", Unkeyed, string.inspect(m.reason))
+      record(
+        "fabric",
+        "lease.lose",
+        research(m.correlation),
+        string.inspect(m.reason),
+      )
     }),
     // saga
     sinal.observe(saga_events.run_started(), fn(_, m: saga_events.RunMetadata) {
       record(
         "saga",
         "run.start",
-        keyed(m.correlation),
+        research(m.correlation),
         m.workflow <> " " <> option.unwrap(m.execution, "local"),
       )
     }),
@@ -242,7 +247,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "run.stop",
-          keyed(m.correlation),
+          research(m.correlation),
           m.workflow <> " " <> saga_events.outcome_kind_name(m.outcome),
         )
       },
@@ -253,7 +258,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "step.stop",
-          keyed(m.correlation),
+          research(m.correlation),
           m.step <> " " <> string.inspect(m.result),
         )
       },
@@ -264,7 +269,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         record(
           "saga",
           "undo.stop",
-          keyed(m.correlation),
+          research(m.correlation),
           m.step <> " " <> string.inspect(m.result),
         )
       },

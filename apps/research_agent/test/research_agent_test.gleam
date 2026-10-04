@@ -12,6 +12,7 @@ import grind/admin
 import grind/job
 import pog
 import research_agent/app.{type App}
+import research_agent/domain
 import research_agent/events
 import research_agent/jobs
 import research_agent/node
@@ -112,7 +113,22 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let assert Ok(snapshot) = app.snapshot(f.node, id)
   let assert 6 = list.length(snapshot.transcript)
   let assert 3 = snapshot.turns_used
-  let assert run.Finished(run.Completed(_)) = snapshot.status
+  let assert run.Finished(run.Completed(domain.Written(_, _))) = snapshot.status
+
+  // The model was asked for the union's schema, wrapped for the provider
+  // (`fabric/llm`: the root of an output schema must be an object).
+  let assert [first, ..] = services.llm_requests(f.world, "otp")
+  let assert True =
+    list.all(
+      [
+        "\"strict\":true",
+        "\"required\":[\"answer\"]",
+        "\"anyOf\"",
+        "\"no_sources\"",
+        "\"written\"",
+      ],
+      string.contains(first, _),
+    )
 
   let counts = services.counts(f.world)
   let assert services.Counts(
@@ -160,7 +176,7 @@ pub fn search_down_once_is_explained_to_the_model_which_retries_test() {
     services.CallSearch("beam"),
     services.CallSearch("beam"),
     services.CallRead(services.page_url(f.world, "beam-1")),
-    services.Answer("TITLE: The BEAM\nSmall processes."),
+    services.article("The BEAM", "Small processes."),
   ])
   services.fail_searches(f.world, 1)
   let assert Ok(id) = app.start_research(f.node, "beam")
@@ -186,7 +202,7 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   use f <- with_node("t_search_down")
   services.script(f.world, "cobol", [
     services.CallSearch("cobol"),
-    services.Answer("NO SOURCES the search service is unavailable"),
+    services.no_sources("the search service is unavailable"),
   ])
   services.set_search_down(f.world, True)
   let assert Ok(id) = app.start_research(f.node, "cobol")
@@ -201,6 +217,25 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   // Two attempts, each with its own run (search + answer).
   let assert services.Counts(search_calls: 2, llm_calls: 4, published: 0, ..) =
     services.counts(f.world)
+}
+
+// Failure: the model's answer does not read --------------------------------------
+
+pub fn a_refused_answer_gets_a_corrective_turn_and_then_publishes_test() {
+  use f <- with_node("t_corrective")
+  services.script(f.world, "rust", [
+    services.CallSearch("rust"),
+    services.GarbledOnce(services.article("Rust", "Ownership, without a GC.")),
+  ])
+  let assert Ok(id) = app.start_research(f.node, "rust")
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  // search, the refused answer, and the corrective turn's answer
+  let assert services.Counts(search_calls: 1, llm_calls: 3, published: 1, ..) =
+    services.counts(f.world)
+  let assert Ok(snapshot) = app.snapshot(f.node, id)
+  let assert run.Finished(run.Completed(domain.Written("Rust", _))) =
+    snapshot.status
 }
 
 // Failure: publish fails after upload → compensation ----------------------------
@@ -336,7 +371,7 @@ pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
         services.StallOnce(
           services.CallRead(services.page_url(world, "gleam-1")),
         ),
-        services.Answer("TITLE: Gleam\nA friendly language for the BEAM."),
+        services.article("Gleam", "A friendly language for the BEAM."),
       ]
     },
     fn(_) { Nil },
@@ -365,7 +400,7 @@ pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
   Nil
 }
 
-pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
+pub fn a_read_interrupted_by_a_crash_is_replayed_by_fabric_test() {
   use f, id <- crash_and_recover(
     "t_crash_tool",
     "elixir",
@@ -380,12 +415,13 @@ pub fn a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test() {
   )
   let assert Ok(grind.Succeeded(_)) =
     app.await_outcome(f.node, id, duration.seconds(30))
-  // The read became an uncertain effect; the app read the page again and
-  // reconciled the action with that result.
+  // The read is bound with `tool.with_replay`: the recovered run started
+  // it again, with no uncertain effect for the app to reconcile.
   let assert Ok(snapshot) = app.snapshot(f.node, id)
   let assert Ok(read) =
     list.find(snapshot.actions, fn(a) { a.call.name == "read" })
-  let assert run.Reconciled(_) = read.state
+  let assert run.Succeeded(_) = read.state
+  let assert 1 = read.replays
   let assert services.Counts(search_calls: 1, page_calls: 2, published: 1, ..) =
     services.counts(f.world)
   Nil

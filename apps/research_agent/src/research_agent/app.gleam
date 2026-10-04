@@ -24,7 +24,9 @@ import http_gun/config as http_config
 import http_gun/destination
 import pog
 import research_agent/db
-import research_agent/domain.{type Published, type Research, Research}
+import research_agent/domain.{
+  type Answer, type Published, type Research, Research,
+}
 import research_agent/events
 import research_agent/jobs.{type ResearchError}
 import research_agent/researcher
@@ -321,7 +323,7 @@ pub fn row(app: App, id: String) -> Result(db.Row, String) {
 
 /// The run's stored snapshot: its transcript is the checkpointed
 /// conversation. The run is the job's latest attempt's.
-pub fn snapshot(app: App, id: String) -> Result(run.Snapshot, String) {
+pub fn snapshot(app: App, id: String) -> Result(run.Snapshot(Answer), String) {
   use row <- result.try(db.get(app.db, id))
   use summaries <- result.try(
     admin.list(

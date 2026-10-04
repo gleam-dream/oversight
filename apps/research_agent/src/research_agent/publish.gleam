@@ -40,8 +40,13 @@ pub fn workflow(
   base: String,
 ) -> saga.Workflow(Article, Published, PublishError, String) {
   let text = saga_codec.text()
-  let delete = fn(draft_id: String) {
-    remote.call(client, http.Delete, base <> "/drafts/" <> draft_id, [], "")
+  // Every step joins its request: the client takes the run's correlation
+  // from the step's key.
+  let via = fn(key: saga.EffectKey) {
+    http_gun.with_correlation(client, saga.correlation_of(key))
+  }
+  let delete = fn(key: saga.EffectKey, draft_id: String) {
+    remote.call(via(key), http.Delete, base <> "/drafts/" <> draft_id, [], "")
     |> remote.expect([204, 404])
     |> result.replace(Nil)
     |> result.map_error(remote.describe)
@@ -49,10 +54,10 @@ pub fn workflow(
   let create_draft =
     saga.effect("create_draft", fn(article: Article, key: saga.EffectKey) {
       remote.call(
-        client,
+        via(key),
         http.Post,
         base <> "/drafts",
-        [#("idempotency-key", key.idempotency)],
+        [#("idempotency-key", saga.idempotency_key(key))],
         json.to_string(json.object([#("title", json.string(article.title))])),
       )
       |> remote.expect([201])
@@ -62,9 +67,9 @@ pub fn workflow(
       })
       |> result.map_error(failed("create_draft"))
     })
-    |> saga.undo(fn(undo) { delete(undo.output) })
+    |> saga.undo(fn(undo) { delete(undo.key, undo.output) })
     |> durable.restore_undo(fn(undo) {
-      saga.UndoWith(fn() { delete(undo.output) })
+      saga.UndoWith(fn() { delete(undo.key, undo.output) })
     })
     |> durable.recoverable(
       version: "1",
@@ -73,8 +78,8 @@ pub fn workflow(
       resolve: fn(_article, key) {
         // The publisher deduplicates on the idempotency key, so it can say
         // whether an interrupted create happened.
-        let url = base <> "/drafts?key=" <> key.idempotency
-        case remote.call(client, http.Get, url, [], "") {
+        let url = base <> "/drafts?key=" <> saga.idempotency_key(key)
+        case remote.call(via(key), http.Get, url, [], "") {
           Ok(#(200, body)) ->
             case json.parse(body, decode.at(["id"], decode.string)) {
               Ok(id) -> durable.Completed(id)
@@ -86,10 +91,10 @@ pub fn workflow(
       },
     )
   let upload =
-    saga.step("upload_body", fn(pair: #(Article, String)) {
+    saga.effect("upload_body", fn(pair: #(Article, String), key) {
       let #(article, draft_id) = pair
       remote.call(
-        client,
+        via(key),
         http.Put,
         base <> "/drafts/" <> draft_id <> "/body",
         [],
@@ -107,9 +112,9 @@ pub fn workflow(
       resolve: fn(_, _) { durable.NotSent },
     )
   let publish =
-    saga.step("publish", fn(draft_id: String) {
+    saga.effect("publish", fn(draft_id: String, key) {
       remote.call(
-        client,
+        via(key),
         http.Post,
         base <> "/drafts/" <> draft_id <> "/publish",
         [],

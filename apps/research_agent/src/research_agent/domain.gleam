@@ -3,8 +3,6 @@
 //// one wire shape everywhere it is stored or sent.
 
 import gleam/list
-import gleam/result
-import gleam/string
 import json/blueprint/codec
 
 /// One research request. `id` is the application's key: the job input, the
@@ -115,42 +113,55 @@ pub fn article_codec() -> codec.Codec(Article) {
 
 // The agent's answer ------------------------------------------------------
 
-/// Fabric ends a run with `Completed(text: String)`, so the article's shape
-/// is a convention the system prompt asks for: `TITLE: ...` on the first
-/// line, the body after it, and `NO SOURCES` when research failed.
+/// What the agent concludes: an article, or the reason it found nothing to
+/// write about. Fabric asks the model for `answer_codec`'s schema and
+/// decodes the final text with it, so the shape is no prompt convention.
 pub type Answer {
   Written(title: String, body: String)
   NoSources(reason: String)
 }
 
-pub fn parse_answer(text: String) -> Result(Answer, String) {
-  let text = string.trim(text)
-  case string.split_once(text, "\n") {
-    _ if text == "" -> Error("empty answer")
-    _ ->
-      case string.starts_with(text, "NO SOURCES") {
-        True -> Ok(NoSources(string.drop_start(text, 10) |> string.trim))
-        False -> {
-          let #(first, rest) =
-            string.split_once(text, "\n") |> result.unwrap(#(text, ""))
-          case string.starts_with(first, "TITLE:") {
-            True ->
-              Ok(Written(
-                string.drop_start(first, 6) |> string.trim,
-                string.trim(rest),
-              ))
-            False -> Error("answer does not start with TITLE:")
-          }
-        }
-      }
+/// A tagged union: `{"tag": "written", "value": {"title": .., "body": ..}}`
+/// or `{"tag": "no_sources", "value": "<reason>"}`. `fabric/llm` wraps a
+/// non-object root as `{"answer": ..}` for the provider and unwraps the
+/// reply, so the codec stays the natural sum type.
+pub fn answer_codec() -> codec.Codec(Answer) {
+  let written = {
+    use title <- codec.field(
+      "title",
+      codec.string() |> codec.describe("The article's title"),
+      get: fn(pair: #(String, String)) { pair.0 },
+    )
+    use body <- codec.field(
+      "body",
+      codec.string() |> codec.describe("The article's body"),
+      get: fn(pair: #(String, String)) { pair.1 },
+    )
+    codec.success(#(title, body))
   }
+  codec.union({
+    use written <- codec.variant("written", written, fn(pair) {
+      Written(pair.0, pair.1)
+    })
+    use no_sources <- codec.variant(
+      "no_sources",
+      codec.string() |> codec.describe("Why no source could be read"),
+      NoSources,
+    )
+    codec.match(fn(answer) {
+      case answer {
+        Written(title, body) -> written(#(title, body))
+        NoSources(reason) -> no_sources(reason)
+      }
+    })
+  })
 }
 
 pub fn system_prompt() -> String {
   [
     "You research a topic with the search and read tools, then write a short article.",
-    "Answer with 'TITLE: <title>' on the first line and the article below it.",
-    "If no source can be read, answer 'NO SOURCES <reason>'.",
+    "Answer with the title and the article's body.",
+    "If no source can be read, say so and give the reason.",
   ]
   |> list.fold("", fn(acc, line) { acc <> line <> "\n" })
 }
