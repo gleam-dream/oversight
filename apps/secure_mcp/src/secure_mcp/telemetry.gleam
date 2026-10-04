@@ -2,14 +2,15 @@
 ////
 //// Correlation of one `/mcp` request across packages, with no app event:
 //// - relay `[relay, authorization, decided]`, `[relay, request, admitted]`
-////   and `[relay, invocation, *]` carry the request's correlation, which
-////   `http.with_correlation` reads from `x-request-id` (or mints);
+////   and `[relay, invocation, *]` carry the request's correlation: the app's
+////   `x-request-id`, else the Relay client's `x-correlation-id`, else a fresh
+////   value;
 //// - grind `[grind, job, admitted | claimed | acknowledged]` carry the same
 ////   correlation, because the tool submits its job with
 ////   `job.with_correlation(tool.correlation(call))`;
-//// - warden `[warden, http, request]` carries a correlation only for a client
-////   view made with `warden.with_correlation`; local JWT validation sends no
-////   request per token at all.
+//// - warden `[warden, http, request]` carries the request's correlation in
+////   introspection mode (the verifier applies `warden.with_correlation`);
+////   local JWT validation sends no request per token at all.
 
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -74,7 +75,7 @@ pub fn start() -> Result(Collector, String) {
           <> " decision="
           <> string.inspect(m.decision)
           <> " correlation="
-          <> optional(m.correlation),
+          <> correlation.to_string(m.correlation),
       )
     }),
     sinal.observe(relay_telemetry.http_rejected_event(), fn(_, m) {
@@ -86,7 +87,7 @@ pub fn start() -> Result(Collector, String) {
           <> " reason="
           <> string.inspect(m.reason)
           <> " correlation="
-          <> optional(m.correlation),
+          <> correlation.to_string(m.correlation),
       )
     }),
     sinal.observe(relay_telemetry.request_admitted_event(), fn(_, m) {
@@ -98,7 +99,7 @@ pub fn start() -> Result(Collector, String) {
           <> " method="
           <> m.method
           <> " correlation="
-          <> optional(m.correlation),
+          <> correlation.to_string(m.correlation),
       )
     }),
     sinal.observe(relay_telemetry.invocation_started_event(), fn(_, m) {
@@ -112,7 +113,7 @@ pub fn start() -> Result(Collector, String) {
           <> " tool="
           <> option.unwrap(m.tool, "-")
           <> " correlation="
-          <> optional(m.correlation),
+          <> correlation.to_string(m.correlation),
       )
     }),
     sinal.observe(
@@ -126,10 +127,34 @@ pub fn start() -> Result(Collector, String) {
             <> " status="
             <> string.inspect(m.status)
             <> " duration_ms="
-            <> int.to_string(measurements.duration_ms),
+            <> int.to_string(measurements.duration_ms)
+            <> " correlation="
+            <> correlation.to_string(m.correlation),
         )
       },
     ),
+    sinal.observe(relay_telemetry.exchange_closed_event(), fn(_, m) {
+      record(
+        "relay",
+        "exchange.closed",
+        "exchange="
+          <> int.to_string(m.exchange_id)
+          <> " correlation="
+          <> correlation.to_string(m.correlation),
+      )
+    }),
+    sinal.observe(relay_telemetry.client_call_event(), fn(_, m) {
+      record(
+        "relay",
+        "client.call",
+        "method="
+          <> m.method
+          <> " outcome="
+          <> string.inspect(m.outcome)
+          <> " correlation="
+          <> correlation.to_string(m.correlation),
+      )
+    }),
     sinal.observe(relay_telemetry.frame_rejected_event(), fn(_, m) {
       record(
         "relay",
@@ -147,7 +172,9 @@ pub fn start() -> Result(Collector, String) {
         "invocation="
           <> int.to_string(m.invocation_id)
           <> " reason="
-          <> string.inspect(m.reason),
+          <> string.inspect(m.reason)
+          <> " correlation="
+          <> correlation.to_string(m.correlation),
       )
     }),
     sinal.observe(warden_telemetry.http_request(), fn(measure, r) {
@@ -169,7 +196,8 @@ pub fn start() -> Result(Collector, String) {
           <> outcome
           <> " ("
           <> int.to_string(measure.duration_ms)
-          <> " ms)",
+          <> " ms) correlation="
+          <> optional(r.correlation),
       )
     }),
     sinal.observe(grind_telemetry.admitted(), fn(_, m) {

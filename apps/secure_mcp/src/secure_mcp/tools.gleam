@@ -1,6 +1,6 @@
 //// MCP tools that act for the authenticated principal, backed by Grind jobs.
 
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/result
 import grind.{type Grind}
 import grind/job
@@ -97,7 +97,7 @@ fn generate_report(
   jobs: Grind,
   report_worker: ReportWorker,
   principal: Principal,
-  correlation: Option(Correlation),
+  correlation: Correlation,
   request: ReportRequest,
 ) -> Result(Submitted, ReportError) {
   // The request's correlation travels with the job: Grind's admitted, claimed
@@ -111,10 +111,7 @@ fn generate_report(
         period: request.period,
       ),
     )
-  let report = case correlation {
-    Some(correlation) -> job.with_correlation(report, correlation)
-    None -> report
-  }
+  let report = job.with_correlation(report, correlation)
   // A lost reply is settled from the submission's receipt.
   use admission <- result.try(
     case grind.submit(jobs, report) {
