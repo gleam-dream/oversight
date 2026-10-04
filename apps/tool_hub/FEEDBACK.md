@@ -222,6 +222,18 @@ relay_tool.cancelled(call))` waits for the run and for the cancellation in
   negative one (`cancel_with_caller: False` passes an empty selector, so
   `Interrupted` never arrives).
 
+- **Status (wave 5):** resolved by fabric_relay. `fabric_relay.serve`
+  cancels a run its call owns (no idempotency key) when the call is cancelled,
+  through `relay_tool.cancelled` and `fabric.await_with`; the app has no
+  handler code for it. The disconnect test passes unchanged
+  (`disconnecting_mcp_client_cancels_run_and_model_stream_test`), three runs
+  in a row. The wave 4 concern, that Relay kills the worker before the
+  handler returns from `fabric.cancel`, did not show; I did not look for why.
+  The brief's rule is now the behavior: a keyed call does not cancel its run
+  (`keyed_call_outlives_its_disconnect_test`), so `Settings.cancel_with_caller`
+  and the negative test with its empty selector are gone, and so is the dead
+  `Interrupted` arm. `fabric.cancel_when_down` is not needed here.
+
 ### TH-4 Relay transport failures carry no submission evidence
 
 - **Packages**: relay (http_gun as the model). **Kind**: composition.
@@ -302,6 +314,24 @@ peer: fn(context) -> client.Client)` and `discover(client, peer)` for agent
 - **Status (wave 4):** open. FABRIC-R10 replaces fabric_mcp with a Relay
   adapter in wave 5. The app's adapter is 123 lines (typed 24, dynamic 41,
   failure mapping 58).
+
+- **Status (wave 5):** resolved by `integrations/fabric_relay`.
+  `src/tool_hub/remote_tools.gleam` (204 lines) is deleted: `mount` is
+  `fabric_relay.tool(definition, peer:)` (3 lines in `typed_tools`),
+  `discover` is `fabric_relay.discover(peer, peer: ..)` and `classify` is
+  built in with the same evidence rule. All 15 tests pass, including the
+  three failure-mapping tests, with one wording change: the model now reads
+  `the MCP call failed: ... (connect_failed)` where the app said `the
+inventory is unavailable`. The listing's names are now checked
+  (`UnsupportedName`), which the app never did.
+  Exposing the agent: `ask`, `render`, `tool_error` and `AskError` (about
+  120 lines) are `fabric_relay.serve(ask_assistant(), service)`; see
+  `assistant.serve` (18 lines, the same size as before). The `outcome_unknown`
+  facts carry the same `run_id` and `uncertain` list as the app's own
+  structured error. The answer is typed: `agent.with_answer(answer_codec())`.
+  The answer has little structure, so `Answer` is one field, `{"answer":
+string}`. It had to be an object for the provider, and the definition
+  needs it as the agent's answer. `Answer.run_id` is gone.
 
 ### TH-6 Mounting a discovered schema needs a hand-built `Codec(Value)` and an error-vocabulary map
 
@@ -469,6 +499,24 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `gleam run` joins the same 12 fabric, 42 http_gun, 20 llm_wire and 6 relay
   events, and 17 relay events stay unjoined (see round 5 below).
 
+- **Status (wave 5):** resolved. The caller owns the correlation
+  (`client.with_correlation(mcp, question)`); Relay carries it in `_meta` and
+  `x-correlation-id`, so the assistant server's events carry it, with no
+  `http.with_correlation` builder (deleted, which hid it).
+  `fabric_relay.serve` starts the run under it, and `fabric_relay.tool` puts
+  the run's correlation on the inventory client, so the inventory server's
+  events and the closed exchanges carry it too. For the demo question
+  `gleam run` joins 12 fabric, 48 http_gun, 20 llm_wire and 20 relay events;
+  unattributed events of the question: **0** (before: 17 relay). 3 relay
+  events remain unjoined, and they are the caller's own `tools/list`
+  (a different request: its `client.call`, `request.admitted` and
+  `exchange.closed`). The http_gun count is higher because the caller's
+  client (label `assistant_caller`) now joins. `follow` takes the
+  `Correlation`, not a run id, which `Answer` no longer needs to carry.
+  `lazy_unwrap` (assistant.gleam:221) is gone because `tool.correlation` is
+  not an `Option`; `ExchangeKey` and the `Option` fallback in `key_of`
+  remain only for `frame.rejected`.
+
 ### TH-8 One schema, but name and description are declared twice unless derived one way
 
 - **Packages**: fabric, relay. **Kind**: ergonomics. **Severity**: minor.
@@ -491,6 +539,12 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   returns `Option(Codec(o))` (`None` for a content tool), so the derivation
   needs `let assert Some(output)` for a structured definition
   (src/tool_hub/remote_tools.gleam:50).
+
+- **Status (wave 5):** the derivation (11 lines) went with `remote_tools`:
+  `fabric_relay.tool` derives the fabric definition from the Relay one, and
+  the `let assert Some(output)` is a documented panic inside it. The reverse
+  direction (a fabric tool served over MCP) is still absent, which no longer
+  matters here: `serve` publishes the agent, not a tool.
 
 ### TH-9 An MCP error result can carry only text, so "outcome unknown" is prose
 
@@ -516,6 +570,14 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   `Uncertain` now carries the run id, so `render` no longer takes it from the
   first effect, with a `"?"` fallback. The data costs about 30 lines; this
   is a new capability, not glue.
+
+- **Status (wave 5):** resolved by fabric_relay. The `isError` result and its
+  structured content are `serve`'s: `error` is one of `working`, `timed_out`,
+  `outcome_unknown`, `awaiting_approval`, `cancelled`, `failed` and others,
+  with `run_id`. `timed_out_reservation_is_uncertain_test` now reads the
+  evidence (`timed_out.maybe_sent`) from the `uncertain` list in the data
+  instead of the text; the text is the library's ("the run stopped on effects
+  of unknown status"), not the app's.
 
 ### TH-10 fabric's `model.stop` event reports unreported usage as zero
 
@@ -979,3 +1041,90 @@ New friction:
   each package has its own `with_correlation`; the 8 lines stay in the app.
 - **The suite is slightly faster** (14.3 s against 15.0 s). The drain in
   `client.close` (about 5 s per in-flight call) still dominates.
+
+### After wave 5
+
+Package heads: fabric and `fabric_relay` (local wave 5), relay b83486b,
+llm_wire 2c32d5e. 15 tests pass (14 before: the `cancel_with_caller: False`
+negative test became `keyed_call_outlives_its_disconnect_test`, and
+`retried_keyed_call_reaches_the_same_run_test` is new), three runs in a row,
+about 17 s each with the `nix develop` start. `gleam format --check` and
+`gleam build --warnings-as-errors` are clean; `gleam run` prints the trail.
+
+| Seam                                                       | Before | After | Change                                                    |
+| ---------------------------------------------------------- | ------ | ----- | --------------------------------------------------------- |
+| `remote_tools.gleam` (mount, discover, classify)           | 204    | 0     | `fabric_relay.tool`, `discover`                           |
+| `assistant.gleam` (`ask`, `render`, `tool_error`)          | 233    | 114   | `fabric_relay.serve` + `with_wait` + `agent.with_answer`  |
+| `lazy_unwrap`, `with_correlation(Some(unique))`            | 2      | 0     | `tool.correlation` is a `Correlation`; the builder hid it |
+| `Settings.cancel_with_caller`, `AskError`, `Answer.run_id` | 6      | 0     | the key rule; typed `Answer`                              |
+
+Lines: src +74 −398 (net −324), test +128 −48 (new assertions on the joined
+relay events, two keyed-call tests, JSON final replies). The scripted
+provider gained `scripted_llm.answer` (6 lines): its final replies must be
+the answer's JSON now. Telemetry changed by its import and by
+`follow(telemetry, correlation)`.
+
+Unattributed events per question: **0** (17 relay before). The only
+unjoined relay events in `gleam run` are the 3 of the caller's `tools/list`.
+
+Remaining gaps:
+
+- **`working` returns after `with_wait` (default 25 s; here `budget`).** The
+  wait must stay below Relay's invocation timeout (30 s) by hand; the app's
+  `budget` setting has no guard for that and `with_wait` only checks its own
+  range.
+
+New friction in the new APIs:
+
+- **The typed answer is a wrapper here.** The agent's answer is prose, but
+  `with_answer` needs an object schema for OpenAI and Anthropic, so `Answer`
+  is `{"answer": string}`, every scripted final reply is JSON, and a model
+  that answers in prose gets a corrective turn and then `AnswerInvalid`. The
+  guide says so for the root type, but nothing says that this also doubles a
+  failing scripted run's model calls (`with_answer_attempts`).
+- **`invocation.cancelled` for a keyed call.** Relay still emits it when the
+  caller disconnects, though the run goes on; the event reads as the call's
+  end, so a trail reader sees `invocation.cancelled` and no `run.cancel`. It is
+  correct, but it needs the key to be read.
+- **The error wording is the library's.** `the MCP call failed: ...` replaced
+  the app's `the inventory is unavailable`. It is generic by design; an app
+  that wants the peer named has no hook short of its own `tool.bind`.
+
+#### Catch-up: fabric F6 and relay ca38f75
+
+`fabric_relay.service(ask_assistant(), runs:, agent:, start:) |> serve` and
+relay's plain `Correlation` compile with small edits (`assistant.serve` is 3
+lines shorter; `start` is one expression). 15 tests pass twice in a row,
+format and `--warnings-as-errors` are clean, `gleam run` prints the same
+trail (0 unjoined for the question, 3 for the caller's `tools/list`).
+
+Resolved friction (struck from the list above):
+
+- **The `start:` annotation is gone.** The definition comes first, so
+  `fn(_, question) { question.question }` infers. Resolved.
+- **`start`'s constant principal and its `Ok` are gone.** `fabric_relay.start(context,
+prompt:)` is the whole closure; the principal is `anonymous`, which suits
+  this single-client app (the test reads the keyed run with
+  `fabric_relay.anonymous`). Resolved.
+- **A success names its run.** The result's text block carries
+  `io.github.gleam-dream/run-id` in `_meta`; the common path test reads it
+  and matches the run from telemetry. Replaces the lost `Answer.run_id`.
+- **Relay's `correlation` is a `Correlation`.** The seven relay handlers
+  use `CorrelationKey(m.correlation)`; `InvocationKey` and the `key_of`
+  fallback for relay are deleted (`key_of` stays for http_gun and llm_wire,
+  which still type it `Option`; `ExchangeKey` stays for `frame.rejected`).
+- **A keyed run nobody retries** is bounded by the agent's limits and the
+  7-day approval expiry, as `serve` now documents (a run held for an
+  uncertain effect waits for a person, by design).
+
+New:
+
+- **`_meta` is read by key.** The run id is one `list.key_find` on a text
+  block with the string `"io.github.gleam-dream/run-id"`; fabric_relay
+  exports no accessor (the constant `run_id_meta` is private) and relay's
+  client result has no helper for a block's `_meta`. A
+  `fabric_relay.run_id_of(blocks)` would remove a string the caller must
+  copy.
+- **The remaining gaps are unchanged:** `working`, `timed_out`, `key_reused`
+  and `awaiting_approval` are untested here; the `with_wait` against Relay's
+  30 s invocation timeout still needs a manual check.

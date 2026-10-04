@@ -1,19 +1,18 @@
 //// Collects the Sinal events of every package the app uses and tries to
 //// follow one question across them.
 ////
-//// Join keys available today:
-//// - fabric, http_gun, llm_wire and relay: the question's `Correlation`. The
-////   assistant server gives each request one (`http.with_correlation`), the
-////   handler reads it (`tool.correlation`) and starts the run under it
-////   (`fabric.start`). Fabric puts it on every run event, on the provider's
-////   HTTP Gun view (which llm_wire reads) and in every `tool.Call`, which the
-////   tools put on the inventory client's Relay view.
-//// - relay events of the inventory server: an exchange or invocation integer
-////   only, because a Relay client's correlation does not cross the wire.
-//// Fabric events also carry the run id, which names the question to follow.
+//// Join key: the question's `Correlation`. The MCP caller sets it
+//// (`client.with_correlation`; Relay mints one per call when it does not),
+//// it crosses the wire to the assistant server, `fabric_relay.serve` starts
+//// the run under it, and fabric puts it on every run event, on the
+//// provider's HTTP Gun view (which llm_wire reads) and in every `tool.Call`.
+//// `fabric_relay.tool` puts it on the inventory client's Relay view, so the
+//// inventory server's own events carry it too.
+//// Only a frame Relay rejects before it has a request falls back to its
+//// exchange id.
 
 import fabric/model
-import fabric/observation
+import fabric/telemetry as fabric_telemetry
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
@@ -33,8 +32,6 @@ pub type Key {
   CorrelationKey(Correlation)
   /// A Relay exchange id (per HTTP POST).
   ExchangeKey(Int)
-  /// A Relay invocation id.
-  InvocationKey(Int)
   NoKey
 }
 
@@ -135,21 +132,14 @@ pub fn records(telemetry: Telemetry) -> List(Record) {
   process.call(telemetry.collector, 1000, Snapshot)
 }
 
-/// Every record that a key joins to `run`, and every other record.
-pub fn follow(telemetry: Telemetry, run: String) -> Followed {
-  let records = records(telemetry)
-  // The run's own events name its correlation.
-  let correlations =
-    list.filter_map(records, fn(record) {
-      case record.key {
-        RunKey(id, correlation) if id == run -> Ok(correlation)
-        _ -> Error(Nil)
-      }
-    })
+/// Every record whose key is `correlation`, and every other record. The
+/// caller of the question owns the correlation (`client.with_correlation`),
+/// so it needs no run id to follow its question.
+pub fn follow(telemetry: Telemetry, correlation: Correlation) -> Followed {
   let #(joined, unjoined) =
-    list.partition(records, fn(record) {
+    list.partition(records(telemetry), fn(record) {
       case record.key {
-        RunKey(_, id) | CorrelationKey(id) -> list.contains(correlations, id)
+        RunKey(_, id) | CorrelationKey(id) -> id == correlation
         _ -> False
       }
     })
@@ -171,7 +161,6 @@ pub fn render(record: Record) -> String {
     RunKey(..) -> " [run]"
     CorrelationKey(_) -> " [correlation]"
     ExchangeKey(id) -> " [exchange " <> int.to_string(id) <> "]"
-    InvocationKey(id) -> " [invocation " <> int.to_string(id) <> "]"
     NoKey -> ""
   }
   record.package <> " " <> record.event <> ": " <> record.detail <> key
@@ -210,7 +199,7 @@ fn relay_handlers(
           "relay",
           "request.admitted",
           server(m.listener) <> m.method,
-          key_of(m.correlation, ExchangeKey(m.exchange_id)),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -222,7 +211,7 @@ fn relay_handlers(
           "relay",
           "invocation.started",
           server(m.listener) <> m.method <> " tool=" <> tool(m.tool),
-          key_of(m.correlation, InvocationKey(m.invocation_id)),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -240,7 +229,7 @@ fn relay_handlers(
             <> " in "
             <> int.to_string(measured.duration_ms)
             <> " ms",
-          key_of(m.correlation, InvocationKey(m.invocation_id)),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -252,7 +241,7 @@ fn relay_handlers(
           "relay",
           "invocation.cancelled",
           server(m.listener) <> tool(m.tool),
-          key_of(m.correlation, InvocationKey(m.invocation_id)),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -264,7 +253,7 @@ fn relay_handlers(
           "relay",
           "invocation.crashed",
           server(m.listener) <> tool(m.tool) <> " " <> string.inspect(m.reason),
-          key_of(m.correlation, InvocationKey(m.invocation_id)),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -276,7 +265,7 @@ fn relay_handlers(
           "relay",
           "exchange.closed",
           server(m.listener),
-          ExchangeKey(m.exchange_id),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -297,7 +286,7 @@ fn relay_handlers(
             <> " in "
             <> int.to_string(measured.duration_ms)
             <> " ms",
-          key_of(m.correlation, NoKey),
+          CorrelationKey(m.correlation),
         )
       },
     ),
@@ -309,14 +298,14 @@ fn fabric_handlers(
 ) -> List(sinal.Attachment) {
   [
     sinal.observe_labelled(
-      observation.run_started(),
+      fabric_telemetry.run_started(),
       "tool_hub_fabric_run_started",
       fn(_, m) {
         add("fabric", "run.start", m.agent, RunKey(m.run, m.correlation))
       },
     ),
     sinal.observe_labelled(
-      observation.model_turn(),
+      fabric_telemetry.model_turn(),
       "tool_hub_fabric_model_turn",
       fn(usage, m) {
         add(
@@ -332,7 +321,7 @@ fn fabric_handlers(
       },
     ),
     sinal.observe_labelled(
-      observation.tool_dispatched(),
+      fabric_telemetry.tool_dispatched(),
       "tool_hub_fabric_tool_dispatched",
       fn(_, m) {
         add(
@@ -344,7 +333,7 @@ fn fabric_handlers(
       },
     ),
     sinal.observe_labelled(
-      observation.tool_settled(),
+      fabric_telemetry.tool_settled(),
       "tool_hub_fabric_tool_settled",
       fn(_, m) {
         add(
@@ -356,12 +345,12 @@ fn fabric_handlers(
       },
     ),
     sinal.observe_labelled(
-      observation.run_cancelled(),
+      fabric_telemetry.run_cancelled(),
       "tool_hub_fabric_run_cancelled",
       fn(_, m) { add("fabric", "run.cancel", "", RunKey(m.run, m.correlation)) },
     ),
     sinal.observe_labelled(
-      observation.run_finished(),
+      fabric_telemetry.run_finished(),
       "tool_hub_fabric_run_finished",
       fn(totals, m) {
         add(

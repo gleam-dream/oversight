@@ -7,10 +7,12 @@
 
 import fabric/store
 import fabric/tool as fabric_tool
+import fabric_relay
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/result
 import gleam/string
 import gleam/time/duration.{type Duration}
 import http_gun
@@ -19,9 +21,9 @@ import http_gun/destination
 import llm_wire/testing
 import relay/client
 import relay/http
+import sinal/correlation
 import tool_hub/assistant.{type Assistant}
 import tool_hub/inventory
-import tool_hub/remote_tools
 import tool_hub/scripted_llm
 import tool_hub/telemetry
 
@@ -56,12 +58,10 @@ pub type Settings {
     name: String,
     /// Relay settings of the `ask_assistant` server, over its defaults.
     assistant_http: fn(http.Config(Nil)) -> http.Config(Nil),
-    /// How long one question may take.
+    /// How long one call waits for the answer.
     budget: Duration,
     /// How long the agent's client waits for one inventory call.
     inventory_timeout: Duration,
-    /// Bridge Relay cancellation to the fabric run.
-    cancel_with_caller: Bool,
   )
 }
 
@@ -72,7 +72,6 @@ pub fn settings(name: String) -> Settings {
     assistant_http: fn(config) { config },
     budget: duration.seconds(10),
     inventory_timeout: duration.seconds(2),
-    cancel_with_caller: True,
   )
 }
 
@@ -115,7 +114,9 @@ pub fn start(
   let inventory_peer = fn(context: assistant.Context) { context.inventory }
   use tools <- try(case settings.mounting {
     Typed -> Ok(typed_tools(inventory_peer))
-    Discovered -> remote_tools.discover(peer, inventory_peer) |> result_string
+    Discovered ->
+      fabric_relay.discover(peer, peer: inventory_peer)
+      |> result.map_error(fabric_relay.describe_discovery_error)
   })
   use agent <- try(
     assistant.build_agent(
@@ -132,7 +133,6 @@ pub fn start(
       agent:,
       context: assistant.Context(peer),
       budget: settings.budget,
-      cancel_with_caller: settings.cancel_with_caller,
     )
   use assistant_server <- try(assistant.serve(
     assistant,
@@ -153,12 +153,12 @@ pub fn start(
 }
 
 pub fn typed_tools(
-  peer: remote_tools.Peer(assistant.Context),
+  peer: fn(assistant.Context) -> client.Client,
 ) -> List(fabric_tool.Tool(assistant.Context)) {
   [
-    remote_tools.mount(inventory.search_products(), peer),
-    remote_tools.mount(inventory.get_stock(), peer),
-    remote_tools.mount(inventory.reserve_stock(), peer),
+    fabric_relay.tool(inventory.search_products(), peer:),
+    fabric_relay.tool(inventory.get_stock(), peer:),
+    fabric_relay.tool(inventory.reserve_stock(), peer:),
   ]
 }
 
@@ -212,7 +212,7 @@ pub fn demo_script() -> List(scripted_llm.Step) {
         ),
       ]),
     ),
-    scripted_llm.Reply(testing.text(
+    scripted_llm.Reply(scripted_llm.answer(
       "The Ergonomic keyboard (KB-101) has 12 units in Lisbon; reservation R-1 holds 2 of them.",
     )),
   ]
@@ -240,17 +240,18 @@ pub fn main() -> Nil {
     <> string.join(list.map(listed, fn(tool) { tool.name }), ", "),
   )
   io.println("- it asks: " <> demo_question)
+  let question = correlation.unique()
   case
     client.call(
-      mcp,
+      mcp |> client.with_correlation(question),
       assistant.ask_assistant(),
       assistant.Question(demo_question),
     )
   {
     Ok(client.Succeeded(answer, _)) -> {
       io.println("- answer: " <> answer.answer)
-      io.println("- run " <> answer.run_id <> ", followed across packages:")
-      let followed = telemetry.follow(hub.telemetry, answer.run_id)
+      io.println("- followed across packages by the caller's correlation:")
+      let followed = telemetry.follow(hub.telemetry, question)
       followed.joined
       |> list.filter(fn(record) { record.package == "fabric" })
       |> list.each(fn(record) { io.println("    " <> telemetry.render(record)) })
@@ -264,10 +265,10 @@ pub fn main() -> Nil {
         <> joined("llm_wire")
         <> " llm_wire and "
         <> joined("relay")
-        <> " relay events joined through the question's correlation",
+        <> " relay events",
       )
       io.println(
-        "  not joinable to the run (no shared key): "
+        "  not joinable to the question: "
         <> int.to_string(telemetry.count(followed.unjoined, "relay"))
         <> " relay and "
         <> int.to_string(telemetry.count(followed.unjoined, "llm_wire"))

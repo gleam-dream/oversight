@@ -8,6 +8,7 @@ import gleam/erlang/process.{type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
@@ -97,6 +98,11 @@ fn stop_process(pid: process.Pid) -> Nil
 pub fn settings(provider: Provider) -> llm_wire.Config {
   testing.config()
   |> llm_wire.with_endpoint("http://127.0.0.1:" <> int.to_string(provider.port))
+}
+
+/// The final reply of an agent whose answer is `{"answer": text}`.
+pub fn answer(text: String) -> testing.Reply {
+  testing.text(json.to_string(json.object([#("answer", json.string(text))])))
 }
 
 /// A scripted tool call; `arguments` is the raw JSON text the model "sent".
