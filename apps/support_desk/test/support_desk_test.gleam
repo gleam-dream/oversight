@@ -1,6 +1,6 @@
 import fabric
 import fabric/agent
-import fabric/reviewer.{type Reviewer}
+import fabric/reviewer
 import fabric/run
 import gleam/list
 import gleam/option.{Some}
@@ -12,6 +12,7 @@ import sinal/correlation
 import sinal/fields
 import support_desk
 import support_desk/app.{type App}
+import support_desk/approvers
 import support_desk/desk
 import support_desk/domain.{type Resolution}
 import support_desk/events
@@ -21,6 +22,7 @@ import support_desk/refund
 import support_desk/services
 import support_desk/shop
 import support_desk/telemetry
+import warden/testing
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -41,9 +43,11 @@ fn open(
   #(session, handle)
 }
 
-fn approver(name: String) -> Reviewer {
-  let assert Ok(reviewer) = desk.approver_named(name)
-  reviewer
+/// The approver signs in at the scripted OIDC provider and holds the
+/// access token it issued.
+fn signed_in(app: App, subject: String) -> approvers.Credential {
+  let assert Ok(credential) = app.sign_in(app, subject)
+  credential
 }
 
 fn awaiting_refund_approval(
@@ -72,13 +76,9 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
   // Nothing is refunded before a person approves.
   assert services.calls_matching(app.services, "POST /payments") == []
 
-  let assert Ok(_) =
-    fabric.approve(
-      handle,
-      pending.reference,
-      reviewer: approver("alice"),
-      context: session,
-    )
+  let assert Ok(approver) =
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
+  assert reviewer.subject(approver) == "alice"
   let resolved = finish(handle)
   assert resolved.outcome == domain.Refunded
   assert resolved.refunded_cents == 2500
@@ -105,6 +105,7 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
   let assert [run.Approval(reviewer: Some(who), answer: run.Approve, ..)] =
     refund.approvals
   assert reviewer.subject(who) == "alice"
+  assert reviewer.issuer(who) == Some(testing.issuer(app.identity))
   app.stop(app)
 }
 
@@ -177,11 +178,12 @@ pub fn rejected_refund_is_explained_by_the_agent_test() {
   let #(_, handle) = open(app, "T-4", "Refund A-200 please.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.reject(
+    desk.reject(
+      app.desk,
       handle,
-      pending.reference,
+      pending,
+      signed_in(app, "carol"),
       reason: "over the goodwill limit",
-      reviewer: approver("carol"),
     )
   let resolved = finish(handle)
   assert resolved.outcome == domain.Declined
@@ -195,12 +197,7 @@ pub fn failed_notification_compensates_the_refund_test() {
   let #(session, handle) = open(app, "T-5", "Order A-300 never worked.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(
-      handle,
-      pending.reference,
-      reviewer: approver("alice"),
-      context: session,
-    )
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   let resolved = finish(handle)
   // The saga rolled back in reverse: ledger entry removed, refund voided,
   // and fabric_saga reported it as a definite failure the model explains.
@@ -221,12 +218,7 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   let #(session, handle) = open(app, "T-6", "Refund order A-400 please.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(
-      handle,
-      pending.reference,
-      reviewer: approver("alice"),
-      context: session,
-    )
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   // http_gun's deadline fired after the request may have been sent; the
   // step marks that error with `saga.unknown_when`, and fabric_saga turns
   // the unknown effect into an uncertain one: no model turn until reconciled.
@@ -269,16 +261,113 @@ pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
   let assert Ok(run.Finished(run.Cancelled)) = fabric.cancel(handle)
   // The pending approval is void: a late approver changes nothing.
   let assert Error(error) =
-    fabric.approve(
-      handle,
-      pending.reference,
-      reviewer: approver("alice"),
-      context: session,
-    )
-  assert error == fabric.RunEnded
-  assert fabric.error_kind(error) == fabric.Refused
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
+  assert error == desk.Refused(fabric.RunEnded)
   assert services.calls_matching(app.services, "POST") == []
   assert ledger.entries(app.ledger) == []
+  app.stop(app)
+}
+
+// Approver authentication ---------------------------------------------------
+
+/// Answers the pending refund with `credential`, expects the desk to refuse
+/// it before fabric sees it, and checks that nothing moved: the approval is
+/// still pending, no approval is recorded and no refund was paid.
+fn refused_and_still_pending(
+  app: App,
+  handle: fabric.Run(desk.Session, Resolution),
+  session: desk.Session,
+  credential: approvers.Credential,
+) -> approvers.Error {
+  let pending = awaiting_refund_approval(handle)
+  let assert Error(desk.NotAuthenticated(error)) =
+    desk.approve(app.desk, handle, pending, credential, session)
+  // The same approval can still be answered: fabric never saw the refusal.
+  let _ = awaiting_refund_approval(handle)
+  let assert Ok(snapshot) = fabric.snapshot(handle)
+  let assert Ok(refund) =
+    list.find(snapshot.actions, fn(action) {
+      action.call.name == "issue_refund"
+    })
+  assert refund.approvals == []
+  assert services.calls_matching(app.services, "POST") == []
+  error
+}
+
+pub fn an_approval_without_a_credential_is_refused_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-16", "Refund order A-100.", 0)
+  let error =
+    refused_and_still_pending(app, handle, session, approvers.Anonymous)
+  assert error == approvers.NotSignedIn
+  // Rejecting needs the same authentication.
+  let pending = awaiting_refund_approval(handle)
+  let assert Error(desk.NotAuthenticated(approvers.NotSignedIn)) =
+    desk.reject(app.desk, handle, pending, approvers.Anonymous, reason: "no")
+  // A signed-in approver then answers it.
+  let assert Ok(_) =
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
+  assert finish(handle).outcome == domain.Refunded
+  app.stop(app)
+}
+
+pub fn an_expired_token_is_refused_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-17", "Refund order A-100.", 0)
+  let expired =
+    testing.access_token("alice")
+    |> testing.with_audiences([app.audience])
+    |> testing.with_ttl(duration.seconds(-60))
+    |> testing.issue_access_token(app.identity, _)
+  let assert approvers.Rejected(reason) =
+    refused_and_still_pending(app, handle, session, approvers.Bearer(expired))
+  assert string.contains(reason, "expired")
+  app.stop(app)
+}
+
+pub fn invalid_tokens_are_refused_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-18", "Refund order A-100.", 0)
+  let mint = fn(spec) {
+    approvers.Bearer(testing.issue_access_token(app.identity, spec))
+  }
+  let valid = fn() {
+    testing.access_token("mallory")
+    |> testing.with_audiences([app.audience])
+  }
+  // Unsigned, signed by an unpublished key, and not a token at all.
+  let assert approvers.Rejected(_) =
+    refused_and_still_pending(
+      app,
+      handle,
+      session,
+      mint(testing.forged(valid(), testing.UnsignedToken)),
+    )
+  let assert approvers.Rejected(_) =
+    refused_and_still_pending(
+      app,
+      handle,
+      session,
+      mint(testing.forged(valid(), testing.UnknownKey)),
+    )
+  let assert approvers.Rejected(_) =
+    refused_and_still_pending(app, handle, session, approvers.Bearer("alice"))
+  // A token that claims another issuer.
+  let assert approvers.Rejected(_) =
+    refused_and_still_pending(
+      app,
+      handle,
+      session,
+      mint(testing.with_issuer(valid(), "https://evil.test")),
+    )
+  // A genuine token minted for another resource.
+  assert refused_and_still_pending(
+      app,
+      handle,
+      session,
+      mint(testing.with_audiences(valid(), ["https://billing.test"])),
+    )
+    == approvers.WrongAudience
   app.stop(app)
 }
 
@@ -289,12 +378,7 @@ pub fn telemetry_follows_the_ticket_through_every_package_test() {
   let #(session, handle) = open(app, "T-9", "Please refund order A-100.", 0)
   let pending = awaiting_refund_approval(handle)
   let assert Ok(_) =
-    fabric.approve(
-      handle,
-      pending.reference,
-      reviewer: approver("alice"),
-      context: session,
-    )
+    desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   let assert Ok(run.Finished(outcome)) =
     fabric.await(handle, within: duration.seconds(10))
   let assert run.Completed(_) = outcome
@@ -326,19 +410,9 @@ pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
   let one_pending = awaiting_refund_approval(one)
   let two_pending = awaiting_refund_approval(two)
   let assert Ok(_) =
-    fabric.approve(
-      one,
-      one_pending.reference,
-      reviewer: approver("alice"),
-      context: first,
-    )
+    desk.approve(app.desk, one, one_pending, signed_in(app, "alice"), first)
   let assert Ok(_) =
-    fabric.approve(
-      two,
-      two_pending.reference,
-      reviewer: approver("alice"),
-      context: second,
-    )
+    desk.approve(app.desk, two, two_pending, signed_in(app, "alice"), second)
   let _ = finish(one)
   let _ = finish(two)
   let all = telemetry.observations(app.telemetry)
