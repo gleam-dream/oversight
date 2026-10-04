@@ -125,9 +125,6 @@ pub fn start(config: Config) -> Result(App, String) {
     workflow.define(workflow.Deps(
       pool:,
       gateway:,
-      client_for: fn(order_id) {
-        http_gun.with_correlation(http, telemetry.order(order_id))
-      },
       charge_attempts: config.charge_attempts,
     ))
   let saga_config =

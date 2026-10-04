@@ -359,13 +359,17 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
   assert eventually(fn() { db.receipt_sent(services.pool, "durable-1") }, 100)
 
   // Two saga runs (before and after the kill), both carrying the order's
-  // correlation.
+  // correlation, and so do the provider calls the steps made in each: the
+  // saved correlation is read back by the redelivered drive, and no event of
+  // either drive is unattributed.
+  let trace = telemetry.trace(services.collector, telemetry.order("durable-1"))
   let runs =
-    telemetry.trace(services.collector, telemetry.order("durable-1"))
-    |> list.count(fn(e) {
+    list.count(trace, fn(e) {
       e.source == telemetry.Saga && e.line == "run start checkout"
     })
   assert runs == 2
+  assert list.any(trace, fn(e) { e.source == telemetry.Http })
+  assert telemetry.unattributed(services.collector) == []
 }
 
 /// A whole-worker crash: the grind handler process dies. Its saga runner
@@ -421,6 +425,14 @@ pub fn durable_checkout_after_job_crash_replays_without_an_operator_test() {
   assert list.contains(grind_lines, "job quarantined replayed=True" <> job)
   assert !list.any(grind_lines, string.starts_with(_, "job claimed attempt=2"))
   assert !list.any(grind_lines, string.starts_with(_, "job resolved"))
+  // The replayed drive's saga and provider events stay under the same order.
+  let trace = telemetry.trace(services.collector, telemetry.order("crash-1"))
+  assert list.count(trace, fn(e) {
+      e.source == telemetry.Saga && e.line == "run start checkout"
+    })
+    == 2
+  assert list.any(trace, fn(e) { e.source == telemetry.Http })
+  assert telemetry.unattributed(services.collector) == []
 }
 
 /// `grind.cancel` of a running durable checkout reaches the handler through

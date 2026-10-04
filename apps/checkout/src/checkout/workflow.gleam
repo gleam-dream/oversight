@@ -2,11 +2,15 @@
 //// book the shipment (shipping API). One definition serves both the local
 //// run behind `POST /orders` and the durable run driven by a grind job.
 ////
-//// Provider idempotency keys are derived from the order id, not from saga's
-//// `EffectKey.idempotency`. Saga's key is stable across retries and across
+//// Provider idempotency keys are derived from the order id, not from
+//// `saga.idempotency_key(key)`. Saga's key is stable across retries and across
 //// restarts of one durable execution, but a local run derives it from its
 //// run id, so a second `POST /orders` for the same order would charge again.
 //// The order id is the business key across runs.
+////
+//// Each step correlates its own provider calls from the run:
+//// `saga.correlation_of(key)` is the order's correlation, set on the local
+//// run (`execution.with_correlation`) or on the durable handle.
 ////
 //// Both provider steps mark a `MaybeSent` transport failure with
 //// `saga.unknown_when`, so saga names the attempt in `unknown_effects`
@@ -24,7 +28,7 @@ import gleam/option.{None, Some}
 import gleam/result
 import http_gun
 import pog
-import saga.{type Step, type Workflow}
+import saga.{type EffectKey, type Step, type Workflow}
 import saga/durable
 import saga/execution
 
@@ -32,8 +36,6 @@ pub type Deps {
   Deps(
     pool: pog.Connection,
     gateway: Gateway,
-    /// The http_gun client view to use for one order (correlated).
-    client_for: fn(String) -> http_gun.Client,
     /// Total charge attempts when the payment outcome is unknown.
     charge_attempts: Int,
   )
@@ -51,6 +53,11 @@ pub fn payment_key(order: OrderRequest) -> String {
 
 pub fn shipment_key(order: OrderRequest) -> String {
   "ship-" <> order.order_id
+}
+
+/// The gateway's client, correlated like the run that calls it.
+fn client_for(deps: Deps, key: EffectKey) -> http_gun.Client {
+  http_gun.with_correlation(deps.gateway.client, saga.correlation_of(key))
 }
 
 pub fn define(deps: Deps) -> Checkout {
@@ -103,32 +110,28 @@ fn reserve_stock(
 fn charge_card(
   deps: Deps,
 ) -> Step(Reserved, Charged, CheckoutError, UndoError) {
-  let void = fn(charged: Charged) {
-    gateway.void(
-      deps.gateway,
-      deps.client_for(charged.reserved.order.order_id),
-      charged.charge_id,
-    )
+  let void = fn(charged: Charged, key) {
+    gateway.void(deps.gateway, client_for(deps, key), charged.charge_id)
     |> result.map_error(UndoError("charge_card", _))
   }
-  let lookup = fn(reserved: Reserved) {
+  let lookup = fn(reserved: Reserved, key) {
     gateway.find_charge(
       deps.gateway,
-      deps.client_for(reserved.order.order_id),
+      client_for(deps, key),
       payment_key(reserved.order),
     )
   }
-  saga.step("charge_card", fn(reserved: Reserved) {
+  saga.effect("charge_card", fn(reserved: Reserved, key) {
     let order = reserved.order
     gateway.charge(
       deps.gateway,
-      deps.client_for(order.order_id),
+      client_for(deps, key),
       order,
       payment_key(order),
     )
     |> result.map(Charged(reserved, _))
   })
-  |> saga.undo(fn(undo) { void(undo.output) })
+  |> saga.undo(fn(undo) { void(undo.output, undo.key) })
   |> saga.unknown_when(domain.effect_uncertain)
   // Retry an unknown payment outcome under the same provider idempotency
   // key, and hold (no rollback) when attempts run out.
@@ -147,12 +150,14 @@ fn charge_card(
         }
     }
   })
-  |> durable.restore_undo(fn(undo) { saga.UndoWith(fn() { void(undo.output) }) })
-  |> durable.resolve_compensation(fn(reserved, _key) {
-    case lookup(reserved) {
+  |> durable.restore_undo(fn(undo) {
+    saga.UndoWith(fn() { void(undo.output, undo.key) })
+  })
+  |> durable.resolve_compensation(fn(reserved, key) {
+    case lookup(reserved, key) {
       Ok(gateway.ChargeFound(id, False)) -> {
         let charged = Charged(reserved, id)
-        Some(saga.Continue(charged, saga.UndoWith(fn() { void(charged) })))
+        Some(saga.Continue(charged, saga.UndoWith(fn() { void(charged, key) })))
       }
       Ok(_) -> Some(saga.Retry)
       Error(_) -> None
@@ -162,8 +167,8 @@ fn charge_card(
     version: "1",
     input: codecs.to_saga(codecs.reserved()),
     output: codecs.to_saga(codecs.charged()),
-    resolve: fn(reserved, _key) {
-      case lookup(reserved) {
+    resolve: fn(reserved, key) {
+      case lookup(reserved, key) {
         Ok(gateway.ChargeFound(id, _)) ->
           durable.Completed(Charged(reserved, id))
         Ok(gateway.NoCharge) -> durable.NotSent
@@ -176,25 +181,28 @@ fn charge_card(
 fn book_shipment(
   deps: Deps,
 ) -> Step(Charged, Booked, CheckoutError, UndoError) {
-  let client = fn(charged: Charged) {
-    deps.client_for(charged.reserved.order.order_id)
-  }
-  let cancel = fn(charged: Charged) {
+  let cancel = fn(charged: Charged, key) {
     gateway.cancel_shipment(
       deps.gateway,
-      client(charged),
+      client_for(deps, key),
       shipment_key(charged.reserved.order),
     )
   }
-  saga.step("book_shipment", fn(charged: Charged) {
+  saga.effect("book_shipment", fn(charged: Charged, key) {
     let order = charged.reserved.order
-    gateway.book(deps.gateway, client(charged), order, shipment_key(order))
+    gateway.book(
+      deps.gateway,
+      client_for(deps, key),
+      order,
+      shipment_key(order),
+    )
     |> result.map(Booked(charged, _))
   })
   // A booked shipment is cancelled when a cancellation rolls the run back
   // after this last step succeeded.
   |> saga.undo(fn(undo) {
-    cancel(undo.input) |> result.map_error(UndoError("book_shipment", _))
+    cancel(undo.input, undo.key)
+    |> result.map_error(UndoError("book_shipment", _))
   })
   |> saga.unknown_when(domain.effect_uncertain)
   // A shipment request that timed out may still have been booked. Saga only
@@ -210,7 +218,7 @@ fn book_shipment(
     {
       False -> saga.Abort(error)
       True ->
-        case cancel(failed.input) {
+        case cancel(failed.input, failed.key) {
           Ok(Nil) -> saga.Abort(error)
           Error(cleanup) ->
             saga.AbortAfterCleanupFailure(
@@ -222,11 +230,12 @@ fn book_shipment(
   })
   |> durable.restore_undo(fn(undo) {
     saga.UndoWith(fn() {
-      cancel(undo.input) |> result.map_error(UndoError("book_shipment", _))
+      cancel(undo.input, undo.key)
+      |> result.map_error(UndoError("book_shipment", _))
     })
   })
-  |> durable.resolve_compensation(fn(charged, _key) {
-    case cancel(charged) {
+  |> durable.resolve_compensation(fn(charged, key) {
+    case cancel(charged, key) {
       Ok(Nil) -> Some(saga.Abort(Interrupted("book_shipment")))
       Error(_) -> None
     }
@@ -235,12 +244,12 @@ fn book_shipment(
     version: "1",
     input: codecs.to_saga(codecs.charged()),
     output: codecs.to_saga(codecs.booked()),
-    resolve: fn(charged, _key) {
+    resolve: fn(charged, key) {
       let order = charged.reserved.order
       case
         gateway.find_shipment(
           deps.gateway,
-          client(charged),
+          client_for(deps, key),
           shipment_key(order),
         )
       {
