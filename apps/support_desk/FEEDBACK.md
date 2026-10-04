@@ -230,6 +230,8 @@ telemetry trail.
 
 - **Status (wave 4):** resolved by llm_wire 177ad50 (`testing.events_for`). `provider.gleam` goes from 382 to 305 lines (345 to 269 non-blank, non-comment): `tool_call_events`, `text_events`, `completed` and `event` (about 100 lines) become `testing.tool_calls`, `testing.text` and a 4-line `wire` that adds the old usage with `testing.with_usage` and lowers with `events_for(message.OpenAI, _)`. The 12 tests pass unchanged against the generated wire, so the provider still accepts what llm_wire emits and fabric still reads what it sends. `events_for` gives `Interrupted` and `Status` replies back unchanged, so `sse` keeps a catch-all arm that answers 500 for them; the app uses neither.
 
+- **Status (round 6):** the caller-built `Reply` is gone for good: llm_wire 36c341c makes `Reply` and `ScriptedCall` opaque, so the app cannot match `Events`/`Interrupted`/`Status` any more, and need not. `wire` and the `sse` case (about 17 lines) become one `sse` of three lines: `testing.with_usage`, then `testing.http_response(message.OpenAI, _)`, then `response.map` to `mist.Bytes`. The unreachable `Interrupted | Status -> status(500)` arm is deleted (`status` stays for the 400). `provider.gleam` goes from 319 to 308 lines; the one other change is `testing.ScriptedCall(..)` to `testing.tool_call(..)`. The 16 tests pass unchanged.
+
 ### SD-8 fabric, fabric_saga and saga cap gleam_stdlib below 1.0
 
 - **Packages**: fabric, saga. **Kind**: ecosystem-interop. **Severity**: minor.
@@ -798,3 +800,9 @@ Lines in `src/`: 139 added, 136 removed (net +3). Production code (`desk`, `refu
 ### Migration guide
 
 Sufficient, and the order of its slices matched the order of compile errors. It named every break in this app: `desk.gleam`, `app.gleam`, `support_desk.gleam`, the tests and `telemetry.gleam:224-261`. Two things it did not predict: `agent.Spec` now has two type parameters, so a `Settings` field that holds a spec hook needs both; and `fabric.Run(Session)` and `Agent(Session)` in the tests each needed the answer type added. The saga guide's "after" snippet for `saga.effect` still matches `saga.correlation_of(key)` as an `Option` (`Some(correlation) -> .. None -> ..`); the function returns a plain `Correlation`, as the text below it says, and that snippet does not compile.
+
+### After round 6
+
+llm_wire 36c341c, fabric 3d4b840. The only edit is `provider.gleam` (SD-7 status above). The app uses no graph runtime, `fabric_relay` or provider safety stop, so none of the fabric round 6 changes touched it. 16 tests pass, `gleam format --check` and `--warnings-as-errors` are clean, and `gleam run` prints the same five tickets, the ledger and `not attributable to any ticket: 0 of 267 events`.
+
+New friction: none. The one `Reply` question left is that the scripted provider cannot script a safety stop (`testing.content_filtered`) without a new ticket case; the desk has no ticket that needs one.
