@@ -91,7 +91,7 @@ fn respond(body: String) -> Response(mist.ResponseData) {
         CallTool(name, arguments) ->
           sse(
             testing.tool_calls("", [
-              testing.ScriptedCall(
+              testing.tool_call(
                 "call_" <> int.to_string(calls + 1),
                 name,
                 json.to_string(arguments),
@@ -273,22 +273,11 @@ fn item_decoder() -> decode.Decoder(Item) {
 // OpenAI Responses SSE ------------------------------------------------------
 
 /// The scripted reply as the OpenAI Responses stream llm_wire's own
-/// `testing.events_for` writes, with the usage the old fixture reported.
-fn wire(reply: testing.Reply) -> testing.Reply {
-  testing.with_usage(reply, message.Usage(150, 40, 190))
-  |> testing.events_for(message.OpenAI, _)
-}
-
+/// `testing.http_response` writes, with the usage the old fixture reported.
 fn sse(reply: testing.Reply) -> Response(mist.ResponseData) {
-  case wire(reply) {
-    testing.Events(chunks) ->
-      response.new(200)
-      |> response.set_header("content-type", "text/event-stream")
-      |> response.set_body(
-        mist.Bytes(bytes_tree.from_string(string.concat(chunks))),
-      )
-    testing.Interrupted(_) | testing.Status(..) -> status(500)
-  }
+  testing.with_usage(reply, message.Usage(150, 40, 190))
+  |> testing.http_response(message.OpenAI, _)
+  |> response.map(fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
 }
 
 fn status(code: Int) -> Response(mist.ResponseData) {
