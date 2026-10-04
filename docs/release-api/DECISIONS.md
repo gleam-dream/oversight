@@ -15,6 +15,7 @@ a recommendation.
 Package decisions taken with these (3 October 2026):
 
 - **fabric reviewer:** a typed caller identity, not a string. An answer to an approval names its reviewer with a fabric `Reviewer` value, built by the application from an authenticated identity.
+- **fabric approvers (round 8, 4 October 2026):** answers carry an opaque `Proof` minted by the agent's configured `fabric/approvers` verifier, which decides both authentication and authorization. There is no `fabric_warden` package: the warden verifier is a compiled recipe in fabric's docs, promoted to a package only if a second app copies it or the mapping grows.
 - **fabric approval expiry:** 7 days by default (decision 5). An expired approval rejects the action, and the model sees the rejection. The default is configurable, with an explicit `Infinity`.
 
 ## 1. Durability ownership
