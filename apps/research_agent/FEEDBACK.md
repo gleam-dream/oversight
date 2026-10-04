@@ -1124,6 +1124,14 @@ Package heads: llm_wire 9f35183, http_gun 4a6eeb0, saga af644b0, fabric
     `let assert` that shape to join the chunks into one response body; a
     `testing.body(reply)` returning the concatenated SSE would fit a fake
     server directly.
+
+    **Status (round 6):** resolved earlier for the body by
+    `testing.http_response(..).body`. The remaining caller-built value,
+    `testing.ScriptedCall(..)`, is now `testing.tool_call(id:, name:,
+arguments_json:)` because llm_wire 36c341c made `Reply` and
+    `ScriptedCall` opaque; `services` constructs and matches no `Reply`
+    variant any more.
+
   - `testing.tool_calls("", ..)` takes the assistant text as a required
     string; `""` reads as a magic value.
   - `saga.step` timeouts now need `execution.After(duration.seconds(5))`:
@@ -1260,3 +1268,16 @@ Package heads: fabric ee83046 (F6), saga 9a0b1d8, llm_wire 0e4f01a.
   poor answer codec (see the friction above), and its `Dependents` for
   llm_wire says the `let assert testing.Events` becomes
   `http_response(..).body`, which was right.
+
+### After round 6
+
+Package heads: llm_wire 36c341c, fabric 3d4b840.
+
+- **Change**: one line in `services.gleam`, `testing.ScriptedCall(` becomes
+  `testing.tool_call(` (same labels). `gleam format --check`, `gleam build
+--warnings-as-errors`, `with-postgres.sh gleam test` (10 passed) and `gleam
+run` (51 events joined, none unclaimed) pass.
+- **Not applicable here**: `graph.build`, `fabric_relay.with_wait` and
+  `serve` (no MCP), and `run.Refused` on a safety stop (the scripted provider
+  never filters; the job already ends a refused answer as before).
+- **New friction**: none.
