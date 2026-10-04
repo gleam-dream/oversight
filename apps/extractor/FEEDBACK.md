@@ -1031,3 +1031,22 @@ correction: two of the five sites (L289, L297) are patterns on results of real
 calls, not constructions, so only three could use `testing.failure`; and
 `scripted.provider_error`'s three-wire bodies map to `http_status`, and 2c32d5e
 added the missing `Retry-After` helper for a fake server.
+
+### After round 6
+
+Package heads: llm_wire 36c341c. No source change. `gleam format --check`,
+`gleam build --warnings-as-errors`, `with-postgres.sh gleam test` (15 passed)
+and `gleam run` (unattributed events 0) pass unchanged.
+
+- **Opaque `Reply`**: the app uses builders only (`text`, `rate_limited`,
+  `http_status`, `http_response`, `with_usage`, `failure`) and constructs or
+  matches no `Reply` or `ScriptedCall` variant, so there is nothing to migrate.
+- **`ContentFiltered`**: `outcome.decide_call` already ends it as a discard.
+  `advise` answers `WillNotHelpUnchanged` for it, so the last arm discards
+  with `describe_failure`'s text. A provider safety stop on Anthropic or Gemini
+  no longer reaches `llm.Refused` (only OpenAI refusal content does), which is
+  the same ending with a different message. No test scripts a filter, so the
+  arm is covered by the type only.
+- **Code removed**: none left to remove; the wave-5 adoptions
+  (`provider_error`, `sse`, hand-built `Failure`) are already in.
+- **New friction**: none.
