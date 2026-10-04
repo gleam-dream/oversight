@@ -25,26 +25,15 @@ pub type Page {
 }
 
 /// The browser trusts the test provider's root (`warden/testing` publishes
-/// it as PEM) and may reach loopback, like a developer's browser would.
-pub fn new(root_pem: String) -> Browser {
+/// it as DER) and may reach loopback, like a developer's browser would.
+pub fn new(root_der: BitArray) -> Browser {
   let assert Ok(client) =
     config.default()
-    |> config.with_trust(config.Anchors([pem_to_der(root_pem)]))
+    |> config.with_trust(config.Anchors([root_der]))
     |> config.with_request_timeout(config.After(duration.seconds(10)))
     |> config.with_destination(destination.loopback_only())
     |> http_gun.start
   Browser(client:, jar: dict.new())
-}
-
-/// The DER bytes of a one-certificate PEM text; http_gun takes DER anchors.
-fn pem_to_der(pem: String) -> BitArray {
-  let body =
-    string.split(pem, "\n")
-    |> list.filter(fn(line) { !string.starts_with(line, "-----") })
-    |> string.concat
-    |> string.trim
-  let assert Ok(der) = bit_array.base64_decode(body)
-  der
 }
 
 pub fn close(browser: Browser) -> Nil {
