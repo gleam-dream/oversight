@@ -1,78 +1,42 @@
-//// Who may answer a refund approval: an approver proves who they are with
-//// a bearer access token from the desk's OIDC provider, and the desk builds
-//// fabric's `Reviewer` from the validated claims. Nothing here takes a
-//// name: the `sub` and `iss` come from a token that Warden verified.
+//// Who may answer a refund approval: the warden recipe of
+//// `fabric/approvers`, adopted as documented. An approver presents the
+//// access token the desk's OIDC provider issued when they signed in, and
+//// the token must carry the scope `approve:<requirement name>`.
 
-import fabric/reviewer.{type Reviewer}
+import fabric/approvers.{type Approvers}
+import fabric/reviewer
+import gleam/bool
+import gleam/list
 import gleam/result
 import warden/resource
 
-/// What an approver presents. The bearer value is the access token the
-/// provider issued when the approver signed in.
-pub type Credential {
-  Bearer(token: String)
-  /// Nothing was presented: an unauthenticated caller.
-  Anonymous
+/// Approvers that accept a warden access token issued for the validator's
+/// audience and carrying the scope `approve:<requirement name>`. The answer
+/// records the token's `sub` and `iss`, and the verifier `"warden"`. Call
+/// it once, at boot: the agent and the request handlers share the value.
+pub fn warden_approvers(validator: resource.Validator) -> Approvers(String) {
+  use token, requirement <- approvers.new("warden")
+  use claims <- result.try(
+    resource.verify(validator, token) |> result.map_error(denial),
+  )
+  let scope = "approve:" <> requirement.name
+  use <- bool.guard(
+    !list.contains(resource.scopes(claims), scope),
+    Error(approvers.NotAuthorized("the token lacks the scope " <> scope)),
+  )
+  reviewer.new(resource.subject(claims))
+  |> result.try(reviewer.with_issuer(_, resource.issuer(claims)))
+  |> result.map_error(fn(error) {
+    approvers.NotAuthenticated(reviewer.describe_error(error))
+  })
 }
 
-/// Why a credential did not become a reviewer.
-pub type Error {
-  /// No credential: the caller is not signed in.
-  NotSignedIn
-  /// The token failed validation (expired, forged, wrong issuer, unsigned,
-  /// malformed). The reason is for logs, not for the caller.
-  Rejected(reason: String)
-  /// A valid token issued for another resource.
-  WrongAudience
-  /// The issuer's keys are unavailable: nothing was decided, try again.
-  Unavailable
-  /// The claims are valid but fabric refuses them as a reviewer (an empty or
-  /// over-long `sub` or `iss`).
-  Unusable(reason: String)
-}
-
-/// The validator of the desk's approver tokens.
-pub opaque type Approvers {
-  Approvers(validator: resource.Validator)
-}
-
-pub fn new(validator: resource.Validator) -> Approvers {
-  Approvers(validator)
-}
-
-/// The reviewer a credential vouches for: its validated `sub`, vouched for
-/// by its validated `iss`.
-pub fn authenticate(
-  approvers: Approvers,
-  credential: Credential,
-) -> Result(Reviewer, Error) {
-  case credential {
-    Anonymous -> Error(NotSignedIn)
-    Bearer(token) -> {
-      use claims <- result.try(
-        resource.verify(approvers.validator, token)
-        |> result.map_error(fn(error) {
-          case resource.error_kind(error) {
-            resource.WrongAudience -> WrongAudience
-            resource.Unavailable -> Unavailable
-            resource.Rejected | resource.Forbidden ->
-              Rejected(resource.describe_error(error))
-          }
-        }),
-      )
-      reviewer.new(resource.subject(claims))
-      |> result.try(reviewer.with_issuer(_, resource.issuer(claims)))
-      |> result.map_error(fn(error) { Unusable(reviewer.describe_error(error)) })
-    }
-  }
-}
-
-pub fn describe(error: Error) -> String {
-  case error {
-    NotSignedIn -> "the approver is not signed in"
-    Rejected(reason) -> "the approver's token was refused: " <> reason
-    WrongAudience -> "the approver's token was issued for another resource"
-    Unavailable -> "the identity provider's keys are unavailable"
-    Unusable(reason) -> "the token's identity is unusable: " <> reason
+fn denial(error: resource.TokenError) -> approvers.Denial {
+  let reason = resource.describe_error(error)
+  case resource.error_kind(error) {
+    resource.Rejected | resource.WrongAudience ->
+      approvers.NotAuthenticated(reason)
+    resource.Forbidden -> approvers.NotAuthorized(reason)
+    resource.Unavailable -> approvers.Unavailable(reason)
   }
 }
