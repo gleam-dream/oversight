@@ -113,6 +113,16 @@ cancellation to another, so the app owns the joins (RA-1).
   `run_id` function came. FABRIC-R13 (a Grind adapter in fabric) is still
   open.
 
+**Status (wave 5):** the job-to-run state machine shrank again and lost its
+last package-specific recovery code. `reconcile_all` (the 77-line
+read-only reconciliation, RA-4) is gone, `follow` no longer carries the
+correlation, and the typed answer arrives as `Completed(answer)` (RA-10), so
+the machine only maps ends to a `worker.Response` (jobs.gleam 318 → 290
+lines). Run ids come from `run.id_from_parts` (RA-3). Fabric's sweeper stays
+unregistered for the same reason as before (the job publishes); the app keeps
+`store.supervised`, which still exists for that case. FABRIC-R13 is still not
+a Grind adapter.
+
 ### RA-2 Grind never redelivers a job whose node died; the app authorizes each replay
 
 - **Packages**: grind. **Kind**: composition. **Severity**: major.
@@ -188,6 +198,15 @@ cancellation to another, so the app owns the joins (RA-1).
   start a second run on replay; the app has no deployed data, so no migration
   is written.
 
+**Status (wave 5):** resolved by fabric `run.id_from_parts`. `jobs.run_id`
+is one line, `run.id_from_parts("research", [job_id, attempt])`; the
+`let assert Ok(..) as "digits and dashes are a valid run id"` is gone, and
+`AlreadyStarted(_)` is `AlreadyStarted(_, same_input: True)`. A replay sends
+the same agent, prompt and correlation, so it is `True` and the job
+`recover`s; `same_input: False` (another start reused the id) now stops the
+job with the error text instead of recovering someone else's run. The attempt
+lookup in `app.snapshot` (see the round 5 friction) is unchanged.
+
 ### RA-4 After a crash, even a read-only tool suspends the run until the app reconciles it
 
 - **Packages**: fabric. **Kind**: extensibility. **Severity**: major.
@@ -213,6 +232,17 @@ cancellation to another, so the app owns the joins (RA-1).
   `researcher.replay_read_only` and `jobs.reconcile_all` (77 lines) stay, and
   `a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test` still
   passes through them.
+
+**Status (wave 5):** resolved by fabric `tool.with_replay`.
+`researcher.replay_read_only`, `find_action`, `decode`, `encode` and
+`jobs.reconcile_all` (77 lines in round 5) are deleted; the tools list
+ends in `|> list.map(tool.with_replay(_, 3))` (3 lines with its comment). The
+crash test `a_tool_interrupted_by_a_crash_is_reconciled_by_the_app_test` became
+`a_read_interrupted_by_a_crash_is_replayed_by_fabric_test` and now asserts
+the stronger fact: the recovered run's `read` action is `Succeeded`, with
+`replays: 1` and `page_calls: 2`, instead of `Reconciled`. The job's
+`Suspended([], uncertain)` arm is one `Stopped` line: with `Explain`-only
+handlers an uncertain effect now means a read that exhausted its three starts.
 
 ### RA-5 Cancelling the job does not reach the agent; the app fans the cancellation out
 
@@ -391,6 +421,18 @@ cancellation to another, so the app owns the joins (RA-1).
   `correlation`, so a lease loss would be unattributed (the app keys it
   `Unkeyed`; no test triggers it).
 
+**Status (wave 5):** resolved for the fabric and saga seams. `fabric/telemetry`
+`LeaseLost` carries `correlation`, so `lease.lose` is keyed by the research
+(telemetry.gleam; `Unkeyed` remains only for Sinal's `forwarder.dropped`).
+Saga's `RunMetadata` and the other three observers' `correlation` is a
+`Correlation`, so the saga observers use `research(..)` and not `keyed(..)`
+(no `None` arm). The saga steps read the correlation from the key:
+`upload_body` and `publish` became `saga.effect`, `create_draft`'s resolver and
+undos call `via(key)` (`http_gun.with_correlation(client, saga.correlation_of(key))`),
+so the job no longer correlates the HTTP client (`jobs.handle` lost the
+`http_gun.with_correlation(..)` argument; `publish.run` keeps only
+`durable.with_correlation`). Nothing is left to join by hand in the job.
+
 ### RA-8 Three codec systems for one request; 96 lines of bridges for five types
 
 - **Packages**: grind, saga, json_blueprint. **Kind**: ergonomics.
@@ -472,6 +514,19 @@ codec adds 26 lines of gleam_json glue (see RA-8).
 - **Proposal** (fabric): `agent.with_output(spec, codec)` → `Completed(value)`
   validated against the codec's schema, as llm_wire's structured output does.
 
+**Status (wave 5):** resolved by fabric `agent.with_answer` (F3).
+`domain.parse_answer` (the 46-line `TITLE:` / `NO SOURCES` parser) is deleted,
+and the system prompt no longer teaches a format. `domain.answer_codec` is a
+union codec (about 30 lines) instead, so the domain gains 11 lines
+(domain.gleam 161 → 172); the
+agent is `Agent(Context, Answer)`, the job matches `Completed(answer)`, and
+the test asserts `Completed(domain.Written(..))`. The business outcome "no
+sources" is now a variant the model picks, not a prefix a parser guesses. A
+refused answer gets a corrective turn: the new test
+`a_refused_answer_gets_a_corrective_turn_and_then_publishes_test` has the
+scripted provider return unparseable text once and sees the run finish with
+three model calls and a published article.
+
 ### RA-11 Small frictions
 
 - **Two pools on one database** (grind, minor; grind card): Grind opens its own
@@ -546,6 +601,11 @@ destination.only_hosts([authority]))` replaces the nested update, and it
   so the shared pool resolves to pog 4.1.0; the app's own `pog` range is
   narrowed to match. `gleam_time` became a direct dependency, because
   every Grind and queue duration is a `gleam/time/duration.Duration`.
+
+**Status (wave 5):** the "model failures are strings" item is resolved by
+fabric `model.error` kinds, but this app builds no `model.ModelError` and reads
+none; the job reports a failed run through `run.describe_outcome` and
+`fabric.describe_error` instead of `string.inspect`.
 
 ### RA-12 A replayed abandoned attempt emits no event and uses a business attempt
 
@@ -1120,3 +1180,83 @@ Package heads: fabric fd60851 / 409f1a7 (local, not pushed).
   could "start under `run.parse_id(job_id)`", which is only right if a retry
   may reopen a finished run; this app's `NoSources` retry needs the attempt
   in the id, which the guide does not mention.
+
+### After wave 5
+
+Package heads: fabric ee83046 (F6), saga 9a0b1d8, llm_wire 0e4f01a.
+
+- **Tests**: 10 passed, no failures
+  (`../scripts/with-postgres.sh gleam test`), including both OTP-peer
+  crash-recovery tests. `gleam format --check`, `gleam build
+--warnings-as-errors` and `gleam run` pass (51 events
+  joined, none unclaimed). One test added (corrective turn), one rewritten
+  (replayed read), and the common-path test checks the union schema in the
+  request.
+- **Lines** (`git diff --numstat`, source, test and README): 261 added, 209
+  removed, net 52 more: the new test, the request log and `article`, `no_sources`
+  and `GarbledOnce` in the scripted provider, the union check and the job's
+  `Unavailable` ending account for the growth. By file:
+  `researcher.gleam` 202 → 145 (replay glue out, answer type in), `jobs.gleam`
+  318 → 290, `domain.gleam` 161 → 172 (parser 46 out, codec 57 in),
+  `publish.gleam` 220 → 225 (`via`, key reads), `services.gleam` 604 → 629
+  (test-only builders), `telemetry.gleam` 387 → 392 (`lease.lose` keyed, the
+  saga observers lost `keyed`).
+- **Unattributed events per request**: 0 of 51 on the common path; the
+  test asserts none for fabric, llm_wire, saga and http_gun. `lease.lose` is
+  now attributable; Sinal's `forwarder.dropped` stays unkeyed by nature.
+- **Not applicable here**: `ProviderDelay` and the `llm_wire.advise`
+  retry advice (the job retries a business failure, never a provider one),
+  `fabric/reviewer`, approval expiry and `sweeper.supervised` (no
+  approvals; the job drives the run, so no sweeper). `services` builds no
+  `llm_wire.Failure` by hand: its only use of llm_wire testing was
+  `events_for`, now `testing.http_response(..).body` (5 lines → 4).
+  Failing the provider (`rate_limited`, `overloaded`) would be a new test
+  scenario, not a deletion.
+- **New friction**:
+  - **A sum-type answer needed fabric F6 and llm_wire 0e4f01a.** First
+    pass: `codec.union` is a `oneOf` of `{tag, value}`, and providers need an
+    object root, so the answer was a record with a `found_sources` flag and
+    a `text` field that meant two things (a title could accompany
+    `found_sources: false`). Catch-up: fabric `ee83046` wraps a non-object
+    root as `{"answer": ..}` and llm_wire `0e4f01a` takes the nested union in
+    strict output, so `domain.answer_codec` is the natural
+    `Written(title, body) | NoSources(reason)` union again and the flag is
+    gone. The common-path test checks the scripted provider's request:
+    `text.format` is `json_schema`, `strict: true`, the root requires
+    `answer`, and its `anyOf` holds the `written` and `no_sources` variants.
+    The scripted provider replies `{"answer": {"tag": ..}}`. Cost: the
+    model sees `{"tag", "value"}` plumbing, so the fake and any hand-written
+    reply carry it; the doc for F6 says the wrapper is unwrapped for the
+    run, but not that a scripted provider must send it.
+  - **The corrective turn is invisible to a scripted provider.** The fake
+    chooses its step by counting `function_call_output` items, and the
+    corrective turn adds none, so it replays the same step. `GarbledOnce`
+    keys on how often a step was hit. The wave-5 doc says tests count two
+    model calls on a refused answer, but not that step-counting fakes
+    need a hit counter.
+  - **`with_replay(3)` has no visible effect except in `ActionRecord.replays`.**
+    A replayed read leaves `Succeeded` and no event the app observes, so the
+    only evidence is `snapshot.actions[..].replays`. A `tool.dispatched`
+    event with the attempt number would make the telemetry story match the
+    record.
+  - **An unreadable record on a taken id** is now the read's error, not
+    `AlreadyStarted(_, False)`. `start_run` retries `StoreUnavailable` like
+    `StartUnconfirmed` (three tries), then a store that stays out of reach
+    snoozes the job one second (`worker.Snoozed`, a new `Unavailable` ending),
+    so Grind delivers it again and the start finds its run. `CorruptRecord`,
+    `UnsupportedVersion` and `AlreadyStarted(_, same_input: False)` stop the
+    job (`AgentStopped`), because no retry changes them. Not covered by a
+    test: no scenario here can make Fabric's store fail or hold a corrupt
+    record on a job's derived id.
+  - **`tool.with_replay` is applied after `bind`, to a list**, so the app maps
+    it over the list. A `bind` variant (`tool.bind_replayable`) would read
+    better only if more than one policy per tool were needed; as is, fine.
+  - `StartUnconfirmed`'s three-try recursion (round 5) is unchanged:
+    `fabric.error_kind` calls it `Unavailable`, which does not say "the
+    same id may be started again", and the app needs that exact variant.
+- **Migration guide**: accurate for every research_agent site it names
+  (`AlreadyStarted(..)`, `with_limits`, the `TITLE:` parser, `parse_id`,
+  `reconcile`, `publish.gleam:55,76`). It does not say that a union is a
+  poor answer codec (see the friction above), and its `Dependents` for
+  llm_wire says the `let assert testing.Events` becomes
+  `http_response(..).body`, which was right.

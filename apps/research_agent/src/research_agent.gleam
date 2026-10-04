@@ -73,9 +73,7 @@ fn story(url: String) -> Nil {
     services.CallSearch("beam"),
     services.CallSearch("beam"),
     services.CallRead(services.page_url(world, "beam-1")),
-    services.Answer(
-      "TITLE: The BEAM\nA virtual machine for many small processes.",
-    ),
+    services.article("The BEAM", "A virtual machine for many small processes."),
   ])
   services.fail_searches(world, 1)
   let assert Ok(second) = app.start_research(node, "beam")

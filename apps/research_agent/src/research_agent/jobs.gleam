@@ -23,7 +23,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
-import gleam/string
 import gleam/time/duration
 import grind/worker.{type Worker}
 import http_gun
@@ -48,7 +47,7 @@ pub const queue = "research"
 pub type Deps {
   Deps(
     runs: Store,
-    agent: Agent(Context),
+    agent: Agent(Context, domain.Answer),
     context: Context,
     http: http_gun.Client,
     sagas: Storage,
@@ -123,7 +122,7 @@ pub fn handle(
       let published =
         publish.run(
           deps.sagas,
-          http_gun.with_correlation(deps.http, worker.correlation(job)),
+          deps.http,
           deps.publisher,
           article,
           worker.correlation(job),
@@ -170,6 +169,8 @@ pub fn handle(
         )
       worker.Failed(NoSources(reason))
     }
+    Error(Unavailable(reason)) ->
+      worker.Snoozed(after: duration.seconds(1), reason:)
     Error(Cancelled) -> {
       let _ = db.set_state(conn, research.id, events.Cancelled, "")
       worker.Cancelled("research cancelled")
@@ -182,6 +183,8 @@ pub fn handle(
 }
 
 type Ending {
+  /// Fabric's store could not be read or written: the job tries again.
+  Unavailable(reason: String)
   Cancelled
   Stopped(reason: String)
 }
@@ -190,12 +193,7 @@ type Ending {
 /// replays and `attempt` counts only business attempts, so a replayed job
 /// finds its own run and a retried job (`NoSources`) starts a fresh one.
 pub fn run_id(job_id: Int, attempt: Int) -> run.RunId {
-  let assert Ok(id) =
-    run.parse_id(
-      "research-" <> int.to_string(job_id) <> "-" <> int.to_string(attempt),
-    )
-    as "digits and dashes are a valid run id"
-  id
+  run.id_from_parts("research", [int.to_string(job_id), int.to_string(attempt)])
 }
 
 /// Starts the attempt's run, or continues the one a replay already has.
@@ -208,7 +206,7 @@ fn drive_agent(
   let id = run_id(worker.job_id(job), worker.attempt(job))
   let correlation = worker.correlation(job)
   use handle <- result.try(start_run(deps, conn, research, id, correlation, 3))
-  follow(deps, correlation, worker.cancellation(job), handle)
+  follow(deps, worker.cancellation(job), handle)
 }
 
 fn start_run(
@@ -218,7 +216,7 @@ fn start_run(
   id: run.RunId,
   correlation: Correlation,
   tries: Int,
-) -> Result(fabric.Run(Context), Ending) {
+) -> Result(fabric.Run(Context, domain.Answer), Ending) {
   let started =
     fabric.start(
       deps.runs,
@@ -239,13 +237,30 @@ fn start_run(
     // A replay: on a leased store `recover` is safe at any time. It takes
     // over only a free or expired lease, or a lease of this store whose
     // runner is gone, and otherwise just opens the run.
-    Error(fabric.AlreadyStarted(_)) ->
+    Error(fabric.AlreadyStarted(_, same_input: True)) ->
       fabric.recover(deps.runs, deps.agent, deps.context, id)
-      |> result.map_error(fn(e) { Stopped("recover: " <> string.inspect(e)) })
-    // The same id may be started again.
-    Error(fabric.StartUnconfirmed(..)) if tries > 1 ->
-      start_run(deps, conn, research, id, correlation, tries - 1)
-    Error(e) -> Error(Stopped("start: " <> string.inspect(e)))
+      |> result.map_error(fn(e) {
+        Stopped("recover: " <> fabric.describe_error(e))
+      })
+    // The same id may be started again: the first start may have landed
+    // (`AlreadyStarted`), and a store that blinks while the taken id is
+    // compared answers `StoreUnavailable`, which asks to start again.
+    Error(fabric.StartUnconfirmed(..))
+      | Error(fabric.StoreUnavailable(_))
+      if tries > 1
+    -> start_run(deps, conn, research, id, correlation, tries - 1)
+    Error(e) -> {
+      let detail = "start: " <> fabric.describe_error(e)
+      case fabric.error_kind(e) {
+        // The store is out of reach, but the id is free or ours: Grind
+        // delivers the job again, and the start finds its run.
+        fabric.Unavailable | fabric.Retry -> Error(Unavailable(detail))
+        // Another start's run holds the id (`same_input: False`), or the
+        // id holds a record this Fabric cannot read (`CorruptRecord`,
+        // `UnsupportedVersion`): no retry changes that.
+        _ -> Error(Stopped(detail))
+      }
+    }
   }
 }
 
@@ -253,11 +268,10 @@ fn start_run(
 /// comes first.
 fn follow(
   deps: Deps,
-  correlation: Correlation,
   cancellation: process.Selector(Nil),
-  handle: fabric.Run(Context),
+  handle: fabric.Run(Context, domain.Answer),
 ) -> Result(domain.Answer, Ending) {
-  let next = fn(handle) { follow(deps, correlation, cancellation, handle) }
+  let next = fn(handle) { follow(deps, cancellation, handle) }
   case
     fabric.await_with(handle, within: duration.seconds(5), or: cancellation)
   {
@@ -274,45 +288,22 @@ fn follow(
         fabric.recover(deps.runs, deps.agent, deps.context, fabric.id(handle))
       {
         Ok(handle) -> next(handle)
-        Error(e) -> Error(Stopped("recover: " <> string.inspect(e)))
+        Error(e) -> Error(Stopped("recover: " <> fabric.describe_error(e)))
       }
+    // The tools only read and replay (`tool.with_replay`), so an uncertain
+    // effect is a read that kept failing: nothing here can settle it.
     Ok(fabric.Reached(run.Suspended([], uncertain))) ->
-      case reconcile_all(deps, correlation, handle, uncertain) {
-        Ok(Nil) -> next(handle)
-        Error(reason) -> Error(Stopped(reason))
-      }
+      Error(Stopped(
+        int.to_string(list.length(uncertain)) <> " uncertain tool effects",
+      ))
     Ok(fabric.Reached(run.Suspended(approvals, _))) ->
       Error(Stopped(
         int.to_string(list.length(approvals)) <> " unexpected approvals",
       ))
-    Ok(fabric.Reached(run.Finished(run.Completed(text)))) ->
-      domain.parse_answer(text) |> result.map_error(Stopped)
+    Ok(fabric.Reached(run.Finished(run.Completed(answer)))) -> Ok(answer)
     Ok(fabric.Reached(run.Finished(run.Cancelled))) -> Error(Cancelled)
     Ok(fabric.Reached(run.Finished(other))) ->
-      Error(Stopped(string.inspect(other)))
-    Error(e) -> Error(Stopped("await: " <> string.inspect(e)))
+      Error(Stopped(run.describe_outcome(other)))
+    Error(e) -> Error(Stopped("await: " <> fabric.describe_error(e)))
   }
-}
-
-fn reconcile_all(
-  deps: Deps,
-  correlation: Correlation,
-  handle: fabric.Run(Context),
-  uncertain: List(run.UncertainAction),
-) -> Result(Nil, String) {
-  use snapshot <- result.try(
-    fabric.snapshot(handle) |> result.map_error(string.inspect),
-  )
-  list.try_each(uncertain, fn(action) {
-    use content <- result.try(researcher.replay_read_only(
-      deps.endpoints,
-      deps.context,
-      correlation,
-      snapshot,
-      action,
-    ))
-    fabric.reconcile(handle, action.reference, content)
-    |> result.replace(Nil)
-    |> result.map_error(string.inspect)
-  })
 }

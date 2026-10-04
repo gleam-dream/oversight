@@ -4,9 +4,9 @@
 import fabric/agent.{type Agent}
 import fabric/llm
 import fabric/policy
-import fabric/run
 import fabric/tool
 import gleam/http
+import gleam/list
 import gleam/option.{Some}
 import gleam/result
 import gleam/string
@@ -17,7 +17,8 @@ import json/blueprint/codec
 import llm_wire
 import llm_wire/openai
 import research_agent/domain.{
-  type Page, type PageRequest, type SearchQuery, type SearchResults, Page,
+  type Answer, type Page, type PageRequest, type SearchQuery, type SearchResults,
+  Page,
 }
 import research_agent/remote
 import sinal/correlation.{type Correlation}
@@ -109,94 +110,36 @@ pub fn gate(endpoints: Endpoints) -> policy.Policy(Context) {
 pub fn build(
   llm_client: http_gun.Client,
   endpoints: Endpoints,
-) -> Result(Agent(Context), List(agent.ConfigError)) {
+) -> Result(Agent(Context, Answer), List(agent.ConfigError)) {
   let settings =
     openai.new("sk-scripted")
     |> openai.config
     |> llm_wire.with_endpoint(endpoints.llm)
   let model = llm.model(llm_client, settings, "gpt-scripted")
-  let tools = [
-    tool.bind(
-      search_definition(),
-      fn(context, call, query) {
-        search(endpoints, client(context, call.correlation), query)
-      },
-      explain,
-    ),
-    tool.bind(
-      read_definition(),
-      fn(context, call, page) { read(client(context, call.correlation), page) },
-      explain,
-    ),
-  ]
+  let tools =
+    [
+      tool.bind(
+        search_definition(),
+        fn(context, call, query) {
+          search(endpoints, client(context, call.correlation), query)
+        },
+        explain,
+      ),
+      tool.bind(
+        read_definition(),
+        fn(context, call, page) {
+          read(client(context, call.correlation), page)
+        },
+        explain,
+      ),
+    ]
+    // Both tools only read, so a crash may start them again instead of
+    // suspending the run on an uncertain effect.
+    |> list.map(tool.with_replay(_, 3))
   agent.new("researcher", model, tools, gate(endpoints))
   |> agent.with_system_prompt(domain.system_prompt())
-  |> agent.with_limits(
-    agent.Limits(
-      ..agent.default_limits(),
-      max_turns: 8,
-      model_retry_delay: duration.milliseconds(50),
-    ),
-  )
+  |> agent.with_answer(domain.answer_codec())
+  |> agent.with_max_turns(8)
+  |> agent.with_model_retry_delay(duration.milliseconds(50))
   |> agent.build
-}
-
-/// Recovery glue. After a crash, Fabric turns every tool that had started
-/// into an uncertain effect and suspends the run until someone reconciles
-/// it, even a read-only search. Fabric's agent tools cannot declare "safe to
-/// run again" (graph operations can, `operation.with_replay`), so the app
-/// finds the action's arguments in the snapshot, runs the read again and
-/// reconciles with the encoded output the model would have seen.
-pub fn replay_read_only(
-  endpoints: Endpoints,
-  context: Context,
-  correlation: Correlation,
-  snapshot: run.Snapshot,
-  uncertain: run.UncertainAction,
-) -> Result(String, String) {
-  use record <- result.try(
-    snapshot.actions
-    |> find_action(uncertain.reference.id)
-    |> result.replace_error("no action record for the uncertain effect"),
-  )
-  let arguments = record.call.arguments_json
-  let http = client(context, correlation)
-  let rendered = case uncertain.tool {
-    "search" -> {
-      use query <- result.try(decode(domain.search_query_codec(), arguments))
-      use found <- result.try(
-        search(endpoints, http, query) |> result.map_error(remote.describe),
-      )
-      encode(domain.search_results_codec(), found)
-    }
-    "read" -> {
-      use page <- result.try(decode(domain.page_request_codec(), arguments))
-      use page <- result.try(
-        read(http, page) |> result.map_error(remote.describe),
-      )
-      encode(domain.page_codec(), page)
-    }
-    other -> Error("tool " <> other <> " is not read-only")
-  }
-  rendered
-}
-
-fn find_action(
-  actions: List(run.ActionRecord),
-  id: run.ActionId,
-) -> Result(run.ActionRecord, Nil) {
-  case actions {
-    [] -> Error(Nil)
-    [first, ..] if first.id == id -> Ok(first)
-    [_, ..rest] -> find_action(rest, id)
-  }
-}
-
-fn decode(c: codec.Codec(a), text: String) -> Result(a, String) {
-  codec.decode_json(c, text) |> result.map_error(codec.describe_decode_error)
-}
-
-fn encode(c: codec.Codec(a), value: a) -> Result(String, String) {
-  codec.encode_json(c, value)
-  |> result.map_error(codec.describe_encode_error)
 }
