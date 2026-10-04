@@ -689,8 +689,8 @@ pub fn cancelling_one_call_keeps_the_client_open_test() {
     ask_in_background(hub, client.with_cancellation(_, token))
   cancellation.cancel(token)
   let assert True = stream_closed_within(hub.notices, 3000)
-  let assert Ok(Error(client.Cancelled(client.MaybeSent))) =
-    process.receive(caller, 2000)
+  let assert Ok(Error(cancelled)) = process.receive(caller, 2000)
+  let assert client.Cancelled(client.MaybeSent) = client.reason(cancelled)
   process.sleep(100)
   let assert run.Finished(run.Cancelled) = cancelled_run(hub)
   // The same client still answers.
@@ -724,12 +724,13 @@ pub fn relay_client_timeout_cancels_the_run_test() {
     tool_hub.start(tool_hub.settings("cancel_timeout"), [Hold])
   let assert Ok(mcp) =
     tool_hub.assistant_client(hub, duration.milliseconds(300))
-  let assert Error(client.TimedOut(client.MaybeSent)) =
+  let assert Error(timed_out) =
     client.call(
       mcp,
       assistant.ask_assistant(),
       assistant.Question("Anything in stock?"),
     )
+  let assert client.TimedOut(client.MaybeSent) = client.reason(timed_out)
   let assert True = stream_closed_within(hub.notices, 3000)
   process.sleep(100)
   let assert True =
