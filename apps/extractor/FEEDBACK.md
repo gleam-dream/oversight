@@ -32,6 +32,9 @@ prints the demo batch.
   `HttpStatusError(429, _, Some(RetryDelaySeconds(2)))`. A `nullable` field
   prepares on OpenAI and Anthropic and fails preparation on Google, before
   any I/O (test `nullable_output_field_is_not_portable_to_google_test`).
+  **Status (round 7):** resolved. llm_wire now sends Gemini's
+  `responseJsonSchema`, and nullable fields were verified live. The test is now
+  `nullable_output_field_prepares_on_every_provider_test`.
 - **Does llm_wire's retry vocabulary map onto Grind's outcomes without
   strings?** Only for an HTTP status with a numeric `Retry-After`:
   `RetryDelaySeconds(Int)` becomes `worker.retry_delay` directly. Transport
@@ -1050,3 +1053,14 @@ and `gleam run` (unattributed events 0) pass unchanged.
 - **Code removed**: none left to remove; the wave-5 adoptions
   (`provider_error`, `sse`, hand-built `Failure`) are already in.
 - **New friction**: none.
+
+**Status (round 7):** resolved in the app; no package change. A new test
+(`content_filter_stop_discards_the_job_on_the_first_attempt_test`) scripts
+`testing.content_filtered` through the fake server on all three wires and
+`testing.prompt_blocked` on Google (`scripted.ContentFiltered` and
+`PromptBlocked`; OpenAI and Anthropic reject a blocked prompt with a 400
+status, so the server answers that for them). Each job ends in grind state
+`Discarded` after one claim, one provider call and no snooze, with the
+provider's own reason in `grind.Discarded` (`content_filter`, `refusal`,
+`SAFETY`), and the `terminal failed` llm_wire event stays attributed with no
+unattributed llm event. The app's handling was already right; no fix needed.

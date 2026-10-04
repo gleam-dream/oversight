@@ -127,3 +127,16 @@ pub fn batch() -> List(scripted.Document) {
     ),
   ]
 }
+
+/// Documents whose provider call ends in a content-filter stop: one after
+/// some output, one at the prompt.
+pub fn filtered() -> List(scripted.Document) {
+  [
+    document(
+      "filtered-output",
+      acme(),
+      scripted.ContentFiltered("{\"vendor\":\"Acme"),
+    ),
+    document("blocked-prompt", acme(), scripted.PromptBlocked),
+  ]
+}

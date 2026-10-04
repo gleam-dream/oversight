@@ -187,7 +187,7 @@ pub fn same_extraction_runs_on_three_providers_test() {
   clients.stop(http)
 }
 
-pub fn nullable_output_field_is_not_portable_to_google_test() {
+pub fn nullable_output_field_prepares_on_every_provider_test() {
   // An optional purchase-order number, explicit null when absent.
   let with_po = {
     use po_number <- codec.field(
@@ -207,7 +207,8 @@ pub fn nullable_output_field_is_not_portable_to_google_test() {
       )
       |> result.is_ok
     })
-  assert prepared == [True, True, False]
+  // Gemini accepts nullable fields since llm_wire round 7 (verified live).
+  assert prepared == [True, True, True]
 }
 
 // Failure paths -----------------------------------------------------------
@@ -316,6 +317,83 @@ pub fn invalid_output_keeps_the_raw_output_and_a_typed_reason_test() {
   assert string.contains(raw_output, "\"total_cents\":9999")
   assert string.contains(message, "differs from line sum")
   clients.stop(http)
+}
+
+/// A provider safety stop cannot succeed unchanged: the job is discarded on
+/// its first attempt with the provider's reason, and its events stay joined.
+pub fn content_filter_stop_discards_the_job_on_the_first_attempt_test() {
+  use context <- with_pipeline("extract_filtered", fixtures.filtered(), live)
+  // The pure mapping, per wire: the provider's own reason survives.
+  let filtered = fn(provider, reason) {
+    let assert outcome.Discard(text) =
+      outcome.decide(
+        outcome.ExtractFailed(
+          llm.CallFailed(wire_testing.failure(
+            provider,
+            error.ContentFiltered(error.InOutput, reason),
+          )),
+        ),
+      )
+    text
+  }
+  assert filtered(message.Anthropic, "refusal")
+    == "Provider content filter stopped the output: refusal (anthropic, completed)"
+  // End to end, an output-stage stop on each wire. The reasons are the
+  // wires' own values.
+  let stops = [
+    #(llm.OpenAi, "content_filter", "openai"),
+    #(llm.Anthropic, "refusal", "anthropic"),
+    #(llm.Google, "SAFETY", "google"),
+  ]
+  list.each(stops, fn(stop) {
+    let #(provider, reason, name) = stop
+    let submitted = submit(context, "filtered-output", provider)
+    let assert grind.Discarded(recorded) = finish(context, submitted)
+    assert recorded
+      == "Provider content filter stopped the output: "
+      <> reason
+      <> " ("
+      <> name
+      <> ", completed)"
+    // Discarded, not retried or snoozed: the stored state is final.
+    assert grind.state(context.pipeline.jobs, submitted.1) == Ok(job.Discarded)
+  })
+  assert scripted.provider_calls(context.services, "filtered-output") == 3
+  // A prompt-stage stop, on the one wire that carries it.
+  let blocked = submit(context, "blocked-prompt", llm.Google)
+  let assert grind.Discarded(recorded) = finish(context, blocked)
+  assert recorded
+    == "Provider content filter blocked the prompt: SAFETY (google, completed)"
+  assert grind.state(context.pipeline.jobs, blocked.1) == Ok(job.Discarded)
+  assert scripted.provider_calls(context.services, "blocked-prompt") == 1
+  // Exactly one claim per job, and the grind, http and llm events all carry
+  // the document's correlation.
+  let trace = telemetry.trace(context.collector, "blocked-prompt")
+  assert list.count(trace.attributed, fn(record) {
+      string.starts_with(record.summary, "claimed attempt")
+    })
+    == 1
+  assert list.any(trace.attributed, fn(record) {
+    record.summary == "acknowledged discarded"
+  })
+  assert !list.any(trace.attributed, fn(record) {
+    record.summary == "acknowledged scheduled"
+    || record.summary == "acknowledged retryable"
+  })
+  // The call ended as a failure, not a success, and llm_wire still read the
+  // correlation from the client view.
+  assert list.any(trace.attributed, fn(record) {
+    record.summary == "google terminal failed"
+  })
+  assert telemetry.count(trace.attributed, telemetry.Http) >= 8
+  assert telemetry.count(trace.unattributed, telemetry.Llm) == 0
+  // The three filtered jobs share one document id: three claims, no retry.
+  let trace = telemetry.trace(context.collector, "filtered-output")
+  assert list.count(trace.attributed, fn(record) {
+      string.starts_with(record.summary, "claimed attempt")
+    })
+    == 3
+  assert telemetry.count(trace.unattributed, telemetry.Llm) == 0
 }
 
 pub fn oversized_and_unsupported_documents_are_discarded_test() {
