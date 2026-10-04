@@ -150,6 +150,19 @@ prints the demo batch.
   snooze or back off. The whole mapping, `default_snooze` to `decide_http`,
   went from 71 to 55 lines.
 
+- **Status (wave 5):** resolved by llm_wire 727ab54. `RetryAdvice(prospect,
+delay: ProviderDelay(Duration) | Backoff)` is the snooze-or-backoff choice:
+  `decide_call` matches `MayHelp` with `ProviderDelay(wait)` as `Snooze` and
+  `MayHelp` with `Backoff` as `Retry`. The `Status` and `Provider(Some(code))`
+  arms, `Option.unwrap` and `default_snooze` (5 s) are gone, and the function
+  went from 27 to 21 lines; the whole mapping went from 81 to 83 lines because
+  the app now caps the hint (`longest_snooze`, `bounded`, 8 lines; llm_wire
+  does not cap `ProviderDelay`). Behavior changed on purpose: a 503 or a
+  provider error code without `Retry-After` now spends an attempt under the
+  worker's backoff instead of parking the job for 5 s. New assertions in
+  `rate_limit_snoozes_for_the_retry_after_hint_test` cover that case and the
+  cap (a 3 hour hint snoozes 5 minutes).
+
 ### EXT-3 Invalid structured output loses the raw output and the typed reason
 
 - **Packages**: llm_wire, json_blueprint. **Kind**: ergonomics. **Severity**: major.
@@ -967,3 +980,54 @@ the llm_wire guide does not say that `error.Http`'s description is prefixed
 test's expected text, and its table for `extractor/jobs.gleam` is stale: the
 worker no longer maps `WireError` at all (`Env.model` is now total and
 `NotPrepared` is built only inside `llm.extract`).
+
+### After wave 5
+
+Package heads: llm_wire 727ab54 (e809711). relay, warden and saga are not
+dependencies of this app. 15 tests pass (`../scripts/with-postgres.sh gleam
+test`; no test added or removed, the two extra assertions live in an existing
+test) and `gleam run` prints the same batch: `globex` snoozes between its two
+claims, and unattributed events stay at 0 (llm_wire 0, http_gun 0). The
+migration touched three files: src 47 added and 79 removed (net -32), test 31
+added and 26 removed (net +5, the added cases being the no-hint and cap
+assertions).
+
+| Seam                                                                     | Before                | After                         | Change                                                                                                 |
+| ------------------------------------------------------------------------ | --------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `decide_call` (advice to Grind response)                                 | 27                    | 21                            | `ProviderDelay` is the snooze, `Backoff` the retry; no `Status` or `Provider` arm, no default delay    |
+| Provider error bodies per wire (`scripted.provider_error`)               | 43                    | 0                             | `testing.rate_limited`, `testing.http_status`                                                          |
+| SSE and reply plumbing (`sse`, the `Events`/`Interrupted`/`Status` case) | 15                    | 0 plus a 6-line `serve_reply` | `testing.http_response(wire, reply)` then `to_mist` (`response.map`)                                   |
+| Hand-built `llm_wire.Failure` in tests                                   | 3 sites, 7 lines each | 3 sites, 1 to 4 lines         | `testing.failure(provider, error)`; two other `Failure(..)` uses are patterns on real results and stay |
+| Snooze cap                                                               | 0                     | 8                             | new: llm_wire leaves `ProviderDelay` unbounded                                                         |
+
+Remaining gaps and new friction, critically:
+
+- **`Retry-After` on the fake server is resolved by llm_wire 2c32d5e.**
+  `testing.with_retry_after_header` replaces the two hand-set
+  `response.set_header("retry-after", ...)` calls; the rename to
+  `ProviderDelay` also ends the clash with grind's `worker.RetryAfter`. What is
+  left is the body: `http_response` returns `Response(String)`, so a mist
+  server still maps it (`to_mist`, 3 lines), and the helper rounds a fraction
+  up to whole seconds, which this app's whole-second hints never meet.
+
+- **`Backoff` leaves the curve to the worker, which is right, but the cap is
+  the app's too.** Nothing tells the app a sensible bound; 5 minutes is a guess
+  with no test against a real provider's header.
+- **`advise` still folds `Unknown` into a retry here.** The app maps `Unknown`
+  to `Retry`; for a read-only call that is correct, but an app whose call has
+  effects must also branch on `failure.sent`, which `advise` does not read for
+  it.
+- **`testing.failure` cannot set a `Retry-After` for a non-`Status` error,
+  and fixes `partial_output: False`.** A test of a mid-stream failure needs a
+  record update.
+- **Mid-stream provider errors are scripted but untested here.** `stream_error`
+  and `response_failed` now exist, but the scripted server has no behavior that
+  uses them, so no extractor test shows a `Provider(Some(code))` failure end to
+  end; only the pure mapping covers it.
+
+Migration guide: sufficient and exact. It named the `outcome.gleam` arms
+(L100-111), the `scripted.gleam` sections and the five `Failure` sites. One
+correction: two of the five sites (L289, L297) are patterns on results of real
+calls, not constructions, so only three could use `testing.failure`; and
+`scripted.provider_error`'s three-wire bodies map to `http_status`, and 2c32d5e
+added the missing `Retry-After` helper for a fake server.
