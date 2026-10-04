@@ -42,7 +42,7 @@ fn provider(
 
 fn with_app(options: app.Options, run: fn(App, Browser) -> Nil) -> Nil {
   let assert Ok(portal) = app.start(options)
-  let b = browser.new(testing.trust_anchor_pem(portal.provider))
+  let b = browser.new(testing.trust_anchor_der(portal.provider))
   run(portal, b)
   browser.close(b)
   app.stop(portal)
@@ -231,7 +231,7 @@ pub fn billing_down_keeps_the_session_test() {
 pub fn sessions_survive_web_and_warden_restarts_test() {
   let assert Ok(portal) = app.start(options())
   let b =
-    sign_in(portal, browser.new(testing.trust_anchor_pem(portal.provider)))
+    sign_in(portal, browser.new(testing.trust_anchor_der(portal.provider)))
 
   // The web tier restarts: row and custody carry the session.
   let assert Ok(portal) = app.restart_portal(portal)

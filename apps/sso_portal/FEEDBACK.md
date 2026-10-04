@@ -262,6 +262,8 @@ Provider`, `issuer`, `trust_anchors_pem`, `revoke_refresh_tokens`,
   `revoke_refresh_tokens` and `requests` cover the knobs the tests used. Not
   covered, so the app still carries glue (see "Re-run after wave 4"): no HTTP
   `/authorize`, no access-token revocation, a PEM-only trust anchor.
+- **Status (wave 5):** the PEM-only trust anchor is resolved by warden 77da944
+  (`testing.trust_anchor_der`); see "After wave 5".
 - **Status (round 5):** the `/authorize` gap is closed by warden b9d799f/1e507d4.
   `warden/testing`'s provider serves `GET/POST /authorize` with
   `with_login(SignIn(subject))`, so the scripted browser follows the portal's
@@ -768,6 +770,8 @@ url, subject:)`, or serve `/authorize` for a configured subject.
 - **Trust anchor format (warden, http_gun).** `testing.trust_anchor_pem` is PEM;
   http_gun's `Anchors` takes DER and `CustomCa` takes a file path. The browser
   client decodes the PEM itself (10 lines). Proposal: `testing.trust_anchor_der`.
+  **Status (wave 5):** resolved by warden 77da944. `browser.new` takes the
+  DER from `testing.trust_anchor_der` and `pem_to_der` is deleted.
 - **pog and `timestamptz` (pog).** `pog.timestamp_decoder()` fails on a
   `timestamptz` column under pog 4.1.0 (`Int` expected, `Array` found), so the
   adapter selects `extract(epoch ...)::bigint` and writes with `to_timestamp`.
@@ -802,3 +806,32 @@ New friction:
 - No warden call had to change meaning: the migration guide's sso_portal table
   matched the files it named, including the expected `[warden.http.request]
 POST /token -> 200` line.
+
+### After wave 5
+
+Packages: warden 77da944 (relay, llm_wire and saga are not dependencies of this
+app). The only wave 5 item that touches `sso_portal` is `trust_anchor_der`; the
+warden migration guide's table said so and was right.
+
+- **Tests:** 13 pass under `../scripts/with-postgres.sh gleam test`, format and
+  `--warnings-as-errors` clean, `gleam run` unchanged (five steps).
+- **Lines:** 3 files, 6 added and 17 removed. `browser.gleam` loses
+  `pem_to_der` (10 lines), the `list`/`string` pipeline and the explanatory
+  doc comment, and `browser.new` now takes a `BitArray`. The three call sites
+  swap one function name.
+- **Unattributed events:** none that wave 5 changes. In the `gleam run` trace
+  all 18 `http_gun.lifecycle` events are `(correlated)`; the other two lines
+  are `[warden.http.request]` and `[warden.refresh]`, which the printer does
+  not label.
+- **Remaining gaps:** unchanged from wave 4: two destination vocabularies
+  (SSO-9), `redirect_uri` before the port is bound (SSO-10), the billing deny
+  list because `resource.verify` is local, pog `timestamptz`, sealing-key
+  custody, untested unconfirmed-refresh recovery, and no outcome-name
+  functions. The billing API is a plain wisp route, so relay's wrong-audience
+  challenge and `warden.with_correlation` on introspection do not apply here.
+- **New friction:** none from the new API. `browser.new` is still handed a
+  value that only exists after `start_provider`, so every caller writes
+  `browser.new(testing.trust_anchor_der(portal.provider))`; a
+  `testing.trusting_config` that returns the whole browser `http_gun.Config`
+  would remove that, but it is the same Anchors-versus-provider coupling and
+  a cosmetic gain.

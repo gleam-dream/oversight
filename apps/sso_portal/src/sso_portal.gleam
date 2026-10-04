@@ -24,7 +24,7 @@ pub fn main() -> Nil {
   io.println("  billing   " <> portal.billing_api.base_url)
   io.println("  portal    " <> portal.portal_url)
 
-  let b = browser.new(testing.trust_anchor_pem(portal.provider))
+  let b = browser.new(testing.trust_anchor_der(portal.provider))
   step("1. Anonymous visit to /dashboard: login via Warden, then billing")
   let assert Ok(#(b, page)) =
     browser.visit(b, portal.portal_url <> "/dashboard")
