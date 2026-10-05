@@ -210,7 +210,7 @@ pub fn failed_notification_compensates_the_refund_test() {
     desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   let resolved = finish(handle)
   // The saga rolled back in reverse: ledger entry removed, refund voided,
-  // and fabric_saga reported it as a definite failure the model explains.
+  // and the saga recipe reported it as a definite failure the model explains.
   assert resolved.outcome == domain.RefundFailed
   assert string.contains(resolved.message, "voided")
   assert ledger.entries(app.ledger) == []
@@ -230,7 +230,7 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   let assert Ok(_) =
     desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   // http_gun's deadline fired after the request may have been sent; the
-  // step marks that error with `saga.unknown_when`, and fabric_saga turns
+  // step marks that error with `saga.unknown_when`, and the saga recipe turns
   // the unknown effect into an uncertain one: no model turn until reconciled.
   let assert Ok(run.Suspended([], [uncertain])) =
     fabric.await(handle, within: duration.seconds(10))
@@ -517,7 +517,7 @@ pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   // The provider took the refund and answered after the client deadline.
   // The step marks that error with `saga.unknown_when`, so saga records the
   // attempt as an unknown effect and, with no decider and no `on_unknown`,
-  // ends the run `Unresolved` and undoes nothing; fabric_saga reports it as
+  // ends the run `Unresolved` and undoes nothing; the saga recipe reports it as
   // uncertain rather than as a failure the model may retry.
   let assert execution.Unresolved(_, shop.PaymentOutcomeUnknown(_), settlement) =
     outcome

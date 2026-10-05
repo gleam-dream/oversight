@@ -9,7 +9,7 @@
 //// - fabric: the run id and the run's `Correlation`, which the desk sets to
 ////   the ticket's when it starts the run.
 //// - saga: its own run counter, the workflow name and the `Correlation`
-////   that `fabric_saga.tool` sets from the tool call's.
+////   that `saga_tool.tool` sets from the tool call's.
 //// - http_gun: a per-request id and the caller's `Correlation`
 ////   (`http_gun.with_correlation`): the tools set the call's.
 //// - llm_wire: a call id and the `Correlation` of the http_gun client view
