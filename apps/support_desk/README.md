@@ -13,16 +13,16 @@ network access and no keys are used.
 
 ## Packages and seams
 
-| Package                 | Role                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| fabric                  | Agent runtime: three typed tools, the refund policy and approvals, cancellation, reconcile                                           |
-| fabric_saga (in fabric) | The refund saga as one fabric tool; maps the saga outcome onto the tool result                                                       |
-| saga                    | The three-step refund workflow with undo and `unknown_when` for an unknown payment outcome                                           |
-| llm_wire                | OpenAI Responses adapter, reached through `fabric/llm.model` with a caller-owned client                                              |
-| http_gun                | One loopback-only client; the shop API is a shorter-timeout view; Sinal events by default                                            |
-| json_blueprint          | One codec per record: tool schemas, argument checks, policy match, typed final answer                                                |
-| sinal                   | `src/support_desk/telemetry.gleam` attaches to fabric, saga, http_gun and llm_wire events                                            |
-| warden                  | Approvers sign in through OIDC; `approvers.gleam` is fabric's warden recipe: token validation plus the scope `approve:<requirement>` |
+| Package                | Role                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| fabric                 | Agent runtime: three typed tools, the refund policy and approvals, cancellation, reconcile                                           |
+| Local saga tool recipe | The refund saga as one fabric tool; maps the saga outcome onto the tool result                                                       |
+| saga                   | The three-step refund workflow with undo and `unknown_when` for an unknown payment outcome                                           |
+| llm_wire               | OpenAI Responses adapter, reached through `fabric/llm.model` with a caller-owned client                                              |
+| http_gun               | One loopback-only client; the shop API is a shorter-timeout view; Sinal events by default                                            |
+| json_blueprint         | One codec per record: tool schemas, argument checks, policy match, typed final answer                                                |
+| sinal                  | `src/support_desk/telemetry.gleam` attaches to fabric, saga, http_gun and llm_wire events                                            |
+| warden                 | Approvers sign in through OIDC; `approvers.gleam` is fabric's warden recipe: token validation plus the scope `approve:<requirement>` |
 
 Seams under test:
 
