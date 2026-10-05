@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bind Warden discovery, metadata reload and key refresh work to its cache
+  process. Late results cannot restore removed signing keys in a replacement
+  cache; owner exit cancels fetch work without changing the public API.
+- Sequence Warden whole-tree restarts after the previous owned processes exit.
+  Reuse the startup deadline instead of racing their registered names.
 - Round 9 typed composition: separate classification protocols from fresh
   live configuration, admit provider-neutral typed answers, retain optional
   confidence and usage, and reject incompatible receipt/live limits before I/O.

@@ -513,8 +513,76 @@ with fabric passing twice consecutively.
 - Follow-up: observe recipe maintenance cost across applications before
   introducing another public abstraction. Retain compatible operation
   definitions for stored receipts when introducing another provider protocol.
-  Warden discovery requests can outlive their owner until their transport
-  deadline; this existing production behavior was not changed by fixture cleanup.
+  The fixture cleanup did not change Warden's production fetch ownership.
+  The subsequent ownership follow-up below addresses it.
+
+#### Round 9 provider fetch ownership follow-up
+
+| Package   | Result                                                                                                                                                                                                                                                                                                                  |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| warden    | Background discovery, metadata reload and key refresh belong to the cache process that started them. Completion cannot reach a replacement cache; owner exit cancels fetch work, and worker loss releases waiting callers without discarding the last accepted snapshot. The public API and retry policy are unchanged. |
+| fabric    | Mechanical Warden revision refresh only.                                                                                                                                                                                                                                                                                |
+| oversight | Record the ownership contract, unchanged caller API and measured costs. Application source and recipes require no changes.                                                                                                                                                                                              |
+
+- A local regression reproduced stale completion restoring removed signing
+  keys after cache restart. The public validator rejected an old token before
+  the stale result and accepted it afterward. Process-specific completion and
+  owned fetch cancellation address the cause.
+- Lifecycle bookkeeping adds one short-lived process per active fetch, with
+  no additional idle process or process per cached validation. Completion gains
+  one message hop. Independent clients share no lifecycle coordinator.
+- `warden.stop` retains its existing wait of up to five seconds for supervisor
+  exit. Worker exit notifications may follow the supervisor notification;
+  cancellation does not wait for the provider response or a blocked telemetry
+  callback.
+- TDD reproduced four intended failures against the original code before the
+  fix. Nineteen focused scenarios now cover owner and worker exits, stalled
+  requests, removed-key validation, discovery/reload recovery, obsolete terminal
+  messages, independent clients and drained lifecycle bookkeeping.
+- A queued result delivered after owner exit completes without a named-send
+  panic. A generated mutation restoring named completion routing fails this
+  regression; production source was not changed for that check.
+- A final gate exposed the separate whole-tree restart race: a new HTTP pool
+  attempted to claim its name before its previous process exited. A real
+  lifecycle callback reproduced the held registration and exhausted parent
+  restart allowance. Startup now waits for this client's previous owned
+  processes under one existing startup deadline; manual discovery shares that
+  deadline. The abrupt-restart test remains, and its fixture stops its owning
+  parent. No sleep, increased restart allowance or name takeover is added.
+- Joining old children adds at most five temporary monitors per starting
+  client. A held child can delay that parent's supervisor management work up
+  to the startup bound, 15 seconds by default. Existing request actors keep
+  serving independently; no work is added to their steady validation path.
+- Three local before/after samples measured median cached validations per
+  second of 2,568 → 2,528 for one client and 9,761 → 9,737 for four clients.
+  One hundred sequential TLS refreshes took a median 5.232 → 5.223 seconds.
+  These are local microbenchmarks, not production capacity estimates.
+- An initially slower snapshot-only sample prompted five alternating
+  baseline/fix pairs in one OTP 28 VM with four schedulers. Each client warmed
+  1,000 reads before 20,000 measured reads. Median latency was 20.259 → 20.230
+  microseconds for one client and 20.581 → 20.798 for four clients with
+  interleaved reads: an increase of 0.217 microseconds, or 1.06%, in the latter.
+  Post-GC cache process memory stayed within the baseline range; differing heap
+  allocation sizes do not establish a memory improvement.
+- Forwarding copies the decoded metadata/key-set term once more. Transient
+  allocation grows with key-set size under the existing response bound;
+  these small-provider measurements do not establish worst-case JWKS cost.
+- All eight application gates passed without source changes: checkout 12,
+  webhooks 14, extractor 16, support_desk 21, tool_hub 16, secure_mcp 16,
+  sso_portal 13 and research_agent 10. The support demo retains zero of 267
+  unattributed events; the tool-hub demo retains zero unjoined events.
+- Warden's final full gate passed in both implementation and independent
+  acceptance runs: 205 core tests, 18 negative compilation fixtures and their
+  positive control, 13 external-consumer tests and six compiled recipe tests.
+- Fabric's full gate passed twice consecutively: 47 checks per pass, including
+  823 core tests and 66 PostgreSQL tests. Its tested Warden revision is
+  `0a0907f`. The other seven package gates retain their preceding accepted
+  results on unchanged heads and unchanged dependency trees.
+- Application source and recipe changes for this follow-up are zero lines
+  added and zero removed. The published package set remains 11 packages.
+- Follow-up: startup snapshot reuse for manually started clients remains a
+  separate lifecycle question. This fix changes background fetch ownership;
+  it does not redesign bootstrap snapshots or provider refresh policy.
 
 ## sinal
 
