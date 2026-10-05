@@ -18,6 +18,29 @@ Package decisions taken with these (3 October 2026):
 - **fabric approvers (round 8, 4 October 2026):** answers carry an opaque `Proof` minted by the agent's configured `fabric/approvers` verifier, which decides both authentication and authorization. There is no `fabric_warden` package: the warden verifier is a compiled recipe in fabric's docs, promoted to a package only if a second app copies it or the mapping grows.
 - **fabric approval expiry:** 7 days by default (decision 5). An expired approval rejects the action, and the model sees the rejection. The default is configurable, with an explicit `Infinity`.
 
+Package decisions (round 9, 5 October 2026):
+
+- **Bridges become compiled recipes (convention 11):** packages expose ports
+  and accessors; consumers own about 20–50 lines of wiring, compiled verbatim
+  from the downstream README and module docs and checked for drift by a gate.
+  Substantial logic moves into a dependency-neutral capability in one of the
+  packages. Promote a recipe only when several apps copy it and drift, or
+  maintaining a growing mapping costs more than a package.
+- **Protocol-neutral invocation in fabric core:** `fabric.invoke` starts or
+  reopens a run by idempotency key and principal, waits with a deadline,
+  handles caller cancellation, and returns a structured result with the run
+  id. MCP serving composes this capability in a recipe.
+- **Classification in llm_wire:** a provider-neutral classification family,
+  with TypeSafe System One as its first wire; not a TypeSafe-specific public
+  family. Fabric's classification decision operation belongs in core.
+- **Keep the PostgreSQL adapters:** `saga_postgres` and `fabric_postgres`
+  remain separate packages because they isolate substantial,
+  correctness-critical external infrastructure dependencies.
+- **Publication scope:** replace `fabric_typesafe`, `fabric_saga`, and
+  `fabric_relay` with the capabilities and recipes above, reducing the
+  planned published set from 14 to 11 packages (nine cores and two PostgreSQL
+  adapters).
+
 ## 1. Durability ownership
 
 **Context.** Three packages implement durable execution:

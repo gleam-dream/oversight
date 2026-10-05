@@ -200,6 +200,23 @@ Every public module has a `////` module doc. Every README starts with the
 common path and contains a defaults table. Every package has a CHANGELOG.
 Examples compile as tests.
 
+### 11. Package ports and compiled composition recipes
+
+A bridge between two gleam-dream packages is a compiled recipe. Both
+packages expose the ports and accessors needed for about 20–50 lines of
+consumer-owned wiring. Any substantial logic belongs in one package as a
+capability that does not depend on the other.
+
+The recipe lives in the downstream package's README and public module docs,
+compiles verbatim in an unpublished `consumers/` package, and has a gate
+that fails with a diff when the copies differ. Promote it to a package only
+when several apps copy it and drift, or maintaining a growing mapping costs
+more than maintaining a package.
+
+An external infrastructure adapter stays a package when its implementation
+is substantial and correctness-critical and its dependency should remain
+outside the core. `saga_postgres` and `fabric_postgres` remain packages.
+
 ## Owner decisions
 
 The reviews collected about 60 open questions. These are the ones that block
