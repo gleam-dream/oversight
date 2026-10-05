@@ -3,10 +3,10 @@
 ////
 //// Join key: the question's `Correlation`. The MCP caller sets it
 //// (`client.with_correlation`; Relay mints one per call when it does not),
-//// it crosses the wire to the assistant server, `fabric_relay.serve` starts
+//// it crosses the wire to the assistant server, `relay_serve.serve` starts
 //// the run under it, and fabric puts it on every run event, on the
 //// provider's HTTP Gun view (which llm_wire reads) and in every `tool.Call`.
-//// `fabric_relay.tool` puts it on the inventory client's Relay view, so the
+//// `relay_tools.tool` puts it on the inventory client's Relay view, so the
 //// inventory server's own events carry it too.
 //// Only a frame Relay rejects before it has a request falls back to its
 //// exchange id.

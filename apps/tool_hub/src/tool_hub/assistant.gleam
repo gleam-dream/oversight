@@ -1,11 +1,11 @@
 //// The fabric agent and its exposure as the MCP tool `ask_assistant`.
 
 import fabric/agent
+import fabric/invoke
 import fabric/llm
 import fabric/policy
 import fabric/store.{type Store}
 import fabric/tool as fabric_tool
-import fabric_relay
 import gleam/result
 import gleam/time/duration.{type Duration}
 import http_gun
@@ -15,6 +15,7 @@ import relay/client
 import relay/http
 import relay/server
 import relay/tool as relay_tool
+import relay_serve
 
 /// What every tool call of a run receives.
 pub type Context {
@@ -93,18 +94,13 @@ pub fn serve(
   configure: fn(http.Config(Nil)) -> http.Config(Nil),
 ) -> Result(http.Handler(Nil), String) {
   let service =
-    fabric_relay.service(
-      ask_assistant(),
-      runs: assistant.store,
-      agent: assistant.agent,
-      start: fn(_, question) {
-        fabric_relay.start(assistant.context, prompt: question.question)
-      },
-    )
-    |> fabric_relay.with_wait(assistant.budget)
+    invoke.agent("ask_assistant", assistant.store, assistant.agent)
+    |> invoke.with_wait(assistant.budget)
   use tool <- result.try(
-    fabric_relay.serve(service)
-    |> result.map_error(fabric_relay.describe_config_errors),
+    relay_serve.serve(ask_assistant(), service, fn(_, question) {
+      Ok(invoke.request(assistant.context, question.question))
+    })
+    |> result.map_error(invoke.describe_config_error),
   )
   server.new([tool])
   |> http.new

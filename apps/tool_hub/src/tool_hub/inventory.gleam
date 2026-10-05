@@ -1,7 +1,7 @@
 //// The "inventory" MCP server: a small product catalog with typed Relay tools.
 ////
 //// The codecs below are the single source of each tool's schema. Relay admits
-//// them into definitions; `fabric_relay.tool` derives the fabric definitions
+//// them into definitions; `relay_tools.tool` derives the fabric definitions
 //// from the same Relay definitions.
 
 import gleam/dict.{type Dict}

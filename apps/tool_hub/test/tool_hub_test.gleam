@@ -1,6 +1,6 @@
 import fabric
+import fabric/invoke
 import fabric/run
-import fabric_relay
 import gleam/erlang/process
 import gleam/http as gleam_http
 import gleam/http/request
@@ -22,6 +22,7 @@ import relay/content
 import relay/http
 import relay/testing as relay_testing
 import relay/tool as relay_tool
+import relay_run
 import sinal/correlation.{type Correlation}
 import tool_hub
 import tool_hub/assistant
@@ -189,7 +190,7 @@ pub fn common_path_answers_through_both_mcp_servers_test() {
   let assert True = string.contains(answer.answer, "reservation R-1")
   // The result names its run, so a caller needs no side channel.
   let assert [run_id] = run_ids(telemetry.records(hub.telemetry))
-  let assert Some(named) = fabric_relay.run_of(result)
+  let assert Some(named) = relay_run.run_of(result)
   let assert True = run.id_to_string(named) == run_id
 
   // The reservation really happened on the inventory server.
@@ -596,10 +597,10 @@ pub fn keyed_call_outlives_its_disconnect_test() {
   let assert False = telemetry.has(records, "fabric", "run.cancel")
   // The key names the run, so the application can find it.
   let id =
-    fabric_relay.run_id(
-      assistant.ask_assistant(),
-      principal: fabric_relay.anonymous,
-      key: "question-1",
+    invoke.keyed_id(
+      invoke.agent("ask_assistant", hub.store, hub.assistant.agent),
+      "anonymous",
+      "question-1",
     )
   let assert [started] = run_ids(records)
   let assert True = started == run.id_to_string(id)
@@ -736,6 +737,29 @@ pub fn relay_client_timeout_cancels_the_run_test() {
   let assert True =
     telemetry.has(telemetry.records(hub.telemetry), "fabric", "run.cancel")
   let assert run.Finished(run.Cancelled) = cancelled_run(hub)
+  client.close(mcp)
+  tool_hub.stop(hub)
+}
+
+/// Discovery for this question is part of its trace, not a separate call
+/// accidentally counted as unjoined by the demo's telemetry summary.
+pub fn listing_and_question_share_one_complete_trace_test() {
+  let assert Ok(hub) =
+    tool_hub.start(tool_hub.settings("joined_demo"), tool_hub.demo_script())
+  let assert Ok(connected) =
+    tool_hub.assistant_client(hub, duration.seconds(15))
+  let question = correlation.unique()
+  let mcp = connected |> client.with_correlation(question)
+  let assert Ok(_) = client.list_tools(mcp)
+  let assert Ok(client.Succeeded(..)) =
+    client.call(
+      mcp,
+      assistant.ask_assistant(),
+      assistant.Question(tool_hub.demo_question),
+    )
+  let followed = telemetry.follow(hub.telemetry, question)
+  let assert 0 = telemetry.count(followed.unjoined, "relay")
+  let assert 0 = telemetry.count(followed.unjoined, "llm_wire")
   client.close(mcp)
   tool_hub.stop(hub)
 }
