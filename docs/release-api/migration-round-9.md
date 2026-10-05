@@ -209,3 +209,51 @@ Validation also fixes test lifecycle assumptions in Fabric and Warden. Fabric
 waits for runner exits before asserting an idle shutdown. Warden settles a test
 discovery request and stops its owning supervisor before later telemetry tests.
 Neither change requires a public API or application migration.
+
+## Round 9 provider fetch ownership
+
+Warden's background discovery, metadata reload and signing-key refresh now
+belong to the cache process that started them. Previously, a fetch could
+survive cache restart and deliver its old keys to the replacement process's
+registered name. A local key-rotation regression reproduced rejection of an
+old token followed by acceptance after that stale completion.
+
+After this change, completion targets the original process, and owner exit
+cancels its fetch. Unexpected worker exit releases waiting refresh callers
+through the existing snapshot/failure behavior. Cached validation stays
+available during a refresh. No caller changes are required:
+
+```gleam
+// Before and after: clients keep the same lifecycle and validation API.
+let assert Ok(client) = warden.new(config)
+supervisor.new(supervisor.OneForOne)
+|> supervisor.add(warden.supervised(client))
+|> supervisor.start
+resource.verify(resource.new(client, audience), token)
+```
+
+Each active fetch gains one short-lived lifecycle process. Idle clients and
+cached validation gain no process. Clients remain independent; no shared
+fetch lock or public cancellation setting is added. A cache restart discards
+its previous work, so a replacement may need another provider request.
+`warden.stop` still requests shutdown and waits up to five seconds for the
+client supervisor to exit. Worker exit notifications may arrive afterward
+as owner monitoring cancels them.
+
+A full-gate failure also exposed a whole-tree restart race. Previously, a
+parent could start the replacement before the old HTTP pool released its
+registered name, exhausting the parent's restart allowance. Startup now waits
+for the previous client-owned processes to exit before replacing them.
+Application-owned stores remain outside that wait.
+
+`config.with_startup_timeout` keeps its signature and default of 15 seconds.
+For manual startup, discovery and previous-process cleanup share one absolute
+deadline. For supervised startup, this bound applies to local startup cleanup;
+background discovery retains its independent retry behavior. A process that
+does not exit in time produces the existing startup-timeout failure. No new
+configuration or application wiring is required.
+
+This wait is synchronous within child startup. A held previous child can
+delay its parent's supervisor management work up to the configured bound;
+existing request actors continue serving independently. Startup adds at most
+five temporary monitors and removes them on success or expiry.

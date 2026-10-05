@@ -31,6 +31,51 @@
 - Registered names are allocated once at trusted startup and never by converting request strings to atoms. Supervisor child-spec exposure remains subject to the selected `gleam_otp` API.
 - Login transaction storage and session custody have distinct owners and protocols. Neither a live process handle nor a copyable checked callback substitutes for durable storage authority.
 
+#### Client restart ownership
+
+- A client value remains valid when its parent restarts the whole client tree.
+  A replacement must not claim child names while processes from the previous
+  tree still own them. A live registered client supervisor remains an
+  already-started client.
+- Startup observes the actual exits of this client's previously registered
+  children before starting their replacements. This includes the HTTP pool,
+  provider cache, sweeper and any Warden-owned in-memory stores. External
+  application stores are outside this ownership boundary.
+- Waiting uses one absolute startup deadline. Manual startup shares its
+  existing discovery deadline with this wait; supervised startup uses the
+  configured startup bound. Expiry returns the existing startup-timeout
+  failure instead of taking over a name or exhausting immediate retries.
+- A restart test holds a real old child's registration across supervisor
+  death, then releases it. The replacement must become usable through the
+  same client value. A held registration past the deadline must fail within
+  the configured bound. Tests retain abrupt supervisor death and stop the
+  parent that owns the supervised fixture.
+
+#### Provider fetch ownership
+
+- A discovery, metadata reload or signing-key refresh belongs to the cache process
+  that started it. Its completion cannot update a replacement cache process,
+  even when that process has the same registered name.
+- The cache retains at most one active fetch and continues serving its last
+  accepted snapshot while that fetch runs. Independent clients do not share a
+  fetch lock or lifecycle coordinator.
+- A fetch terminates when its cache owner exits. Client shutdown must stop its
+  owned fetch work; transport deadlines remain a separate bound for live owners.
+  Termination must not depend on a provider response or telemetry callback.
+- Public `stop` requests shutdown and waits for the client's supervisor exit up
+  to its existing wait bound. Owner-death monitoring drives fetch termination; a worker
+  exit notification may be observed after the supervisor exit notification.
+- A worker exit without a result releases the active-fetch state. Waiting key
+  refresh callers receive the existing failure/snapshot projection, while
+  discovery retry and metadata reload retain their existing bounded cadence.
+- Completion and exit notifications for an obsolete fetch cannot clear or
+  replace a newer active fetch. Cancellation is an ownership event and does
+  not add a new public retry policy or configuration setting.
+- Tests must reproduce key rotation across a cache restart, shutdown during a
+  stalled request, worker failure, and cached reads during a slow fetch. The
+  lifecycle mechanism must keep cached reads asynchronous and bound process
+  bookkeeping by active clients and fetches.
+
 ### 3.2 Configuration and authorization planning
 
 - Issuer configuration requires an absolute HTTPS URI with no query or fragment and exact issuer matching. Any loopback-only HTTP test constructor must be explicit; production configuration must exclude issuer-regex quirks.
