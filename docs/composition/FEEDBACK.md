@@ -1,5 +1,9 @@
 # Composition feedback
 
+> Historical assessment. Round 9 supersedes the bridge-package proposals:
+> classification is in llm_wire, run invocation is in fabric, and composition
+> uses compiled recipes. See the [Round 9 migration guide](../release-api/migration-round-9.md). Findings below retain their original context.
+
 This document synthesizes the evidence from eight composition apps in
 [apps/](../../apps/README.md) and nine package API cards in [scan/](scan/).
 It answers whether the gleam-dream packages compose through their public APIs.
@@ -45,7 +49,7 @@ Evidence date: 1 October 2026. The package heads at that date were:
 | checkout       | saga, grind, http_gun, sinal + wisp, mist, pog                                   |     9 | ~750                                | CHK-1 grind cannot use the app pool |
 | webhooks       | grind, http_gun, sinal + wisp, mist, pog                                         |     8 | ~530                                | WHK-1 grind snooze defect           |
 | extractor      | grind, http_gun, llm_wire, json_blueprint, sinal + pog                           |    11 | ~290                                | EXT-1 grind snooze defect           |
-| support_desk   | fabric, fabric_saga, llm_wire, http_gun, blueprint, saga, sinal                  |    10 | ~210                                | none                                |
+| support_desk   | fabric, the workflow bridge, llm_wire, http_gun, blueprint, saga, sinal          |    10 | ~210                                | none                                |
 | tool_hub       | relay, fabric, llm_wire, blueprint, http_gun, sinal                              |    11 | ~380                                | none                                |
 | secure_mcp     | relay, warden, grind, blueprint, sinal + wisp, mist, pog                         |    10 | ~480, plus a 459-line test provider | SMCP-1 packages do not resolve      |
 | sso_portal     | warden, http_gun, sinal + wisp, mist, pog                                        |    10 | ~490, plus a 644-line test provider | SSO-1 sessions cannot be durable    |
@@ -185,7 +189,7 @@ meaning and invariants of the shared value match, as the
   - Saga treats a returned error as a known failure. Its `unknown_effects`
     report stays empty unless the step crashes. A crash in turn renders the
     typed failure as an Erlang term string (CHK-3, SD-1).
-  - fabric_saga can therefore tell the model that a refund failed cleanly
+  - the workflow bridge can therefore tell the model that a refund failed cleanly
     when the provider took the refund (SD-1).
   - Relay's `TransportError` does not say whether a call was sent, so a server
     that was already down looks like a lost reservation (TH-4).
@@ -376,7 +380,7 @@ concerns.
   in `model.Request` (SD-3). Give agent tools a replay policy (RA-4). Add
   `agent.with_answer(schema)` for typed final answers through structured
   output (SD-4, RA-10). Make tool accessors public so that fabric tools can be
-  served over relay (TH-5, TH-8). Pass the run context in fabric_saga (SD-2).
+  served over relay (TH-5, TH-8). Pass the run context in the workflow bridge (SD-2).
   Replace fabric_mcp's client with relay's client (TH-5). Report usage as
   optional (TH-10). Widen `gleam_stdlib`.
 

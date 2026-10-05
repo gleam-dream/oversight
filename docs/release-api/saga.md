@@ -1,5 +1,9 @@
 # saga — release API review
 
+> Historical assessment. Round 9 supersedes the bridge-package proposals:
+> classification is in llm_wire, run invocation is in fabric, and composition
+> uses compiled recipes. See the [Round 9 migration guide](migration-round-9.md). Findings below retain their original context.
+
 Reviewed 2 October 2026 at saga `26dbc73` against the [design](../../saga-design.md),
 the [API card](../composition/scan/saga.md), [FEEDBACK.md](../composition/FEEDBACK.md)
 and the app findings. "Probe" marks a claim checked in a scratch consumer.
@@ -167,7 +171,7 @@ ordinary path is unchanged.
   (`execution.gleam:245-254`). A retried `MayHaveBeenSent` charge ends as
   plain `Completed`, and a held order reports `unknown_effects == []`
   (CHK-3). Crashing instead renders the typed error as an Erlang term
-  (`saga.gleam:59-61`), and fabric_saga reports a refund the provider took
+  (`saga.gleam:59-61`), and the workflow bridge reports a refund the provider took
   as a clean failure (SD-1, theme 3).
 - **Sketch.**
 

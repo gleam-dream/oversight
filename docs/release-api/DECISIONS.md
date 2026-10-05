@@ -36,8 +36,7 @@ Package decisions (round 9, 5 October 2026):
 - **Keep the PostgreSQL adapters:** `saga_postgres` and `fabric_postgres`
   remain separate packages because they isolate substantial,
   correctness-critical external infrastructure dependencies.
-- **Publication scope:** replace `fabric_typesafe`, `fabric_saga`, and
-  `fabric_relay` with the capabilities and recipes above, reducing the
+- **Publication scope:** replace the classification, workflow, and MCP bridge packages with the capabilities and recipes above, reducing the
   planned published set from 14 to 11 packages (nine cores and two PostgreSQL
   adapters).
 

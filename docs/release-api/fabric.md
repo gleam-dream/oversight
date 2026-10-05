@@ -1,7 +1,11 @@
 # Release API review: fabric
 
+> Historical assessment. Round 9 supersedes the bridge-package proposals:
+> classification is in llm_wire, run invocation is in fabric, and composition
+> uses compiled recipes. See the [Round 9 migration guide](migration-round-9.md). Findings below retain their original context.
+
 Reviewed 2 October 2026 at fabric `db81b79` (includes `c60bc1c`), with `fabric_postgres`,
-`fabric_saga`, `fabric_mcp` and `fabric_typesafe`. The inputs were
+`the workflow bridge`, `fabric_mcp` and `the classification bridge`. The inputs were
 [fabric-design.md](../../fabric-design.md), the [API card](../composition/scan/fabric.md),
 [FEEDBACK.md](../composition/FEEDBACK.md) (including "Fix round results"), the app findings SD, RA
 and TH, and the [public API guidelines](../../PUBLIC-API-GUIDELINES.md).
@@ -125,7 +129,7 @@ caller can put into context, job and telemetry.
 | `fabric/telemetry`, `fabric/testing`                               | `telemetry`: renamed from `observation`, 19 descriptors plus graph events and `correlation` (R15). `testing`: `call`, `scripted_model` (2)                                                                                                                                                                                                            |
 | `fabric/graph`                                                     | `Runtime`, `Handle`, `Status(a)`, `Error`; `new`, three timeout setters, `with_family_budget`, `start`, `open`, `id`, `snapshot`, `await`, `recover`, `approve`, `reject`, `reconcile`, `cancel`, `deliver`, `deliver_json`, `poll_job`, `child`, `branch`, `as_subgraph`, `status_kind`, `error_kind`, `describe_error` (24). Absorbs `graph/child`. |
 | `graph/definition`, `operation`, `agent`, `signal`, `job`, `fork`  | 7, 9, 3, 2, 2 and 3 functions. `definition.Spec` and `graph/agent.Definition` become constructors. `both` and `map` move to `fork`.                                                                                                                                                                                                                   |
-| Integrations                                                       | `fabric_postgres` (`config`, one `Error`); `fabric_saga` (`tool` with `input:`); `fabric_relay` replaces `fabric_mcp`; `fabric_typesafe` on `http_gun`; new `fabric_llm` (`model`, `decision`, `receipt_codec`)                                                                                                                                       |
+| Integrations                                                       | `fabric_postgres` (`config`, one `Error`); `the workflow bridge` (`tool` with `input:`); `the Relay bridge` replaces `fabric_mcp`; `the classification bridge` on `http_gun`; new `fabric_llm` (`model`, `decision`, `receipt_codec`)                                                                                                                 |
 
 | Count (core, graph included)      | Before                               | After                                                                                                      |
 | --------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
@@ -281,7 +285,7 @@ The proposals are ranked by user impact. "Breaks" means callers must change code
   (`graph/agent.gleam:29`), `budget.Limits(work, children, depth)` (`budget.gleam:4`), the
   3-tuple graph LLM request builder `#(http_gun.Client, config.Config, types.Request)`
   (`graph/llm.gleam:43`), `model.ToolCall`, `fabric_mcp/client.Options` and
-  `fabric_typesafe/client.Bounds`.
+  `the former classifier request bounds`.
 
 - **Change.**
 
@@ -328,39 +332,35 @@ The proposals are ranked by user impact. "Breaks" means callers must change code
 
 - **Breaks:** no. **Effort:** S.
 
-### FABRIC-R10. `fabric_relay` replaces `fabric_mcp` (TH-5)
+### FABRIC-R10. Relay composition through compiled recipes (TH-5)
 
-- **Problem.** `fabric_mcp` ships its own stdio JSON-RPC client (`client.gleam:1-14`), although
-  Relay's client also speaks stdio. It binds MCP tools only as graph operations
-  (`fabric_mcp.gleam:215`), maps a remote `isError` to `UncertainEffect` (`:274`, `:316`) against
-  `Explain`'s documentation and tool_hub's mapping, returns `Result(_, String)` built with
-  `string.inspect`, and `client.start` has no child specification.
-- **Change.** A `fabric_relay` package over `relay/client`:
-  `tool(relay_definition, peer: fn(context) -> client.Client) -> tool.Tool(context)`,
-  `discovered(..)`, `operation(..)` for graph nodes, and `serve(definition, handler)` to publish a
-  fabric definition. `isError` maps to `Explain`; a lost call to `Uncertain` until Relay reports
-  submission evidence (TH-4). Delete `fabric_mcp`.
-- **Breaks:** yes for `fabric_mcp` users. **Effort:** L.
+**Resolved in round 9.** Fabric owns the protocol-neutral `fabric/invoke`
+request lifecycle. Relay exposes definitions, output evidence and reply
+metadata. Consumer-owned recipes cover typed calls (40 lines), discovery
+(50), graph operations (28), serving (41), and reading a run id (12).
+Each is compiled verbatim and checked against README and module docs. All
+23 former bridge tests remain, and tool_hub uses the same recipes.
 
-### FABRIC-R11. `fabric_saga` passes the run context and evidence (SD-2, SD-5)
+### FABRIC-R11. Saga outcome and ownership ports (SD-2, SD-5)
 
-- **Problem.** The handler is `fn(_context, input, settlement)` (`fabric_saga.gleam:60`), so the
-  approver and per-run clients never reach the saga. `Hold` evidence is dropped
-  (`internal/verdict.gleam:60`).
-- **Change.** `tool(definition, workflow, config, input: fn(context, run.ActionRef, tool_input) ->
-workflow_input, explain:, rollback_within:)`, and `explain` also renders `Hold` evidence.
+**Resolved in round 9.** `saga/outcome` classifies effects and held evidence;
+`saga/reporting.run_owned` owns cancellation and reporting after its caller
+stops. The 47-line `saga_tool` recipe forwards `call.correlation`, binds a
+settling tool and maps failures to `Explain` or `Uncertain`. Saga steps read
+`saga.correlation_of(key)`. Fabric core has no saga dependency. The old 43
+tests are preserved in saga (24) and the consumer (19).
 
-- **Breaks:** yes (one argument). **Effort:** S.
+### FABRIC-R12. Provider-neutral classification and one HTTP client
 
-### FABRIC-R12. Optional provider adapters; one HTTP client
-
-- **Problem.** Core `gleam.toml` depends on `llm_wire` and `http_gun`. Only three places use
-  them: `fabric/llm`, `fabric/graph/llm`, and the tool-name grammar
-  (`internal/registry.gleam:13`). llm_wire's HTTP Gun migration broke the whole core build (card,
-  Health). `fabric_typesafe` opens `gun` directly, outside http_gun's destination policy.
-- **Change.** Move both adapters to a `fabric_llm` package and let the registry own the tool-name
-  grammar. Move `fabric_typesafe` to a caller-owned `http_gun.Client`.
-- **Breaks:** an import path. **Effort:** S. Costs one dependency in the first ten minutes (Q3).
+**Resolved in round 9.** Provider adapters remain in fabric core, as the
+owner decided on 1 October. `llm_wire/classify` adds a provider-neutral
+question/request/outcome family; TypeSafe System One is its first wire.
+`fabric/graph/classify.decision` consumes it alongside `fabric/graph/llm`.
+Credentials are reveal closures, failures stay typed, and http_gun supplies
+transport, redaction and recording. A second custom wire is compiled in an
+external consumer. Confidence means concentration evidence, not correctness.
+Old receipt and stored graph fixtures remain readable. Decision and writing
+consumers migrated. No new optional provider adapter package is introduced.
 
 ### FABRIC-R13. Lifecycle: sweeper, owner, stop
 
@@ -399,7 +399,7 @@ id)` (`observation.gleam:127`, `run.gleam:53`). `graph.Approval` is a pending re
 ### FABRIC-R16. Docs, dependencies, design
 
 - **Problem.** The README opens with 55 lines of status before its test-compiled usage example.
-  No package has a defaults table or a CHANGELOG, and `fabric_saga` has no README.
+  No package has a defaults table or a CHANGELOG, and `the workflow bridge` has no README.
   `README.md:483` says the suite skips PostgreSQL, but `check.py full` runs it. `http_gun`,
   `json_blueprint`, `llm_wire` and `sinal` are path dependencies. fabric-design.md §1-2 assigns
   durable graphs to Saga and excludes multi-node coordination; Fabric now does both.
@@ -428,7 +428,7 @@ id)` (`observation.gleam:127`, `run.gleam:53`). `graph.Approval` is a pending re
 | Store request mailbox                       | unbounded actor mailbox                                                                                                                                                                                                           | documented; callers are bounded by their own timeouts       |
 | Sweeper                                     | `every` required; 50 + 50 per batch; context 5 s; per root 30 s; handler 1 s                                                                                                                                                      | same, listed in the README                                  |
 | `fabric_mcp` request                        | 10 s; 1 MiB frames; 64 notifications; 16 discovery pages                                                                                                                                                                          | Relay client defaults (R10)                                 |
-| `fabric_typesafe` request                   | 20 s; 1 MiB request and response; 16 KiB headers                                                                                                                                                                                  | same, through `http_gun`                                    |
+| `the classification bridge` request         | 20 s; 1 MiB request and response; 16 KiB headers                                                                                                                                                                                  | same, through `http_gun`                                    |
 | Security                                    | policy required; policy failure and timeout fail closed; reviewer not authenticated; `RunId` forgeable (probe 2)                                                                                                                  | same; `reviewer` required; forging closed (R6)              |
 | Unchanged and sound                         | 4 concurrent tool bodies; policy decision 5 s, fails closed; sub-agents 4 children, depth 1 (caps 999, 16); family budget opt-in; `await` takes a required `within`; drain 25 s; `fabric_postgres` lease 30 s, renewed every 10 s | same                                                        |
 
@@ -483,5 +483,5 @@ id)` (`observation.gleam:127`, `run.gleam:53`). `graph.Approval` is a pending re
    the run? Is a tool timeout `Uncertain`, or `Explain` for tools declared replayable?
 5. **Reviewer.** The design asks for authenticated answers. Should `reviewer` be a required
    `String`, or a typed caller identity?
-6. **Relay ↔ fabric adapter.** Does it live in `fabric_relay` or on Relay's side? It also depends
+6. **Relay ↔ fabric adapter.** Does it live in `the Relay bridge` or on Relay's side? It also depends
    on Relay adding submission evidence (TH-4).

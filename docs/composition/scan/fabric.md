@@ -1,5 +1,9 @@
 # fabric — API card
 
+> Historical assessment. Round 9 supersedes the bridge-package proposals:
+> classification is in llm_wire, run invocation is in fabric, and composition
+> uses compiled recipes. See the [Round 9 migration guide](../../release-api/migration-round-9.md). Findings below retain their original context.
+
 Bounded, typed LLM agent and agentic-graph runtime. Repo: `/code/gleam-dream/fabric`.
 Design: [fabric-design.md](../../../fabric-design.md).
 
@@ -9,10 +13,10 @@ Gate: `nix develop --command python3 scripts/check.py full` (formatting, per-pac
 format/build/test for 13 Gleam packages, a throwaway PostgreSQL 16 cluster, a local
 jobs service, Python protocol suites; credentials stripped, so there are no live calls).
 
-| Run                                                                 | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Real checkout, siblings at HEAD (llm_wire `1c0ad61`)                | **FAIL at `core-build`**. `nix flake check`, gate self-tests and `gleam format --check` pass. 4 compile errors: `session.run`/`run_structured` now take an `http_gun.Client` (`src/fabric/llm.gleam:58`, `src/fabric/graph/llm.gleam:73`). Later checks did not run.                                                                                                                                                                                                                                                                               |
-| Scratch clone, llm_wire pinned to `bbde1d9`, other siblings at HEAD | **PASS, all checks.** The scripted run stopped at `consumers-jobs-tests` on a transient Hex API rate limit ("rate limit … exceeded") while resolving. Rerunning that check and the rest by hand passed. Gleam: core 650, fabric_saga 35, fabric_postgres 64 (throwaway PG16, stopped), fabric_mcp 22, fabric_typesafe 18, app 15, graph 5, decision 2, jobs 19, writing 8, workflow_composition 29, graph_authoring 12, its consumer 6. That is **885 passed, 0 failed**. Python: 24 tests OK. Format and `--warnings-as-errors` builds are clean. |
+| Run                                                                 | Result                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Real checkout, siblings at HEAD (llm_wire `1c0ad61`)                | **FAIL at `core-build`**. `nix flake check`, gate self-tests and `gleam format --check` pass. 4 compile errors: `session.run`/`run_structured` now take an `http_gun.Client` (`src/fabric/llm.gleam:58`, `src/fabric/graph/llm.gleam:73`). Later checks did not run.                                                                                                                                                                                                                                                                                                 |
+| Scratch clone, llm_wire pinned to `bbde1d9`, other siblings at HEAD | **PASS, all checks.** The scripted run stopped at `consumers-jobs-tests` on a transient Hex API rate limit ("rate limit … exceeded") while resolving. Rerunning that check and the rest by hand passed. Gleam: core 650, the workflow bridge 35, fabric_postgres 64 (throwaway PG16, stopped), fabric_mcp 22, the classification bridge 18, app 15, graph 5, decision 2, jobs 19, writing 8, workflow_composition 29, graph_authoring 12, its consumer 6. That is **885 passed, 0 failed**. Python: 24 tests OK. Format and `--warnings-as-errors` builds are clean. |
 
 - Git head: `ad20963 feat: add durable writing workflow and live reviewer comparison`. Worktree clean.
   The gate's `gleam build` rewrote `manifest.toml` to add `http_gun`. I restored it, so the repo is unchanged.
@@ -58,7 +62,7 @@ decision. Missing vs design and backlog:
 | Run data      | `fabric/run`, `fabric/observation`                                                                                                          | `RunId`, `Status`, `Outcome`, approvals, snapshots; Sinal event descriptors                                                                                                       |
 | Storage       | `fabric/store`, `fabric/discovery`, `fabric/retention`, `fabric/statistics`, `fabric/testing`                                               | Store port and built-ins, leases, readiness; storage projections for backends; scripted calls + leased-backend conformance checks                                                 |
 | Graph         | `fabric/graph`, `graph/definition`, `graph/operation`, `graph/agent`, `graph/llm`, `graph/signal`, `graph/job`, `graph/child`, `graph/fork` | Graph runtime/commands; typed node authoring; operation kinds; agent-as-node; one structured LLM decision; durable signals; external jobs; child/fork observables                 |
-| Optional pkgs | `integrations/fabric_postgres`, `fabric_saga`, `fabric_mcp`, `fabric_typesafe`                                                              | pog leased backend + migrate/prune/stats; Saga workflow as a tool; MCP stdio tools as graph operations; TypeSafe classifier operations                                            |
+| Optional pkgs | `integrations/fabric_postgres`, `the workflow bridge`, `fabric_mcp`, `the classification bridge`                                            | pog leased backend + migrate/prune/stats; Saga workflow as a tool; MCP stdio tools as graph operations; TypeSafe classifier operations                                            |
 
 ## Common path
 
@@ -169,7 +173,7 @@ case fabric.await(handle, 30_000) {
   agent `tool.Tool`s, and requires a native codec whose schema equals the remote schema. In the other direction,
   fabric tools cannot be exposed over relay. `tool.Definition` and `tool.Tool` are opaque, and their name, schema
   and invoke accessors are all `@internal` (`src/fabric/tool.gleam:380-412`). An adapter would have to re-declare each tool from shared codecs.
-- **saga / grind (reimplemented, not used).** `fabric_saga.tool(definition, workflow, execution.config(), explain:, rollback_within:)`
+- **saga / grind (reimplemented, not used).** `saga_tool.tool(definition, workflow, execution.config(), explain:, rollback_within:)`
   runs a Saga workflow as a single agent tool. Fabric's graph runtime owns its own durable records,
   revisions with compare-and-set, leases, sweeper, deadlines, signals, job polling and forks. That overlaps Saga's
   new persistence and recovery (`saga 23f0bdc`) and Grind's leases, polling and scheduling. Grind integration (S8)
@@ -178,7 +182,7 @@ case fabric.await(handle, 30_000) {
   ranges as grind, and resolves pog 4.1.0 and pgo 0.20.0. It uses only public pog with a caller-owned
   `pog.Connection`, has no private-shape FFI, and can share grind's pool. It also inherits grind's tight pin,
   so the two packages must widen together.
-- **HTTP.** `fabric_typesafe` opens `gun` directly (`fabric_typesafe_http.erl`) instead of using `http_gun`.
+- **HTTP.** `the classification bridge` opens `gun` directly (`the former classifier HTTP transport`) instead of using `http_gun`.
   This is a second hand-rolled HTTP client in the ecosystem.
 - **sinal.** Agent and store events go through `sinal/forwarder.emit_routed` under `[fabric, ...]`: `run.start/recover/
 hand_off/take_over/cancel/stop`, `lease.lose`, `lease.renew.fail`, `sweep.stop`, `model.stop`,
