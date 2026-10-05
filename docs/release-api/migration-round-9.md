@@ -102,3 +102,39 @@ remain readable by their old ids; no serialization shape changed.
 Application code grows where it now owns wiring. Canonical recipe gates do
 not automatically update every app copy. Keep drift and synchronized upgrades
 visible; promote a recipe only when observed maintenance cost warrants it.
+
+## Round 9 review follow-up
+
+The approved follow-up preserves four existing guarantees: invocation results
+retain unresolved effect evidence, classification parsing honors configured
+byte budgets, discovered replies preserve structured-content presence, and
+saga reporting returns a bounded startup failure instead of asserting success.
+Invocation, classification and saga startup signatures stay unchanged.
+
+The discovered-call output changes from `ToolResult(Value)` to
+`ToolResult(Option(Value))`. Continuations preserve that same output type.
+
+```gleam
+// Before: output schemas guessed whether Null meant content-only output.
+client.call_discovered(peer, declaration, arguments)
+  |> output.require_discovered(declaration)
+// After: the decoded reply determines whether structured content is absent.
+client.call_discovered(peer, declaration, arguments)
+  |> output.require_discovered
+```
+
+Direct discovered callers match `None` for absent structured content and
+`Some(value.Null)` for explicit null. Every present structured value remains
+unchanged; only `None` projects the content blocks to text. Typed `client.call`,
+content blocks, metadata and submission evidence remain unchanged. Tool_hub
+refreshes one line in its 50-line discovery recipe; tests and manifests do not
+change. Relay's migration guide lists the exact signatures.
+
+Fresh-context classification configuration, a normalized provider-neutral wire
+contract, typed operational causes in saga reporting, and complete saga outcome
+summaries remain deferred review findings. They are not part of these fixes.
+All nine package gates and all eight app gates passed, with fabric passing its
+full gate twice consecutively. The demos retain zero of 267 unattributed
+support_desk events and zero unjoined tool_hub events.
+The [review results](PLAN.md#round-9-review-follow-up) record the package and
+app counts.

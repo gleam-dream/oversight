@@ -1206,3 +1206,20 @@ The new framed id/key mapping requires finishing or reconciling legacy keyed
 runs and interrupted remote calls before upgrade; old records remain readable
 by id. A recipe should become a package only if real downstream drift makes
 maintaining these copies more expensive, not merely because copying is visible.
+
+#### Round 9 review follow-up: discovered reply presence
+
+**Status (round 9):** the discovery recipe now calls
+`output.require_discovered(result)` without supplying the declaration again.
+Relay preserves absent structured content as `None` and explicit JSON null as
+`Some(value.Null)`, including continuation replies. Only absence selects the
+text projection, so an output schema no longer substitutes for actual reply
+presence.
+
+This follow-up changes source by **+1 / −1 line**, with tests and manifests
+**+0 / −0**. The discovery recipe remains **50 lines** and matches fabric's
+canonical copy. The change removes a declaration dependency from output
+projection; declarations still own input admission and the read-only hint.
+The app must still refresh its recipe copy when the public port changes.
+Follow-up validation: all 16 tests passed, and the demo retains zero unjoined
+Relay and llm_wire events per question.

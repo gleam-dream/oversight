@@ -427,7 +427,51 @@ call admission queue at 30 seconds; production defaults did not change.
 | llm_wire       | One live TypeSafe call verifies the first wire; other provider classification wires require their own contract and replay evidence. Confidence remains concentration evidence, not correctness probability.                                                                                                | Future providers |
 | release        | Hex publication and upstream reports remain owner actions. No publication or upstream contact was performed.                                                                                                                                                                                               | Owner            |
 
-All nine package gates and all eight app gates passed on the final code, with fabric passing twice consecutively. Both migrated demos retain zero unattributed/unjoined events. Recipe copies, removed-package references, branch names, sibling pins and commit trailers were audited. Transient Hex rate limits were retried after cooldowns; no code failure was waived. Pushes follow dependency order only after this validation; Hex publication remains out of scope.
+Initial Round 9 validation: all nine package gates and all eight app gates passed, with fabric passing twice consecutively. Both migrated demos retained zero unattributed/unjoined events. Recipe copies, removed-package references, branch names, sibling pins and commit trailers were audited. Transient Hex rate limits were retried after cooldowns; no code failure was waived. Pushes followed dependency order only after this validation; Hex publication remained out of scope. These counts precede the review follow-up below.
+
+#### Round 9 review follow-up
+
+The owner approved fixes 1, 3, 5 and 7. Their scope preserves existing behavior
+and package ownership; findings 2, 4, 6 and 8 remain deferred.
+
+| Finding | Package          | Approved scope                                                                                                                                                                                                                                                                  | Validation                                                                                                                        |
+| ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | fabric           | Preserve unresolved cancellation/expiration evidence, including child and terminal agent effects. Translate native outcomes consistently during await, reopen and cancellation; preserve an answer that wins a cancellation race.                                               | Full gate passed twice consecutively: 47 checks each, including 819 core and 66 PostgreSQL tests.                                 |
+| 3       | llm_wire         | Honor configured request/response byte budgets beyond the former hidden 1 MiB cap. Receipt decoding retains the configured byte budgets and existing depth, element and numeric limits. Signatures stay unchanged.                                                              | Full gate passed: 379 tests, external consumers, negative fixtures and HTTP/2 checks.                                             |
+| 5       | relay / tool_hub | Preserve absent structured content as `None` and explicit null as `Some(value.Null)`, including continuation rounds. `output.require_discovered` uses actual presence and no longer takes a declaration. Tool_hub source +1/−1; tests/manifests +0/−0; recipe remains 50 lines. | Full gate passed: 315 tests and 108/108 conformance cases. Tool_hub: 16 tests and zero unjoined demo events.                      |
+| 7       | saga             | Monitor and bound reporting startup, return failure on receiver death or timeout, clean up receiver/mailbox state and start the workflow only after readiness. Public error shape stays unchanged.                                                                              | Full gate passed: 241 core, 24 consumer and 26 PostgreSQL tests; negative/restart checks, benchmark build and flake check passed. |
+
+| Deferred finding | Package  | Follow-up                                                              |
+| ---------------- | -------- | ---------------------------------------------------------------------- |
+| 2                | fabric   | Classification configuration derived from fresh context.               |
+| 4                | llm_wire | A normalized provider-neutral classification wire contract.            |
+| 6                | saga     | Typed operational causes in the reporting boundary's public errors.    |
+| 8                | saga     | Outcome summaries that include the missing effect-evidence categories. |
+
+The Relay lazy-connect fixture also replaces a stopped listener with a reserved,
+bound but non-listening socket. It retains the `ConnectFailed`/`NotSent`
+assertions while removing listener-shutdown timing and port-reuse races.
+This is test infrastructure only; the production stop contract is unchanged.
+
+Warden's `introspection_checks_exp_strictly_test` now fixes provider expiry
+at `2000000000` and checks the same fixed client clock: inactive at expiry,
+active one second earlier. This removes dependence on the time between test
+setup and the provider request. Production validation is unchanged; 20 focused
+repetitions and the full gate passed.
+
+The other package gates passed: sinal 134 tests; json_blueprint 227 Erlang and
+226 JavaScript tests plus 70 codegen tests on each target; http_gun 211 tests;
+grind 314 core, 17 consumer and 38 benchmark tests; warden 186 core, 13 consumer
+and 6 recipe tests, including its negative checks.
+
+All eight app gates passed: checkout 12, webhooks 14, extractor 16,
+support_desk 21, tool_hub 16, secure_mcp 16, sso_portal 13 and research_agent 10.
+The demos retain zero of 267 unattributed support_desk events and zero unjoined
+events per tool_hub question. Fabric's two consecutive full gates also passed
+its consumers: saga 19, relay 23, app 16, graph 5, decision 2, jobs 19, writing 8
+and approvers 5 tests; its three experiments passed 29, 12 and 6 tests.
+All nine package gates and all eight app gates passed on the final source,
+with fabric passing twice consecutively.
 
 ## sinal
 
