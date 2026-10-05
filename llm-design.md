@@ -35,6 +35,96 @@ laboratory excerpts below are design evidence.
 - Provider constructors return the LLM public contract. This resolves the baseline's conflicting declarations that `llm_wire` defines its own model port but exports an `agent.model.Model`; Fabric adapts the independent contract.
 - Sinal receives package-owned provider observations after transitions. Observations must not control provider interaction or substitute for authoritative state.
 
+## Classification extension contract
+
+- Classification exposes typed question views and typed answer candidates
+  at the provider extension boundary. Each wire translates its own protocol;
+  shared admission validates the candidates before constructing native answers.
+- Native choice labels and full choice and score distributions remain
+  required. A provider that cannot supply the requested answer evidence must
+  return a typed unsupported-capability failure rather than fabricate it.
+- Represent absent provider concentration evidence
+  as `None` in `Choice.confidence` and `Score.confidence`, using `Option(Float)`.
+  Present evidence remains subject to validation; malformed evidence must not
+  be converted to absence.
+- Complete choice and score distributions remain mandatory. Callers that use
+  confidence explicitly handle its absence; wires never fabricate confidence
+  to satisfy the shared answer type.
+- Confidence remains provider concentration evidence, not answer correctness.
+
+### Typed classification extension
+
+- `Question(a)` and `Batch(a)` retain caller-owned values and heterogeneous
+  composition. Provider-facing question views expose identifiers, question
+  kinds, instructions, labels and rubric levels without exposing native
+  application values or requiring TypeSafe JSON field names.
+- Provider decoders return typed answer candidates keyed by question id.
+  The candidate alternatives represent yes probability, choice and score;
+  choice carries its selected label and full distribution, and score carries
+  its position, rubric correspondence and full distribution.
+- Candidates are untrusted values. Shared admission checks exact question ids,
+  question kinds, finite numeric ranges, complete distributions, known labels,
+  a maximal selected choice, rubric correspondence and weighted score
+  agreement before constructing native answers.
+- TypeSafe retains its envelope parsing, field names and protocol-specific
+  checks. Another wire can supply the same candidates from a different
+  envelope without manufacturing TypeSafe JSON as an intermediate format.
+- The fixed wire supplies pure request encoding and response decoding.
+  Live configuration supplies credentials, endpoint override, timeout and byte
+  limits; a Fabric call cannot select another wire through live configuration.
+  Transport, correlation, cancellation, limits and typed failures remain shared.
+- Missing confidence is admitted only when the particular wire permits its
+  absence. A required TypeSafe field that disappears remains a protocol error;
+  shared optionality does not weaken that provider's contract.
+- Missing usage remains unknown, consistent with the existing usage contract.
+  An extension must not manufacture zero usage; reported values remain
+  validated, and a provider's mandatory usage fields remain mandatory there.
+- Receipt decoding uses the fixed wire's pure projections and shared admission.
+  It reconstructs and compares the expected request against stored evidence;
+  changing to typed candidates must not remove that check.
+- Existing receipt tags and legacy TypeSafe receipts remain readable. Recorded
+  confidence becomes `Some(value)`, and a missing optional measurement becomes
+  `None` only under a wire contract that allows it.
+- Acceptance requires an external wire using a different JSON envelope, native
+  choice labels, a heterogeneous batch, an advanced configuration and typed
+  failure handling. Malformed candidate tests must prove that extensions cannot
+  bypass shared validation.
+- TypeSafe replay and old receipt fixtures must pass with credentials that
+  fail if invoked. Fresh-context tests must cover approval resumption and
+  recovery; changing credentials must not affect receipt decoding.
+- Separate-consumer compilation and behavior tests remain required for facade
+  acceptance. Implementation authorization does not establish that those
+  checks have passed.
+
+### Classification construction and limits
+
+- `classify.typesafe()` returns a pure `Wire`; `classify.config(reveal)`
+  returns live `Config`. `classify.prepare(wire, config, request)` binds them
+  for one call, and `classify.run(client, prepared)` retains caller-owned HTTP.
+- `Wire` owns provider encoding, decoding, default endpoint and finite receipt
+  byte bounds. `with_receipt_request_limit` and `with_receipt_response_limit`
+  configure those explicit bounds, both defaulting to 1 MiB.
+- `Config` owns credentials, endpoint override, timeout and live byte limits.
+  The existing live `with_request_limit` and `with_response_limit` setters
+  remain distinct from receipt bounds; `with_headers` preserves custom
+  authentication through a closure and replaces default bearer authentication.
+- Custom headers must not reveal or validate a replaced bearer credential.
+  Preparation validates limit compatibility before credential access, and
+  credentials remain absent from the pure wire and receipt codec.
+- `classify.receipt_codec(wire, questions)` uses only pure projections and
+  fixed bounds. A caller admitting more than 1 MiB explicitly increases both
+  the applicable receipt bound and live bound; no hidden parser cap overrides
+  either admitted bound.
+- `classify/protocol.QuestionView` has `YesProbability`, `Choice` and `Score`
+  alternatives. Provider-facing choices expose label/description pairs;
+  caller-native label values remain inside the question batch.
+- `classify/protocol.Answer` has `Yes`, `Selected` and `Rated` alternatives.
+  `Selected` carries label, distribution and optional confidence; `Rated`
+  carries position, indexed distribution, rubric levels and optional confidence.
+- `question.definitions(batch)` returns id/view pairs, and
+  `question.decode(batch, answers)` admits id/answer pairs. Both `Decoded`
+  and `Outcome` carry `Option(message.Usage)` for unknown usage.
+
 ## Requests, configuration, and outcomes
 
 - A common request retains roles, content blocks, model selection, output limits, application tool declarations, and sequential or parallel tool mode. The demonstrated text subset does not remove richer content or completion outcomes from the contract backlog.

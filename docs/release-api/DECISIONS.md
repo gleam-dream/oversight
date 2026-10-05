@@ -40,6 +40,45 @@ Package decisions (round 9, 5 October 2026):
   planned published set from 14 to 11 packages (nine cores and two PostgreSQL
   adapters).
 
+Package review decisions (5 October 2026):
+
+- **Saga reporting returns the full execution report.**
+  `reporting.run_owned` returns
+  `Result(execution.Outcome(output, error, undo_error), reporting.Error)`.
+  Keeping the report preserves typed workflow and settlement evidence while
+  reporting errors retain operational causes. Returning the application output
+  directly was rejected because its failure wrapper would duplicate execution
+  evidence. Callers perform an explicit classification when they need that
+  simpler result. The [reporting contract](../../saga-design.md#reporting-preserves-the-execution-report)
+  owns the intended behavior and typed operational error contract.
+- **Classification fixes the provider protocol per operation version.**
+  Credentials and execution settings come from fresh context after policy
+  admission. Request encoding and receipt interpretation belong to the
+  operation version, so changing provider protocols requires a new version.
+  This preserves offline receipt interpretation without introducing a
+  per-call protocol selector or decoder registry. The
+  [classification contract](../../fabric-design.md#classification-protocol-and-fresh-execution-context)
+  owns this boundary; the [construction contract](../../llm-design.md#classification-construction-and-limits)
+  separates the pure wire from fresh live configuration.
+
+- **Classification confidence is optional; distributions remain mandatory.**
+  `Choice.confidence` and `Score.confidence` become `Option(Float)`.
+  Missing provider concentration evidence is `None`; malformed evidence
+  remains an error. This admits providers with complete distributions without
+  inventing confidence or treating it as answer correctness. See the
+  [classification extension contract](../../llm-design.md#classification-extension-contract).
+- **Incompatible live limits fail during preparation.** A live request or
+  response byte limit greater than its operation version's receipt bound
+  produces a typed preparation error before credential revelation or network
+  I/O. Limits are not silently reduced. This keeps configured behavior explicit
+  and preserves stable bounds for stored evidence; see the
+  [receipt limit contract](../../fabric-design.md#receipt-limits-and-live-request-limits).
+
+The owner authorized implementation of review findings 2, 4, 6 and 8 after
+these decisions. The typed extension, reporting error and complete safe
+summary contracts define that scope; implementation must pass external
+consumer acceptance and the ecosystem gates before release.
+
 ## 1. Durability ownership
 
 **Context.** Three packages implement durable execution:

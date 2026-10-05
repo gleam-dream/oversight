@@ -847,7 +847,8 @@ Friction:
 
 - **Status (round 9):** outcome classification lives in `saga/outcome`; held
   effects and returned unknown effects still become `Uncertain` (SD-1).
-- **Status (round 9):** the application owns the 47-line `saga_tool` recipe.
+- **Status (round 9):** the application owns the `saga_tool` recipe, initially
+  47 lines and now 59 after the typed reporting follow-up.
   It retains native inputs, context, cancellation rollback and late settlement
   through `saga/reporting.run_owned` (SD-2).
 - **Status (round 9):** the recipe passes the call correlation to saga; steps
@@ -866,3 +867,21 @@ The migrated app passes 21 tests. Its demo still reports **0 of 267 events
 unattributed**. The recipe consumer preserves the old bridge's 19 integration
 tests; the 24 outcome table tests live in saga, with independent reporting and
 classification-accessor coverage added there.
+
+### Round 9 typed reporting follow-up
+
+- **Status (round 9):** `reporting.run_owned` returns the complete typed
+  execution report. The recipe explicitly classifies it and renders settlement
+  evidence; an operational reporting error remains distinct from workflow failure.
+- **Status (round 9):** the copied recipe is 59 formatted lines, including
+  its local projection. This follow-up adds 37 source lines and removes 25;
+  application business logic, tests and dependency manifests are unchanged.
+
+The larger recipe is a real composition cost: preserving typed reports moves
+the choice of how to present them into the consumer. One local projection is
+shared by the ordinary return and cancellation callback, so the app does not
+duplicate outcome policy or receiver lifecycle. Fabric permits 60 lines for
+this recipe while retaining 50 for the others. Adding a Saga facade solely to
+hide these mappings would reduce the visible line count without simplifying
+ownership. The app still needs a deliberate copy update when the canonical
+recipe changes.

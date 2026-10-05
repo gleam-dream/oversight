@@ -675,6 +675,110 @@ and_then(current_plan, fn(value) {
 That offers dynamic execution, but only through code whose types are known at
 compile time.
 
+## Reporting preserves the execution report
+
+The owned-run reporting boundary returns the execution's full typed report. Reporting owns
+receiver lifecycle and delivery; the application chooses how to classify or
+render a delivered report.
+
+```gleam
+// Return type of reporting.run_owned:
+Result(execution.Outcome(output, error, undo_error), reporting.Error)
+```
+
+- `Ok(report)` means that an execution report was obtained. The report can
+  describe completion, failure, cancellation or unresolved effects; `Ok` does
+  not imply that the workflow completed successfully.
+- `Error(error)` describes a reporting or execution-admission failure for which
+  no execution report is available. The reporting boundary retains typed
+  operational causes instead of encoding them only in diagnostic strings.
+- A reported workflow failure retains its typed business cause, undo errors
+  and settlement evidence in `execution.Outcome`. Reporting does not introduce
+  a second representation of those facts.
+- The stopped-owner callback receives the same result shape as the synchronous
+  caller. Its existing ownership, bounded notification and cancellation
+  behavior remain required.
+- Applications use `outcome.classify(report, explain)` when they need an
+  application output or an effect classification. Safe summary rendering is a
+  separate projection of the report; it does not replace typed evidence.
+- Fabric's consumer-owned recipe performs this projection when mapping the
+  report to `Explain` or `Uncertain`. Saga acquires no dependency on Fabric.
+
+### Reporting errors and consumer mapping
+
+- `run_owned` removes the `explain`
+  parameter and the separate summary argument to `on_stopped`; both callers
+  receive the full-report result specified above.
+- One `reporting.Error` boundary retains invalid rollback bounds, receiver
+  startup failure, execution admission failure and lost report delivery as
+  distinct typed causes. Execution admission retains `execution.RunError`,
+  including its configuration errors or `saga.Crash`, without copying their
+  fields into a second error representation.
+- Receiver startup distinguishes receiver exit from its readiness deadline.
+  Delivery loss distinguishes receiver loss from coordinator loss; available
+  process exit evidence remains typed, with absence represented explicitly.
+- `reporting.error_kind` supplies stable categories for growing errors;
+  `reporting.describe_error` renders a safe description. Typed causes are
+  available through accessors, so a caller never parses those descriptions.
+- `reporting.effect_status` returns `NotStarted` only when the boundary can
+  prove that no workflow execution was launched; every other error returns
+  `Unknown`. An `execution.ExecutionLost` during startup is `Unknown`, since
+  the coordinator may have started work before its handshake was lost.
+- `NotStarted` covers rejected configuration, invalid rollback bounds and
+  receiver failure before workflow launch. It does not mean compensation
+  occurred and does not authorize an automatic retry.
+- The stopped-owner callback retains the existing cancellation, rollback and
+  bounded notification rules. A callback crash or deadline does not establish
+  successful delivery and cannot replace the execution report with a success.
+- The Fabric recipe maps `Ok(report)` through `outcome.classify` with the
+  application's `explain` and uses `outcome.summary` for settlement evidence.
+  It maps reporting errors to `Explain` only for `NotStarted`, and to
+  `Uncertain` for `Unknown`, using `reporting.describe_error` in either case.
+- One consumer-local projection serves synchronous return and stopped-owner
+  settlement. The verbatim recipe includes that projection in its line count;
+  the API must not acquire a Fabric-specific helper merely to meet 50 lines.
+
+### Complete safe outcome summaries
+
+- Review finding 8 keeps `execution.Outcome` as the authority for execution
+  evidence. An internal pure projection supplies facts used by both effect
+  classification and safe rendering; no new public report type is introduced.
+- `outcome.summary` includes the outcome and cause kinds, step addresses,
+  successful undos, held steps, steps without undo, undo failures,
+  compensation failures, interrupted steps and sibling failures. Unknown
+  effects retain the action, attempt number where applicable, and ending kind.
+- Completed outcomes with unknown effects retain those effects in the
+  summary. Failed, cancelled and unresolved outcomes include the same
+  settlement and unknown-effect categories whenever present.
+- Overlapping categories preserve distinct facts: a step can have a failed
+  undo and an earlier unknown attempt. Identical addresses within one category
+  may be displayed once, but distinct attempts and actions must remain visible.
+- Safe descriptions exclude application output, typed error payloads and
+  crash payloads. Step addresses remain visible under the existing contract.
+- Applications explicitly supply `explain` to expose selected business error
+  details through classification. Safe summary rendering never invokes it.
+- Existing completed, compensated and unresolved classification semantics
+  remain unchanged. Evidence that no effects remain does not determine retry
+  policy, which belongs to the caller.
+
+### Reporting and summary acceptance evidence
+
+- External consumer tests must preserve application-native business and undo
+  error values through the report and preserve typed operational causes
+  through reporting errors. Tests must distinguish an obtained failure report
+  from an operational error without a report.
+- Startup, owner-death and delivery-loss tests must verify effect status,
+  bounded waits, callback behavior and monitor/mailbox cleanup. Existing
+  completion, compensation, cancellation and uncertainty tests remain required.
+- Table-driven summary tests must cover every evidence category for each
+  outcome that can carry it, including overlapping categories and multiple
+  attempts. Secret-shaped payload sentinels must remain absent from safe
+  summaries and safe reporting descriptions.
+- The revised recipe must compile from README and module documentation,
+  include all helper lines in its 50-line gate, and retain the migrated apps'
+  tests and attribution results. This design discussion has not run those
+  future implementation checks.
+
 ## Error types must be deliberately unified
 
 Different steps naturally have different error types. Before they can

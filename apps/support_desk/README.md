@@ -26,6 +26,9 @@ network access and no keys are used.
 
 Seams under test:
 
+- The 59-line Saga recipe receives a full typed execution report, then
+  explicitly classifies it for Fabric. Reporting failures distinguish work
+  that never started from work whose effects are unknown.
 - One tool definition (`domain.gleam`) serves fabric, llm_wire and the
   policy; no llm_wire declaration is written.
 - An http_gun failure with `MaybeSent` becomes a step error marked with
