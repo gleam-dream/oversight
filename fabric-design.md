@@ -8,10 +8,29 @@
   facade. Typed tool registrations should retain caller-owned values and errors;
   an optional public-error renderer belongs to the deliberate exposure path.
 
-## Release decisions (3 October 2026)
+## Release decisions (3–5 October 2026)
 
 - **The graph runtime stays in Fabric and ships in Fabric 1.0**, under the same semver promise as the agent runtime ([release decision 2](docs/release-api/DECISIONS.md#2-fabrics-graph-runtime-in-10)). Fabric therefore owns durable graph execution (records, leases, a sweeper, signals, job polling, subgraphs and forks), which sections 1 and 2 below assign to Saga; the two runtimes share one vocabulary for failures, policy actions, approvals, cancellation and context (FABRIC-R5). Where sections 1 and 2 and the ownership table say Saga owns durable graphs, this decision governs Fabric's release.
 - **Durability ownership is still open** ([release decision 1](docs/release-api/DECISIONS.md#1-durability-ownership), deferred). Option B, moving the graph runtime out of Fabric, is ruled out by decision 2; how Grind, Saga and Fabric divide durable execution, and whether they converge on shared leases, is not decided. Fabric's leased stores coordinate several nodes sharing one database, which section 2's exclusion of multi-node coordination predates.
+
+- **Ports and compiled recipes govern package boundaries (5 October).**
+  Cross-ecosystem bridges are consumer-owned, compiled recipes of at most
+  about 50 lines. Substantial logic belongs to the library that owns it:
+  classification wires and evidence in llm_wire, workflow outcomes and
+  cancellation reporting in saga, request/run lifecycle in fabric. Fabric's
+  core depends on llm_wire but not saga, relay or warden. The PostgreSQL
+  adapters remain separate because their substantial infrastructure logic
+  and dependencies warrant packages. Recipes are promoted only when real
+  downstream drift or mapping complexity makes copies costlier to maintain.
+- **Request/response composition is protocol-neutral.** `fabric/invoke`
+  binds an agent or graph, scopes idempotency keys by service and principal,
+  waits within a finite deadline and cancels caller-owned unkeyed runs.
+  Returned ids support approval, reconciliation and retry. MCP only renders
+  this result in a recipe; HTTP and jobs use the same capability directly.
+- **Classification belongs beside generation.** llm_wire's provider-neutral
+  classification family owns native-label choices, yes-probability, rubric
+  scores and heterogeneous batches. Fabric owns graph decision receipts.
+  Concentration evidence is not a probability that the answer is correct.
 
 ## Package ownership and dependency direction
 
@@ -25,7 +44,7 @@
 | JSON Schema-aware contracts     | [Blueprint](blueprint-design.md)          | Derive tool declarations and dispatch from the same retained codecs.                          |
 | Observation delivery            | [Sinal](sinal-design.md)                  | Emit Fabric-owned facts after accepted state transitions.                                     |
 
-- Fabric's agent core must remain usable without a workflow graph or queue. An integration with Saga or Grind must reside in an optional distribution unit or application adapter; an optional module does not make package dependencies optional.
+- Fabric's agent core must remain usable without a workflow graph or queue. Composition with Saga or Grind uses a consumer-owned recipe over explicit ports; an optional module does not make package dependencies optional.
 - LLM owns its request, response, and continuation vocabulary without importing Fabric. Fabric may depend on the LLM public contract, but must not import specific provider networking to implement agent policy.
 - Blueprint owns JSON Schema-aware contracts for tool declarations and structured output. Ordinary continuation or other JSON serialization uses standard Gleam JSON encoders/decoders and may use an optional schema-independent codec abstraction. Each package owns its boundary errors and admission rules. Native application values remain typed until a named network or persistence boundary requires encoding.
 - Sinal delivers observations without owning state transitions. Packages define distinct event descriptors and fact types; no universal lifecycle event, task type, context, retry policy, or persistence protocol is introduced.

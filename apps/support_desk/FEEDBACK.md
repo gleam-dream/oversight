@@ -805,7 +805,7 @@ Sufficient, and the order of its slices matched the order of compile errors. It 
 
 ### After round 6
 
-llm_wire 36c341c, fabric 3d4b840. The only edit is `provider.gleam` (SD-7 status above). The app uses no graph runtime, `fabric_relay` or provider safety stop, so none of the fabric round 6 changes touched it. 16 tests pass, `gleam format --check` and `--warnings-as-errors` are clean, and `gleam run` prints the same five tickets, the ledger and `not attributable to any ticket: 0 of 267 events`.
+llm_wire 36c341c, fabric 3d4b840. The only edit is `provider.gleam` (SD-7 status above). The app uses no graph runtime, MCP serving or provider safety stop, so none of the fabric round 6 changes touched it. 16 tests pass, `gleam format --check` and `--warnings-as-errors` are clean, and `gleam run` prints the same five tickets, the ledger and `not attributable to any ticket: 0 of 267 events`.
 
 New friction: none. The one `Reply` question left is that the scripted provider cannot script a safety stop (`testing.content_filtered`) without a new ticket case; the desk has no ticket that needs one.
 

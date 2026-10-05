@@ -1176,7 +1176,7 @@ Package heads: fabric fd60851 / 409f1a7 (local, not pushed).
     prefix and a number, or `run.id_from(parts)`, would not.
   - The saga step gets no `tool.Call`, so the publication's HTTP client is
     still correlated by hand. The app's saga is started by the job, not by a
-    fabric tool, so `fabric_saga.tool` does not apply.
+    fabric tool, so `saga_tool.tool` does not apply.
   - `StartUnconfirmed` is the caller's to retry; the app wrote a three-try
     recursion for it. Fabric could retry once itself, since the id is
     idempotent.
@@ -1277,7 +1277,15 @@ Package heads: llm_wire 36c341c, fabric 3d4b840.
   `testing.tool_call(` (same labels). `gleam format --check`, `gleam build
 --warnings-as-errors`, `with-postgres.sh gleam test` (10 passed) and `gleam
 run` (51 events joined, none unclaimed) pass.
-- **Not applicable here**: `graph.build`, `fabric_relay.with_wait` and
+- **Not applicable here**: `graph.build`, `invoke.with_wait` and
   `serve` (no MCP), and `run.Refused` on a safety stop (the scripted provider
   never filters; the job already ends a refused answer as before).
 - **New friction**: none.
+
+### After round 9
+
+**Status (round 9):** no runtime migration is needed. This graph-based app
+already composes public ports and uses none of the removed bridge packages.
+Historical references now name the saga recipe and invocation port. Source
+and test lines added/removed: **0 / 0**. Recipe size here: **0 lines**.
+The composition boundary is unchanged; no new friction was introduced.
