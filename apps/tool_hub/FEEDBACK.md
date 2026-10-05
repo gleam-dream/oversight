@@ -222,7 +222,7 @@ relay_tool.cancelled(call))` waits for the run and for the cancellation in
   negative one (`cancel_with_caller: False` passes an empty selector, so
   `Interrupted` never arrives).
 
-- **Status (wave 5):** resolved by fabric_relay. `fabric_relay.serve`
+- **Status (wave 5):** resolved by bridge. `relay_serve.serve`
   cancels a run its call owns (no idempotency key) when the call is cancelled,
   through `relay_tool.cancelled` and `fabric.await_with`; the app has no
   handler code for it. The disconnect test passes unchanged
@@ -305,7 +305,7 @@ relay_tool.cancelled(call))` waits for the run and for the cancellation in
   - Adding fabric_mcp would also give the app a second MCP client next to
     Relay's, with a different protocol version check and error vocabulary.
 - **Proposal** (fabric): replace fabric_mcp's client with `relay/client` in
-  an optional `fabric_relay` package that offers `mount(relay_definition,
+  an optional Relay adapter package that offers `mount(relay_definition,
 peer: fn(context) -> client.Client)` and `discover(client, peer)` for agent
   tools, plus the existing graph binding. It should own the isError →
   `Explain` and lost-call → `Uncertain` mapping (after TH-4) and fix
@@ -315,17 +315,17 @@ peer: fn(context) -> client.Client)` and `discover(client, peer)` for agent
   adapter in wave 5. The app's adapter is 123 lines (typed 24, dynamic 41,
   failure mapping 58).
 
-- **Status (wave 5):** resolved by `integrations/fabric_relay`.
+- **Status (wave 5):** resolved by the former optional Relay bridge.
   `src/tool_hub/remote_tools.gleam` (204 lines) is deleted: `mount` is
-  `fabric_relay.tool(definition, peer:)` (3 lines in `typed_tools`),
-  `discover` is `fabric_relay.discover(peer, peer: ..)` and `classify` is
+  `relay_tools.tool(definition, peer:)` (3 lines in `typed_tools`),
+  `discover` is a listing followed by dynamic mounting and `classify` is
   built in with the same evidence rule. All 15 tests pass, including the
   three failure-mapping tests, with one wording change: the model now reads
   `the MCP call failed: ... (connect_failed)` where the app said `the
 inventory is unavailable`. The listing's names are now checked
   (`UnsupportedName`), which the app never did.
   Exposing the agent: `ask`, `render`, `tool_error` and `AskError` (about
-  120 lines) are `fabric_relay.serve(ask_assistant(), service)`; see
+  120 lines) are `relay_serve.serve(ask_assistant(), service)`; see
   `assistant.serve` (18 lines, the same size as before). The `outcome_unknown`
   facts carry the same `run_id` and `uncertain` list as the app's own
   structured error. The answer is typed: `agent.with_answer(answer_codec())`.
@@ -503,7 +503,7 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   (`client.with_correlation(mcp, question)`); Relay carries it in `_meta` and
   `x-correlation-id`, so the assistant server's events carry it, with no
   `http.with_correlation` builder (deleted, which hid it).
-  `fabric_relay.serve` starts the run under it, and `fabric_relay.tool` puts
+  `relay_serve.serve` starts the run under it, and `relay_tools.tool` puts
   the run's correlation on the inventory client, so the inventory server's
   events and the closed exchanges carry it too. For the demo question
   `gleam run` joins 12 fabric, 48 http_gun, 20 llm_wire and 20 relay events;
@@ -551,7 +551,7 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   (src/tool_hub/remote_tools.gleam:50).
 
 - **Status (wave 5):** the derivation (11 lines) went with `remote_tools`:
-  `fabric_relay.tool` derives the fabric definition from the Relay one, and
+  `relay_tools.tool` derives the fabric definition from the Relay one, and
   the `let assert Some(output)` is a documented panic inside it. The reverse
   direction (a fabric tool served over MCP) is still absent, which no longer
   matters here: `serve` publishes the agent, not a tool.
@@ -581,7 +581,7 @@ Codec(Value)`, which decodes by validating and reports `DecodeError`s
   first effect, with a `"?"` fallback. The data costs about 30 lines; this
   is a new capability, not glue.
 
-- **Status (wave 5):** resolved by fabric_relay. The `isError` result and its
+- **Status (wave 5):** resolved by bridge. The `isError` result and its
   structured content are `serve`'s: `error` is one of `working`, `timed_out`,
   `outcome_unknown`, `awaiting_approval`, `cancelled`, `failed` and others,
   with `run_id`. `timed_out_reservation_is_uncertain_test` now reads the
@@ -1062,7 +1062,7 @@ New friction:
 
 ### After wave 5
 
-Package heads: fabric and `fabric_relay` (local wave 5), relay b83486b,
+Package heads: fabric and the former Relay bridge (local wave 5), relay b83486b,
 llm_wire 2c32d5e. 15 tests pass (14 before: the `cancel_with_caller: False`
 negative test became `keyed_call_outlives_its_disconnect_test`, and
 `retried_keyed_call_reaches_the_same_run_test` is new), three runs in a row,
@@ -1071,8 +1071,8 @@ about 17 s each with the `nix develop` start. `gleam format --check` and
 
 | Seam                                                       | Before | After | Change                                                    |
 | ---------------------------------------------------------- | ------ | ----- | --------------------------------------------------------- |
-| `remote_tools.gleam` (mount, discover, classify)           | 204    | 0     | `fabric_relay.tool`, `discover`                           |
-| `assistant.gleam` (`ask`, `render`, `tool_error`)          | 233    | 114   | `fabric_relay.serve` + `with_wait` + `agent.with_answer`  |
+| `remote_tools.gleam` (mount, discover, classify)           | 204    | 0     | `relay_tools.tool`, `discover`                            |
+| `assistant.gleam` (`ask`, `render`, `tool_error`)          | 233    | 114   | `relay_serve.serve` + `with_wait` + `agent.with_answer`   |
 | `lazy_unwrap`, `with_correlation(Some(unique))`            | 2      | 0     | `tool.correlation` is a `Correlation`; the builder hid it |
 | `Settings.cancel_with_caller`, `AskError`, `Answer.run_id` | 6      | 0     | the key rule; typed `Answer`                              |
 
@@ -1110,7 +1110,7 @@ New friction in the new APIs:
 
 #### Catch-up: fabric F6 and relay ca38f75
 
-`fabric_relay.service(ask_assistant(), runs:, agent:, start:) |> serve` and
+`bridge.service(ask_assistant(), runs:, agent:, start:) |> serve` and
 relay's plain `Correlation` compile with small edits (`assistant.serve` is 3
 lines shorter; `start` is one expression). 15 tests pass twice in a row,
 format and `--warnings-as-errors` are clean, `gleam run` prints the same
@@ -1120,10 +1120,10 @@ Resolved friction (struck from the list above):
 
 - **The `start:` annotation is gone.** The definition comes first, so
   `fn(_, question) { question.question }` infers. Resolved.
-- **`start`'s constant principal and its `Ok` are gone.** `fabric_relay.start(context,
+- **`start`'s constant principal and its `Ok` are gone.** `bridge.start(context,
 prompt:)` is the whole closure; the principal is `anonymous`, which suits
   this single-client app (the test reads the keyed run with
-  `fabric_relay.anonymous`). Resolved.
+  `bridge.anonymous`). Resolved.
 - **A success names its run.** The result's text block carries
   `io.github.gleam-dream/run-id` in `_meta`; the common path test reads it
   and matches the run from telemetry. Replaces the lost `Answer.run_id`.
@@ -1138,10 +1138,10 @@ prompt:)` is the whole closure; the principal is `anonymous`, which suits
 New:
 
 - **`_meta` is read by key.** The run id is one `list.key_find` on a text
-  block with the string `"io.github.gleam-dream/run-id"`; fabric_relay
+  block with the string `"io.github.gleam-dream/run-id"`; the former Relay bridge
   exports no accessor (the constant `run_id_meta` is private) and relay's
   client result has no helper for a block's `_meta`. A
-  `fabric_relay.run_id_of(blocks)` would remove a string the caller must
+  `bridge.run_id_of(blocks)` would remove a string the caller must
   copy.
 - **The remaining gaps are unchanged:** `working`, `timed_out`, `key_reused`
   and `awaiting_approval` are untested here; the `with_wait` against Relay's
@@ -1149,9 +1149,9 @@ New:
 
 #### Catch-up: fabric 3d4b840 and llm_wire 36c341c (round 6)
 
-Two edits, three lines of app code each at most. `fabric_relay.serve` returns
+Two edits, three lines of app code each at most. `relay_serve.serve` returns
 `Result(Tool, List(ConfigError))`, so `assistant.serve` maps the error with
-`fabric_relay.describe_config_errors` into its existing `String` error
+`bridge.describe_config_errors` into its existing `String` error
 (`with_wait` only stores; `budget` is range-checked there now). The opaque
 `Reply` replaced the `ScriptedCall` constructor, the `Status(500, ..)` reply
 and the three-way `case` in `scripted_llm.respond` (now two accessors).
@@ -1167,3 +1167,42 @@ New friction:
 - **`serve`'s error has no home in this app's `String` errors.** The
   `with_wait` range is now reported at `serve` and the app's `budget` still
   has no guard against Relay's 30 s invocation timeout (unchanged gap).
+
+### After round 9
+
+**Status (round 9):** TH-1, TH-2 and TH-3 remain resolved: `fabric/invoke`
+owns keyed retries, bounded waiting and caller cancellation. All disconnect,
+stream-close and retry tests still pass through a local serving recipe.
+
+**Status (round 9):** TH-4, TH-5 and TH-9 use explicit composition: Relay's
+output boundary retains submission evidence; the calling recipe maps definite
+failures to `Explain` and possibly sent changing calls to `Uncertain`. No
+bridge dependency remains. Dynamic mounting still checks names and schemas.
+
+**Status (round 9):** correlation remains joined in both MCP directions. The
+demo now gives its preliminary listing the question's correlation too: **0
+unjoined Relay and 0 llm_wire events**, with every event still collected.
+The new regression test covers the listing and question together. **16 tests
+pass** (15 retained, one added), and `gleam run` completes the four-turn demo.
+
+Source changes against the pre-round-9 app: **+172 / −24 lines**; tests
+**+30 / −6**; manifests **+0 / −3**. Four verbatim recipe modules account
+for 143 added source lines: typed calling 40, discovery 50, serving 41 and
+reading a run id 12. The last is used by the app's tests. The graph variant
+is documented and tested in fabric's consumer; this app does not need it.
+
+The app grows because it now owns its wiring. That is a real maintenance cost:
+its copies must be refreshed deliberately when ports change, and imports and
+types account for much of the small recipes. Fabric's documentation gate
+proves the canonical copies agree, not every downstream application's copy.
+The benefit is clear ownership: fabric has no Relay dependency and owns run
+lifecycle; Relay owns MCP and output evidence. There is no hidden 768-line
+bridge implementation to version in lockstep with both.
+
+Remaining friction: applications still coordinate the invocation wait with
+Relay's request timeout; discovery has separate listing and admission errors;
+this app's older `String` startup boundary still renders those typed errors.
+The new framed id/key mapping requires finishing or reconciling legacy keyed
+runs and interrupted remote calls before upgrade; old records remain readable
+by id. A recipe should become a package only if real downstream drift makes
+maintaining these copies more expensive, not merely because copying is visible.
