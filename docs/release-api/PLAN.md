@@ -431,8 +431,9 @@ Initial Round 9 validation: all nine package gates and all eight app gates passe
 
 #### Round 9 review follow-up
 
-The owner approved fixes 1, 3, 5 and 7. Their scope preserves existing behavior
-and package ownership; findings 2, 4, 6 and 8 remain deferred.
+The first review follow-up implemented fixes 1, 3, 5 and 7. Their scope preserves
+existing behavior and package ownership. The subsequent typed composition
+follow-up below implements findings 2, 4, 6 and 8 after owner design approval.
 
 | Finding | Package          | Approved scope                                                                                                                                                                                                                                                                  | Validation                                                                                                                        |
 | ------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -440,13 +441,6 @@ and package ownership; findings 2, 4, 6 and 8 remain deferred.
 | 3       | llm_wire         | Honor configured request/response byte budgets beyond the former hidden 1 MiB cap. Receipt decoding retains the configured byte budgets and existing depth, element and numeric limits. Signatures stay unchanged.                                                              | Full gate passed: 379 tests, external consumers, negative fixtures and HTTP/2 checks.                                             |
 | 5       | relay / tool_hub | Preserve absent structured content as `None` and explicit null as `Some(value.Null)`, including continuation rounds. `output.require_discovered` uses actual presence and no longer takes a declaration. Tool_hub source +1/−1; tests/manifests +0/−0; recipe remains 50 lines. | Full gate passed: 315 tests and 108/108 conformance cases. Tool_hub: 16 tests and zero unjoined demo events.                      |
 | 7       | saga             | Monitor and bound reporting startup, return failure on receiver death or timeout, clean up receiver/mailbox state and start the workflow only after readiness. Public error shape stays unchanged.                                                                              | Full gate passed: 241 core, 24 consumer and 26 PostgreSQL tests; negative/restart checks, benchmark build and flake check passed. |
-
-| Deferred finding | Package  | Follow-up                                                              |
-| ---------------- | -------- | ---------------------------------------------------------------------- |
-| 2                | fabric   | Classification configuration derived from fresh context.               |
-| 4                | llm_wire | A normalized provider-neutral classification wire contract.            |
-| 6                | saga     | Typed operational causes in the reporting boundary's public errors.    |
-| 8                | saga     | Outcome summaries that include the missing effect-evidence categories. |
 
 The Relay lazy-connect fixture also replaces a stopped listener with a reserved,
 bound but non-listening socket. It retains the `ConnectFailed`/`NotSent`
@@ -472,6 +466,55 @@ its consumers: saga 19, relay 23, app 16, graph 5, decision 2, jobs 19, writing 
 and approvers 5 tests; its three experiments passed 29, 12 and 6 tests.
 All nine package gates and all eight app gates passed on the final source,
 with fabric passing twice consecutively.
+
+#### Round 9 typed composition follow-up
+
+| Finding | Package  | Result                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2       | fabric   | A graph operation version fixes a pure classification wire and receipt bounds. The admitted callback supplies fresh live configuration after approval or recovery. Incompatible byte limits fail before credential access or I/O. Current and legacy receipts retain offline decoding.                                                                                                                              |
+| 4       | llm_wire | Provider-neutral typed question views and answer candidates replace TypeSafe-shaped extension JSON. Shared admission validates full distributions and numeric evidence. Confidence and usage preserve absence; TypeSafe mandatory fields remain mandatory. A separate consumer implements an array protocol with native labels, heterogeneous batches, custom authentication and typed unsupported-question errors. |
+| 6       | saga     | `reporting.run_owned` and its stopped-owner callback return the full execution report or a typed operational error. Error accessors retain causes; `effect_status` distinguishes proven `NotStarted` from `Unknown`. The consumer chooses classification and rendering.                                                                                                                                             |
+| 8       | saga     | Classification and complete safe summaries share one private evidence projection. Summaries retain held, not-undoable, undo/cleanup failure, interruption, sibling and unknown-action evidence without application or crash payloads. No second public report model is added.                                                                                                                                       |
+
+- Saga's full gate passed with 251 core, 27 external consumer and 26 PostgreSQL
+  tests, seven negative fixtures and both restart probes. llm_wire's full gate
+  passed with 390 core and three Python tests, external consumers and protocol
+  checks. No new live provider calls were made.
+- Fabric's final full gate passed twice consecutively: 47 checks per pass,
+  including 823 core, 66 PostgreSQL and nine gate-unit tests. Consumers passed
+  Saga 21, Relay 23, app 16, graph 5, decision 2, jobs 19, writing 8 and approvers
+  5 tests; the three experiments passed 29, 12 and 6 tests.
+- Fabric's Saga recipe grows from 47 to 59 formatted lines, including its local
+  projection. Its gate permits 60 lines; the other recipes retain 50. This
+  exposes reporting errors separately from execution outcomes without adding
+  a library abstraction solely to shorten consumer code.
+- Support desk and Fabric's app consumer each add 37 source lines and remove 25. Fabric's decision consumer changes source by +6/−4 and tests by +4/−4;
+  writing changes source by +11/−10. All original behavior tests remain.
+- All eight app gates passed: checkout 12, webhooks 14, extractor 16,
+  support_desk 21, tool_hub 16, secure_mcp 16, sso_portal 13 and research_agent 10.
+  The demos retain zero of 267 unattributed support_desk events and zero
+  unjoined tool_hub events.
+- Fabric's idle-shutdown test now waits for actual runner exits. Readiness
+  counts active run ownership, while a completed runner may still deliver
+  synchronous observations. A deterministic observer barrier proves that
+  shutdown includes such a runner; 200 focused lifecycle checks passed.
+- Warden's unavailable-provider fixture now settles its initial discovery
+  request and stops its owning supervisor. A deterministic reproduction showed
+  that its leaked retry reached a later telemetry test; the exact request and
+  correlation assertions remain unchanged.
+- Grind's first benchmark sample failed arrival-generator validity while other
+  stress gates ran concurrently. The unchanged full gate passed without that
+  competing load, including the generator checks; no threshold was relaxed.
+- The remaining final gates passed: sinal 134; json_blueprint 227 Erlang and
+  226 JavaScript tests plus 70 codegen tests per target; http_gun 211; grind
+  314 core, 17 consumer and 38 benchmark tests; Relay 315 plus 108/108
+  conformance cases; Warden 186 core, 13 consumer and six recipe tests.
+  All nine packages and all eight applications passed on the final source.
+- Follow-up: observe recipe maintenance cost across applications before
+  introducing another public abstraction. Retain compatible operation
+  definitions for stored receipts when introducing another provider protocol.
+  Warden discovery requests can outlive their owner until their transport
+  deadline; this existing production behavior was not changed by fixture cleanup.
 
 ## sinal
 
@@ -611,24 +654,24 @@ Warden keeps its sessions per identity unbounded and documents it (D5).
 
 ## fabric
 
-| Id         | Change                                                                                         | Breaks                 | Effort | Wave | Status                                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------ | ---- | ---------------------------------------------------------------------------------------------- |
-| FABRIC-R1  | Typed final answers: `agent.with_answer(spec, codec)`, `Completed(answer)`                     | yes                    | L      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R2  | Caller-supplied run ids: `fabric.start(.., id:, ..)`, `run.new_id()`; one start                | yes                    | S      | 5    | Done (round 5)                                                                                 |
-| FABRIC-R3  | Bounded by default: tools, models, approvals, waits, result size                               | behavior               | M      | 5    | Done (round 5, wave 5): model 600 s, tool 60 s, result 1 MiB, approvals and graph waits 7 days |
-| FABRIC-R4  | Typed failures; one error per facade; opaque `ModelError` with kind and retry-after            | yes                    | M      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R5  | One vocabulary for the agent and graph runtimes                                                | yes                    | L      | —    | Done (wave 5; decision 2)                                                                      |
-| FABRIC-R6  | Move 72 `@internal` functions into `internal/`; backend modules under `fabric/store/`          | `@internal` users      | M      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R7  | Opaque constructed configuration (`agent.Limits`, `graph.with_timeouts`, `definition.Spec`, …) | yes                    | M      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R8  | Run id and turn in `model.Request`                                                             | positional             | S      | 5    | Done (round 5)                                                                                 |
-| FABRIC-R9  | Tool parity: replay policy, timeout, public accessors, typed reconciliation                    | no                     | S      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R10 | Relay calls and serving through core ports and compiled recipes                                | bridge users           | L      | 9    | Done (round 9): protocol-neutral invoke; all bridge behaviors retained                         |
-| FABRIC-R11 | `fabric_saga` passes run context and evidence                                                  | one argument           | S      | 5    | Done (round 5, wave 5)                                                                         |
-| FABRIC-R12 | Provider adapters remain in core; provider-neutral classification in llm_wire                  | classification imports | M      | 9    | Done (round 9): TypeSafe wire, core graph decision; one HTTP client                            |
-| FABRIC-R13 | Lifecycle: sweeper, owner, stop                                                                | renames                | S      | 5    | Done (wave 5); grind-driven sweeping waits for decision 1                                      |
-| FABRIC-R14 | Naming collisions                                                                              | renames                | S      | 5    | Done (wave 5); `Route.Canceled` became `graph.Stopped`                                         |
-| FABRIC-R15 | `fabric/telemetry`, correlation, graph events                                                  | import path            | M      | 5    | Done (wave 5)                                                                                  |
-| FABRIC-R16 | README common path first, defaults table, CHANGELOG, Hex ranges                                | no                     | S      | 1, 5 | Done (wave 5) except Hex ranges, which wait for publication                                    |
+| Id         | Change                                                                                         | Breaks                 | Effort | Wave | Status                                                                                                |
+| ---------- | ---------------------------------------------------------------------------------------------- | ---------------------- | ------ | ---- | ----------------------------------------------------------------------------------------------------- |
+| FABRIC-R1  | Typed final answers: `agent.with_answer(spec, codec)`, `Completed(answer)`                     | yes                    | L      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R2  | Caller-supplied run ids: `fabric.start(.., id:, ..)`, `run.new_id()`; one start                | yes                    | S      | 5    | Done (round 5)                                                                                        |
+| FABRIC-R3  | Bounded by default: tools, models, approvals, waits, result size                               | behavior               | M      | 5    | Done (round 5, wave 5): model 600 s, tool 60 s, result 1 MiB, approvals and graph waits 7 days        |
+| FABRIC-R4  | Typed failures; one error per facade; opaque `ModelError` with kind and retry-after            | yes                    | M      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R5  | One vocabulary for the agent and graph runtimes                                                | yes                    | L      | —    | Done (wave 5; decision 2)                                                                             |
+| FABRIC-R6  | Move 72 `@internal` functions into `internal/`; backend modules under `fabric/store/`          | `@internal` users      | M      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R7  | Opaque constructed configuration (`agent.Limits`, `graph.with_timeouts`, `definition.Spec`, …) | yes                    | M      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R8  | Run id and turn in `model.Request`                                                             | positional             | S      | 5    | Done (round 5)                                                                                        |
+| FABRIC-R9  | Tool parity: replay policy, timeout, public accessors, typed reconciliation                    | no                     | S      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R10 | Relay calls and serving through core ports and compiled recipes                                | bridge users           | L      | 9    | Done (round 9): protocol-neutral invoke; all bridge behaviors retained                                |
+| FABRIC-R11 | `fabric_saga` passes run context and evidence                                                  | one argument           | S      | 5    | Done (round 5, wave 5)                                                                                |
+| FABRIC-R12 | Provider adapters remain in core; provider-neutral classification in llm_wire                  | classification imports | M      | 9    | Done (round 9): typed wire extension, fixed graph protocol, fresh live configuration; one HTTP client |
+| FABRIC-R13 | Lifecycle: sweeper, owner, stop                                                                | renames                | S      | 5    | Done (wave 5); grind-driven sweeping waits for decision 1                                             |
+| FABRIC-R14 | Naming collisions                                                                              | renames                | S      | 5    | Done (wave 5); `Route.Canceled` became `graph.Stopped`                                                |
+| FABRIC-R15 | `fabric/telemetry`, correlation, graph events                                                  | import path            | M      | 5    | Done (wave 5)                                                                                         |
+| FABRIC-R16 | README common path first, defaults table, CHANGELOG, Hex ranges                                | no                     | S      | 1, 5 | Done (wave 5) except Hex ranges, which wait for publication                                           |
 
 ## Package decisions still open
 

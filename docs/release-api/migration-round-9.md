@@ -12,8 +12,9 @@ The aim is independent, bounded, ergonomic capabilities with explicit wiring.
 // Before: fabric_typesafe
 let client = client.new(http, key)
 let decision = fabric_typesafe.decision(...)
-// After: llm_wire classification; the key is a reveal closure.
-let provider = classify.typesafe(fn() { key })
+// After: a pure protocol and fresh live settings.
+let wire = classify.typesafe()
+let config = classify.config(fn() { key })
 let decision = graph_classify.decision(...)
 ```
 
@@ -38,7 +39,7 @@ saga_tool.tool(definition, workflow, config, input:, explain:, rollback_within:)
 
 `saga/outcome` owns completed/compensated/unresolved classification and held
 step evidence. `saga/reporting.run_owned` owns the receiver surviving caller
-cancellation. The 47-line recipe only binds those capabilities to fabric's
+cancellation. The current 59-line recipe binds those capabilities to fabric's
 settlement API and correlation. Support desk and fabric's app consumer own
 verbatim copies. The 43 former bridge tests remain in saga and the consumer.
 
@@ -88,7 +89,7 @@ and interrupted remote calls before reissuing keys under the new mapping,
 or retain an application mapping to original ids and remote keys. Records
 remain readable by their old ids; no serialization shape changed.
 
-## App effects
+## Initial migration app effects
 
 - support_desk: source +52/−5, 47-line saga recipe; 21 tests; demo still has
   0 of 267 events unattributed. Manifests +1/−4 and test comments +3/−3.
@@ -130,11 +131,81 @@ content blocks, metadata and submission evidence remain unchanged. Tool_hub
 refreshes one line in its 50-line discovery recipe; tests and manifests do not
 change. Relay's migration guide lists the exact signatures.
 
-Fresh-context classification configuration, a normalized provider-neutral wire
-contract, typed operational causes in saga reporting, and complete saga outcome
-summaries remain deferred review findings. They are not part of these fixes.
+The first review follow-up deferred fresh-context classification, typed
+classification wires, typed reporting errors and complete outcome summaries.
+The owner subsequently authorized the implementation described below.
 All nine package gates and all eight app gates passed, with fabric passing its
 full gate twice consecutively. The demos retain zero of 267 unattributed
 support_desk events and zero unjoined tool_hub events.
 The [review results](PLAN.md#round-9-review-follow-up) record the package and
 app counts.
+
+## Round 9 typed composition follow-up
+
+Classification now separates the versioned protocol from live configuration:
+
+```gleam
+// Before: configuration owns both protocol and live credentials.
+let config = classify.typesafe(reveal)
+let prepared = classify.prepare(config, request)
+let receipt = classify.receipt_codec(config, questions)
+// After: the operation version owns the wire; a call owns live settings.
+let wire = classify.typesafe()
+let config = classify.config(reveal)
+let prepared = classify.prepare(wire, config, request)
+let receipt = classify.receipt_codec(wire, questions)
+```
+
+Custom wires encode typed `protocol.QuestionView` values and decode typed
+`protocol.Answer` candidates. Shared admission validates ids, kinds, labels,
+distributions and numeric evidence. Custom headers move from the wire to
+`classify.with_headers(config, headers)`; the closure replaces bearer
+authentication. `Choice.confidence` and `Score.confidence` change from `Float`
+to `Option(Float)`, and classification usage changes to `Option(message.Usage)`.
+TypeSafe retains its required wire fields; other wires can explicitly report
+unavailable confidence or usage.
+
+Graph `decision` receives a fixed wire where it previously received config.
+Its request callback now constructs `graph_classify.call(http, config, model, state)`
+from the current approved context. Credentials and limits can change
+after approval or recovery without changing receipt decoding. Existing graph
+and receipt formats remain readable under their compatible definitions.
+
+The wire's `with_receipt_request_limit` and `with_receipt_response_limit` set
+stable evidence bounds. Live `with_request_limit` and `with_response_limit`
+remain call settings; exceeding a receipt bound fails preparation before
+credential access or I/O. Increasing a limit above 1 MiB requires increasing
+both explicit bounds. Decreasing live limits does not narrow stored readers.
+
+Saga reporting now returns the authoritative execution report:
+
+```gleam
+// Before: both return and callback contain the classified application result.
+reporting.run_owned(workflow, input, config, explain, on_stopped, rollback_within)
+// After: return and callback contain Result(execution.Outcome(...), reporting.Error).
+reporting.run_owned(workflow, input, config, on_stopped, rollback_within)
+```
+
+The callback no longer receives a separate summary argument. For `Ok(report)`,
+call `outcome.classify(report, explain)` and `outcome.summary(report)` explicitly.
+`Ok` means a report was obtained, including a report of failed or cancelled
+work. Operational errors retain typed causes through reporting accessors,
+stable `error_kind`, safe `describe_error` and `effect_status`.
+
+The Fabric recipe maps `NotStarted` reporting errors to `Explain` and
+`Unknown` to `Uncertain`. Workflow classification retains its existing
+completed/compensated/unresolved meanings. Safe summaries now include held,
+not-undoable, undo/cleanup failure, interrupted, sibling and unknown-action
+evidence without application or crash payloads. Retry policy remains with
+the application.
+
+The full Saga recipe grows from 47 to 59 formatted lines. Its gate permits
+60 lines; the other recipes retain their 50-line limit. The additional mapping
+preserves the distinction between execution reports and reporting errors without
+adding another public report model. Support desk and Fabric's app consumer each
+add 37 source lines and remove 25; their business behavior remains unchanged.
+
+Validation also fixes test lifecycle assumptions in Fabric and Warden. Fabric
+waits for runner exits before asserting an idle shutdown. Warden settles a test
+discovery request and stops its owning supervisor before later telemetry tests.
+Neither change requires a public API or application migration.

@@ -32,6 +32,54 @@
   scores and heterogeneous batches. Fabric owns graph decision receipts.
   Concentration evidence is not a probability that the answer is correct.
 
+### Classification protocol and fresh execution context
+
+- Each classification operation version fixes one provider protocol. The protocol
+  defines request encoding and response interpretation for that version.
+- The operation definition retains the questions and the pure receipt codec.
+  Changing the provider protocol requires a new operation version; callers
+  retain compatible deployed definitions to read earlier runs.
+- After policy admission, the request callback derives credentials and
+  execution settings from the current context. Approval resumption and
+  recovery use that fresh context rather than configuration captured when
+  the operation was defined.
+- Credentials remain reveal closures. HTTP clients, credentials and live
+  settings are not persisted in receipts; receipt decoding requires neither
+  network access nor credential access.
+- Endpoint overrides must implement the fixed protocol. A protocol change
+  cannot be expressed as a live endpoint or credential setting.
+- Current and legacy receipt formats remain readable under their compatible
+  operation definitions. Fresh execution limits must not change the meaning
+  or acceptance bounds of evidence already stored by that version.
+- `graph/classify.decision` replaces its captured `classify.Config` argument
+  with a pure `classify.Wire`. Its request callback returns
+  `call(client, config, model, state)` with fresh live `Config`.
+- The fixed-protocol decision does not introduce a per-call protocol selector
+  or decoder registry. External consumers must prove the common path and
+  advanced settings before facade acceptance.
+
+#### Receipt limits and live request limits
+
+- Each operation version retains finite request and response receipt bounds.
+  A later context can choose stricter live limits, but changing those live
+  limits must not prevent reading an earlier receipt.
+- The implementation must apply transport byte limits before collecting
+  oversized evidence. It must retain structural and numeric validation, and
+  the storage reader independently bounds the enclosing persisted record.
+- Reject a live request or response limit greater
+  than the corresponding fixed receipt bound during preparation, before
+  credentials are revealed or network I/O begins. Use the existing typed
+  preparation-error boundary to identify the incompatible setting.
+- A live limit equal to or smaller than the corresponding receipt bound
+  passes this compatibility check; ordinary setting validation still applies.
+  Preparation never silently reduces a configured live limit.
+- For example, a 2 MiB live response limit and a 1 MiB receipt bound produce
+  a preparation error even when the eventual response might have been small.
+  The caller must choose compatible settings before calling the provider.
+- Tests must cover both byte limits below, equal to and above their receipt
+  bounds. Rejection must perform no network I/O and must not reveal a
+  credential; reducing live limits must leave older receipts readable.
+
 ## Package ownership and dependency direction
 
 | Baseline concern                | Current owner                             | Fabric integration requirement                                                                |
