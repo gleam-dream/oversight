@@ -16,7 +16,6 @@ import fabric/reviewer.{type Reviewer}
 import fabric/run
 import fabric/store.{type Store}
 import fabric/tool
-import fabric_saga
 import gleam/erlang/process
 import gleam/int
 import gleam/option.{Some}
@@ -26,6 +25,7 @@ import gleam/time/duration
 import http_gun
 import llm_wire
 import llm_wire/openai
+import saga_tool
 import sinal/correlation.{type Correlation}
 import support_desk/domain.{
   type Eligibility, type OrderQuery, type Resolution, Eligibility,
@@ -99,7 +99,7 @@ pub fn build(settings: Settings) -> Result(Agent(Session, Resolution), String) {
     |> llm_wire.with_endpoint(settings.provider_url)
   let model = llm.model(settings.llm_client, config, "gpt-4.1-mini")
   let issue_refund =
-    fabric_saga.tool(
+    saga_tool.tool(
       domain.issue_refund(),
       refund.workflow(settings.shop, settings.ledger),
       refund.config(),

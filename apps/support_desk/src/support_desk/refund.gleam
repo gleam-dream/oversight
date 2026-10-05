@@ -2,7 +2,7 @@
 //// entry, notify the customer. A failure after the payment rolls back
 //// the ledger entry and voids the refund. A payment whose outcome is
 //// unknown is marked with `saga.unknown_when`: saga names it in
-//// `unknown_effects`, and fabric_saga reports an uncertain effect instead
+//// `unknown_effects`, and saga_tool reports an uncertain effect instead
 //// of a clean failure for a refund that may exist.
 
 import gleam/int
@@ -37,7 +37,7 @@ pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
         })
         // A payment that "may have been sent" may exist: saga names it an
         // unknown effect and holds the run (`Unresolved`, no rollback), and
-        // fabric_saga hands the model an uncertain one.
+        // saga_tool hands the model an uncertain one.
         |> saga.unknown_when(fn(error) {
           case error {
             PaymentOutcomeUnknown(_) -> True
