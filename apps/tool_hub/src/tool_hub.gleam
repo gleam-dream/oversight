@@ -7,7 +7,6 @@
 
 import fabric/store
 import fabric/tool as fabric_tool
-import fabric_relay
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
@@ -21,6 +20,8 @@ import http_gun/destination
 import llm_wire/testing
 import relay/client
 import relay/http
+import relay_discovery
+import relay_tools
 import sinal/correlation
 import tool_hub/assistant.{type Assistant}
 import tool_hub/inventory
@@ -114,9 +115,16 @@ pub fn start(
   let inventory_peer = fn(context: assistant.Context) { context.inventory }
   use tools <- try(case settings.mounting {
     Typed -> Ok(typed_tools(inventory_peer))
-    Discovered ->
-      fabric_relay.discover(peer, peer: inventory_peer)
-      |> result.map_error(fabric_relay.describe_discovery_error)
+    Discovered -> {
+      use declarations <- result.try(
+        client.list_tools(peer) |> result.map_error(client.describe_error),
+      )
+      list.try_map(declarations, relay_discovery.discovered(
+        _,
+        peer: inventory_peer,
+      ))
+      |> result.map_error(relay_discovery.describe_error)
+    }
   })
   use agent <- try(
     assistant.build_agent(
@@ -156,9 +164,9 @@ pub fn typed_tools(
   peer: fn(assistant.Context) -> client.Client,
 ) -> List(fabric_tool.Tool(assistant.Context)) {
   [
-    fabric_relay.tool(inventory.search_products(), peer:),
-    fabric_relay.tool(inventory.get_stock(), peer:),
-    fabric_relay.tool(inventory.reserve_stock(), peer:),
+    relay_tools.tool(inventory.search_products(), peer:),
+    relay_tools.tool(inventory.get_stock(), peer:),
+    relay_tools.tool(inventory.reserve_stock(), peer:),
   ]
 }
 
@@ -233,14 +241,15 @@ pub fn main() -> Nil {
     <> inventory.url(hub.assistant_server)
     <> " exposes ask_assistant (a fabric agent)",
   )
-  let assert Ok(mcp) = assistant_client(hub, duration.seconds(15))
+  let question = correlation.unique()
+  let assert Ok(connected) = assistant_client(hub, duration.seconds(15))
+  let mcp = connected |> client.with_correlation(question)
   let assert Ok(listed) = client.list_tools(mcp)
   io.println(
     "- an MCP client lists: "
     <> string.join(list.map(listed, fn(tool) { tool.name }), ", "),
   )
   io.println("- it asks: " <> demo_question)
-  let question = correlation.unique()
   case
     client.call(
       mcp |> client.with_correlation(question),

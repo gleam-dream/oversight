@@ -13,7 +13,6 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 mist = ">= 6.0.2 and < 7.0.0"
 relay = { path = "../../../relay" }
 fabric = { path = "../../../fabric" }
-fabric_relay = { path = "../../../fabric/integrations/fabric_relay" }
 llm_wire = { path = "../../../llm_wire" }
 json_blueprint = { path = "../../../json_blueprint" }
 http_gun = { path = "../../../http_gun" }
