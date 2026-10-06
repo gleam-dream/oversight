@@ -1,4 +1,4 @@
-"""Validate the complete sibling pin set before any private checkout."""
+"""Validate the complete sibling pin set before checkout."""
 
 import os
 import re
