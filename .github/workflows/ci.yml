@@ -1,0 +1,128 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      applications: ${{ steps.inventory.outputs.applications }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py quality
+      - id: inventory
+        run: echo "applications=$(python3 -B scripts/ci.py inventory)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: quality
+          path: .artifacts/ci
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  applications:
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        application: ${{ fromJSON(needs.quality.outputs.applications) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: oversight
+          persist-credentials: false
+      - uses: ./oversight/.github/actions/siblings
+        with:
+          app-id: ${{ vars.SIBLINGS_APP_ID }}
+          private-key: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.SIBLINGS_APP_PRIVATE_KEY || '' }}
+          read-token: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.SIBLINGS_READ_TOKEN || '' }}
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - working-directory: oversight
+        env:
+          APPLICATION: ${{ matrix.application }}
+        run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py application "$APPLICATION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: application-${{ matrix.application }}
+          path: oversight/.artifacts/ci
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  experiments:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: oversight
+          persist-credentials: false
+      - uses: ./oversight/.github/actions/siblings
+        with:
+          app-id: ${{ vars.SIBLINGS_APP_ID }}
+          private-key: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.SIBLINGS_APP_PRIVATE_KEY || '' }}
+          read-token: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.SIBLINGS_READ_TOKEN || '' }}
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - working-directory: oversight
+        run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py experiments
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: experiments
+          path: oversight/.artifacts/ci
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  design:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - run: |
+          mkdir -p .artifacts/design
+          set -o pipefail
+          nix run .#design-gate-check -- docs/design . 2>&1 | tee .artifacts/design/check.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: design
+          path: .artifacts/design
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  ci:
+    name: CI
+    if: always()
+    needs: [quality, applications, experiments, design]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 -B scripts/ci.py result quality applications experiments design

@@ -12,10 +12,18 @@ root="$(mktemp -d "${TMPDIR:-/tmp}/apps-postgres.XXXXXX")"
 cluster="$root/data"
 started=0
 cleanup() {
+  local result=$?
   if [[ "$started" == 1 ]]; then
     pg_ctl -D "$cluster" -m immediate stop >/dev/null 2>&1 || true
   fi
+  if [[ -n "${OVERSIGHT_PG_LOG_DIR:-}" && -f "$root/postgres.log" ]]; then
+    mkdir -p "$OVERSIGHT_PG_LOG_DIR"
+    cp "$root/postgres.log" "$OVERSIGHT_PG_LOG_DIR/postgres-$(basename "$root").log"
+  elif [[ "$result" != 0 && -f "$root/postgres.log" ]]; then
+    cat "$root/postgres.log" >&2
+  fi
   rm -rf "$root"
+  return "$result"
 }
 trap cleanup EXIT
 

@@ -1,0 +1,117 @@
+name: Sibling checkouts
+description: Fetch the recorded ecosystem revisions without retaining credentials.
+inputs:
+  app-id:
+    description: GitHub App ID with read access to the sibling repositories.
+    default: ""
+  private-key:
+    description: Private key for the read-only GitHub App.
+    default: ""
+  read-token:
+    description: Optional repository-restricted token instead of the GitHub App.
+    default: ""
+  current:
+    description: Resolve default branches for the scheduled compatibility run.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Refuse private checkouts for fork code
+      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+      shell: bash
+      run: |
+        echo '::error::Private sibling validation requires a trusted branch in this repository.'
+        exit 1
+    - name: Check access configuration
+      if: inputs.app-id == '' && inputs.read-token == ''
+      shell: bash
+      run: |
+        echo '::error::Configure SIBLINGS_APP_ID and SIBLINGS_APP_PRIVATE_KEY, or SIBLINGS_READ_TOKEN. See docs/TESTING.md.'
+        exit 1
+    - name: Read sibling revisions
+      id: revisions
+      shell: bash
+      env:
+        CURRENT: ${{ inputs.current }}
+      run: python3 oversight/scripts/sibling_refs.py
+    - name: Create read-only sibling token
+      if: inputs.app-id != '' && inputs.read-token == ''
+      id: token
+      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: gleam-dream
+        permission-contents: read
+        repositories: sinal,http_gun,saga,grind,llm_wire,relay,warden,fabric
+    - name: Checkout sinal
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/sinal
+        ref: ${{ steps.revisions.outputs.sinal }}
+        path: sinal
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout json_blueprint
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: lostbean/json_blueprint
+        ref: ${{ steps.revisions.outputs.json_blueprint }}
+        path: json_blueprint
+        persist-credentials: false
+    - name: Checkout http_gun
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/http_gun
+        ref: ${{ steps.revisions.outputs.http_gun }}
+        path: http_gun
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout saga
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/saga
+        ref: ${{ steps.revisions.outputs.saga }}
+        path: saga
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout grind
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/grind
+        ref: ${{ steps.revisions.outputs.grind }}
+        path: grind
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout llm_wire
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/llm_wire
+        ref: ${{ steps.revisions.outputs.llm_wire }}
+        path: llm_wire
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout relay
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/relay
+        ref: ${{ steps.revisions.outputs.relay }}
+        path: relay
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout warden
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/warden
+        ref: ${{ steps.revisions.outputs.warden }}
+        path: warden
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
+    - name: Checkout fabric
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/fabric
+        ref: ${{ steps.revisions.outputs.fabric }}
+        path: fabric
+        persist-credentials: false
+        token: ${{ inputs.read-token || steps.token.outputs.token }}
