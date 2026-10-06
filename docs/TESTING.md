@@ -41,7 +41,7 @@ upstream inputs and captured evidence are not rewritten by linting.
 Create a GitHub App with repository contents read access, install it on the
 eight private sibling repositories, and configure these Oversight settings:
 
-- Repository variable `SIBLINGS_APP_ID`: the App ID.
+- Repository variable `SIBLINGS_APP_CLIENT_ID`: the App client ID.
 - Repository secret `SIBLINGS_APP_PRIVATE_KEY`: the App's private key.
 
 Alternatively, configure `SIBLINGS_READ_TOKEN` as a repository secret containing
