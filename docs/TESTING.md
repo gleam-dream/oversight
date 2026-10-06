@@ -36,19 +36,13 @@ unfinished runtime declarations. Their own compiler checkers remain the
 acceptance boundary; they are not warning-free production packages. Frozen
 upstream inputs and captured evidence are not rewritten by linting.
 
-## Private sibling access
+## Sibling access
 
-Create a GitHub App with repository contents read access, install it on the
-eight private sibling repositories, and configure these Oversight settings:
-
-- Repository variable `SIBLINGS_APP_CLIENT_ID`: the App client ID.
-- Repository secret `SIBLINGS_APP_PRIVATE_KEY`: the App's private key.
-
-Alternatively, configure `SIBLINGS_READ_TOKEN` as a repository secret containing
-a read-only token restricted to the necessary repositories. This takes
-precedence over the App. JSON Blueprint is public and uses ordinary checkout.
+All nine library repositories are public. CI checks them out with the default
+read-only GitHub Actions token; no GitHub App or personal access token is needed.
 Tokens are not persisted in Git configuration or passed to the test commands.
-Missing access configuration fails before sibling checkout.
+Oversight remains private; its visibility does not restrict access to the public
+libraries.
 
 Each required run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.

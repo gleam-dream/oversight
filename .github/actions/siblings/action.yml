@@ -1,49 +1,18 @@
 name: Sibling checkouts
-description: Fetch the recorded ecosystem revisions without retaining credentials.
+description: Fetch the recorded public ecosystem revisions without retaining credentials.
 inputs:
-  client-id:
-    description: GitHub App client ID with read access to the sibling repositories.
-    default: ""
-  private-key:
-    description: Private key for the read-only GitHub App.
-    default: ""
-  read-token:
-    description: Optional repository-restricted token instead of the GitHub App.
-    default: ""
   current:
     description: Resolve default branches for the scheduled compatibility run.
     default: "false"
 runs:
   using: composite
   steps:
-    - name: Refuse private checkouts for fork code
-      if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
-      shell: bash
-      run: |
-        echo '::error::Private sibling validation requires a trusted branch in this repository.'
-        exit 1
-    - name: Check access configuration
-      if: inputs.client-id == '' && inputs.read-token == ''
-      shell: bash
-      run: |
-        echo '::error::Configure SIBLINGS_APP_CLIENT_ID and SIBLINGS_APP_PRIVATE_KEY, or SIBLINGS_READ_TOKEN. See docs/TESTING.md.'
-        exit 1
     - name: Read sibling revisions
       id: revisions
       shell: bash
       env:
         CURRENT: ${{ inputs.current }}
       run: python3 oversight/scripts/sibling_refs.py
-    - name: Create read-only sibling token
-      if: inputs.client-id != '' && inputs.read-token == ''
-      id: token
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-      with:
-        client-id: ${{ inputs.client-id }}
-        private-key: ${{ inputs.private-key }}
-        owner: gleam-dream
-        permission-contents: read
-        repositories: sinal,http_gun,saga,grind,llm_wire,relay,warden,fabric
     - name: Checkout sinal
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -51,7 +20,6 @@ runs:
         ref: ${{ steps.revisions.outputs.sinal }}
         path: sinal
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout json_blueprint
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -66,7 +34,6 @@ runs:
         ref: ${{ steps.revisions.outputs.http_gun }}
         path: http_gun
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout saga
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -74,7 +41,6 @@ runs:
         ref: ${{ steps.revisions.outputs.saga }}
         path: saga
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout grind
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -82,7 +48,6 @@ runs:
         ref: ${{ steps.revisions.outputs.grind }}
         path: grind
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout llm_wire
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -90,7 +55,6 @@ runs:
         ref: ${{ steps.revisions.outputs.llm_wire }}
         path: llm_wire
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout relay
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -98,7 +62,6 @@ runs:
         ref: ${{ steps.revisions.outputs.relay }}
         path: relay
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout warden
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -106,7 +69,6 @@ runs:
         ref: ${{ steps.revisions.outputs.warden }}
         path: warden
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
     - name: Checkout fabric
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
@@ -114,4 +76,3 @@ runs:
         ref: ${{ steps.revisions.outputs.fabric }}
         path: fabric
         persist-credentials: false
-        token: ${{ inputs.read-token || steps.token.outputs.token }}
