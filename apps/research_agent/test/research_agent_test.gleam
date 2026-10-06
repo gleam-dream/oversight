@@ -100,7 +100,7 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let assert Ok(row) = app.row(f.node, id)
   let assert "published" = row.state
   // The unqualified `research` table lives in the node's schema, because the
-  // app's pool keeps its own `search_path` (grind 9ccbfb5).
+  // app's pool keeps its own `search_path`.
   let assert Ok(pog.Returned(1, _)) =
     pog.query(
       "SELECT 1 FROM information_schema.tables
@@ -156,7 +156,7 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let assert ["queued", "researching", "publishing", "published"] = states
   let assert True = list.contains(sources, "fabric")
   let assert True = list.contains(sources, "http_gun")
-  // The durable saga carries the job's correlation (saga wave 3): its run
+  // The durable saga carries the job's correlation: its run
   // and step events join the request, and none is left over.
   let assert True = list.contains(sources, "saga")
   // The model runs on the research's correlated client view, and llm_wire
@@ -208,7 +208,7 @@ pub fn search_down_for_good_retries_the_job_with_a_fresh_run_then_fails_test() {
   let assert Ok(id) = app.start_research(f.node, "cobol")
   let assert Ok(outcome) = app.await_outcome(f.node, id, duration.seconds(15))
   // The worker's error codec keeps the typed `NoSources` through
-  // persistence, with the cause that ended the job (RA-9, grind 7a04831).
+  // persistence, with the cause that ended the job.
   let assert grind.Failed(
     grind.Business(jobs.NoSources("the search service is unavailable")),
     Some(job.BudgetExhausted),
@@ -347,7 +347,7 @@ fn crash_and_recover(
   let assert 1 = summary.replay_count
   let assert job.Succeeded = summary.state
   // The replay did not use up a business attempt, as
-  // `worker.with_max_attempts` documents (RA-12, grind 6bd06ec): the job
+  // `worker.with_max_attempts` documents: the job
   // finished as its first attempt.
   let assert 1 = summary.attempt
   let trace = telemetry.trace(observed, id)

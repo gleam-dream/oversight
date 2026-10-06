@@ -1,11 +1,11 @@
 # sso_portal
 
-A small web portal that signs users in with OpenID Connect, keeps a
-server-side session in Postgres, and calls a token-protected downstream
-"billing API" with the user's access token, refreshing it transparently.
+A web portal that signs users in with OpenID Connect, stores sessions in
+PostgreSQL and calls a billing API with their access tokens. Warden refreshes
+tokens near expiry; the application retries a billing request once after a 401.
 
 Packages: **warden**, **http_gun**, **sinal**, plus wisp, mist and pog.
-Findings are in [FEEDBACK.md](FEEDBACK.md).
+The [ecosystem design](../../docs/design/design-layer.pdf) records the current composition contract.
 
 ## What it does
 
@@ -24,7 +24,7 @@ Everything external runs on loopback:
 
 - `warden/testing`: the OpenID provider over TLS with its own test root
   (discovery, keys, PKCE token endpoint with rotating refresh tokens, revocation,
-  end-session). The app writes no provider and no PKI.
+  end-session). The provider includes its test certificates.
 - `src/sso_portal/billing_api.gleam`: plain-HTTP API that validates bearer
   tokens locally with `warden/resource`, plus a deny list the tests fill (local validation cannot see revocation).
 - `src/sso_portal/browser.gleam`: an http_gun "browser" with a cookie jar that
@@ -35,29 +35,29 @@ Everything external runs on loopback:
 From `apps/sso_portal`, inside the oversight dev shell:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 13 tests
-../scripts/with-postgres.sh gleam run    # narrative: login, 401 + refresh, billing down, logout
+../scripts/with-postgres.sh gleam test
+../scripts/with-postgres.sh gleam run
 ```
 
-## Seams exercised
+## What the tests cover
 
-| Seam                               | Where                                                       |
+| Integration                        | Where                                                       |
 | ---------------------------------- | ----------------------------------------------------------- |
 | Warden in an ordinary wisp app     | `src/sso_portal/web.gleam` (login, callback, logout)        |
 | Durable custody (pog)              | `src/sso_portal/warden_records.gleam`, `app.gleam`          |
 | Warden token → http_gun request    | `src/sso_portal/billing.gleam`, `web.gleam` invoices        |
 | Refresh policy and refresh races   | `warden.access_token` and `warden.refresh`, `web.gleam`     |
-| Sharing (not) an http_gun client   | `src/sso_portal/app.gleam` `start_billing_client`           |
+| Separate HTTP client for billing   | `src/sso_portal/app.gleam` `start_billing_client`           |
 | Following one request across Sinal | `warden.with_correlation`, `src/sso_portal/telemetry.gleam` |
 | Test provider and TLS for Warden   | `warden/testing` (serves `/authorize`; `with_login`)        |
 | Resource server                    | `src/sso_portal/billing_api.gleam` (`warden/resource`)      |
 
 Tests (`test/sso_portal_test.gleam`): common path including RFC 7009
-revocation at logout; proactive refresh near expiry (advanced policy); 401 →
+revocation at logout; proactive refresh near expiry; 401 →
 refresh → retry with a cross-package trace; two concurrent requests racing one
-refresh (advanced); provider clock ahead with and without
-`config.with_clock_tolerance` (advanced); tampered callback state; revoked
+refresh; provider clock ahead with and without
+`config.with_clock_tolerance`; tampered callback state; revoked
 refresh token → forced re-login; billing API down; sessions across a web-tier
-restart and a Warden restart (durability); Warden's rows hold nothing readable;
+restart and a Warden restart; Warden's rows hold nothing readable;
 the Postgres store passes `testing.check_store`; a session ended elsewhere;
 logout with a stale session revision.

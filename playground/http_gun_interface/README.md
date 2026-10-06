@@ -1,8 +1,9 @@
-# HTTP Gun facade compiler probe
+# HTTP Gun API compiler experiment
 
 This disposable declaration package tests a candidate public shape from a separate consumer. It is not the HTTP Gun implementation and must not be published or used as runtime code.
 
-The ordinary, advanced, streaming, caller-owned error/data, playback and recording call sites compile. Negative fixtures must reject an opaque client constructor and a String body passed to a byte request operation.
+The examples cover ordinary and advanced configuration, streaming, application
+types, playback and recording. Negative fixtures must reject an opaque client constructor and a String body passed to a byte request operation.
 
 Run from Oversight:
 
@@ -14,4 +15,6 @@ The script works in a temporary directory and removes it afterward. Gleam may re
 
 The library deliberately declares external functions with no supplied implementation. This establishes syntax/type composition only. It proves no configuration validation, network behavior, cleanup, concurrency, storage, cassette fidelity or memory bound. Its simplified error/settings types are not the production error or settings inventory.
 
-The construction agent must replace this sketch with a working package, retain an independent executable consumer, and test every guarantee in [the design](../../http-gun-design.md). Exact names and ergonomic changes remain reviewable through that evidence.
+The [HTTP Gun design](../../../http_gun/docs/design/design.typ) owns the
+implemented contract. This sketch remains a compiler experiment; its candidate
+signatures are not the production API or evidence of runtime guarantees.

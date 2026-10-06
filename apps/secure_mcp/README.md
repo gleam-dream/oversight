@@ -29,8 +29,8 @@ An MCP server for reports whose tools act for a signed-in user.
 Inside the oversight dev shell, from this directory:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 13 tests
-../scripts/with-postgres.sh gleam run    # narrated session + telemetry
+../scripts/with-postgres.sh gleam test
+../scripts/with-postgres.sh gleam run
 ```
 
 `gleam run` signs in alice, calls the tools through Relay's client, shows the
@@ -50,7 +50,7 @@ event it collected.
 | `secure_mcp/telemetry` | Sinal subscriptions for relay, warden, grind and sinal, joined by `sinal/correlation`     |
 | `secure_mcp/client`    | Scripted browser, Relay's MCP client with a bearer header, provider-side token revocation |
 
-## Packages and seams exercised
+## Library responsibilities
 
 - relay: tool definitions from Blueprint codecs, `handle_call` for the
   per-request principal and correlation, `http.new_protected` mounted as
@@ -74,4 +74,4 @@ event it collected.
 - wisp, mist: one listener for browser routes and MCP. pog: only through
   Grind, which owns the pool.
 
-See [FEEDBACK.md](FEEDBACK.md) for what composed and what needed glue.
+See the [ecosystem design](../../docs/design/design-layer.pdf) for the composition contract.

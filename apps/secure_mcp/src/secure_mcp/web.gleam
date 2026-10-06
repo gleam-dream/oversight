@@ -90,8 +90,8 @@ fn callback(req: Request, context: Context) -> Response {
 }
 
 /// Hands the signed-in user the access token to paste into an MCP client.
-/// Warden is a relying party only, so the app has no authorization-server
-/// flow of its own for MCP clients; see FEEDBACK SMCP-6.
+/// Warden supplies the relying-party login. MCP clients use the issued token;
+/// this application does not run its own authorization server.
 fn my_token(req: Request, context: Context) -> Response {
   let session =
     wisp.get_cookie(req, session_cookie, wisp.Signed)

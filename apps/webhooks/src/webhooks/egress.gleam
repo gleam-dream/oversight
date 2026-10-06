@@ -23,9 +23,9 @@ pub type Settings {
     deadline: Duration,
     /// `host` or `host:port` entries the internal tier may reach on loopback.
     internal_hosts: List(String),
-    /// Test seam: simulated DNS. `None` uses the system resolver.
+    /// Optional DNS resolver for deterministic tests. `None` uses the system resolver.
     resolver: Option(config.Resolver),
-    /// Test seam: how the client starts, e.g. `testing.playback(script, _)`.
+    /// Starts the client; tests can supply `testing.playback(script, _)`.
     start_client: fn(config.Config) ->
       Result(http_gun.Client, http_gun.StartError),
   )

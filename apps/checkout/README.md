@@ -1,8 +1,8 @@
 # checkout
 
-An order API built from `saga`, `grind`, `http_gun` and `sinal` on `wisp`,
-`mist` and `pog`. It is composition evidence, not a product: the payment and
-shipping providers are scripted mist servers on 127.0.0.1.
+An order API using Saga, Grind, HTTP Gun and Sinal, with Wisp routes and
+PostgreSQL storage. Payment and shipping providers are scripted servers on
+loopback.
 
 `POST /orders` runs a checkout saga:
 
@@ -34,8 +34,8 @@ after its lease expires; `grind.cancel` of a running job rolls the saga back.
 Inside the oversight dev shell, from this directory:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 12 tests
-../scripts/with-postgres.sh gleam run    # narrated demo
+../scripts/with-postgres.sh gleam test
+../scripts/with-postgres.sh gleam run
 ```
 
 `gleam run` places six orders (happy path, a declined card, a shipping timeout,
@@ -58,7 +58,7 @@ orders.
 | `checkout/providers`           | Scripted payment and shipping APIs (mist)                                 |
 | `checkout/web`, `checkout/app` | wisp routes; wiring and lifecycle                                         |
 
-## Seams exercised
+## What the tests cover
 
 - Saga steps over http_gun: typed `Failure` in step errors, deadlines, and
   `MaybeSent` reported as an unknown effect (`unknown_when`).
@@ -71,7 +71,7 @@ orders.
 - One pog pool for the app, grind and saga_postgres, built by grind from the
   app's `pog.Config`.
 - Sinal: saga (synchronous), http_gun (app-owned forwarder) and grind
-  (grind-owned forwarder) events collected and attributed to one order by
+  (owned forwarding runtime) events collected and attributed to one order by
   the `sinal/correlation` each package carries in its metadata.
 
-The friction is in [FEEDBACK.md](FEEDBACK.md).
+The [ecosystem design](../../docs/design/design-layer.pdf) records the current composition contract.

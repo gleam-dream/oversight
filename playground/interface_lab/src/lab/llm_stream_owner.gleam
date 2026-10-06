@@ -52,8 +52,8 @@ pub fn new_owner(
   Owner(events.begin(), decode_arguments, port, Active)
 }
 
-// The first wave permits reuse only for tool-request turns. Final and
-// output-limited continuation semantics remain an open follow-up.
+// This experiment permits continuation only after a tool-request turn.
+// Final and output-limited turns end without a reusable continuation.
 pub type StreamEnd(continuation) {
   FinalText
   OutputLimited

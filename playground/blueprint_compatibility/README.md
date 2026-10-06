@@ -4,7 +4,7 @@
 
 - Can an existing JSON Blueprint decoder participate in the new codec boundary while preserving its wire format and exposing the limits of its schema?
 - The experiment uses published upstream code in a separate Gleam project. Its dependencies do not enter the main interface laboratory.
-- Source versions and the initial hypotheses are recorded in the [compatibility investigation](../../research/blueprint-compatibility-contract.md).
+- Source versions are pinned in the two manifests. The [JSON Blueprint design](../../../json_blueprint/docs/design/design.typ) owns the current compatibility contract; its ADRs retain the architectural rationale.
 
 ## Run the experiment
 
@@ -30,12 +30,14 @@
 - Explicit encoders round-trip the exercised native constructors through the legacy decoder. These examples do not prove inverse laws for arbitrary supplied encoders.
 - The upstream Draft 7 schema cannot enter the laboratory's Draft 2020-12 loader merely by being associated with a typed decoder. Dialect conversion remains a separate unsupported operation.
 
-## Consequences for the package
+## Using the findings
 
-- Updating the existing package remains a viable direction. The removed JSON API is already bridged in 1.7.1; it is not sufficient evidence for discarding the package.
-- A new bidirectional API needs an explicit encoding direction and one well-defined schema dialect. Decoder, encoder, and validator agreement must be tested independently.
-- Correcting historical schema or decoder acceptance can change observable behavior. Record source compatibility, wire compatibility, and deliberate behavior corrections separately.
-- Runtime construction and generated native codecs can share one codec representation. This experiment does not add a separate generated-code representation or decide the final package name.
+A bidirectional codec needs an explicit encoder as well as a decoder. Schema
+validation must be checked independently: a schema associated with a decoder
+does not by itself describe every value that decoder accepts.
+
+The 1.1.0 and 1.7.1 fixtures pin their respective acceptance behavior. Consult the
+[package migration guide](../../../json_blueprint/docs/migration-2.0.md) for compatibility and upgrade details.
 
 ## Evidence boundaries
 
