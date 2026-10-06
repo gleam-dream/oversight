@@ -11,8 +11,8 @@ loopback.
 From this directory, inside the oversight dev shell (`nix develop`):
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 13 tests
-../scripts/with-postgres.sh gleam run    # the demo batch, with a narrative
+../scripts/with-postgres.sh gleam test
+../scripts/with-postgres.sh gleam run
 ```
 
 `gleam run` submits seven documents: three good invoices (one rate limited
@@ -35,16 +35,16 @@ and the telemetry attributed to the rate-limited job.
 | `extractor/scripted`  | Loopback mist servers: documents, and the three provider SSE wire formats                       |
 | `extractor/fixtures`  | The demo batch                                                                                  |
 
-## Packages and seams
+## Library responsibilities
 
 - **grind**: one runtime on the app's `pog.Config`, a `responding` worker, a typed retry policy, `await`, and `grind.connection` for the app's own table.
 - **http_gun**: two clients with separate destination policies; `with_response` with `body.collect` caps; `destination.loopback_only() |> only_hosts` per client; `Kind` and `is_retryable` for failures; `with_correlation` views passed into llm_wire.
-- **llm_wire**: `prepare_structured` / `run_structured` on three built-in adapters; `retry.assess` and `RetryHint` drive Grind snoozes.
+- **llm_wire**: `prepare` / `run` on three built-in adapters; typed runtime failures feed application-owned Grind retry and snooze policy.
 - **json_blueprint**: one `Invoice` codec supplies the output schema, provider-output decoding, the Postgres payload and the Grind output codec.
 - **sinal**: typed observation of every package's events; one forwarder for http_gun.
 - **pog**, **mist**, **envoy**: storage, scripted servers, configuration.
 
-Seams under test: llm_wire retry advice to Grind snooze, retry and discard;
+The tests cover llm_wire retry advice to Grind snooze, retry and discard;
 one or two HTTP clients; provider portability of structured output; codec
 reuse across Blueprint, Grind and pog; following one job across packages.
-Findings are in [FEEDBACK.md](FEEDBACK.md).
+The [ecosystem design](../../docs/design/design-layer.pdf) records the current composition contract.

@@ -13,15 +13,15 @@ the delivery id (`event:subscription`), so it stays the same across retries
 and serves as the receiver's idempotency key.
 
 Packages: `grind`, `http_gun`, `sinal`, plus `wisp`, `mist` and `pog`.
-[FEEDBACK.md](FEEDBACK.md) records what composed and what needed glue.
+The [ecosystem design](../../docs/design/design-layer.pdf) records the current composition contract.
 
 ## Run
 
 From this directory, inside the oversight dev shell:
 
 ```sh
-../scripts/with-postgres.sh gleam test   # 12 tests
-../scripts/with-postgres.sh gleam run    # narrative of one run
+../scripts/with-postgres.sh gleam test
+../scripts/with-postgres.sh gleam run
 ```
 
 `gleam run` starts the API and a scripted receiver on loopback and registers
@@ -46,7 +46,7 @@ checks, and one delivery's telemetry trace across packages.
 | `webhooks/receiver`     | scripted loopback receiver (mist)                                                          |
 | `webhooks/service`      | wiring: one pool, one egress client, the grind runtime and its worker                      |
 
-## Seams exercised
+## What the example exercises
 
 - http_gun failure kinds and statuses mapped to grind retry, snooze, discard and
   fail outcomes (`attempt.classify`, `attempt.retry_policy`); the http_gun
@@ -67,19 +67,14 @@ checks, and one delivery's telemetry trace across packages.
 
 ## Tests
 
-| Test                                                               | Covers                                                                                                                       |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `core_test.status_and_failure_mapping_test`                        | status and http_gun failure-kind mapping, Retry-After parsing, the snooze cap, a failure after a 2xx head                    |
-| `core_test.error_codec_round_trips_http_failures_test`             | an http_gun `Failure` with status survives the job error codec                                                               |
-| `core_test.signature_round_trip_test`                              | HMAC signing and verification                                                                                                |
-| `core_test.registration_rejects_unsafe_endpoints_test`             | metadata, private, loopback, IPv4-mapped, scheme, credential and `host:port` checks                                          |
-| `core_test.delivery_attempted_event_round_trip_test`               | the app event through native telemetry; a stable correlation for an over-long id                                             |
-| `core_test.every_outcome_is_listed_test`                           | `fields.check` for every `Outcome`                                                                                           |
-| `delivery_test.common_path_signed_delivery_test`                   | API to job and delivery row in one transaction to signed live delivery; idempotent re-publish; ordered cross-package trace   |
-| `delivery_test.receiver_down_retries_then_exhausts_test`           | connection refused, three attempts, `BudgetExhausted` with the typed http_gun failure                                        |
-| `delivery_test.always_throttled_receiver_stops_test`               | a receiver that always answers 429: two snoozes, three attempts, `BudgetExhausted` with `RateLimited`                        |
-| `delivery_test.ssrf_rejected_at_registration_and_at_delivery_test` | DNS-rebinding answer refused; loopback refused for a public tenant, allowed for the internal tenant; subscription disabled   |
-| `cassette_test.cassette_drives_snooze_discard_and_body_limit_test` | 429 snoozes for Retry-After 120, 200 with oversized body (status kept on the failure), 410, offline from a serialized script |
-| `cassette_test.snooze_with_error_codec_runs_again_test`            | 429 snoozes a worker with an error codec; the job stays bindable and delivers on the next claim                              |
-| `cassette_test.oversized_429_keeps_retry_after_test`               | a 429 over the body limit keeps `Retry-After` (`error.headers`) and snoozes for it                                           |
-| `cassette_test.request_without_tenant_view_is_refused_test`        | a request that skips the tenant view fails `ViewDestinationRequired`, `NotSent`                                              |
+[Unit tests](test/webhooks/core_test.gleam) cover status and failure mapping,
+Retry-After and snooze bounds, signatures, codec roundtrips, destination policy
+and telemetry fields.
+
+[Delivery tests](test/webhooks/delivery_test.gleam) exercise transactional
+admission, stable delivery identities, receiver outages, repeated throttling,
+DNS rebinding and tenant-specific destination rules.
+
+[Cassette tests](test/webhooks/cassette_test.gleam) replay 429 and 410 responses,
+body-limit failures and retries without a receiver. They also check that a
+request which skips the tenant's client view is refused before sending.

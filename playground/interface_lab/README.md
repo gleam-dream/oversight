@@ -2,24 +2,16 @@
 
 # Ecosystem interface playground
 
-This is a retained, disposable type experiment. It is not an implementation of the proposed packages and must not be published as one. The `lab/` module names identify candidate responsibilities, not settled package APIs.
+This laboratory tests candidate typed APIs. Its `lab/` modules are sketches,
+not the production packages, and must not be published as implementations.
 
-The primary question is whether one typed workflow model can express a bounded agent call, approval suspension, a compensating child workflow, and a restorable continuation while keeping execution capabilities explicit. Smaller consumer examples check whether the supporting interfaces remain useful independently.
+The main experiment combines an agent call, approval suspension, a compensating
+child workflow and a restorable continuation in one typed workflow. Smaller
+consumers exercise the supporting interfaces independently.
 
-Start with the [current refinement status](REFINEMENT-STATUS.md) for the evidence map and remaining integration questions. The [first findings](FINDINGS.md) and [initial stress exploration](STRESS-TESTS.md) are historical checkpoints.
-
-| Refinement                                       | Main question tested                                                    |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| [Codec-derived catalogs](SCHEMA-CATALOG.md)      | Can registration supply both declaration and invocation?                |
-| [Observation contracts](OBSERVATION-CONTRACT.md) | Can typed map fields classify foreign callback data?                    |
-| [Shared graphs](SHARED-GRAPH.md)                 | Can one producer feed typed checks and a join?                          |
-| [Closed choices](CLOSED-CHOICE.md)               | Can approval decline be a normal branch with private internals?         |
-| [Activity contracts](ACTIVITY-CONTRACT.md)       | Can codecs and their revisions form reusable typed boundaries?          |
-| [Execution ownership](EXECUTION-OWNERSHIP.md)    | Can direct activities remain distinct from independent children?        |
-| [Login transactions](LOGIN-TRANSACTIONS.md)      | Can concurrent callbacks be checked without issuing an identity?        |
-| [Scheduled jobs](SCHEDULED-JOBS.md)              | Can scheduled admission and cancellation intent preserve typed handles? |
-
-Newer refinements cover [collection codecs](COLLECTION-CODECS.md), [object codecs](OBJECT-CODECS.md), [tagged codecs](TAGGED-CODECS.md), [schema admission](SCHEMA-ADMISSION.md), [independent schema comparison](SCHEMA-ORACLE.md), and [durable child attachment](CHILD-ATTACHMENT.md). Their evidence boundaries and remaining obligations are recorded in each note.
+The [ecosystem design](../../docs/design/design-layer.pdf) owns composition
+contracts; each package owns its implemented design. [ADR 0009](../../docs/adr/0009-retain-executable-evidence-with-scoped-claims.md)
+explains why these prototypes remain as scoped evidence.
 
 ## Run the experiment
 
@@ -76,26 +68,16 @@ Constructive representations retain the values needed by their interfaces. Codec
 
 Compiler checks can reject incompatible types, distinguish execution capabilities and native child result types, and prevent a pending identity from entering a verified-identity API. They cannot prove codec laws, graph validity, persistence safety, authorization, idempotency, or correct scheduling.
 
-The original agent wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The newer `fabric_turn` module exercises explicit tool-request/result handoff with scripted providers. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser. Blueprint emits a finite JSON Schema subset; independent validation covers the recorded corpus rather than full dialect conformance.
+The `fabric` wrapper stores a caller-supplied function and a tool registry. Its invocation calls that function; this does not implement tool calling or enforce a loop bound. The `fabric_turn` module exercises explicit tool-request/result handoff with scripted providers. The model provider is an injected function, not a provider compatibility implementation. The small data algebra is not a JSON parser. Blueprint emits a finite JSON Schema subset; independent validation covers the recorded corpus rather than full dialect conformance.
 
 Compiling isolated source imports tests module dependency direction. All modules still belong to one experimental package; independently distributable packages require later consumer builds against actual package boundaries.
 
-## Deliberately unresolved
+## Outside this experiment
 
 - Full DAG authoring, shared dependencies, branching, cycles, dynamic graph validation, and definition migrations.
 - Executable freeze/thaw, JSON byte roundtrips, revision checks, signal authentication and deduplication, crash recovery, and compensation races.
 - Provider-specific continuation, streaming cancellation/backpressure, and interruption inside a running agent.
 - Full schema support, telemetry interoperability, MCP conformance, OIDC correctness, upstream oracle suites, and benchmarks.
 
-These are follow-on experiments, not guarantees implied by a successful type check. Keep this playground here for inspection and revision; promote only learned contracts into the package designs after review.
-
-## Next executable question
-
-After reviewing these interfaces, use one fixed checkout flow to ask whether a committed suspension can survive process loss without losing ownership of effects. This would be a separate, deliberately small runtime experiment:
-
-1. Reach approval, encode a real snapshot, discard the process, and reconstruct the definition from fresh code.
-2. Decode and validate the snapshot, then race duplicate approval commands against a compare-and-set store. Exactly one revision may advance.
-3. Inject a crash after a fake payment ledger records its effect but before workflow completion is recorded. Restore must require reconciliation unless the declared idempotency contract resolves the ambiguity.
-4. Resolve the outcome, fail a later step, and restart during compensation. Check the journal's compensation admission and ordering independently of remote effect guarantees.
-
-That experiment would test the freeze/thaw proposal. The current compiler experiment does not perform these steps.
+A successful type check establishes none of these runtime guarantees. The
+production libraries and their designs describe the implemented APIs.

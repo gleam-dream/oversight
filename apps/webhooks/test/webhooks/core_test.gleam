@@ -44,7 +44,7 @@ pub fn status_and_failure_mapping_test() {
   let assert Snooze(60_000, _) =
     classify(reply(429, Some("Wed, 21 Oct 2026 07:28:00 GMT")))
   let assert Snooze(3_600_000, _) = classify(reply(429, Some("999999")))
-  // WHK-8: once the context shows the snooze budget spent, a 429 uses an
+  // Once the context shows the snooze budget spent, a 429 uses an
   // attempt instead.
   assert attempt.classify(reply(429, Some("7")), snooze, snooze.max_snoozes)
     == Retry(attempt.RateLimited)
@@ -71,7 +71,7 @@ pub fn status_and_failure_mapping_test() {
     failed(error.LimitExceeded(error.RequestBodyBytes, 10, 20), error.NotSent)
   let assert #(_, Reject(attempt.Http(_))) =
     failed(error.PlaybackMismatch(0), error.NotSent)
-  // WHK-3: a failure after the head keeps its status, which decides.
+  // A failure after the head keeps the status used to classify the delivery.
   assert classify(Error(
       error.new(error.RequestFailed(error.ConnectionReset), error.MaybeSent)
       |> error.with_status(200),
@@ -146,7 +146,7 @@ pub fn registration_rejects_unsafe_endpoints_test() {
   // DNS-rebinding test).
   let assert Ok(_) = check("https://rebind.acme.test/hook", PublicTier)
   let assert Ok(_) = check("http://127.0.0.1:4000/hook", InternalTier)
-  // WHK-4: a `host:port` entry pins the internal tier to one local server.
+  // A `host:port` entry pins the internal tier to one local server.
   let pinned = fn(url) {
     subscription.validate_endpoint(url, InternalTier, ["127.0.0.1:4000"])
   }

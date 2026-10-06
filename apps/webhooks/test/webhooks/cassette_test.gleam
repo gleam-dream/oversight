@@ -102,7 +102,7 @@ pub fn cassette_drives_snooze_discard_and_body_limit_test() {
   assert support.drain(svc) == Ok(3)
 
   assert support.outcome(svc, rate_limited) == Ok(grind.Pending(job.Scheduled))
-  // WHK-3: the oversized body fails with the 200 it belonged to, so the
+  // The oversized body fails with the 200 it belonged to, so the
   // delivery is not retried.
   assert support.outcome(svc, big)
     == Ok(
@@ -191,7 +191,7 @@ pub fn request_without_tenant_view_is_refused_test() {
   Nil
 }
 
-/// WHK-1: a 429 snoozes a worker that has an error codec; the job stays
+/// A 429 snoozes a worker that has an error codec; the job stays
 /// bindable while scheduled, runs again, and the second exchange delivers.
 pub fn snooze_with_error_codec_runs_again_test() {
   let tape =

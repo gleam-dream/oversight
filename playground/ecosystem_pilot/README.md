@@ -1,4 +1,4 @@
-# Cross-package integration pilot
+# MCP and model-provider example
 
 This consumer composes the public APIs of JSON Blueprint, Relay, LLM Wire, and
 Sinal. It looks up a synthetic inventory record through Relay and continues an
@@ -18,7 +18,7 @@ It prints:
 A-100 has 7 Ada Lovelace notebooks.
 ```
 
-The simple path owns `Lookup` and `InventoryItem`. Blueprint builds the latter
+The application defines `Lookup` and `InventoryItem`. Blueprint builds the latter
 with `codec.record3` and exports their Draft 2020-12 schemas with
 `codec.schema_json`. One admitted Relay definition holds the lookup name,
 metadata, and codecs. The application binds its handler, reuses the definition
@@ -48,18 +48,17 @@ provider-authored assistant text and call ID
 on continuation. A separate scenario checks that the shared runtime rejects
 text over an admitted byte bound.
 
-Run the ten real transport scenarios with:
+Run the local transport scenarios with:
 
 ```sh
 nix develop --command gleam test
 ```
 
-The original seven tests cover success, invalid arguments, a rendered application error and
+The tests cover success, invalid arguments, a rendered application error and
 provider continuation, cancellation during a partial response, provider
 disconnect without retry, a stable generic application error, and an explicitly
 JSON-text-rendered application error. The last path binds the same admitted
 definition with an error renderer, preserving the JSON string over HTTP without
-an extra error codec. Three more tests cover discovery with mixed scoped
-observation, fourth-provider text and replay, and fourth-provider limits. See
-[REPORT.md](REPORT.md) for observed
-package heads, results, and limits.
+an extra error codec. They also cover discovery with scoped observation, an application-defined
+provider's text and replay, and provider limits. The [ecosystem design](../../docs/design/design-layer.pdf) states the evidence
+boundary; package designs own protocol and resource guarantees.

@@ -207,7 +207,7 @@ pub fn nullable_output_field_prepares_on_every_provider_test() {
       )
       |> result.is_ok
     })
-  // Gemini accepts nullable fields since llm_wire round 7 (verified live).
+  // All three provider adapters admit this nullable output field.
   assert prepared == [True, True, True]
 }
 
@@ -281,7 +281,7 @@ pub fn invalid_structured_output_is_discarded_test() {
   assert store.find(jobs.connection(context.pipeline), "bad-currency") == Ok([])
 }
 
-/// EXT-3: the failure is typed and keeps the model's raw output, so a caller
+/// The failure is typed and keeps the model's raw output, so a caller
 /// tells a schema rejection from a codec rejection without parsing text.
 pub fn invalid_output_keeps_the_raw_output_and_a_typed_reason_test() {
   let assert Ok(services) = scripted.start(fixtures.batch())
@@ -499,8 +499,7 @@ pub fn fetcher_cannot_reach_the_provider_origin_test() {
   clients.stop(http)
 }
 
-/// EXT-7: llm_wire no longer matches the endpoint's host string. http_gun
-/// applies the plaintext rule to the resolved address, so a host name that
+/// HTTP Gun applies the plaintext rule to the resolved address. A host name that
 /// resolves to loopback is admitted and one that resolves elsewhere is refused
 /// before anything is sent.
 pub fn plaintext_rule_follows_the_resolved_address_test() {
@@ -563,7 +562,7 @@ pub fn one_job_is_followed_across_packages_test() {
   assert llm_lost == 0
 }
 
-/// EXT-1 regression: with an error codec, a snoozed job is re-claimed and
+/// With an error codec, a snoozed job is re-claimed and
 /// runs again, and its finished job can be re-bound from its id.
 pub fn snoozed_job_with_error_codec_runs_again_test() {
   use context <- with_pipeline("extract_snooze_typed", fixtures.batch(), live)
@@ -584,9 +583,8 @@ pub fn snoozed_job_with_error_codec_runs_again_test() {
 
 // Failure classes ---------------------------------------------------------
 
-/// EXT-2: http_gun's closed `Kind` and `is_retryable` decide fetch failures
-/// and, once llm_wire's `Reason` is rebuilt into a `Failure`, extraction
-/// failures; no exhaustive map of reasons is left in the app.
+/// HTTP Gun's `Kind` and `is_retryable` classify both fetch failures and
+/// HTTP failures preserved inside an LLM Wire `Failure`.
 pub fn http_failures_are_decided_by_kind_test() {
   let fetch = fn(reason, evidence) {
     outcome.decide(

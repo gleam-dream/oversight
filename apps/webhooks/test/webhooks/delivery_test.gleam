@@ -49,7 +49,7 @@ pub fn common_path_signed_delivery_test() {
   assert support.publish(svc, raw) == [#(delivery_id, job_id)]
   assert support.drain(svc) == Ok(0)
 
-  // WHK-2: the worker itself, error codec included, re-binds its own
+  // The worker itself, error codec included, re-binds its own
   // succeeded job; `await` returns at once for a finished job.
   let assert Ok(handle) = grind.bind(svc.jobs, svc.worker, job_id)
   assert grind.await(svc.jobs, handle, within: duration.seconds(1))
@@ -58,7 +58,7 @@ pub fn common_path_signed_delivery_test() {
   let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
   assert row.job_id == job_id && row.attempts == 1
 
-  // WHK-5: one delivery is followed across grind, http_gun and the app by
+  // One delivery is followed across grind, http_gun and the app by
   // its correlation alone, in emit order: claim, request, attempt, ack.
   // `submit_in` emits no `admitted` event; the commit is the app's.
   support.settle()
@@ -96,7 +96,7 @@ pub fn receiver_down_retries_then_exhausts_test() {
   assert row.attempts == 3
 }
 
-/// WHK-8: a receiver that always answers 429 is snoozed `max_snoozes` times
+/// A receiver that always answers 429 is snoozed `max_snoozes` times
 /// (read from the job's context), then each 429 uses an attempt, so the
 /// delivery ends instead of snoozing forever.
 pub fn always_throttled_receiver_stops_test() {

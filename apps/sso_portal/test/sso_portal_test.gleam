@@ -78,7 +78,7 @@ pub fn login_dashboard_logout_test() {
   )
   let requests = testing.requests(portal.provider)
   assert requests.end_sessions == 1
-  // RFC 7009: logout revoked the refresh token at the provider (SSO-2).
+  // RFC 7009: logout revoked the refresh token at the provider.
   assert requests.revocations == 1
   assert requests.active_refresh_tokens == 0
   assert rows(portal) == 0
@@ -239,7 +239,7 @@ pub fn sessions_survive_web_and_warden_restarts_test() {
   assert page.status == 200
 
   // Warden restarts: a new client with empty processes. Custody lives in
-  // Postgres (SSO-1), so the same browser session still works and nobody
+  // Postgres, so the same browser session still works and nobody
   // signed in again.
   let assert Ok(portal) = app.restart_warden(portal)
   let assert Ok(#(b, page)) = browser.get(b, portal.portal_url <> "/dashboard")
