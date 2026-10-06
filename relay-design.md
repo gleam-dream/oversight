@@ -150,6 +150,15 @@ pub fn perform(
 
 ### 2.6 Runtime and transports
 
+- An HTTP endpoint remains linked to its caller and to its owned listener
+  while running. Unexpected listener failure propagates through that ownership
+  chain. Intentional endpoint shutdown disconnects the listener's failure link
+  before terminating it, so the listener's shutdown cannot kill the endpoint's
+  caller or race the endpoint's normal stop.
+- Shutdown tests must exercise the actual listener exit before the endpoint
+  resumes its stop path, and retain a separate unexpected-listener-failure
+  check. Ignoring all linked exits or unlinking the running listener would
+  violate the ownership contract.
 - The server runtime owns supervised invocations, timeout, cancellation observation, progress callbacks, crash isolation, and cleanup. Modern request ownership and legacy session supervision must remain separate lifecycle strategies.
 - Legacy sessions retain configurable idle timeout and maximum session count. Client runtime owns correlation, timeouts, registered callback handlers, and transport lifetime.
 - The transport port provides bounded inbound data, explicit terminal outcomes, cancellation, and shared idempotent close. Pure effects cannot establish connection or actor cleanup.

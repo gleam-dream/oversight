@@ -53,6 +53,24 @@
 
 #### Provider fetch ownership
 
+- Every cache process starts without provider metadata or signing keys and
+  performs its own discovery. Supervisor restart configuration contains no
+  previously discovered snapshot. Restart cannot restore keys removed by a
+  newer accepted key set by replaying startup data.
+- Manual `start` waits for the initial discovery outcome within the existing
+  startup deadline. Success still means compatible metadata and a completed
+  initial key load. Discovery, compatibility and timeout failures retain their
+  existing typed classifications. Failed startup requests shutdown of only
+  the tree it created and waits for exit within the remaining startup budget.
+  Expiry can return before shutdown finishes; an immediate retry can still
+  observe the draining supervisor as already started.
+- The cache retains its first discovery outcome to answer a startup waiter
+  even when discovery completes before the waiter arrives. A later retry must
+  not hide that first attempt's failure. This retains at most one bounded
+  metadata/error value per cache, with no historical signing-key set.
+- A replacement cache answers not-ready until fresh compatible discovery
+  succeeds. It retries under the existing background discovery policy; provider
+  unavailability cannot make it fall back to the original startup keys.
 - A discovery, metadata reload or signing-key refresh belongs to the cache process
   that started it. Its completion cannot update a replacement cache process,
   even when that process has the same registered name.
