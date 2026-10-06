@@ -257,3 +257,42 @@ This wait is synchronous within child startup. A held previous child can
 delay its parent's supervisor management work up to the configured bound;
 existing request actors continue serving independently. Startup adds at most
 five temporary monitors and removes them on success or expiry.
+
+## Round 9 startup snapshot follow-up
+
+- Before: a manually started Warden client retained its first discovery
+  snapshot in the supervisor's restart closure. After rotation removed a key,
+  a cache restart could restore that key and accept its tokens again.
+- After: every cache starts empty and performs fresh discovery. The same
+  client value remains usable, but validation returns provider-not-ready
+  until compatible discovery completes. An outage does not restore old keys.
+- The public call is unchanged:
+
+  ```gleam
+  let assert Ok(client) = warden.new(config)
+  let assert Ok(Nil) = warden.start(client)
+  ```
+
+- `start` still waits for its first discovery result and returns the existing
+  typed errors. It now creates the tree before discovery; failure requests
+  shutdown of that specific tree within the remaining startup budget.
+  Timeout can return before shutdown finishes, so an immediate retry can
+  briefly return `AlreadyStarted` while the supervisor drains.
+- Internal startup bookkeeping retains one bounded metadata/error result,
+  with no historical key set. No public settings or dependencies are added.
+- Application code and compiled recipes require no changes. Larger key-set
+  measurements and their limitations are recorded in `PLAN.md` under
+  "Round 9 startup snapshot follow-up"; they do not justify another public
+  abstraction or a production optimization.
+
+## Round 9 Relay listener shutdown
+
+- Before: `http.stop(endpoint)` terminated the linked listener with a
+  `shutdown` reason. If that exit reached the endpoint before its normal
+  stop, it could also terminate the endpoint's linked caller.
+- After: intentional shutdown removes that link immediately before stopping
+  the listener. The same call returns normally; no caller migration is needed.
+  The running listener stays linked, so unexpected listener failure still
+  propagates through its endpoint.
+- The change fixes a reproduced tool_hub gate failure without changing app
+  code, recipes, transport deadlines or MCP protocol behavior.

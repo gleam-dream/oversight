@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Remove Warden's replay of initial signing keys on cache restart. Record
+  fresh discovery, bounded manual startup, failure cleanup and the measured
+  cost of forwarding larger key sets.
+- Correct Relay's intentional listener shutdown so a linked shutdown exit
+  cannot terminate the endpoint's caller. Preserve unexpected listener-failure
+  propagation and record the deterministic tool_hub validation finding.
+
 - Bind Warden discovery, metadata reload and key refresh work to its cache
   process. Late results cannot restore removed signing keys in a replacement
   cache; owner exit cancels fetch work without changing the public API.

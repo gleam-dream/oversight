@@ -580,9 +580,93 @@ with fabric passing twice consecutively.
   results on unchanged heads and unchanged dependency trees.
 - Application source and recipe changes for this follow-up are zero lines
   added and zero removed. The published package set remains 11 packages.
-- Follow-up: startup snapshot reuse for manually started clients remains a
-  separate lifecycle question. This fix changes background fetch ownership;
-  it does not redesign bootstrap snapshots or provider refresh policy.
+- The startup-snapshot follow-up below closes the separate manual-start
+  restart path. Fetch cancellation alone did not prevent replay of a snapshot
+  retained in the supervisor's child configuration.
+
+#### Round 9 startup snapshot follow-up
+
+| Package   | Result                                                                                                                                                                                                                                               |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| warden    | New cache processes always discover independently. Manual startup waits for the first discovery outcome; restart configuration retains no metadata or signing-key snapshot. Public signatures, retry policy and timeout configuration are unchanged. |
+| relay     | Intentional listener shutdown disconnects its failure link before termination. Unexpected listener failure still propagates through the endpoint to its caller. Public APIs and MCP behavior are unchanged.                                          |
+| fabric    | Tested sibling revisions now name Warden `f3847d1` and Relay `d448fe2`. APIs and recipe copies need no changes.                                                                                                                                      |
+| oversight | Record the restart contract, TDD evidence, availability tradeoff and larger-key-set measurements.                                                                                                                                                    |
+
+- The regression used public token validation: key A was accepted, rotated
+  out and rejected, then accepted again after restarting a manually started
+  client's cache. The old child closure replayed its initial snapshot. The
+  fix removes the seed parameter from cache construction entirely.
+- Manual startup now creates its tree before discovery. It observes the first
+  attempt under the existing startup deadline and keeps the existing discovery,
+  compatibility and timeout errors. Failure requests shutdown of only the
+  tree that call created; waiting consumes only the remaining deadline.
+  A timeout can return before shutdown completes, so an immediate retry may
+  briefly observe an already-started, draining supervisor.
+- Every cache retains one first discovery result containing metadata or an
+  error, with no signing keys. This bounded value prevents a fast result or
+  later retry from racing the manual startup observer. It adds no process.
+- After a cache crash, validation is unavailable until compatible rediscovery
+  succeeds. Provider outages cannot restore the original keys. A surviving
+  cache still serves its accepted snapshot during refresh; no global lock or
+  coordinator is introduced.
+- Isolated forwarding measurements compared a monitored direct worker with
+  the real fetch guardian on OTP 28 with four schedulers. Five alternating
+  pairs measured generated P-256 public keys, with distinct key identifiers.
+  The term-decoding workload creates worker-owned values before delivery.
+
+| Keys  | JSON bytes | Direct decode + delivery | Guardian decode + delivery | Held guardian memory after GC |
+| ----- | ---------- | ------------------------ | -------------------------- | ----------------------------- |
+| 1     | 173        | 7.46 μs                  | 14.18 μs                   | 2,936 bytes                   |
+| 100   | 16,402     | 244.30 μs                | 296.16 μs                  | 88,736 bytes                  |
+| 1,000 | 164,903    | 2.449 ms                 | 3.004 ms                   | 601,976 bytes                 |
+| 5,000 | 828,903    | 14.815 ms                | 19.364 ms                  | 2,546,568 bytes               |
+
+- The 5,000-key decoded term occupies approximately 2.16 MB in flat heap
+  words. The guardian adds about 4.55 ms in the term-decoding workload;
+  transient memory scales with concurrent active fetches. Held-process memory
+  is not a measurement of peak total runtime allocation.
+- Real JSON parsing plus delivery dominated the largest sample: median
+  1.435 seconds direct and 1.410 seconds with the guardian, with overlapping
+  ranges of 1.412–1.778 and 1.395–1.691 seconds. These samples do not establish
+  a speedup or production capacity. Other key shapes remain unmeasured.
+- An initial copy-only benchmark used shared persistent terms, which bypassed
+  normal heap copying. That sample was discarded and replaced with
+  worker-owned terms. No production optimization follows from these results.
+- A scoped recipe audit found no code drift in seven copies: two Saga copies
+  in support_desk and Fabric's app consumer, four Relay copies in tool_hub, and
+  the Warden approver copy in support_desk. The first six match their compiled
+  consumers byte for byte; the approver differs only by its application module
+  introduction. Saga remains 59 lines; the Relay copies are 40, 50, 41 and
+  12 lines. This evidence supports retaining consumer-owned composition;
+  refreshing copies remains an application maintenance obligation.
+- Joint validation exposed a separate Relay shutdown race in tool_hub, which
+  has no Warden dependency. Seven tests passed before a linked `shutdown` exit
+  terminated the test caller. A controlled schedule held the endpoint while
+  its real listener completed an intentional shutdown, reproducing the exit
+  chain from listener to endpoint to caller without synthetic failures.
+- Relay now unlinks the listener only immediately before intentional
+  termination. The regression forces that same schedule; a separate control
+  retains unexpected listener-failure propagation. No application workaround,
+  broader exit suppression, new timeout or public option is introduced.
+- Independent final gates passed for Relay (317 core tests, one negative
+  compile fixture, pinned checksums and 108/108 MCP conformance cases) and
+  Warden (209 core tests, 18 negative compile fixtures plus positive control,
+  13 consumer tests and six compiled Relay recipe tests).
+- All eight application gates passed: checkout 12, webhooks 14, extractor 16,
+  support_desk 21, tool_hub 16, secure_mcp 16, sso_portal 13 and research_agent 10. The demos retain zero unattributed events out of 267 in support_desk,
+  and zero unjoined Relay or llm_wire events in tool_hub.
+- Application source and recipe changes are zero lines added and zero removed.
+  The published package set remains 11. No provider credentials or live
+  provider calls were needed for this follow-up.
+- Fabric passed all 47 full-gate checks twice consecutively against these
+  sibling revisions, including 823 core tests, 66 Postgres tests, 21 Saga
+  recipe tests and 23 Relay recipe tests. The other consumer counts remain
+  app 16, graph 5, decision 2, jobs 19, writing 8 and approvers 5.
+- The accepted full-gate results for sinal, json_blueprint, http_gun, saga,
+  grind and llm_wire remain valid on identical heads and dependency trees.
+  No source, dependency or gate change in those six repositories required a
+  rerun. Both Postgres adapters are unchanged.
 
 ## sinal
 
