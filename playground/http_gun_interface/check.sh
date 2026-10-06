@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-probe_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+probe_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 probe_tmp=$(mktemp -d)
 trap 'rm -rf "$probe_tmp"' EXIT HUP INT TERM
 cp -R "$probe_root/library" "$probe_tmp/library"

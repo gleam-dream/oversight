@@ -84,7 +84,14 @@ These are separate workloads, so their numbers are not an ecosystem ranking.
 
 The Nix shell supplies Gleam, Erlang/OTP, Elixir, Python and PostgreSQL. Run the
 checks for the application or contract you change. See [AGENTS.md](AGENTS.md)
-for repository instructions.
+for repository instructions. Run the complete consumer gate with:
+
+```sh
+nix develop --command python3 -B scripts/ci.py full
+```
+
+[Validation](docs/TESTING.md) lists individual checks, CI dependency access,
+artifacts and the scheduled ecosystem compatibility run.
 
 To rebuild and check the design document:
 
