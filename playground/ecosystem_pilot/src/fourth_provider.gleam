@@ -4,115 +4,93 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import llm_wire/error as wire_error
+import llm_wire/message
 import llm_wire/provider
-import llm_wire/types
-
-type Turn {
-  Turn(text: String, calls: List(types.ToolCall))
-}
 
 type State {
   State(
     text: String,
-    calls: List(types.ToolCall),
+    calls: List(message.ToolCall),
     done: Bool,
     limited: Bool,
     refusal: Option(String),
-    failure: Option(types.WireError),
+    failure: Option(wire_error.Error),
   )
 }
 
-pub fn adapter(endpoint: types.Endpoint) -> provider.Adapter {
-  provider.adapter(
-    provider.Spec(
-      identity: types.Custom("scripted-fourth"),
-      endpoint: endpoint,
-      headers: [
-        #("X-Fixture", "fourth"),
-      ],
-      encode: fn(request, tools, format) {
-        Ok(encode_request(request, tools, format, None))
-      },
-      project_tool_schema: provider.blueprint_schema,
-      project_output_schema: provider.blueprint_schema,
-      new_reducer: fn(_limits, _tools) {
-        Ok(
-          provider.reducer(
-            State("", [], False, False, None, None),
-            step,
-            terminal,
-            fn(_state, fallback) { types.RetryEvidence(fallback, False, False) },
-          ),
-        )
-      },
-    ),
+pub fn adapter(endpoint: String) -> provider.Adapter {
+  provider.new(
+    message.Custom("scripted-fourth"),
+    endpoint,
+    encode_request,
+    fn() {
+      provider.reducer(State("", [], False, False, None, None), step, terminal)
+    },
   )
+  |> provider.with_headers(fn() { [#("X-Fixture", "fourth")] })
 }
 
 fn encode_request(
-  request: types.Request,
+  request: provider.Request,
   tools: List(provider.ProjectedTool),
   format: Option(provider.OutputFormat),
-  replay: Option(Turn),
-) -> provider.EncodedRequest {
+) -> Result(provider.Encoded, wire_error.PrepareError) {
   let messages = list.map(request.messages, encode_message)
   let projected =
     list.map(tools, fn(tool) {
-      let provider.ProjectedTool(name, description, schema_json) = tool
       json.object([
-        #("name", json.string(types.tool_name_to_string(name))),
-        #("description", json.string(description)),
-        #("input_schema", schema_json),
+        #("name", json.string(tool.name)),
+        #("description", json.string(tool.description)),
+        #("input_schema", tool.schema),
       ])
     })
   let format_fields = case format {
     None -> []
-    Some(provider.OutputFormat(name, schema_json)) -> [
-      #("output_name", json.string(name)),
-      #("output_schema", schema_json),
+    Some(format) -> [
+      #("output_name", json.string(format.name)),
+      #("output_schema", format.schema),
     ]
   }
-  let replay_fields = case replay {
-    None -> []
-    Some(Turn(text, calls)) -> [
-      #("replay_text", json.string(text)),
-      #(
-        "replay_call_ids",
-        json.array(calls, fn(call) {
-          json.string(types.call_id_to_string(call.id))
-        }),
-      ),
-    ]
-  }
-  provider.EncodedRequest(
+  let replay_fields =
+    list.flat_map(request.messages, fn(message) {
+      case message {
+        message.Assistant(turn) if turn.calls != [] -> [
+          #("replay_text", json.string(turn.text)),
+          #(
+            "replay_call_ids",
+            json.array(turn.calls, fn(call) { json.string(call.id) }),
+          ),
+        ]
+        _ -> []
+      }
+    })
+  Ok(provider.encoded(
     "/events",
     json.to_string(
       json.object(list.append(
         [
-          #("model", json.string(types.model_id_to_string(request.model))),
+          #("model", json.string(request.model)),
           #("messages", json.array(messages, fn(value) { value })),
           #("tools", json.array(projected, fn(value) { value })),
         ],
         list.append(format_fields, replay_fields),
       )),
     ),
-  )
+  ))
 }
 
-fn encode_message(message: types.Message) -> json.Json {
+fn encode_message(message: message.Message) -> json.Json {
   case message {
-    types.SystemMessage(text) -> message_json("system", text)
-    types.UserMessage(text) -> message_json("user", text)
-    types.UserContent(_) -> message_json("user", "[content]")
-    types.AssistantMessage(text) -> message_json("assistant", text)
-    types.AssistantContent(_) -> message_json("assistant", "[content]")
-    types.AssistantToolCalls(calls) -> assistant_calls("", calls)
-    types.AssistantToolCallsWithText(text, calls) ->
-      assistant_calls(text, calls)
-    types.ToolResultMessage(id, content) ->
+    message.System(text) -> message_json("system", text)
+    message.User(text) -> message_json("user", text)
+    message.UserParts(_) -> message_json("user", "[content]")
+    message.Assistant(turn) -> assistant_calls(turn.text, turn.calls)
+    message.AssistantParts(_) -> message_json("assistant", "[content]")
+    message.ToolResult(id, content) ->
       json.object([
         #("role", json.string("tool")),
-        #("call_id", json.string(types.call_id_to_string(id))),
+        #("call_id", json.string(id)),
         #("content", json.string(content)),
       ])
   }
@@ -122,7 +100,7 @@ fn message_json(role: String, text: String) -> json.Json {
   json.object([#("role", json.string(role)), #("text", json.string(text))])
 }
 
-fn assistant_calls(text: String, calls: List(types.ToolCall)) -> json.Json {
+fn assistant_calls(text: String, calls: List(message.ToolCall)) -> json.Json {
   json.object([
     #("role", json.string("assistant")),
     #("text", json.string(text)),
@@ -130,8 +108,8 @@ fn assistant_calls(text: String, calls: List(types.ToolCall)) -> json.Json {
       "calls",
       json.array(calls, fn(call) {
         json.object([
-          #("id", json.string(types.call_id_to_string(call.id))),
-          #("name", json.string(types.tool_name_to_string(call.name))),
+          #("id", json.string(call.id)),
+          #("name", json.string(call.name)),
           #("arguments", json.string(call.arguments_json)),
         ])
       }),
@@ -142,11 +120,11 @@ fn assistant_calls(text: String, calls: List(types.ToolCall)) -> json.Json {
 fn step(
   state: State,
   event: provider.Event,
-) -> Result(#(State, List(types.StreamProgress)), types.WireError) {
+) -> Result(#(State, List(message.Progress)), wire_error.Error) {
   case event.event {
     Some("text") -> {
       let next = State(..state, text: state.text <> event.data)
-      Ok(#(next, [types.TextDelta("0", event.data)]))
+      Ok(#(next, [message.TextDelta("0", event.data)]))
     }
     Some("tool") -> {
       use call <- result.try(parse_call(event.data))
@@ -162,60 +140,40 @@ fn step(
           State(
             ..state,
             done: True,
-            failure: Some(types.ProviderError(Some("fixture"), event.data)),
+            failure: Some(wire_error.Provider(Some("fixture"), event.data)),
           ),
           [],
         ),
       )
     Some("extension") ->
-      Ok(#(state, [types.ProviderExtension("scripted-fourth", event.data)]))
+      Ok(#(state, [message.ProviderExtension("scripted-fourth", event.data)]))
     _ -> Ok(#(state, []))
   }
 }
 
-fn parse_call(raw: String) -> Result(types.ToolCall, types.WireError) {
+fn parse_call(raw: String) -> Result(message.ToolCall, wire_error.Error) {
   case string.split(raw, "|") {
-    [raw_id, raw_name, arguments_json] -> {
-      use id <- result.try(types.call_id(raw_id))
-      use name <- result.try(
-        types.tool_name(raw_name)
-        |> result.replace_error(types.ProtocolError(
-          "Malformed fixture tool name",
-        )),
-      )
-      Ok(types.tool_call(id, name, arguments_json))
-    }
-    _ -> Error(types.ProtocolError("Malformed fixture tool event"))
+    [raw_id, raw_name, arguments_json] ->
+      Ok(message.tool_call(raw_id, raw_name, arguments_json))
+    _ -> Error(wire_error.Protocol("Malformed fixture tool event"))
   }
 }
 
 fn terminal(state: State) -> Option(provider.Terminal) {
   case state.done, state.failure, state.refusal, state.limited, state.calls {
     False, _, _, _, _ -> None
-    True, Some(error), _, _, _ ->
-      Some(provider.Failure(
-        error,
-        types.RetryEvidence(types.NoRequestSent, False, False),
-      ))
-    True, None, Some(reason), _, _ -> Some(provider.Refusal(reason, None))
+    True, Some(error), _, _, _ -> Some(provider.failed(error, None))
+    True, None, Some(reason), _, _ -> Some(provider.refused(reason, None))
     True, None, None, True, _ ->
-      Some(provider.OutputLimited(state.text, state.calls, None))
-    True, None, None, False, [] -> Some(provider.Text(state.text, None))
-    True, None, None, False, calls -> {
-      let replay =
-        provider.replay(
-          Turn(state.text, calls),
-          fn(turn, request, tools, format) {
-            Ok(encode_request(request, tools, format, Some(turn)))
-          },
-        )
-      Some(provider.ToolCalls(
+      Some(provider.output_limited(state.text, state.calls, None))
+    True, None, None, False, [] -> Some(provider.text(state.text, None))
+    True, None, None, False, calls ->
+      Some(provider.tool_calls(
         state.text,
         calls,
         Some("response-fourth"),
-        Some(replay),
+        None,
         None,
       ))
-    }
   }
 }

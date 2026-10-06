@@ -13,6 +13,8 @@ glisten = ">= 9.0.0 and < 10.0.0"
 json_blueprint = { path = "../../../json_blueprint" }
 relay = { path = "../../../relay" }
 llm_wire = { path = "../../../llm_wire" }
+http_gun = { path = "../../../http_gun" }
+gleam_time = ">= 1.0.0 and < 2.0.0"
 sinal = { path = "../../../sinal" }
 
 [dev-dependencies]
