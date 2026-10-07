@@ -2,6 +2,7 @@ import envoy
 import financial_recovery/coordinator
 import financial_recovery/payments
 import financial_recovery/provider
+import financial_recovery/reconciliation
 import gleam/erlang/process
 import gleam/int
 import gleam/time/duration
@@ -52,6 +53,7 @@ pub fn with_runtime(
   let assert Ok(_) =
     pog.query("CREATE SCHEMA " <> schema) |> pog.execute(connection)
   let assert Ok(Nil) = payments.migrate(connection)
+  let assert Ok(Nil) = reconciliation.migrate(connection)
   let assert Ok(saga_config) =
     saga_postgres.config(connection) |> saga_postgres.with_schema(schema)
   let assert Ok(Nil) = saga_postgres.migrate(saga_config)

@@ -161,85 +161,93 @@ pub fn evidence(
   id: OperationId,
   reference: String,
 ) -> Result(Nil, Error) {
-  pog.transaction(connection, fn(tx) {
-    use locked <- result.try(
-      pog.query("SELECT reference FROM operations WHERE id=$1 FOR UPDATE")
-      |> pog.parameter(pog.text(domain.id(id)))
-      |> pog.returning(decode.at([0], decode.optional(decode.string)))
-      |> pog.execute(tx)
-      |> result.map_error(domain.Database),
-    )
-    case locked.rows {
-      [] -> Error(domain.OperationMissing)
-      [Some(old)] if old != reference -> Error(domain.EvidenceConflict)
-      _ -> {
-        use _ <- result.try(
-          pog.query(
-            "INSERT INTO payment_evidence(operation,reference) VALUES($1,$2) ON CONFLICT DO NOTHING",
-          )
-          |> pog.parameter(pog.text(domain.id(id)))
-          |> pog.parameter(pog.text(reference))
-          |> pog.execute(tx)
-          |> result.map_error(domain.Database),
+  pog.transaction(connection, fn(tx) { evidence_in(tx, id, reference) })
+  |> result.map_error(transaction_error)
+}
+
+fn evidence_in(
+  tx: pog.Connection,
+  id: OperationId,
+  reference: String,
+) -> Result(Nil, Error) {
+  use locked <- result.try(
+    pog.query("SELECT reference FROM operations WHERE id=$1 FOR UPDATE")
+    |> pog.parameter(pog.text(domain.id(id)))
+    |> pog.returning(decode.at([0], decode.optional(decode.string)))
+    |> pog.execute(tx)
+    |> result.map_error(domain.Database),
+  )
+  case locked.rows {
+    [] -> Error(domain.OperationMissing)
+    [Some(old)] if old != reference -> Error(domain.EvidenceConflict)
+    _ -> {
+      use _ <- result.try(
+        pog.query(
+          "INSERT INTO payment_evidence(operation,reference) VALUES($1,$2) ON CONFLICT DO NOTHING",
         )
-        pog.query("UPDATE operations SET reference=$2 WHERE id=$1")
         |> pog.parameter(pog.text(domain.id(id)))
         |> pog.parameter(pog.text(reference))
         |> pog.execute(tx)
-        |> result.replace(Nil)
-        |> result.map_error(domain.Database)
-      }
+        |> result.map_error(domain.Database),
+      )
+      pog.query("UPDATE operations SET reference=$2 WHERE id=$1")
+      |> pog.parameter(pog.text(domain.id(id)))
+      |> pog.parameter(pog.text(reference))
+      |> pog.execute(tx)
+      |> result.replace(Nil)
+      |> result.map_error(domain.Database)
     }
-  })
-  |> result.map_error(transaction_error)
+  }
 }
 
 pub fn post(
   connection: pog.Connection,
   id: OperationId,
 ) -> Result(String, Error) {
-  pog.transaction(connection, fn(tx) {
-    use operation <- result.try(read(tx, id))
-    use Nil <- result.try(lock_accounts(tx, operation.payment))
-    // Re-read after account locks: another poster may have committed while
-    // this transaction waited. All posting writers follow this lock order.
-    use operation <- result.try(read(tx, id))
-    case operation.state {
-      domain.Reserved -> Error(domain.EvidenceRequired)
-      domain.Posted(reference) -> Ok(reference)
-      domain.Confirmed(reference) -> {
-        use _ <- result.try(
-          pog.query("INSERT INTO postings(operation,reference) VALUES($1,$2)")
-          |> pog.parameter(pog.text(domain.id(id)))
-          |> pog.parameter(pog.text(reference))
-          |> pog.execute(tx)
-          |> result.map_error(domain.Database),
-        )
-        use _ <- result.try(
-          pog.query(
-            "UPDATE accounts SET balance=balance-$2,reserved=reserved-$2 WHERE id=$1",
-          )
-          |> pog.parameter(pog.text(operation.payment.debit))
-          |> pog.parameter(pog.int(operation.payment.cents))
-          |> pog.execute(tx)
-          |> result.map_error(domain.Database),
-        )
-        use _ <- result.try(
-          pog.query("UPDATE accounts SET balance=balance+$2 WHERE id=$1")
-          |> pog.parameter(pog.text(operation.payment.credit))
-          |> pog.parameter(pog.int(operation.payment.cents))
-          |> pog.execute(tx)
-          |> result.map_error(domain.Database),
-        )
-        pog.query("UPDATE operations SET posted=true WHERE id=$1")
-        |> pog.parameter(pog.text(domain.id(id)))
-        |> pog.execute(tx)
-        |> result.replace(reference)
-        |> result.map_error(domain.Database)
-      }
-    }
-  })
+  pog.transaction(connection, fn(tx) { post_in(tx, id) })
   |> result.map_error(transaction_error)
+}
+
+fn post_in(tx: pog.Connection, id: OperationId) -> Result(String, Error) {
+  use operation <- result.try(read(tx, id))
+  use Nil <- result.try(lock_accounts(tx, operation.payment))
+  // Re-read after account locks: another poster may have committed while
+  // this transaction waited. All posting writers follow this lock order.
+  use operation <- result.try(read(tx, id))
+  case operation.state {
+    domain.Reserved -> Error(domain.EvidenceRequired)
+    domain.Posted(reference) -> Ok(reference)
+    domain.Confirmed(reference) -> {
+      use _ <- result.try(
+        pog.query("INSERT INTO postings(operation,reference) VALUES($1,$2)")
+        |> pog.parameter(pog.text(domain.id(id)))
+        |> pog.parameter(pog.text(reference))
+        |> pog.execute(tx)
+        |> result.map_error(domain.Database),
+      )
+      use _ <- result.try(
+        pog.query(
+          "UPDATE accounts SET balance=balance-$2,reserved=reserved-$2 WHERE id=$1",
+        )
+        |> pog.parameter(pog.text(operation.payment.debit))
+        |> pog.parameter(pog.int(operation.payment.cents))
+        |> pog.execute(tx)
+        |> result.map_error(domain.Database),
+      )
+      use _ <- result.try(
+        pog.query("UPDATE accounts SET balance=balance+$2 WHERE id=$1")
+        |> pog.parameter(pog.text(operation.payment.credit))
+        |> pog.parameter(pog.int(operation.payment.cents))
+        |> pog.execute(tx)
+        |> result.map_error(domain.Database),
+      )
+      pog.query("UPDATE operations SET posted=true WHERE id=$1")
+      |> pog.parameter(pog.text(domain.id(id)))
+      |> pog.execute(tx)
+      |> result.replace(reference)
+      |> result.map_error(domain.Database)
+    }
+  }
 }
 
 pub fn posting(
@@ -260,5 +268,23 @@ pub fn transaction_error(error: pog.TransactionError(Error)) -> Error {
   case error {
     pog.TransactionRolledBack(error) -> error
     pog.TransactionQueryError(error) -> domain.Database(error)
+  }
+}
+
+/// Records confirmed evidence and posts inside the caller's transaction.
+/// The account-before-operation lock order matches the posting path.
+pub fn settle_in(
+  tx: pog.Connection,
+  payment: Payment,
+  reference: String,
+) -> Result(String, Error) {
+  use Nil <- result.try(lock_accounts(tx, payment))
+  use operation <- result.try(read(tx, payment.id))
+  case operation.payment == payment {
+    False -> Error(domain.IdentityConflict)
+    True -> {
+      use Nil <- result.try(evidence_in(tx, payment.id, reference))
+      post_in(tx, payment.id)
+    }
   }
 }

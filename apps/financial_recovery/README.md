@@ -2,7 +2,7 @@
 
 - This executable consumer retains financial evidence across Saga execution and Grind delivery.
 - The application owns payment intent, account reservations, provider evidence, and postings. Saga owns workflow checkpoints; Grind owns delivery and operator resolution.
-- The [owning composition contract](../../docs/design/design.typ#financial-recovery) specifies these boundaries. [ADR 0010](../../docs/adr/0010-demonstrate-financial-recovery-through-public-contracts.md) records the decision.
+- The [owning composition contract](../../docs/design/design.typ#financial-recovery) specifies these boundaries. [ADR 0010](../../docs/adr/0010-demonstrate-financial-recovery-through-public-contracts.md) records the composition decision; [ADR 0011](../../docs/adr/0011-settle-finished-uncertainty-in-the-application.md) records application reconciliation. [ADR 0012](../../docs/adr/0012-commit-queue-resolution-with-application-acknowledgment.md) records the atomic acknowledgment boundary.
 
 ## Run
 
@@ -27,14 +27,15 @@
 
 ## Read the consumer
 
-| Module                                                    | Responsibility                                                                          |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `domain`                                                  | Native payment identity, request, financial state, and typed application failures       |
-| `payments`                                                | Account locking, reservations, accepted evidence, and one posting per business identity |
-| `provider`                                                | Payment submit/lookup protocol through an application-owned HTTP Gun client             |
-| `coordinator`                                             | Transactional job admission and durable Saga execution with interrupted-step resolvers  |
-| `test/support`                                            | Explicit startup, migrations, shared pool, and shutdown                                 |
-| `test/scripted_provider` and `test/financial_fixture.erl` | Independent provider evidence, counters, and local transport failure controls           |
+| Module                                                    | Responsibility                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `domain`                                                  | Native payment identity, request, financial state, and typed application failures           |
+| `payments`                                                | Account locking, reservations, accepted evidence, and one posting per business identity     |
+| `provider`                                                | Payment submit/lookup protocol through an application-owned HTTP Gun client                 |
+| `coordinator`                                             | Transactional job admission and durable Saga execution with interrupted-step resolvers      |
+| `reconciliation`                                          | Attributed settlement of a finished unresolved operation and recoverable queue confirmation |
+| `test/support`                                            | Explicit startup, migrations, shared pool, and shutdown                                     |
+| `test/scripted_provider` and `test/financial_fixture.erl` | Independent provider evidence, counters, and local transport failure controls               |
 
 - Ordinary use constructs an application-native payment and admits it through a transaction:
 
@@ -94,7 +95,39 @@
 - A separate real TCP exchange closes the socket after recording the payment. HTTP Gun reports `MaybeSent`; the test does not infer whether an arbitrary real provider executed from that transport evidence alone.
 - If the Saga callback returns an unknown effect normally, Saga stores a finished `Unresolved` outcome. That outcome is distinct from suspended interrupted-step recovery.
 - Authorizing another delivery does not turn that finished outcome into an interrupted step. The test verifies that it remains uncertain without another payment or posting.
-- Settling this finished outcome requires an explicit application reconciliation procedure with authoritative evidence. This recipe demonstrates the safe hold; it does not supply an operator interface or automatically rewrite Saga history.
+- Settling this finished outcome uses the application reconciliation procedure below. It leaves the original Saga report unchanged.
+
+## Reconcile a finished unresolved operation
+
+- The coordinator's application obligation is a confirmed payment and its local posting. An attributed queue confirmation after reconciliation records fulfillment of that obligation; it does not assert that the original Saga reached `Completed`.
+- The calling application authenticates the operator and authorizes access to the payment before invoking reconciliation. The `by` field records attribution; it is not an authorization mechanism.
+- Supply the retained job identifier and one stable decision identity:
+
+  ```gleam
+  reconciliation.reconcile(
+    deps,
+    jobs,
+    job.id(handle),
+    reconciliation.Decision(
+      id: "reconciliation-204",
+      by: "operator-alice",
+      details: "Settle the confirmed payment and record its posting",
+    ),
+  )
+  ```
+
+- Reconciliation binds the job through the coordinator's worker definition and reads its typed input. It checks the financial intent and requires a finished Saga `Unresolved` report before querying the provider.
+- A nonempty provider confirmation supplies evidence for the same business operation. The application commits the evidence, posting and reconciliation audit record in one transaction. A conflicting reference or failed posting rolls all three back and leaves the queue uncertain.
+- A `Database` error from that first transaction may mean its commit reply was lost. Read or retry the same decision identity before choosing further work; do not infer that financial settlement rolled back.
+- The recipe then sends Grind an attributed `ConfirmSuccess` carrying the posted reference. Cancellation prevents replay but does not prevent recording a payment that already executed. This procedure never sends a payment, issues a refund, releases an unconfirmed reservation, or modifies Saga history.
+- A provider failure, HTTP 404, or empty confirmation leaves the reservation held. The scripted provider does not supply proof of authoritative non-execution; reservation release needs a separate provider contract that excludes late execution.
+- Repeating a committed decision reuses its exact record without another lookup. Changed job, actor or reason under that identity produces `DecisionConflict`; a new decision cannot replace the operation's committed reconciliation. The retained decision, rather than a later retry's transient lookup result, is authoritative for an exact repeat.
+- `reconciliation.pending(connection, limit, after: None)` returns at most 100 committed decisions awaiting local acknowledgment of queue confirmation. Continue with `after: Some(last.decision.id)` to reach later records even when an earlier record needs investigation; start each new sweep with `None`. The application invokes `reconciliation.resume(deps, jobs, decision_id)` to retry the same queue decision. Neither function starts a background process.
+- A process can die after financial settlement or after queue confirmation. Resumption uses the stored reference and decision identity without another payment, lookup or posting. `QueuePending` retains Grind's typed refusal; `QueueConfirmationUnknown(decision_id)` requires durable application readback or resumption with the same identity after a lost outer commit reply.
+- Queue confirmation and its local acknowledgment share a short application-owned READ COMMITTED transaction through `admin.resolve_uncertain_in`. A failed acknowledgment rolls back queue resolution; a committed acknowledgment remains available after job pruning. Provider lookup and financial settlement precede this transaction, and the original Saga report remains unchanged.
+- Grind returns `Staged`, preserves stricter statement/lock limits and restores the caller's settings. Row locks last until the outer commit or rollback; the application bounds its transaction and keeps external calls outside it. The `queue_confirmed` observation is emitted only after the combined commit reply.
+- Existing pending records can still lack queue history, and a separate operator may resolve a job under another decision. These conditions remain explicit errors and never fabricate acknowledgment. A missing receipt is not permission to submit another job or repeat a payment.
+- Once local queue acknowledgment is saved, the audit record remains readable and repeatable after job pruning. Application records own their own retention. This recipe supplies neither an operator interface nor an automatically scheduled recovery service.
 
 ## Local posting and cancellation
 
@@ -107,7 +140,7 @@
 ## Ownership, migrations, and retention
 
 - The application configures one Grind-owned pool. Its own queries and `saga_postgres` borrow that pool.
-- `test/support` migrates application and Saga tables before starting queue consumers. Grind performs its startup migration before polling.
+- `test/support` migrates application, reconciliation and Saga tables before starting queue consumers. Grind performs its startup migration before polling.
 - The recipe's application schema is fresh-install test SQL. An existing production deployment needs versioned application migrations and reviewed changes to worker, workflow, and codec versions.
 - Shutdown stops Grind consumers before HTTP Gun and the scripted provider. The borrowed Saga storage has no separate background process.
 - Job pruning deletes queue receipts and submission deduplication records. Financial operation identity, evidence, and postings remain application-owned and are not pruned with jobs.
@@ -120,4 +153,5 @@
 - Process barriers establish effect/checkpoint ordering. Contention waits inspect PostgreSQL's reported lock state with bounded polling; a separate short sleep advances the retention age before invoking the public pruner.
 - The tests do not restart the whole VM or payment-provider process. They do not test TLS, mTLS, a live BaaS provider, upstream behavioral parity, or lost PostgreSQL commit acknowledgements.
 - Grind's package-level fault tests own cancellation acknowledgement loss. This consumer owns the financial composition and the two acknowledgement/cancellation orderings.
+- Reconciliation tests kill the process after each commit boundary, force two PostgreSQL reconciliation inserts to contend, delay one lookup while an identical decision completes, inject real posting and acknowledgment constraint failures, and verify local acknowledgment survives actual queue pruning. A separate operator followed by pruning still demonstrates explicit missing-history recovery for records not confirmed through the atomic procedure. They do not simulate loss of a PostgreSQL commit reply or prove recovery after full VM restart.
 - The consumer fixture is authored locally. It contains no copied provider implementation or upstream oracle requiring separate version/license provenance.

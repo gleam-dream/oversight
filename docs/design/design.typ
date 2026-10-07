@@ -261,6 +261,10 @@
         [An audited AuthorizeReplay command permits another coordinator delivery only where cancellation policy allows it. The coordinator resumes the same durable execution and resolves interrupted effects from authoritative evidence; the authorization does not itself permit another payment request.],
         [A provider lookup must distinguish confirmed completion, authoritative non-execution and insufficient evidence. An unavailable lookup or a non-authoritative absence does not release a reservation or authorize another external effect.],
         [A local posting transaction and the later Saga checkpoint remain separate commits even when they use the same database. The posting record supplies recovery evidence; the consumer does not add a second Saga storage protocol.],
+        [For a finished Unresolved execution, application reconciliation binds the retained coordinator job and validates its native input against financial intent. Positive provider evidence permits one transaction to record the evidence, posting and attributed reconciliation decision. Unavailable, absent, malformed or conflicting evidence cannot release the reservation. The current provider contract supplies no authoritative non-execution proof.],
+        [The coordinator's business obligation is a confirmed payment and local posting. After the application settlement commits, attributed Grind confirmation records that obligation's fulfillment without changing the original Saga report. Cancellation does not prevent recording an executed payment; reconciliation never initiates another payment or a refund.],
+        [A reconciliation identity binds one job, operation, actor, reason and accepted reference. Exact retries reuse the committed decision without another lookup. Pending application records permit bounded discovery with a decision-identity cursor and resumption by decision identity; the caller owns authorization, scheduling and retention. A blocked record does not hide later records, and no recovery service starts implicitly.],
+        [After financial settlement, queue confirmation and its local acknowledgment share one short caller-owned READ COMMITTED transaction through Grind's borrowed resolution API. A failed local acknowledgment rolls back queue resolution; a committed acknowledgment survives queue pruning under application retention. A lost outer commit reply requires application readback or resumption by the same decision identity. Investigation remains outside this transaction, whose locks last until commit or rollback. Existing missing history and separate operator resolutions remain explicit errors; neither creates another delivery or fabricates acknowledgment. See #adr(12).],
         [The scripted provider owns independent payment evidence and submission counts. Process barriers expose effect/checkpoint gaps. Loopback lost-response evidence establishes HTTP delivery behavior, not TLS or live-provider qualification.],
       )
       #behavior(title: "Financial admission commits with delivery", area: "Financial recovery", level: "boundary")[
@@ -305,12 +309,27 @@
         #when[The application receives the same business operation again.]
         #then[The application returns its retained result without another payment or posting.]
       ]
+      #behavior(title: "Finished uncertainty admits application settlement", area: "Financial recovery", level: "boundary")[
+        #given[A coordinator job is uncertain and its Saga has a saved Unresolved report.]
+        #when[An authorized application reconciliation obtains authoritative payment completion evidence.]
+        #then[Evidence, one local posting and an attributed decision commit together before delivery is reported as confirmed.]
+        #then[The original Saga report remains unchanged; repeated or concurrent identical decisions cannot post or submit the payment again.]
+        #then[A missing, malformed or conflicting confirmation leaves the reservation held. A posting failure rolls back the application settlement and cannot produce a confirmed delivery outcome.]
+      ]
+      #behavior(title: "Reconciliation resumes between independent commits", area: "Financial recovery", level: "boundary")[
+        #given[An application settlement committed before the reconciler process stopped.]
+        #when[The caller discovers the pending decision and resumes it.]
+        #then[The retained decision supplies the exact attributed delivery resolution without another provider lookup or financial effect.]
+        #then[Delivery resolution and the local acknowledgment become durable together; rollback preserves the pending decision and uncertain delivery.]
+        #then[An already committed acknowledgment remains readable after delivery pruning.]
+        #then[Missing delivery history retains an explicit pending acknowledgment and the settled financial facts.]
+      ]
       #behavior(title: "The application retains its isolation choice", area: "Financial recovery", level: "boundary")[
         #given[The application supplies a SERIALIZABLE transaction to Grind admission.]
         #when[The consumer attempts `submit_in`.]
         #then[The typed unsupported-isolation result is preserved and the application transaction is not silently weakened.]
       ]
-      #adr(10)
+      #adr(10) #adr(11)
     ]
     #subsection(title: "Webhook delivery")[
       #answers(title: "Webhook delivery policy",

@@ -35,5 +35,20 @@ pub fn visible(provider: process.Pid, visible: Bool) -> Nil
 @external(erlang, "financial_fixture", "counts")
 pub fn counts(provider: process.Pid) -> #(Int, Int)
 
+@external(erlang, "financial_fixture", "forget")
+pub fn forget(provider: process.Pid, operation: String) -> Nil
+
+@external(erlang, "financial_fixture", "reference")
+pub fn reference(provider: process.Pid, operation: String, value: String) -> Nil
+
+@external(erlang, "financial_fixture", "block_next_lookup")
+pub fn block_next_lookup(
+  provider: process.Pid,
+  notices: process.Subject(process.Pid),
+) -> Nil
+
+@external(erlang, "financial_fixture", "release_lookup")
+pub fn release_lookup(handler: process.Pid, status: Int) -> Nil
+
 @external(erlang, "financial_fixture", "shutdown")
 pub fn stop(provider: process.Pid) -> Nil
