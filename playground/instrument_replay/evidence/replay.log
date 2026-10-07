@@ -1,0 +1,6 @@
+truncated reason: Request failed: peer closed; status 200; request may have been sent
+oversized reason: Response body bytes limit 512; observed 2154; status 200; request may have been sent
+PASS offline: native equality, redacted-token match, page mismatch preserves position, faults
+PASS evolution: located range drift and explicit ContractMismatch
+PASS cancellation: pre-cancelled NotSent preserves cassette position
+PASS concurrent: independent streams, native observations and HTTP correlation, detach and stop
