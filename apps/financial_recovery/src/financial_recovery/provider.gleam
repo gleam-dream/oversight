@@ -7,6 +7,7 @@ import gleam/http
 import gleam/http/request
 import gleam/json
 import gleam/result
+import gleam/string
 import gleam/uri
 import http_gun
 import http_gun/error
@@ -61,6 +62,12 @@ fn call(
     200 ->
       bit_array.to_string(response.response.body)
       |> result.replace_error(InvalidResponse)
+      |> result.try(fn(reference) {
+        case string.trim(reference) == "" {
+          True -> Error(InvalidResponse)
+          False -> Ok(reference)
+        }
+      })
     status -> Error(Status(status))
   }
 }
