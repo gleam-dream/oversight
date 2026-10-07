@@ -22,7 +22,6 @@
 
   #pagebreak(weak: true)
   #pending-ledger(
-      pending-entry(title: "Cancellation and effect settlement remain distinct", kind: "ruling")[Grind's pending-cancellation acknowledgement can replace an explicit uncertain-effect proposal with cancellation. The owning design must decide how cancellation intent and effect evidence coexist; applications cannot treat cancellation as proof that an external effect was prevented.],
       pending-entry(title: "A complete request budget needs an owner", kind: "ruling")[Relay admission callbacks precede its dispatch timeout, while Saga driver timeout is followed by bounded synchronous cleanup. A composed foreground deadline must specify admission, execution, cancellation grace, and cleanup rather than assuming the same duration bounds all phases.],
       pending-entry(title: "External schema breadth must be explicit", kind: "ruling")[Blueprint admits a finite runtime schema profile. General third-party MCP discovery requires a chosen supported vocabulary, bounded validation, and safe provider projection; sibling-to-sibling discovery alone does not establish that breadth.],
       pending-entry(title: "Durable scheduling integration remains application-owned", kind: "ruling")[Applications currently drive and cancel durable Saga and Fabric work through Grind jobs. The intended broader scheduling/retention integration requires a decision about authority before any common driver abstraction is introduced.],
@@ -240,6 +239,78 @@
         failure: [Known failures compensate in reverse completion order. Lost driver ownership permits checkpoint resumption; requested job cancellation is translated into durable Saga cancellation and rollback.],
       )
       #points([The application owns payment/shipment reconciliation and release policy. A job retry alone cannot decide whether stock or money should be restored.], [Source owners: `apps/checkout/src/checkout/workflow.gleam`, `orders.gleam`, `jobs.gleam`, `gateway.gleam`, and `db.gleam`.])
+    ]
+    #subsection(title: "Financial recovery")[
+      #answers(title: "Payment evidence across independent durable records",
+        responsibility: [Retain application financial intent, reservations, payment evidence and local postings while coordinating recoverable execution and job delivery.],
+        interface: [A separate public consumer under `apps/financial_recovery`, with native operation identifiers, payment requests, outcomes and errors. Its test entry runs against disposable PostgreSQL and a scripted loopback payment provider.],
+        interactions: [The payment record owns financial facts. Saga owns the step checkpoint and interrupted-effect resolver. Grind owns delivery and attributed replay authorization. HTTP Gun supplies exchange evidence without inferring provider execution.],
+        invariants: [A stable business operation identity survives job and receipt pruning. Reservation remains held while the payment result is unknown. Accepted evidence and local posting are idempotent by business identity. Re-entering a completed operation does not send another payment or post again.],
+        failure: [A lost response or unavailable lookup leaves an unresolved payment. An interrupted Saga action uses its resolver before another effect is permitted. A completed unresolved Saga outcome is retained as such; coordinator replay does not turn it into an interrupted action.],
+      )
+      #md-table(4, (
+        [*Record*], [*Owner*], [*Stable identity*], [*Authority*],
+        [Payment operation], [Application], [Business operation identifier], [Intent, reservation, evidence and posting],
+        [Workflow execution], [Saga], [Run and effect identifiers], [Admitted actions, checkpoints and interrupted-step recovery],
+        [Delivery], [Grind], [Submission, job and attempt identifiers], [Scheduling, acknowledged outcome and attributed resolution],
+      ))
+      #points(
+        [The consumer uses one application-configured Grind pool; application queries and saga_postgres borrow it. Startup applies all required schemas before admitting jobs. Shutdown stops drivers and borrowers before the pool.],
+        [READ COMMITTED admission locks known account rows in a deterministic order and atomically records financial intent, reservation and job insertion. The example states the protected account invariant; this locking protocol is not a universal replacement for SERIALIZABLE isolation.],
+        [A caller retaining SERIALIZABLE isolation receives Grind's typed refusal for `submit_in`. An application outbox can atomically record dispatch intent with its business transaction and submit separately under a stable operation key. It requires explicit dispatch, retry and retention ownership rather than an implied atomic cross-transaction enqueue.],
+        [An audited AuthorizeReplay command permits another coordinator delivery only where cancellation policy allows it. The coordinator resumes the same durable execution and resolves interrupted effects from authoritative evidence; the authorization does not itself permit another payment request.],
+        [A provider lookup must distinguish confirmed completion, authoritative non-execution and insufficient evidence. An unavailable lookup or a non-authoritative absence does not release a reservation or authorize another external effect.],
+        [A local posting transaction and the later Saga checkpoint remain separate commits even when they use the same database. The posting record supplies recovery evidence; the consumer does not add a second Saga storage protocol.],
+        [The scripted provider owns independent payment evidence and submission counts. Process barriers expose effect/checkpoint gaps. Loopback lost-response evidence establishes HTTP delivery behavior, not TLS or live-provider qualification.],
+      )
+      #behavior(title: "Financial admission commits with delivery", area: "Financial recovery", level: "boundary")[
+        #given[An application admits a payment operation inside a supported transaction.]
+        #when[The transaction commits or rolls back after job insertion.]
+        #then[Financial intent, reservation and job admission become visible together or remain absent together.]
+        #then[An incompatible reuse of the business identity is refused without another reservation.]
+        #then[Competing admissions over the same locked accounts cannot reserve more than their available balance; refusal leaves no partial operation or delivery.]
+      ]
+      #behavior(title: "Payment execution checks application intent", area: "Financial recovery", level: "boundary")[
+        #given[A caller invokes the coordinator through Saga or Grind.]
+        #when[The transfer effect checks the application's payment record.]
+        #then[Missing or incompatible intent prevents a provider submission.]
+        #then[Retained completion evidence supplies the known result without another provider submission.]
+      ]
+      #behavior(title: "Interrupted payment recovery preserves uncertainty", area: "Financial recovery", level: "boundary")[
+        #given[A payment action is interrupted after the provider may have executed it and before Saga checkpoints its result.]
+        #when[The replacement coordinator cannot obtain authoritative provider evidence.]
+        #then[Saga recovery remains suspended and Grind exposes an uncertain job outcome.]
+        #then[The application retains the reservation and does not submit another payment.]
+      ]
+      #behavior(title: "Authorized delivery resolves before another effect", area: "Financial recovery", level: "boundary")[
+        #given[An interrupted payment has authoritative completion evidence and no pending cancellation.]
+        #when[An attributed resolution authorizes delivery of its coordinator again.]
+        #then[The same Saga execution resolves the interrupted action and the application posts the known payment once.]
+        #then[Repeated evidence or completed-operation re-entry does not send another payment or create another posting.]
+      ]
+      #behavior(title: "Local posting survives a missing checkpoint", area: "Financial recovery", level: "boundary")[
+        #given[The posting transaction commits before Saga checkpoints step completion.]
+        #when[The executing process dies and another coordinator recovers the same operation.]
+        #then[The resolver discovers the committed posting and supplies its result.]
+        #then[The posting callback is not repeated.]
+      ]
+      #behavior(title: "Cancellation preserves financial uncertainty", area: "Financial recovery", level: "boundary")[
+        #given[A payment effect is unresolved.]
+        #when[Cancellation and its uncertain worker acknowledgement arrive in either order.]
+        #then[The job's uncertainty and evidence remain queryable and its cancellation intent prevents replay authorization.]
+        #then[The application retains its reservation until explicit financial reconciliation settles the operation.]
+      ]
+      #behavior(title: "Business identity outlives queue retention", area: "Financial recovery", level: "boundary")[
+        #given[A payment operation and posting are complete and the old terminal job and its receipts have been pruned.]
+        #when[The application receives the same business operation again.]
+        #then[The application returns its retained result without another payment or posting.]
+      ]
+      #behavior(title: "The application retains its isolation choice", area: "Financial recovery", level: "boundary")[
+        #given[The application supplies a SERIALIZABLE transaction to Grind admission.]
+        #when[The consumer attempts `submit_in`.]
+        #then[The typed unsupported-isolation result is preserved and the application transaction is not silently weakened.]
+      ]
+      #adr(10)
     ]
     #subsection(title: "Webhook delivery")[
       #answers(title: "Webhook delivery policy",

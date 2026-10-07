@@ -1,17 +1,20 @@
 # Validation
 
-Run checks from the repository root through its Nix shell. The full gate uses
-the sibling checkouts listed in `sibling-revisions.txt`. Tests use scripted
-services and disposable PostgreSQL; they need no provider accounts.
+Run checks from the repository root through its Nix shell. Local checks use
+the sibling working trees beside Oversight and record their revisions and dirty
+status. Required CI checks use the revisions in `sibling-revisions.txt`.
+Tests use scripted services and disposable PostgreSQL; they need no provider
+accounts.
 
 ```sh
 nix develop --command python3 -B scripts/ci.py quality
 nix develop --command python3 -B scripts/ci.py application checkout
+nix develop --command python3 -B scripts/ci.py application financial_recovery
 nix develop --command python3 -B scripts/ci.py experiments
 nix develop --command python3 -B scripts/ci.py full
 ```
 
-The full gate runs quality checks, all eight applications, retained experiments
+The full gate runs quality checks, all nine applications, retained experiments
 and the design gate. CI divides the same commands into jobs. Its final `CI`
 status requires every mandatory job to succeed; failures, cancellations and
 unexpected skips cannot satisfy it.
@@ -44,11 +47,23 @@ Tokens are not persisted in Git configuration or passed to the test commands.
 Oversight remains private; its visibility does not restrict access to the public
 libraries.
 
-Each required run reads immutable revisions from `sibling-revisions.txt`.
+Each required CI run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.
 The separate weekly compatibility workflow resolves sibling default branches
 and records the actual revisions; it does not update pins or replace required
 PR evidence. It can also be run manually.
+
+For local reproduction, keep the nine sibling repositories beside Oversight.
+The [checkout action](../.github/actions/siblings/action.yml) records their
+repository locations; the manifest records the revisions. Use separate clean
+checkouts when reproducing that set so existing work remains intact. The local
+runner records the trees it actually uses and never changes their revisions.
+The Nix lock supplies the toolchain, including Erlang/OTP 28 and PostgreSQL 16.
+
+A passing run with dirty siblings qualifies that workspace. It does not qualify
+the manifest's frozen revisions. After coordinated library changes are committed,
+update the pins and rerun the affected consumer against those clean revisions
+before presenting the set as reproducible release evidence.
 
 ## Results and release evidence
 

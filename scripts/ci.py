@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE = ROOT / ".artifacts" / "ci"
 APPLICATIONS = (
-    "checkout", "extractor", "research_agent", "secure_mcp",
+    "checkout", "extractor", "financial_recovery", "research_agent", "secure_mcp",
     "sso_portal", "support_desk", "tool_hub", "webhooks",
 )
 DATABASE_APPS = frozenset(APPLICATIONS) - {"support_desk", "tool_hub"}
