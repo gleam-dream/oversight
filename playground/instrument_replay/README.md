@@ -57,6 +57,7 @@ nix develop /code/gleam-dream/oversight --command python3 -B run.py
 
 ## Ergonomics and configuration findings
 
+- HTTP Gun's [independent replay recipe](https://github.com/gleam-dream/http_gun/blob/master/docs/USAGE.md#independent-replay-runs) documents the cursor and correlation distinction, with a compiled consumer over one shared script.
 - Keep the single HTTP client boundary. The acquisition function accepts the same `Client` for native capture and offline replay. It needs no transport adapter, mock, or private import.
 - Keep Blueprint's distinction between validation and native decoding. `ValidatedValue` carries the schema that admitted it; a new decoder cannot silently reinterpret that witness. Ordinary known-codec use remains one call, while the extra runtime-contract steps buy separately observable policy admission.
 - Keep explicit error translation in the consumer. HTTP submission evidence cannot be replaced by a schema error. The `AdmissionFailure` sum retains the underlying typed failure for retry or review decisions; diagnostic strings are only printed in the receipt.
@@ -64,7 +65,7 @@ nix develop /code/gleam-dream/oversight --command python3 -B run.py
 - Keep redaction configuration explicit. Default credential stripping does not imply query or body sanitization. The body scrubber operates on complete recorded bodies, including the invalid-body marker, and the consumer's synthetic data makes its replacement rule safe for this experiment.
 - The consumer must choose four different budgets: HTTP collection, JSON admission, cassette capture, and waiting. They protect different resources. Combining them into one unexplained limit would conceal that distinction.
 - The public README and module documentation made the tested capabilities discoverable. `cassette.finish` versus `http_gun.stop`, contract schema identity, ordered matching and Sinal callback process ownership were especially consequential details.
-- Smallest proposed improvement: add a short public cassette recipe showing two independent `testing.playback` clients over one loaded script with distinct `with_correlation` views. The existing APIs suffice; an ecosystem facade or a shared retry/configuration abstraction is not warranted by this experiment.
+- The public cassette recipe shows two independent `testing.playback` clients over one loaded script with distinct `with_correlation` views. The existing APIs suffice; an ecosystem facade or a shared retry/configuration abstraction is not warranted by this experiment.
 
 ## Boundaries and development findings
 

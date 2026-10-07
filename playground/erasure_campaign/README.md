@@ -159,14 +159,14 @@ campaign.execute_targets(
   queue setting and stop/continue an application policy. No generic workflow,
   framework runtime, deletion hook, archive or core option is proposed.
 
-## Evidence-backed proposal hypothesis
+## Resolution identity guidance
 
-- Clarify resolution-ID scope in Grind's public `resolution` documentation.
-  Before: a caller can read “a decision, identified by id” and reuse a constant
-  for each job, receiving `ResolutionConflict` on the second job. After: document
-  that IDs are scoped to the installation and show a stable job-qualified ID.
-  This is a documentation hypothesis based on one observed incorrect call, not
-  evidence that a new constructor, namespace API or runtime behavior is needed.
+- Grind's [resolution guidance](https://github.com/gleam-dream/grind/blob/master/docs/USAGE.md#resolve-an-uncertain-job) documents the installation scope, saved command identity and exact retry rules.
+- Reusing a constant for different jobs produced `ResolutionConflict` on the
+  second job. The public guide now shows a saved application decision ID
+  qualified by the job ID and explains exact-command retry. The observed
+  incorrect call supports clearer documentation; it supplies no evidence that
+  a new constructor, namespace API or runtime behavior is needed.
 
 ## Limits
 
