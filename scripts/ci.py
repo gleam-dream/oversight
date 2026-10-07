@@ -122,7 +122,11 @@ def quality() -> None:
     run(["nix", "flake", "check", "--no-update-lock-file"])
     run(["actionlint", "-color"])
     run(["ruff", "check", "scripts", "playground"])
-    run(["shellcheck", "apps/scripts/with-postgres.sh", "playground/http_gun_interface/check.sh"])
+    run([
+        "shellcheck", "apps/scripts/with-postgres.sh", "playground/http_gun_interface/check.sh",
+        "playground/archive_release/run.sh", "playground/archive_release/provenance.sh",
+        "playground/erasure_campaign/run.sh",
+    ])
     run([sys.executable, "-B", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"])
 
 
@@ -150,6 +154,14 @@ def experiments() -> None:
     run(["gleam", "build", "--warnings-as-errors"], cwd=pilot)
     compile_erlang(pilot)
     run(["gleam", "test"], cwd=pilot)
+    for name, command in (
+        ("archive_release", ["bash", "run.sh"]),
+        ("instrument_replay", [sys.executable, "-B", "run.py"]),
+        ("erasure_campaign", ["bash", "run.sh"]),
+    ):
+        env = dict(os.environ)
+        env["OVERSIGHT_PG_LOG_DIR"] = str(EVIDENCE / name / "postgres")
+        run(command, cwd=ROOT / "playground" / name, env=env)
 
 
 def main() -> None:

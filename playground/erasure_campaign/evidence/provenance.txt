@@ -1,0 +1,13 @@
+2026-10-07T18:49:34Z
+gleam 1.18.1
+OTP 28 ERTS 16.4.0.6
+postgres (PostgreSQL) 16.15
+Python 3.14.7
+oversight 2a130319d7ca7adaca6d00e51b4824fe6a9bf7b6 tracked-change-lines=6
+saga 7859d999bd5045e3594ae3c735a2a64029e1f91b tracked-change-lines=0
+grind 4eacea8a4b9e0413b68f692bbbb4efd5ed015d18 tracked-change-lines=0
+http_gun f081ef8fb4e3d6ee127e25deb3bcb63fdefbfd6f tracked-change-lines=0
+sinal c3539129ed0d80c9ade12e4c350566cb2d6c248d tracked-change-lines=0
+f35d6b1478814d7eb1e8bc08f051aedaf0c2bc2d3b37c050219c1463b6f3b6a4  gleam.toml
+a36f01f8c96d13eb61098cd238bec4c9f9664a419724ac1b9040f4e9a029b967  manifest.toml
+b8c2309b1bb6b9ae5cd46eab04d920449a397a9a2c7d4d340d5d8fb710af6354  ../../flake.lock

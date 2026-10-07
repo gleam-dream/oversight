@@ -417,6 +417,9 @@
       [`playground/blueprint_compatibility`], [How do codec/schema cases compare with the pinned implementation and validator?], [Only executed supported-vocabulary cases establish equivalence.],
       [`playground/ecosystem_pilot`], [Can protocol declarations, model calls and typed observations compose through public imports?], [A pilot does not replace each package's fault and resource tests.],
       [`playground/http_gun_interface`], [Can transport ownership and provider-neutral use fit separate consumers?], [Laboratory signatures are not retained public API promises.],
+      [`playground/archive_release`], [Can authenticated admission and durable approval bind release to its requester, revision and current permission?], [Direct authorization admission and orderly store reopen do not establish full MCP transport or mid-effect crash recovery.],
+      [`playground/instrument_replay`], [Can bounded recorded transport support offline evaluation under different application contracts?], [Synthetic measurements and local faults do not qualify a scientific instrument or remote service.],
+      [`playground/erasure_campaign`], [Can reversible preparation compose with irreversible delivery and forward reconciliation?], [Application evidence, synthetic targets and local restarts do not establish legal erasure or host-loss guarantees.],
       [`apps/scripts/with-postgres.sh`], [Can a consumer exercise real persistence in an isolated reproducible cluster?], [No production database, remote provider or existing deployment is validated.],
     ))
     #behavior(title: "A consumer proves only executed behavior", area: "Evidence acceptance", level: "boundary")[

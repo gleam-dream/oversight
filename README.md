@@ -62,6 +62,12 @@ Retained experiments answer narrower questions:
   calls over local HTTP.
 - [HTTP API probe](playground/http_gun_interface/README.md): a declaration-only
   consumer experiment.
+- [Archive release](playground/archive_release/README.md): requester identity,
+  current permissions and exact document revisions across durable approval.
+- [Instrument replay](playground/instrument_replay/README.md): offline HTTP
+  evidence evaluated under different measurement contracts.
+- [Erasure campaign](playground/erasure_campaign/README.md): reversible
+  preparation followed by irreversible deletion and forward reconciliation.
 
 ## Benchmarks
 

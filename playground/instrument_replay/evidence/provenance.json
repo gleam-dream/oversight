@@ -1,0 +1,19 @@
+{
+  "revisions": {
+    "oversight": "2a130319d7ca7adaca6d00e51b4824fe6a9bf7b6",
+    "http_gun": "f081ef8fb4e3d6ee127e25deb3bcb63fdefbfd6f",
+    "json_blueprint": "0b7fe497decb75b376329467c88b3a3e42bd1219",
+    "sinal": "c3539129ed0d80c9ade12e4c350566cb2d6c248d"
+  },
+  "tracked_dirty": {
+    "oversight": true,
+    "http_gun": false,
+    "json_blueprint": false,
+    "sinal": false
+  },
+  "gleam": "gleam 1.18.1",
+  "erlang": "Erlang/OTP 28 [erts-16.4.0.6] [source] [64-bit] [smp:2:2] [ds:2:2:10] [async-threads:1] [jit]",
+  "python": "3.14.7",
+  "manifest_sha256": "c69d205d754b2c38b083d1bbf8323aed8c6312a8f854b4547bde19e99ebcd35d",
+  "scope": "separate consumer; public imports; native loopback HTTP and offline playback"
+}

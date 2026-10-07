@@ -1,0 +1,22 @@
+Behavioral regression: authenticated requester substitution
+
+Before fix, after a successful compile and seven passing cases:
+  test: archive_release_test.delayed_release_cannot_substitute_authenticated_requester_test
+  actual: Succeeded("{\"document\":\"substitution\",\"revision\":1}")
+  expected: Denied("requester identity changed")
+  result: 7 passed, 1 failure (exit 1)
+
+Both identities were authenticated with signed local-provider tokens. The
+substitute held a separate database permission. The old application persisted
+only document and revision and accepted a new context principal.
+
+Application fix: persist Principal in Release arguments; compare it to current
+Context in policy and handler; advance the agent definition to version 2.
+
+After fix:
+  result: 8 passed, no failures (exit 0)
+  requester substitution: action Denied; no release row
+
+This was an application bug. No sibling library was modified. The retained
+regression test is in test/archive_release_test.gleam. Historical authoring
+logs are ignored; this receipt distinguishes executed failure from speculation.

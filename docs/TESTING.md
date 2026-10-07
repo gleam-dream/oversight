@@ -39,6 +39,14 @@ unfinished runtime declarations. Their own compiler checkers remain the
 acceptance boundary; they are not warning-free production packages. Frozen
 upstream inputs and captured evidence are not rewritten by linting.
 
+The experiments profile also runs [archive release](../playground/archive_release/README.md),
+[instrument replay](../playground/instrument_replay/README.md), and
+[erasure campaign](../playground/erasure_campaign/README.md). Each retains its
+expected outcomes, native consumer inputs, runner, observed results and limits.
+Their runners check compilation before exercising local services; the two
+persistence examples use disposable PostgreSQL. Follow each README to run one
+experiment independently.
+
 ## Sibling access
 
 All nine library repositories are public. CI checks them out with the default
