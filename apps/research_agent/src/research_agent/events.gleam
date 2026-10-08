@@ -18,6 +18,7 @@ pub type State {
   Publishing
   Published
   Failed
+  Uncertain
   Cancelled
 }
 
@@ -32,6 +33,7 @@ pub fn state_name(state: State) -> String {
     Publishing -> "publishing"
     Published -> "published"
     Failed -> "failed"
+    Uncertain -> "uncertain"
     Cancelled -> "cancelled"
   }
 }
@@ -41,7 +43,15 @@ pub fn state_changed() -> sinal.Event(Nil, Transition) {
     use state <- fields.include(
       fields.enum(
         "state",
-        [Queued, Researching, Publishing, Published, Failed, Cancelled],
+        [
+          Queued,
+          Researching,
+          Publishing,
+          Published,
+          Failed,
+          Uncertain,
+          Cancelled,
+        ],
         state_name,
       ),
       get: fn(t) { t.state },

@@ -49,6 +49,7 @@ pub type Notice {
   LlmStalled(topic: String, step: Int)
   LlmStreamClosed(topic: String, step: Int)
   PageStalled(id: String)
+  MutationApplied(operation: Operation)
 }
 
 pub type Services {
@@ -73,7 +74,26 @@ pub type DraftState {
   Deleted
 }
 
+pub type Operation {
+  Creation
+  Upload
+  Publication
+  Deletion
+  Inspection
+}
+
+pub type Fault {
+  DropReply
+  HoldReply
+  Reject
+  MalformedReply
+}
+
 pub opaque type Message {
+  SetFault(Operation, Fault)
+  OperationFault(Operation, Subject(Option(Fault)))
+  GetDraft(String, Subject(Option(DraftState)))
+  GetCalls(Operation, Subject(Int))
   SetScript(topic: String, steps: List(Step))
   LlmTurn(topic: String, step: Int, reply: Subject(Step))
   Search(reply: Subject(Result(Nil, Int)))
@@ -97,6 +117,8 @@ pub opaque type Message {
 
 type World {
   World(
+    faults: Dict(Operation, Fault),
+    calls: Dict(Operation, Int),
     scripts: Dict(String, List(Step)),
     llm_bodies: Dict(String, List(String)),
     hits: Dict(#(String, Int), Int),
@@ -114,6 +136,8 @@ type World {
 pub fn start() -> Result(Services, String) {
   use world <- result.try(
     actor.new(World(
+      faults: dict.new(),
+      calls: dict.new(),
       scripts: dict.new(),
       llm_bodies: dict.new(),
       hits: dict.new(),
@@ -145,6 +169,14 @@ pub fn start() -> Result(Services, String) {
     |> result.replace_error("the loopback server did not report its port"),
   )
   Ok(Services(port:, world:))
+}
+
+pub fn fault(services: Services, operation: Operation, fault: Fault) -> Nil {
+  process.send(services.world, SetFault(operation, fault))
+}
+
+pub fn calls(services: Services, operation: Operation) -> Int {
+  process.call(services.world, 1000, GetCalls(operation, _))
 }
 
 pub fn base_url(services: Services) -> String {
@@ -248,6 +280,28 @@ pub fn drafts(services: Services) -> List(#(String, DraftState)) {
 fn handle(world: World, message: Message) -> actor.Next(World, Message) {
   let counts = world.counts
   case message {
+    SetFault(operation, fault) ->
+      actor.continue(
+        World(..world, faults: dict.insert(world.faults, operation, fault)),
+      )
+    OperationFault(operation, reply) -> {
+      process.send(
+        reply,
+        dict.get(world.faults, operation) |> option.from_result,
+      )
+      let count = dict.get(world.calls, operation) |> result.unwrap(0)
+      actor.continue(
+        World(..world, calls: dict.insert(world.calls, operation, count + 1)),
+      )
+    }
+    GetCalls(operation, reply) -> {
+      process.send(reply, dict.get(world.calls, operation) |> result.unwrap(0))
+      actor.continue(world)
+    }
+    GetDraft(id, reply) -> {
+      process.send(reply, dict.get(world.drafts, id) |> option.from_result)
+      actor.continue(world)
+    }
     SetScript(topic, steps) ->
       actor.continue(
         World(..world, scripts: dict.insert(world.scripts, topic, steps)),
@@ -446,31 +500,94 @@ fn route(
   case req.method, request.path_segments(req) {
     http.Get, ["search"] -> search(world, req)
     http.Get, ["pages", id] -> page(world, id)
-    http.Post, ["drafts"] -> create_draft(world, req)
-    http.Get, ["drafts"] -> find_draft(world, req)
+    http.Post, ["drafts"] ->
+      publisher_response(world, Creation, fn() { create_draft(world, req) })
+    http.Get, ["drafts"] ->
+      publisher_response(world, Inspection, fn() { find_draft(world, req) })
+    http.Get, ["drafts", id] ->
+      publisher_response(world, Inspection, fn() {
+        case process.call(world, 1000, GetDraft(id, _)) {
+          None -> text(404, "no such draft")
+          Some(state) ->
+            json_response(
+              200,
+              json.object([
+                #(
+                  "state",
+                  json.string(case state {
+                    Draft -> "draft"
+                    BodyUploaded -> "uploaded"
+                    Live -> "live"
+                    Deleted -> "deleted"
+                  }),
+                ),
+                #("url", json.string("https://blog.example/" <> id)),
+              ]),
+            )
+        }
+      })
     http.Put, ["drafts", id, "body"] ->
-      case process.call(world, 1000, UploadBody(id, _)) {
-        True -> text(204, "")
-        False -> text(409, "no such draft")
-      }
+      publisher_response(world, Upload, fn() {
+        case process.call(world, 1000, UploadBody(id, _)) {
+          True -> text(204, "")
+          False -> text(409, "no such draft")
+        }
+      })
     http.Post, ["drafts", id, "publish"] ->
-      case process.call(world, 1000, PublishDraft(id, _)) {
-        Ok(Nil) ->
-          json_response(
-            200,
-            json.object([
-              #("url", json.string("https://blog.example/" <> id)),
-            ]),
-          )
-        Error(Nil) -> text(500, "publisher unavailable")
-      }
+      publisher_response(world, Publication, fn() {
+        case process.call(world, 1000, PublishDraft(id, _)) {
+          Ok(Nil) ->
+            json_response(
+              200,
+              json.object([#("url", json.string("https://blog.example/" <> id))]),
+            )
+          Error(Nil) -> text(409, "publication rejected before mutation")
+        }
+      })
     http.Delete, ["drafts", id] ->
-      case process.call(world, 1000, DeleteDraft(id, _)) {
-        True -> text(204, "")
-        False -> text(404, "no such draft")
-      }
+      publisher_response(world, Deletion, fn() {
+        case process.call(world, 1000, DeleteDraft(id, _)) {
+          True -> text(204, "")
+          False -> text(404, "no such draft")
+        }
+      })
     http.Post, ["openai", "v1", "responses"] -> llm(world, req)
     _, _ -> text(404, "not found")
+  }
+}
+
+// Faults act on real socket replies, after the actor has recorded the effect.
+fn publisher_response(
+  world: Subject(Message),
+  operation: Operation,
+  perform: fn() -> Response(mist.ResponseData),
+) -> Response(mist.ResponseData) {
+  let fault = process.call(world, 1000, OperationFault(operation, _))
+  case fault {
+    Some(Reject) -> text(409, "rejected before mutation")
+    _ -> {
+      let response = perform()
+      case
+        operation != Inspection
+        && response.status >= 200
+        && response.status < 300
+      {
+        True -> process.send(world, Notify(MutationApplied(operation)))
+        False -> Nil
+      }
+      case fault {
+        Some(DropReply) -> {
+          process.kill(process.self())
+          response
+        }
+        Some(HoldReply) -> {
+          process.sleep(30_000)
+          response
+        }
+        Some(MalformedReply) -> text(response.status, "malformed")
+        _ -> response
+      }
+    }
   }
 }
 

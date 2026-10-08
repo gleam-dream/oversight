@@ -36,7 +36,7 @@ import research_agent/researcher.{type Context, type Endpoints}
 import research_agent/telemetry.{type Telemetry}
 import research_agent/wire
 import saga/durable
-import saga/execution
+import saga/outcome
 import saga/storage.{type Storage}
 import sinal/correlation.{type Correlation}
 
@@ -129,17 +129,22 @@ pub fn handle(
           timeout: duration.seconds(60),
         )
       case published {
-        Ok(execution.Completed(published)) -> {
-          let _ =
-            db.set_state(conn, research.id, events.Published, published.url)
-          worker.Succeeded(published)
-        }
-        Ok(outcome) -> {
-          let detail = publish.describe(outcome)
-          let _ = db.set_state(conn, research.id, events.Failed, detail)
-          // Rolled back (or needs a person): a retry would reconnect to the
-          // same finished saga, so the job ends here.
-          worker.Discarded(detail)
+        Ok(report) -> {
+          case
+            outcome.classify(report, fn(error) {
+              error.step <> ": " <> error.detail
+            })
+          {
+            Ok(published) -> {
+              let _ =
+                db.set_state(conn, research.id, events.Published, published.url)
+              worker.Succeeded(published)
+            }
+            Error(outcome.Definitely(detail)) ->
+              publication_stopped(conn, research.id, events.Failed, detail)
+            Error(outcome.Unknown(detail)) ->
+              publication_stopped(conn, research.id, events.Uncertain, detail)
+          }
         }
         Error(error) -> {
           let detail =
@@ -152,8 +157,7 @@ pub fn handle(
             durable.NeedsReconciliation
             | durable.Incompatible
             | durable.Defect -> {
-              let _ = db.set_state(conn, research.id, events.Failed, detail)
-              worker.Uncertain(detail)
+              publication_stopped(conn, research.id, events.Uncertain, detail)
             }
           }
         }
@@ -179,6 +183,19 @@ pub fn handle(
       let _ = db.set_state(conn, research.id, events.Failed, reason)
       worker.Failed(AgentStopped(reason))
     }
+  }
+}
+
+fn publication_stopped(
+  conn: pog.Connection,
+  id: String,
+  state: events.State,
+  detail: String,
+) -> worker.Response(Published, ResearchError) {
+  let _ = db.set_state(conn, id, state, detail)
+  case state {
+    events.Failed -> worker.Discarded(detail)
+    _ -> worker.Uncertain(detail)
   }
 }
 
