@@ -22,6 +22,10 @@ publisher whose publish step can fail, and an OpenAI Responses SSE provider that
 follows a per-topic script. A `Stall` step keeps the stream open and reports when
 the client closes it.
 
+The additional [history delivery recipe](HISTORY_DELIVERY.md) exercises Fabric
+history invocation, transactional turn admission and idempotent outcome
+incorporation.
+
 ## Running
 
 Inside the oversight dev shell, from this directory:
