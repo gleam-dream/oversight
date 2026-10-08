@@ -5,6 +5,7 @@
 import envoy
 import fabric
 import fabric/agent
+import fabric/history
 import fabric/input
 import fabric/invoke
 import fabric/model
@@ -15,7 +16,6 @@ import fabric/sweeper
 import fabric_postgres
 import gleam/dynamic/decode
 import gleam/erlang/process
-import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -363,7 +363,10 @@ pub fn incorporate(
   case locked.rows {
     [Some(answer)] -> Ok(answer)
     [None] -> {
-      let encoded = json.array(generated, message_json) |> json.to_string
+      use encoded <- result.try(
+        codec.encode_json(history.codec(), generated)
+        |> result.map_error(codec.describe_encode_error),
+      )
       use _ <- result.map(
         pog.query(
           "UPDATE turns SET answer = $2, run_id = $3, generated = $4,
@@ -379,60 +382,6 @@ pub fn incorporate(
       answer
     }
     _ -> Error("missing accepted turn")
-  }
-}
-
-// Serialization belongs to the application's chosen history schema. Fabric
-// has already validated relationships and decoded the separate native answer.
-fn optional_json(value, encode) {
-  case value {
-    None -> json.null()
-    Some(value) -> encode(value)
-  }
-}
-
-fn message_json(message: model.Message) {
-  case message {
-    model.UserMessage(text) ->
-      json.object([
-        #("role", json.string("user")),
-        #("text", json.string(text)),
-      ])
-    model.ToolResultMessage(id, content) ->
-      json.object([
-        #("role", json.string("tool")),
-        #("call_id", json.string(id)),
-        #("content", json.string(content)),
-      ])
-    model.AssistantMessage(turn) ->
-      json.object([
-        #("role", json.string("assistant")),
-        #("text", json.string(turn.text)),
-        #(
-          "calls",
-          json.array(turn.calls, fn(call) {
-            json.object([
-              #("id", json.string(call.id)),
-              #("name", json.string(call.name)),
-              #("arguments_json", json.string(call.arguments_json)),
-              #("provider_id", optional_json(call.provider_id, json.string)),
-              #(
-                "provider_state",
-                optional_json(call.provider_state, json.string),
-              ),
-            ])
-          }),
-        ),
-        #(
-          "provider_data",
-          optional_json(turn.data, fn(data) {
-            json.object([
-              #("format", json.string(data.format)),
-              #("value", json.string(data.value)),
-            ])
-          }),
-        ),
-      ])
   }
 }
 
@@ -466,20 +415,12 @@ pub fn model_calls(db: pog.Connection) {
   count(db, "SELECT count(*) FROM model_calls", [])
 }
 
-fn saved_field(db: pog.Connection, key: String, field: String) {
-  let assert Ok(pog.Returned(_, [value])) =
-    pog.query("SELECT generated::jsonb -> 0 ->> $2 FROM turns WHERE key = $1")
+pub fn saved_messages(db: pog.Connection, key: String) -> List(model.Message) {
+  let assert Ok(pog.Returned(_, [encoded])) =
+    pog.query("SELECT generated FROM turns WHERE key = $1")
     |> pog.parameter(pog.text(key))
-    |> pog.parameter(pog.text(field))
     |> pog.returning(decode.field(0, decode.string, decode.success))
     |> pog.execute(db)
-  value
-}
-
-pub fn saved_role(db: pog.Connection, key: String) {
-  saved_field(db, key, "role")
-}
-
-pub fn saved_text(db: pog.Connection, key: String) {
-  saved_field(db, key, "text")
+  let assert Ok(messages) = codec.decode_json(history.codec(), encoded)
+  messages
 }

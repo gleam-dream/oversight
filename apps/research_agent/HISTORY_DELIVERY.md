@@ -19,6 +19,7 @@
 - Fabric owns admitted execution. The registered sweeper resumes it after a forced bounded store drain. The application adds no lease-renewal loop, abandoned-run scanner or separate execution queue.
 - Fabric completion can precede application incorporation. The consumer reopens the same keyed outcome, obtains its typed answer through `invoke.answer`, and obtains the generated messages through `fabric.generated_messages`.
 - Incorporation locks the application turn and commits the answer, encoded generated messages and applied marker together. Repeating the transaction reads the applied result. The test rolls back a write, then simulates loss of the delivery caller's reply after a real commit; that simulation is not a PostgreSQL network-fault test.
+- `fabric/history.codec()` stores and restores the complete native message values. The consumer owns the transaction and applied marker; Fabric owns the lossless message representation. Assertions compare restored messages before and after pruning without depending on the encoded field layout.
 - Pruning remains disabled until incorporation commits. The application applied marker survives deliberate Fabric pruning, so later Grind delivery returns the applied answer without invoking Fabric again. An age threshold alone cannot guarantee retention while incorporation is delayed indefinitely.
 
 ## Preserve observations and recovery choices

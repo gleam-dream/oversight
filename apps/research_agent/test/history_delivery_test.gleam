@@ -104,8 +104,7 @@ pub fn transactional_history_delivery_survives_both_commit_gaps_test() {
 
   let assert delivery.AfterApply(lost_reply) = delivery.next(app)
   let assert 1 = delivery.application_count(app.db, turn)
-  let assert "assistant" = delivery.saved_role(app.db, turn)
-  let assert "One observation summarized" = delivery.saved_text(app.db, turn)
+  let assert True = delivery.saved_messages(app.db, turn) == generated
   // This is a deterministic caller-reply loss after a real commit, not a
   // PostgreSQL network-fault claim. The next Grind delivery reads the marker.
   process.send(lost_reply, delivery.LoseReply)
@@ -132,6 +131,7 @@ pub fn transactional_history_delivery_survives_both_commit_gaps_test() {
   let assert 0 = delivery.run_count(app.db)
   let assert 2 = delivery.model_calls(app.db)
   let assert 1 = delivery.application_count(app.db, turn)
+  let assert True = delivery.saved_messages(app.db, turn) == generated
   let assert Error(Nil) = process.receive(app.notices, within: 0)
   delivery.stop(app)
 }
