@@ -10,14 +10,18 @@ import gleeunit
 import grind
 import grind/admin
 import grind/job
+import legacy_publication
 import pog
 import research_agent/app.{type App}
 import research_agent/domain
 import research_agent/events
 import research_agent/jobs
 import research_agent/node
+import research_agent/publish
 import research_agent/services.{type Services}
 import research_agent/telemetry.{type Telemetry}
+import saga/durable
+import saga/storage
 import saga/storage/conformance
 import saga_postgres
 import sinal
@@ -313,6 +317,7 @@ pub fn cancelling_the_job_reaches_the_run_and_closes_the_llm_stream_test() {
 /// matches a notice, then recovers on a node in this VM.
 fn crash_and_recover(
   schema: String,
+  expected_state: job.State,
   topic: String,
   script: fn(Services) -> List(services.Step),
   arm: fn(Services) -> Nil,
@@ -337,15 +342,14 @@ fn crash_and_recover(
   let assert Ok(survivor) =
     app.start(settings(world, "node-b", schema, Some(observed)))
   check(Fixture(world, survivor, notices, observed), id)
-  // The operator view shows one replay and no decision: the job never
-  // waited in `uncertain`.
+  // The operator view shows one recovery delivery and no manual decision.
   let assert Ok([summary]) =
     admin.list(
       survivor.jobs,
       admin.query(limit: 10) |> admin.in_queue(jobs.queue),
     )
   let assert 1 = summary.replay_count
-  let assert job.Succeeded = summary.state
+  let assert True = summary.state == expected_state
   // The replay did not use up a business attempt, as
   // `worker.with_max_attempts` documents: the job
   // finished as its first attempt.
@@ -364,6 +368,7 @@ fn crash_and_recover(
 pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
   use f, id <- crash_and_recover(
     "t_crash_model",
+    job.Succeeded,
     "gleam",
     fn(world) {
       [
@@ -403,6 +408,7 @@ pub fn a_killed_vm_resumes_from_the_last_checkpoint_test() {
 pub fn a_read_interrupted_by_a_crash_is_replayed_by_fabric_test() {
   use f, id <- crash_and_recover(
     "t_crash_tool",
+    job.Succeeded,
     "elixir",
     services.happy_script(_, "elixir"),
     fn(world) { services.stall_page(world, "elixir-1") },
@@ -478,6 +484,7 @@ pub fn every_research_state_reaches_an_observer_with_its_correlation_test() {
     events.Published,
     events.Failed,
     events.Cancelled,
+    events.Uncertain,
   ]
   list.each(states, fn(state) {
     events.announce(correlation.to_string(id), state)
@@ -490,4 +497,178 @@ pub fn every_research_state_reaches_an_observer_with_its_correlation_test() {
   let assert Ok(Nil) = sinal.detach(attachment)
   let assert True =
     received == list.map(states, fn(state) { events.Transition(state, id) })
+}
+
+pub fn applied_creation_with_lost_reply_stays_uncertain_test() {
+  use f <- with_node("t_creation_reply_loss")
+  services.script(f.world, "lost", [services.article("Lost", "Body")])
+  services.fault(f.world, services.Creation, services.DropReply)
+  let assert Ok(id) = app.start_research(f.node, "lost")
+  let assert Ok(grind.Uncertain(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert [#(_, services.Draft)] = services.drafts(f.world)
+  let assert 1 = services.calls(f.world, services.Creation)
+  let assert 0 = services.calls(f.world, services.Deletion)
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "uncertain" = row.state
+}
+
+fn unknown_publication(
+  schema: String,
+  operation: services.Operation,
+  fault: services.Fault,
+) {
+  use f <- with_node(schema)
+  services.script(f.world, "unknown", [services.article("Unknown", "Body")])
+  services.fault(f.world, operation, fault)
+  let assert Ok(id) = app.start_research(f.node, "unknown")
+  let assert Ok(grind.Uncertain(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert 1 = services.calls(f.world, services.Creation)
+  let assert 1 = services.calls(f.world, operation)
+  let assert 0 = services.calls(f.world, services.Deletion)
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "uncertain" = row.state
+  case operation {
+    services.Creation -> {
+      let assert [#(_, services.Draft)] = services.drafts(f.world)
+      Nil
+    }
+    services.Upload -> {
+      let assert [#(_, services.BodyUploaded)] = services.drafts(f.world)
+      Nil
+    }
+    services.Publication -> {
+      let assert [#(_, services.Live)] = services.drafts(f.world)
+      Nil
+    }
+    _ -> panic as "unexpected operation"
+  }
+}
+
+pub fn malformed_creation_success_is_uncertain_test() {
+  unknown_publication(
+    "t_create_malformed",
+    services.Creation,
+    services.MalformedReply,
+  )
+}
+
+pub fn applied_upload_with_lost_reply_is_uncertain_test() {
+  unknown_publication("t_upload_lost", services.Upload, services.DropReply)
+}
+
+pub fn applied_publication_with_lost_reply_is_uncertain_test() {
+  unknown_publication(
+    "t_publish_lost",
+    services.Publication,
+    services.DropReply,
+  )
+}
+
+pub fn malformed_publication_success_is_uncertain_test() {
+  unknown_publication(
+    "t_publish_malformed",
+    services.Publication,
+    services.MalformedReply,
+  )
+}
+
+pub fn rejected_publication_with_failed_cleanup_is_uncertain_test() {
+  use f <- with_node("t_failed_cleanup")
+  services.script(f.world, "cleanup", [services.article("Cleanup", "Body")])
+  services.fault(f.world, services.Publication, services.Reject)
+  services.fault(f.world, services.Deletion, services.Reject)
+  let assert Ok(id) = app.start_research(f.node, "cleanup")
+  let assert Ok(grind.Uncertain(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert [#(_, services.BodyUploaded)] = services.drafts(f.world)
+  let assert 0 = services.counts(f.world).published
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "uncertain" = row.state
+}
+
+fn interrupted_publication(schema: String, operation: services.Operation) {
+  use f, id <- crash_and_recover(
+    schema,
+    job.Succeeded,
+    "interrupted",
+    fn(_) { [services.article("Interrupted", "Body")] },
+    fn(world) { services.fault(world, operation, services.HoldReply) },
+    fn(notice) { notice == services.MutationApplied(operation) },
+  )
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(30))
+  let assert 1 = services.calls(f.world, services.Creation)
+  let assert 1 = services.calls(f.world, services.Upload)
+  let assert 1 = services.calls(f.world, services.Publication)
+  let assert 0 = services.calls(f.world, services.Deletion)
+  let assert [#(_, services.Live)] = services.drafts(f.world)
+  Nil
+}
+
+pub fn interrupted_creation_uses_readback_test() {
+  interrupted_publication("t_crash_create", services.Creation)
+}
+
+pub fn interrupted_upload_uses_readback_test() {
+  interrupted_publication("t_crash_upload", services.Upload)
+}
+
+pub fn interrupted_publication_uses_readback_test() {
+  interrupted_publication("t_crash_publish", services.Publication)
+}
+
+pub fn legacy_checkpoint_is_refused_without_mutating_it_test() {
+  use f <- with_node("t_legacy_publish")
+  services.fault(f.world, services.Creation, services.DropReply)
+  let article = domain.Article("legacy", "Legacy", "Body")
+  let assert Ok(_) =
+    legacy_publication.run(
+      f.node.deps.sagas,
+      f.node.http,
+      services.base_url(f.world),
+      article,
+      correlation.from_key("legacy"),
+      timeout: duration.seconds(10),
+    )
+  let assert Ok(before) =
+    storage.do_load(f.node.deps.sagas, publish.execution_id("legacy"))
+  let assert Error(error) =
+    publish.run(
+      f.node.deps.sagas,
+      f.node.http,
+      services.base_url(f.world),
+      article,
+      correlation.from_key("legacy"),
+      timeout: duration.seconds(10),
+    )
+  let assert durable.Incompatible = durable.error_kind(error)
+  let assert Ok(after) =
+    storage.do_load(f.node.deps.sagas, publish.execution_id("legacy"))
+  let assert True = before == after
+  let assert 1 = services.calls(f.world, services.Creation)
+  let assert 0 = services.calls(f.world, services.Deletion)
+}
+
+pub fn interrupted_publication_without_readback_stays_uncertain_test() {
+  use f, id <- crash_and_recover(
+    "t_crash_unknown",
+    job.Uncertain,
+    "unconfirmed",
+    fn(_) { [services.article("Unconfirmed", "Body")] },
+    fn(world) {
+      services.fault(world, services.Publication, services.HoldReply)
+      services.fault(world, services.Inspection, services.Reject)
+    },
+    fn(notice) { notice == services.MutationApplied(services.Publication) },
+  )
+  let assert Ok(grind.Uncertain(_)) =
+    app.await_outcome(f.node, id, duration.seconds(30))
+  let assert 1 = services.calls(f.world, services.Publication)
+  let assert 0 = services.calls(f.world, services.Deletion)
+  let assert [#(_, services.Live)] = services.drafts(f.world)
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "uncertain" = row.state
+  Nil
 }
