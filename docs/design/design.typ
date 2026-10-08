@@ -400,6 +400,24 @@
         failure: [Transient driver/store conflicts snooze; domain failures follow application retry policy; unresolved publication becomes Uncertain. Unexpected approvals fail explicitly. Cancellation reaches the agent/model and publication workflow without proving that every external effect was undone.],
       )
       Source owners: `apps/research_agent/src/research_agent/jobs.gleam`, `publish.gleam`, `researcher.gleam`, `node.gleam`, and `wire.gleam`.
+      #answers(title: "History-aware turn delivery",
+        responsibility: [Demonstrate application-owned turn data across durable admission, Fabric execution and outcome incorporation.],
+        interface: [A separate public consumer in the research application uses Grind transactional admission, Fabric history-aware keyed invocation, the leased PostgreSQL store and its registered recovery sweeper.],
+        interactions: [The application transaction records a turn and its delivery together. Delivery supplies validated history and the current prompt to Fabric. The sweeper resumes admitted execution after process loss; an idempotent application transaction incorporates the native answer and generated messages.],
+        invariants: [The stable principal and turn key identify execution; correlation and live context do not replace that identity. Retain the outcome until incorporation commits. A durable applied marker prevents a later delivery from reinvoking an incorporated turn after Fabric pruning.],
+        failure: [Working, suspension, uncertain execution, ended failure and refusal retain distinct application decisions. Lost incorporation acknowledgement requires readback or the same idempotent transaction. A shared connection proves no atomicity between the application transaction and Fabric's initial record.],
+      )
+      #points(
+        [This consumer uses existing Grind delivery and Fabric recovery. It adds no application lease renewal, abandoned-run scanner or competing generic queue.],
+        [A per-turn application graph may instead own incorporation as a declared operation with explicit idempotency and interrupted-effect recovery. It still needs the transactional admission bridge and does not imply a new PostgreSQL admission API.],
+        [Deterministic model callbacks and disposable PostgreSQL establish public composition and tested process-loss behavior. They establish no live-provider or power-loss guarantee.],
+      )
+      #behavior(title: "Applied turns survive execution record pruning", area: "Durable research", level: "boundary")[
+        #given[The application has incorporated an agent outcome and retained its applied marker.]
+        #when[Delivery repeats after Fabric's settled run record is pruned.]
+        #then[The application returns the incorporated result without starting another agent run.]
+      ]
+      #adr(13)
     ]
   ])
 
@@ -420,6 +438,7 @@
       [`playground/archive_release`], [Can authenticated admission and durable approval bind release to its requester, revision and current permission?], [Direct authorization admission and orderly store reopen do not establish full MCP transport or mid-effect crash recovery.],
       [`playground/instrument_replay`], [Can bounded recorded transport support offline evaluation under different application contracts?], [Synthetic measurements and local faults do not qualify a scientific instrument or remote service.],
       [`playground/erasure_campaign`], [Can reversible preparation compose with irreversible delivery and forward reconciliation?], [Application evidence, synthetic targets and local restarts do not establish legal erasure or host-loss guarantees.],
+      [`playground/fabric_record_compatibility`], [Does a separately pinned earlier Fabric reader refuse the new history record envelope?], [Two public consumers preserve exact writer inputs and reader revision; incompatible-reader refusal does not establish every older release or backend fault case.],
       [`apps/scripts/with-postgres.sh`], [Can a consumer exercise real persistence in an isolated reproducible cluster?], [No production database, remote provider or existing deployment is validated.],
     ))
     #behavior(title: "A consumer proves only executed behavior", area: "Evidence acceptance", level: "boundary")[
