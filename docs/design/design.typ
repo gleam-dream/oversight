@@ -460,6 +460,7 @@
     )
     #md-table(3, (
       [*Retained system part*], [*Question it answers*], [*Limits of the evidence*],
+      [`playground/relay_admission`], [Do admission callbacks share the request deadline, and what changes when their process owner changes?], [Barrier-driven public consumers distinguish current callback, disconnect, capacity and budget behavior from intentionally failing proposed guarantees. Native process probes do not establish arbitrary resource cleanup.],
       [`playground/interface_lab`], [Can proposed native types, ownership states and protocol boundaries be expressed and distinguished?], [Prototype behavior does not establish production lifecycle conformance.],
       [`playground/blueprint_compatibility`], [How do codec/schema cases compare with the pinned implementation and validator?], [Only executed supported-vocabulary cases establish equivalence.],
       [`playground/ecosystem_pilot`], [Can protocol declarations, model calls and typed observations compose through public imports?], [A pilot does not replace each package's fault and resource tests.],
