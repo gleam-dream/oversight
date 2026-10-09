@@ -22,7 +22,7 @@
 
   #pagebreak(weak: true)
   #pending-ledger(
-      pending-entry(title: "A complete request budget needs an owner", kind: "ruling")[Relay admission callbacks precede its dispatch timeout, while Saga driver timeout is followed by bounded synchronous cleanup. A composed foreground deadline must specify admission, execution, cancellation grace, and cleanup rather than assuming the same duration bounds all phases.],
+      pending-entry(title: "A composed request budget needs explicit cleanup", kind: "ruling")[Relay owns one admitted request deadline and a separate bounded cleanup interval; its package design owns implementation acceptance. Saga driver timeout is followed by bounded synchronous cleanup. A composed foreground deadline must reserve admission, execution, cancellation grace, and cleanup rather than assigning the same duration to every phase.],
       pending-entry(title: "External schema breadth must be explicit", kind: "ruling")[Blueprint admits a finite runtime schema profile. General third-party MCP discovery requires a chosen supported vocabulary, bounded validation, and safe provider projection; sibling-to-sibling discovery alone does not establish that breadth.],
       pending-entry(title: "Durable scheduling integration remains application-owned", kind: "ruling")[Applications currently drive and cancel durable Saga and Fabric work through Grind jobs. The intended broader scheduling/retention integration requires a decision about authority before any common driver abstraction is introduced.],
   )
@@ -460,7 +460,7 @@
     )
     #md-table(3, (
       [*Retained system part*], [*Question it answers*], [*Limits of the evidence*],
-      [`playground/relay_admission`], [Do admission callbacks share the request deadline, and what changes when their process owner changes?], [Barrier-driven public consumers distinguish current callback, disconnect, capacity and budget behavior from intentionally failing proposed guarantees. Native process probes do not establish arbitrary resource cleanup.],
+      [`playground/relay_admission`], [Do admission callbacks share the request deadline, and what changes when their process owner changes?], [Barrier-driven public consumers check callback deadlines, disconnects, retiring capacity, shared budgets, shutdown, panic isolation and borrowed resources. Native process probes do not establish arbitrary resource cleanup or streaming lifecycle conformance.],
       [`playground/interface_lab`], [Can proposed native types, ownership states and protocol boundaries be expressed and distinguished?], [Prototype behavior does not establish production lifecycle conformance.],
       [`playground/blueprint_compatibility`], [How do codec/schema cases compare with the pinned implementation and validator?], [Only executed supported-vocabulary cases establish equivalence.],
       [`playground/ecosystem_pilot`], [Can protocol declarations, model calls and typed observations compose through public imports?], [A pilot does not replace each package's fault and resource tests.],

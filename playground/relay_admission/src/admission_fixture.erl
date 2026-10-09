@@ -1,5 +1,5 @@
 -module(admission_fixture).
--export([with_cleanup/2, stop_process/1, await_exit/1, open_request/3, read_status/1, close/1]).
+-export([with_cleanup/2, stop_process/1, await_exit/1, wait_stopped/2, monotonic_milliseconds/0, open_request/3, read_status/1, close/1]).
 
 with_cleanup(Work, Cleanup) ->
     try Work() after Cleanup() end.
@@ -15,6 +15,14 @@ await_exit(Pid) ->
     Ref = erlang:monitor(process, Pid),
     receive {'DOWN', Ref, process, Pid, _} -> nil
     after 2000 -> erlang:demonitor(Ref, [flush]), error({fixture_exit_timeout, Pid}) end.
+
+%% A bounded observation, unlike stop_process this never terminates the subject.
+wait_stopped(Pid, Timeout) ->
+    Ref = erlang:monitor(process, Pid),
+    receive {'DOWN', Ref, process, Pid, _} -> true
+    after Timeout -> erlang:demonitor(Ref, [flush]), false end.
+
+monotonic_milliseconds() -> erlang:monotonic_time(millisecond).
 
 %% Test-only local HTTP/1.1 peer. No Relay/Mist records or private modules.
 open_request(Port, Headers, Body) ->

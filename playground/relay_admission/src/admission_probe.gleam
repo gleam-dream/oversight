@@ -50,6 +50,12 @@ pub fn with_cleanup(work: fn() -> a, cleanup: fn() -> Nil) -> a
 @external(erlang, "admission_fixture", "stop_process")
 pub fn stop_process(pid: process.Pid) -> Nil
 
+@external(erlang, "admission_fixture", "wait_stopped")
+pub fn wait_stopped(pid: process.Pid, timeout: Int) -> Bool
+
+@external(erlang, "admission_fixture", "monotonic_milliseconds")
+fn monotonic_milliseconds() -> Int
+
 type Socket
 
 @external(erlang, "admission_fixture", "open_request")
@@ -65,7 +71,7 @@ fn read_status(socket: Socket) -> Result(Int, String)
 @external(erlang, "admission_fixture", "close")
 fn close(socket: Socket) -> Nil
 
-fn call(block: Bool) -> request.Request(BitArray) {
+pub fn call(block: Bool) -> request.Request(BitArray) {
   testing.request("tools/call", [
     #("name", json.string("whoami")),
     #("arguments", json.object([])),
@@ -145,12 +151,12 @@ fn config(
     }
   }
   config
-  |> http.with_request_timeout(duration.milliseconds(40))
+  |> http.with_request_timeout(duration.milliseconds(120))
   |> http.with_cancellation_grace(duration.milliseconds(20))
   |> http.with_max_concurrent_requests(1)
 }
 
-fn start(config: http.Config(a), carrier: Carrier) -> http.Handler(a) {
+pub fn start(config: http.Config(a), carrier: Carrier) -> http.Handler(a) {
   let result = case carrier {
     Buffered -> http.handler(config)
     Listener -> http.start(config)
@@ -159,7 +165,7 @@ fn start(config: http.Config(a), carrier: Carrier) -> http.Handler(a) {
   endpoint
 }
 
-fn send(
+pub fn send(
   endpoint: http.Handler(a),
   carrier: Carrier,
   req: request.Request(BitArray),
@@ -176,8 +182,35 @@ fn send(
   }
 }
 
-/// Current runtime observations and proposed deadline assertions share inputs.
-/// Each assertion runs after cleanup, even when a proposed contract is false.
+// Callback DOWN does not acknowledge termination of all request-owned work or
+// the endpoint's slot release. Poll only overload refusal within a fixed window;
+// a timeout or any other response remains visible to the assertion.
+fn recovered_capacity(endpoint: http.Handler(a), carrier: Carrier) -> Int {
+  capacity_until(endpoint, carrier, monotonic_milliseconds() + 200)
+}
+
+fn capacity_until(
+  endpoint: http.Handler(a),
+  carrier: Carrier,
+  deadline: Int,
+) -> Int {
+  let status =
+    send(
+      endpoint,
+      carrier,
+      testing.request("tools/list", []) |> authorize(False),
+    )
+  case status == 503 && monotonic_milliseconds() < deadline {
+    True -> {
+      process.sleep(5)
+      capacity_until(endpoint, carrier, deadline)
+    }
+    False -> status
+  }
+}
+
+/// Wait for cleanup before checking capacity; a timeout response does not
+/// acknowledge termination. Assertions run after fixture cleanup even on failure.
 pub fn blocked(admission: Admission, carrier: Carrier) -> Observation {
   let entered = process.new_subject()
   let dispatched = process.new_subject()
@@ -195,25 +228,17 @@ pub fn blocked(admission: Admission, carrier: Carrier) -> Observation {
       stop_process(entry.child)
       stop_process(entry.owner)
     })
-  let before = process.receive(replies, 200)
+  let before = process.receive(replies, 400)
+  let _ = wait_stopped(entry.owner, 200)
+  let _ = wait_stopped(entry.child, 200)
   let child_alive = process.is_alive(entry.child)
-  let busy =
-    send(
-      endpoint,
-      carrier,
-      testing.request("tools/list", []) |> authorize(False),
-    )
+  let busy = recovered_capacity(endpoint, carrier)
   process.send(entry.release, Nil)
   let after = case before {
     Ok(_) -> before
     Error(_) -> process.receive(replies, 2000)
   }
-  let recovered =
-    send(
-      endpoint,
-      carrier,
-      testing.request("tools/list", []) |> authorize(False),
-    )
+  let recovered = recovered_capacity(endpoint, carrier)
   Observation(
     before,
     busy,
@@ -269,7 +294,12 @@ pub type DisconnectObservation {
 pub fn disconnect(admission: Admission) -> DisconnectObservation {
   let entered = process.new_subject()
   let dispatched = process.new_subject()
-  let endpoint = start(config(admission, entered, dispatched), Listener)
+  let endpoint =
+    start(
+      config(admission, entered, dispatched)
+        |> http.with_request_timeout(duration.seconds(5)),
+      Listener,
+    )
   use <- with_cleanup(_, fn() { http.stop(endpoint) })
   let req = call(True)
   let assert Ok(socket) =
@@ -282,14 +312,11 @@ pub fn disconnect(admission: Admission) -> DisconnectObservation {
       stop_process(entry.owner)
     })
   close(socket)
-  // A receive window observes lack of dispatch after a barrier-established close.
+  let _ = wait_stopped(entry.owner, 200)
+  let _ = wait_stopped(entry.child, 200)
+  // Observe dispatch absence after the established close and bounded cleanup.
   let assert Error(Nil) = process.receive(dispatched, 200)
-  let busy =
-    send(
-      endpoint,
-      Listener,
-      testing.request("tools/list", []) |> authorize(False),
-    )
+  let busy = recovered_capacity(endpoint, Listener)
   let owner_alive = process.is_alive(entry.owner)
   let child_alive = process.is_alive(entry.child)
   process.send(entry.release, Nil)
@@ -380,4 +407,108 @@ pub fn defaults() -> Int {
   let assert Ok(endpoint) = http.handler(http.new(server.new([])))
   use <- with_cleanup(_, fn() { http.stop(endpoint) })
   http.handle(endpoint, testing.request("tools/list", [])).status
+}
+
+pub type RetirementObservation {
+  RetirementObservation(
+    response: Result(Int, Nil),
+    callback_alive_at_response: Bool,
+    capacity_during_grace: Int,
+    callback_stopped: Bool,
+    capacity_after_termination: Int,
+    dispatched: Result(String, Nil),
+  )
+}
+
+/// A long cleanup grace separates response delivery from owned-work termination.
+/// The callback remains behind its barrier until after both observations.
+pub fn retirement() -> RetirementObservation {
+  let entered = process.new_subject()
+  let dispatched = process.new_subject()
+  let endpoint =
+    start(
+      config(Context, entered, dispatched)
+        |> http.with_cancellation_grace(duration.milliseconds(500)),
+      Buffered,
+    )
+  use <- with_cleanup(_, fn() { http.stop(endpoint) })
+  let replies = process.new_subject()
+  let caller =
+    process.spawn_unlinked(fn() {
+      process.send(replies, send(endpoint, Buffered, call(True)))
+    })
+  use <- with_cleanup(_, fn() { stop_process(caller) })
+  let assert Ok(entry) = process.receive(entered, 2000)
+  use <-
+    with_cleanup(_, fn() {
+      stop_process(entry.child)
+      stop_process(entry.owner)
+    })
+  let response = process.receive(replies, 400)
+  let alive = process.is_alive(entry.owner)
+  let busy =
+    send(
+      endpoint,
+      Buffered,
+      testing.request("tools/list", []) |> authorize(False),
+    )
+  let stopped = wait_stopped(entry.owner, 1000)
+  let recovered = recovered_capacity(endpoint, Buffered)
+  process.send(entry.release, Nil)
+  RetirementObservation(
+    response,
+    alive,
+    busy,
+    stopped,
+    recovered,
+    process.receive(dispatched, 100),
+  )
+}
+
+pub type LateAdmissionObservation {
+  LateAdmissionObservation(
+    response: Result(Int, Nil),
+    callback_alive_on_release: Bool,
+    dispatched: Result(String, Nil),
+    callback_stopped: Bool,
+    capacity_after_termination: Int,
+  )
+}
+
+/// Let a still-live context callback return positively after expiry. This
+/// distinguishes revoked dispatch authority from termination alone.
+pub fn late_context_success() -> LateAdmissionObservation {
+  let entered = process.new_subject()
+  let dispatched = process.new_subject()
+  let endpoint =
+    start(
+      config(Context, entered, dispatched)
+        |> http.with_cancellation_grace(duration.milliseconds(500)),
+      Buffered,
+    )
+  use <- with_cleanup(_, fn() { http.stop(endpoint) })
+  let replies = process.new_subject()
+  let caller =
+    process.spawn_unlinked(fn() {
+      process.send(replies, send(endpoint, Buffered, call(True)))
+    })
+  use <- with_cleanup(_, fn() { stop_process(caller) })
+  let assert Ok(entry) = process.receive(entered, 2000)
+  use <-
+    with_cleanup(_, fn() {
+      stop_process(entry.child)
+      stop_process(entry.owner)
+    })
+  let response = process.receive(replies, 400)
+  let alive = process.is_alive(entry.owner)
+  process.send(entry.release, Nil)
+  let stopped = wait_stopped(entry.owner, 1000)
+  let capacity = recovered_capacity(endpoint, Buffered)
+  LateAdmissionObservation(
+    response,
+    alive,
+    process.receive(dispatched, 100),
+    stopped,
+    capacity,
+  )
 }
