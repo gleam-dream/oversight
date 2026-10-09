@@ -1,5 +1,5 @@
 name: Sibling checkouts
-description: Fetch the recorded public ecosystem revisions without retaining credentials.
+description: Fetch the recorded ecosystem revisions without retaining credentials.
 inputs:
   current:
     description: Resolve default branches for the scheduled compatibility run.
@@ -82,4 +82,11 @@ runs:
         repository: gleam-dream/retrace
         ref: ${{ steps.revisions.outputs.retrace }}
         path: retrace
+        persist-credentials: false
+    - name: Checkout correio
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/correio
+        ref: ${{ steps.revisions.outputs.correio }}
+        path: correio
         persist-credentials: false

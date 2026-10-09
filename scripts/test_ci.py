@@ -1,5 +1,7 @@
 """Failure controls for the CI runner, without application services."""
 
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,35 @@ class GateTests(unittest.TestCase):
         self.assertIn('ref = "v1"', changed)
         with self.assertRaises(ValueError):
             ci.replace_git_refs(source.replace("a" * 40, "master"), {"saga": "b" * 40})
+
+    def test_sibling_checkout_selects_pins_and_default_branches(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            for name in ("ci.py", "sibling_refs.py"):
+                shutil.copyfile(Path(__file__).parent / name, scripts / name)
+            pins = {name: "a" * 40 for name in ci.SIBLINGS}
+            pins["correio"] = "b" * 40
+            (root / "sibling-revisions.txt").write_text(
+                "".join(f"{name}={revision}\n" for name, revision in pins.items())
+            )
+            for current in ("false", "true"):
+                with self.subTest(current=current):
+                    output = root / f"{current}.txt"
+                    subprocess.run(
+                        [sys.executable, "-B", str(scripts / "sibling_refs.py")],
+                        env={**os.environ, "CURRENT": current, "GITHUB_OUTPUT": str(output)},
+                        check=True,
+                    )
+                    refs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                    if current == "false":
+                        self.assertEqual(refs, pins)
+                    else:
+                        self.assertEqual(refs["correio"], "main")
+                        self.assertEqual(refs["json_blueprint"], "main")
+                        self.assertEqual(refs["warden"], "master")
+                        self.assertEqual(set(refs), set(pins))
 
     def test_sibling_pins_reject_missing_duplicate_and_untrusted_refs(self):
         pins = "".join(f"{name}={'a' * 40}\n" for name in ci.SIBLINGS)

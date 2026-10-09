@@ -12,6 +12,7 @@ nix develop --command python3 -B scripts/ci.py quality
 nix develop --command python3 -B scripts/ci.py application checkout
 nix develop --command python3 -B scripts/ci.py application session_replay
 nix develop --command python3 -B scripts/ci.py application financial_recovery
+nix develop --command python3 -B scripts/ci.py application email_portal
 nix develop --command python3 -B scripts/ci.py experiments
 nix develop --command python3 -B scripts/ci.py full
 ```
@@ -36,6 +37,12 @@ PostgreSQL. CI derives its application matrix from that inventory.
 Handwritten Erlang in application source and tests is compiled
 strictly after its Gleam dependency build.
 
+The [email portal](../apps/email_portal/README.md) uses Correio's memory store
+and caller-owned capture. Its tests exercise the mailbox through in-process
+HTTP handler requests and recover application session publication after
+verification. They need no PostgreSQL, browser or network listener.
+Correio retains its separate browser, transport, database and oracle tests.
+
 The interface laboratory and HTTP declaration probe intentionally contain
 unfinished runtime declarations. Their own compiler checkers remain the
 acceptance boundary; they are not warning-free production packages. Frozen
@@ -54,8 +61,10 @@ experiment independently.
 All tracked library repositories are public. CI checks them out with the default
 read-only GitHub Actions token; no GitHub App or personal access token is needed.
 Tokens are not persisted in Git configuration or passed to the test commands.
-Oversight remains private; its visibility does not restrict access to the public
-libraries.
+The existing nine library repositories are public. Correio's recorded baseline
+is a local commit; remote CI requires that commit to be published at the
+configured `gleam-dream/correio` repository with public read access.
+The local gate does not establish remote availability.
 
 Each required CI run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.

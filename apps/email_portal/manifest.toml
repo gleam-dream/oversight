@@ -1,0 +1,26 @@
+# Do not manually edit this file, it is managed by Gleam.
+#
+# This file locks the dependency versions used, to make your build
+# deterministic and to prevent unexpected versions from being included
+# in your application.
+#
+# You should check this file into your source control repository.
+
+packages = [
+  { name = "correio", version = "0.1.0", build_tools = ["gleam"], requirements = ["gen_smtp", "gleam_stdlib"], source = "local", path = "../../../correio" },
+  { name = "correio_mailbox", version = "0.1.0", build_tools = ["gleam"], requirements = ["correio", "gleam_http", "gleam_stdlib"], source = "local", path = "../../../correio/adapters/correio_mailbox" },
+  { name = "gen_smtp", version = "1.3.0", build_tools = ["rebar3"], requirements = ["ranch"], otp_app = "gen_smtp", source = "hex", outer_checksum = "0B73FBF069864ECBCE02FE653B16D3F35FD889D0FDD4E14527675565C39D84E6" },
+  { name = "gleam_erlang", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "1124AD3AA21143E5AF0FC5CF3D9529F6DB8CA03E43A55711B60B6B7B3874375C" },
+  { name = "gleam_http", version = "4.4.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "F065CE9941A7756ABBAEAE7F9F32A96CAD29DA3311A381DB2D926EA8E8C156DC" },
+  { name = "gleam_stdlib", version = "1.0.5", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "CEE5B6C076A85B45F60C585F4316C63EC8B7127C119D5738C3958A9C4D50404E" },
+  { name = "gleeunit", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "EC31ABA74256AEA531EDF8169931D775BBB384FED0A8A1BDC4DD9354E3E21826" },
+  { name = "ranch", version = "2.3.0", build_tools = ["make", "rebar3"], requirements = [], otp_app = "ranch", source = "hex", outer_checksum = "6168EC49409D982F7CFBD83DD083144F6CBE67CAA4036551D2F0A3AD67C9D023" },
+]
+
+[requirements]
+correio = { path = "../../../correio" }
+correio_mailbox = { path = "../../../correio/adapters/correio_mailbox" }
+gleam_erlang = { version = ">= 1.0.0 and < 2.0.0" }
+gleam_http = { version = ">= 4.4.0 and < 5.0.0" }
+gleam_stdlib = { version = ">= 0.70.0 and < 2.0.0" }
+gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
