@@ -1,6 +1,5 @@
-//// Proposed contract, intentionally red against the current Relay runtime.
-//// Run separately from the passing characterization suite. All fixtures clean
-//// up before their observations are asserted, including on the red path.
+//// Accepted admission contract, also exercised by the normal test suite.
+//// This runner prints the observations after fixture cleanup for debugging.
 
 import admission_probe as probe
 import gleam/io
@@ -39,8 +38,8 @@ fn budget_checks(carrier: probe.Carrier) -> List(Bool) {
   // 504. The required invariant here is termination on the original budget.
   [
     case observed.before_handler_release {
-      Ok(_) -> True
-      Error(_) -> False
+      Ok(200) | Ok(504) -> True
+      _ -> False
     },
   ]
 }
@@ -58,7 +57,7 @@ pub fn main() {
       budget_checks(probe.Listener),
     ])
   let failed = list.count(checks, fn(passed) { !passed })
-  io.println("Failed proposed invariants: " <> string.inspect(failed))
+  io.println("Failed deadline invariants: " <> string.inspect(failed))
   let assert 0 = failed
-    as "Relay admission does not yet satisfy the proposed deadline contract"
+    as "Relay admission does not satisfy the accepted deadline contract"
 }
