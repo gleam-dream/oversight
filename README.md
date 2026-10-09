@@ -66,6 +66,8 @@ their rationale.
 
 Retained experiments answer narrower questions:
 
+- [Relay admission](playground/relay_admission/README.md): callback deadlines,
+  disconnects, and process ownership through buffered and local HTTP consumers.
 - [Interface laboratory](playground/interface_lab/README.md): candidate typed
   APIs, with explicit limits on what compilation proves.
 - [Blueprint compatibility](playground/blueprint_compatibility/README.md):
