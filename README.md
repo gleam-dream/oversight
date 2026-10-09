@@ -1,6 +1,6 @@
 # Gleam Dream
 
-Gleam libraries for HTTP, JSON, background jobs, workflows, authentication and
+Gleam libraries for HTTP, JSON, background jobs, workflows, email, authentication and
 agents, plus application session recording and replay. Oversight contains the ecosystem design and runnable applications that
 combine the libraries.
 
@@ -19,6 +19,7 @@ they need and supply domain types and policies.
 | [LLM Wire](../llm_wire/README.md)                                                              | Model-provider protocols and classification      |
 | [Relay](../relay/README.md)                                                                    | MCP server and client                            |
 | [Warden](../warden/README.md)                                                                  | OIDC/OAuth client and access-token validation    |
+| [Correio](../correio/README.md)               | Transactional email and passwordless verification |
 | [Fabric](../fabric/README.md)                                                                  | Agents, durable graphs and approvals             |
 | [Retrace core](https://github.com/gleam-dream/retrace)                                         | Typed session recording and deterministic replay |
 | [Retrace frontend](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_frontend) | Browser/Tauri capture, delivery and replay UI    |
@@ -32,9 +33,14 @@ owns recording, delivery and replay contracts;
 uses Git dependencies. The current release is experimental.
 
 [Saga's PostgreSQL adapter](../saga/integrations/saga_postgres/README.md),
-[Warden's PostgreSQL adapter](../warden/integrations/warden_postgres/README.md) and
-[Fabric's PostgreSQL adapter](../fabric/integrations/fabric_postgres/README.md)
+[Warden's PostgreSQL adapter](../warden/integrations/warden_postgres/README.md),
+[Fabric's PostgreSQL adapter](../fabric/integrations/fabric_postgres/README.md) and
+[Correio's PostgreSQL adapter](../correio/adapters/correio_postgres/README.md)
 provide persistent storage. Each package README links its detailed design.
+
+Correio also provides a [Postmark adapter](../correio/adapters/correio_postmark/README.md)
+and an optional [development mailbox](../correio/adapters/correio_mailbox/README.md).
+The [Correio design](../correio/docs/design/design.typ) owns their contracts.
 
 ## Run an example
 
@@ -53,8 +59,11 @@ itself served as an MCP tool. Its model provider and tools run locally.
 
 The [application catalog](apps/README.md) also covers checkout, webhooks,
 document extraction, approvals, login, crash recovery and
-[session replay](apps/session_replay/README.md). Applications use
-scripted services and disposable PostgreSQL; no provider credentials are needed.
+[session replay](apps/session_replay/README.md).
+[Email Portal](apps/email_portal/README.md) exercises captured delivery, mailbox
+inspection, passwordless verification and application session recovery.
+Applications use scripted services and disposable PostgreSQL; no provider
+credentials are needed.
 
 ## Design and experiments
 
@@ -96,6 +105,7 @@ Package benchmark guides record measured workloads, environments and limits.
 | [Grind](../grind/bench/README.md)                                | PostgreSQL job throughput and latency               |
 | [LLM Wire](../llm_wire/docs/benchmarks.md)                       | Local HTTP/2 concurrency, latency and VM memory     |
 | [Warden](../warden/docs/BENCHMARKS.md)                           | Token validation, key refresh and cache allocation  |
+| [Correio](../correio/benchmarks/README.md)                       | MIME rendering and memory/PostgreSQL verification   |
 | [Fabric](../fabric/consumers/writing/README.md#retained-timings) | Review-call latency in a graph application          |
 
 These are separate workloads, so their numbers are not an ecosystem ranking.

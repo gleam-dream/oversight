@@ -13,6 +13,7 @@ resource cleanup. External services are scripted locally.
 | [tool_hub](tool_hub/README.md)                     | Use and serve MCP tools through an agent        | Discovery schemas, typed protocol results, invocation identity and cancellation     |
 | [secure_mcp](secure_mcp/README.md)                 | Protect MCP tools and run long work as jobs     | Token validation, domain permission, HTTP mount, result lookup                      |
 | [sso_portal](sso_portal/README.md)                 | Sign in and call a protected API                | Browser sessions, durable token custody, concurrent refresh                         |
+| [email_portal](email_portal/README.md)             | Sign in through captured email                  | Development mailbox, explicit confirmation, account policy, session recovery        |
 | [research_agent](research_agent/README.md)         | Resume research and publish with compensation   | Grind/Fabric/Saga authority, effect evidence, cancellation and VM restart           |
 | [session_replay](session_replay/README.md)         | Record and reconstruct a cart session           | Retrace core, native application types, checkpoint continuation and refused gaps    |
 

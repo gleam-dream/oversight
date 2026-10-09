@@ -28,13 +28,14 @@
   )
 
   #pagebreak(weak: true)
-  #section(title: "System at a glance", lead: "The ecosystem contains independent libraries, three PostgreSQL adapters and Retrace core, frontend and server packages. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
+  #section(title: "System at a glance", lead: "The ecosystem contains independent libraries, four PostgreSQL adapters, a Postmark adapter, a development mailbox adapter and Retrace core, frontend and server packages. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
     altitude: "L1", viewpoint: "runtime", title: "Applications select independent library authorities",
     nodes: (
       (id: "app", label: "Application", kind: "external-system"),
       (id: "fabric", label: "Fabric", kind: "component"),
       (id: "relay", label: "Relay", kind: "component"),
       (id: "warden", label: "Warden", kind: "component"),
+      (id: "correio", label: "Correio", kind: "component"),
       (id: "saga", label: "Saga", kind: "component"),
       (id: "grind", label: "Grind", kind: "component"),
       (id: "llm", label: "LLM Wire", kind: "component"),
@@ -47,6 +48,7 @@
       (from: "app", to: "fabric", relation: "call", label: "uses"),
       (from: "app", to: "relay", relation: "call", label: "uses"),
       (from: "app", to: "warden", relation: "call", label: "uses"),
+      (from: "app", to: "correio", relation: "call", label: "uses"),
       (from: "app", to: "saga", relation: "call", label: "uses"),
       (from: "app", to: "grind", relation: "call", label: "uses"),
       (from: "app", to: "retrace", relation: "call", label: "uses"),
@@ -75,6 +77,7 @@
       [LLM Wire], [Provider protocols and classification], [HTTP Gun, JSON Blueprint, Sinal], [Conversation ownership and autonomous tool execution],
       [Relay], [MCP client/server contracts and transport], [HTTP Gun, JSON Blueprint, Sinal], [OIDC custody and application authorization],
       [Warden], [OIDC/OAuth client behavior and token custody/validation], [HTTP Gun, Sinal], [MCP-specific policy and application sessions],
+      [Correio], [Transactional message construction, delivery evidence and passwordless verification], [None], [Account policy, application sessions and OIDC token claims],
       [Fabric], [Agents, durable graphs, approvals and managed children], [LLM Wire, HTTP Gun, JSON Blueprint, Sinal], [Job delivery and Saga effect semantics],
       [Retrace core], [Typed recording, checkpoints, wire validation and pure reconstruction], [None], [Capture policy, UI and storage ownership],
       [retrace_frontend], [Browser/Tauri delivery, Lustre capture and optional replay viewer], [Retrace core], [Application state, safe projections and historical build publication],
@@ -82,6 +85,9 @@
       [saga_postgres], [Saga persistence, leases and fencing], [Saga, Sinal], [Pool ownership and driver scheduling],
       [fabric_postgres], [Fabric persistence and family retention], [Fabric], [Pool ownership and model/tool policy],
       [warden_postgres], [Warden sealed-record persistence and conditional writes], [Warden, HTTP Gun, Sinal], [Pool ownership, sealing keys and application authorization],
+      [correio_postgres], [Atomic challenge persistence and retention], [Correio], [Pool ownership and account policy],
+      [correio_postmark], [Postmark submission and delivery evidence], [Correio, HTTP Gun], [HTTP client ownership and automatic resend],
+      [correio_mailbox], [Read-only development inspection of captured mail], [Correio], [HTTP server ownership and production access policy],
     ))
     #points(
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
@@ -212,6 +218,14 @@
       #then[The refusal preserves the distinction between invalid identity and insufficient permission.]
     ]
     #adr(8)
+    #contract(name: "Email verification and application identity", mission: "Compose delivery and proof of possession without importing account policy.", answers: answers-data(
+      responsibility: [Correio owns message admission, delivery evidence and challenge consumption. The application owns trusted account lookup, current permission and session publication.],
+      interface: [A typed sender, an explicitly configured challenge service, opaque verification evidence and an application-native principal mapping.],
+      interactions: [A capture sender and optional mailbox handler share one caller-owned capture. Email verification and Warden OIDC identity remain distinct authentication methods in the application's principal.],
+      invariants: [Accepted mail does not establish authentication. Inspecting a message does not consume its challenge. Only intentional confirmation and current account policy can produce an application session.],
+      failure: [Unknown submission is not automatically resent. Confirmed verification survives a session-publication failure as application-owned evidence; retrying publication does not verify a consumed answer again.],
+    ))
+    #adr(17)
   ])
 
   #section(title: "Observation and diagnostic contracts", lead: "Observation joins work without controlling it. Applications decide which events to retain, export, and disclose.", body: [
@@ -410,7 +424,19 @@
       )
       Source owners: `apps/secure_mcp/src/secure_mcp/auth.gleam`, `tools.gleam`, `reports.gleam`, and `web.gleam`.
     ]
-      #subsection(title: "SSO portal")[
+    #subsection(title: "Email portal")[
+      #answers(title: "Delivery, inspection and application sessions",
+        responsibility: [Retain a complete email sign-in recipe under apps/email_portal using public Correio contracts.],
+        interface: [Application-native account and session types, explicit challenge request and confirmation operations, capture checkpoints and the standard Gleam HTTP mailbox handler.],
+        interactions: [Correio's memory store owns atomic challenge state. Capture retains local mail. The application owns both runtimes, its account policy, pending verification evidence and idempotent session publication.],
+        invariants: [The mailbox route is explicitly configured for development. Pending values and confirmed evidence are not application sessions. A disabled or changed account cannot receive a session. Repeated publication of one verification identity returns the same session.],
+        failure: [Delivery refusal, unknown delivery, invalid confirmation and failed publication remain distinct application outcomes. Publication recovery uses retained evidence and rechecks current account policy.],
+      )
+      #points([The ordinary flow takes a checkpoint, requests delivery, inspects the resulting message through the mailbox handler, explicitly confirms its secret and reads the application session. Advanced use configures a different mount path and challenge policy with email codes.], [Tests exercise separate consumer compilation, actual capture and memory runtimes, and in-process HTTP handler requests. They do not claim browser navigation, network transport, durable session storage or production authentication policy. Correio owns its separate browser, transport, database and upstream-oracle evidence.], [Detailed library design remains in the Correio repository. Oversight owns this composition and its scenario assertions. #adr(17)])
+      #behavior(title: "Mailbox inspection grants no session", area: "Email portal", level: "boundary")[#given[A sign-in request has delivered a challenge into the development capture.] #when[The application inspects the mailbox and message.] #then[The challenge remains available for intentional confirmation.] #then[No application session exists before successful confirmation.]]
+      #behavior(title: "Session publication recovers confirmed verification", area: "Email portal", level: "boundary")[#given[Challenge consumption has succeeded but application session publication failed.] #when[The application retries publication with the retained verification evidence.] #then[Current account policy is checked again.] #then[Publication creates or recovers one session without a second challenge consumption.]]
+    ]
+    #subsection(title: "SSO portal")[
       #answers(title: "Durable login custody in a web application",
         responsibility: [Maintain browser sessions and call a protected billing resource with recoverable token custody.],
         interface: [Login/callback/logout routes, application session cookie, and native principal/account views.],
