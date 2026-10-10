@@ -1,10 +1,12 @@
 //// Warden's `warden/store` port on PostgreSQL (pog): one table of sealed
-//// records, three statements.
+//// records with explicit conditional writes.
 ////
 //// Warden seals every record (AES-256-GCM, bound to its key and version)
 //// before it reaches this module, so the table holds no token, no session
 //// reference and nothing a database reader or writer can use. The adapter
-//// only has to be a compare-and-set on one row.
+//// checks version and validity under a row lock. PostgreSQL clock_timestamp()
+//// supplies wall time at microsecond precision after any lock wait; hosts
+//// issuing deadlines must synchronize clocks. Retention remains separate.
 
 import gleam/dynamic/decode
 import gleam/list
@@ -36,7 +38,7 @@ pub fn new(db: pog.Connection, table: String) -> Store {
   let table = identifier(table)
   store.new(
     get: fn(key) { get(db, table, key) },
-    put: fn(record, expected) { put(db, table, record, expected) },
+    put: fn(record, condition) { put(db, table, record, condition) },
     delete_expired: fn(now) {
       pog.query(
         "delete from " <> table <> " where expires_at <= " <> instant("$1"),
@@ -80,8 +82,22 @@ fn put(
   db: pog.Connection,
   table: String,
   record: Record,
+  condition: store.WriteCondition,
+) -> Result(store.WriteOutcome, StoreError) {
+  case condition {
+    store.AtVersionBefore(version, deadline) ->
+      guarded_put(db, table, record, version, deadline)
+    store.Absent -> ordinary_put(db, table, record, None)
+    store.AtVersion(version) -> ordinary_put(db, table, record, Some(version))
+  }
+}
+
+fn ordinary_put(
+  db: pog.Connection,
+  table: String,
+  record: Record,
   expected: Option(Int),
-) -> Result(Bool, StoreError) {
+) -> Result(store.WriteOutcome, StoreError) {
   let query = case expected {
     None ->
       pog.query("insert into " <> table <> " (key, version, expires_at, sealed)
@@ -106,8 +122,57 @@ fn put(
   }
   query
   |> pog.execute(db)
-  |> result.map(fn(returned) { returned.count == 1 })
+  |> result.map(fn(returned) {
+    case returned.count {
+      1 -> store.Written
+      _ -> store.VersionConflict
+    }
+  })
   |> result.map_error(write_error)
+}
+
+// Lock first, then check time in a separate statement. A clock predicate on
+// the UPDATE itself can be evaluated before its row-lock wait.
+fn guarded_put(
+  db: pog.Connection,
+  table: String,
+  record: Record,
+  version: Int,
+  deadline: Timestamp,
+) -> Result(store.WriteOutcome, StoreError) {
+  pog.transaction(db, fn(connection) {
+    use locked <- result.try(
+      pog.query("select version from " <> table <> " where key = $1 for update")
+      |> pog.parameter(pog.text(record.key))
+      |> pog.returning(decode.at([0], decode.int))
+      |> pog.execute(connection)
+      |> result.map_error(write_error),
+    )
+    case locked.rows {
+      [current] if current == version -> {
+        use clock <- result.try(
+          pog.query("select clock_timestamp() < " <> instant("$1"))
+          |> pog.parameter(pog.int(microseconds(deadline)))
+          |> pog.returning(decode.at([0], decode.bool))
+          |> pog.execute(connection)
+          |> result.map_error(write_error),
+        )
+        case clock.rows {
+          [True] -> ordinary_put(connection, table, record, Some(version))
+          [False] -> Ok(store.DeadlineElapsed)
+          _ -> Error(store.StoreUnavailable)
+        }
+      }
+      _ -> Ok(store.VersionConflict)
+    }
+  })
+  |> result.map_error(fn(error) {
+    case error {
+      pog.TransactionRolledBack(_) -> store.StoreUnavailable
+      // This includes a failed COMMIT acknowledgement: it may have acted.
+      pog.TransactionQueryError(_) -> store.StoreOutcomeUnknown
+    }
+  })
 }
 
 /// Instants cross the driver as integer microseconds since the epoch:

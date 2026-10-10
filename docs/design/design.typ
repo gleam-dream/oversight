@@ -385,8 +385,8 @@
       #answers(title: "Durable login custody in a web application",
         responsibility: [Maintain browser sessions and call a protected billing resource with recoverable token custody.],
         interface: [Login/callback/logout routes, application session cookie, and native principal/account views.],
-        interactions: [Warden owns transactions and token custody; the application implements sealed-record CAS on PostgreSQL and separately manages its browser session. HTTP Gun performs resource calls.],
-        invariants: [The application does not implement a second refresh state machine. Custody records and browser session references have separate owners and lifetimes.],
+        interactions: [Warden owns transactions and token custody; the application implements Warden's conditional sealed-record writes on PostgreSQL and separately manages its browser session. HTTP Gun performs resource calls.],
+        invariants: [The application does not implement a second refresh state machine. Custody records and browser session references have separate owners and lifetimes. Guarded consumption checks version and database wall time under row ownership after lock waiting; validity and storage retention remain separate.],
         failure: [The application may refresh once after a resource refusal and recover uncertain publication once, then maps Warden's typed action to user-visible decisions. Storage uncertainty is not treated as definite non-action.],
       )
       Source owners: `apps/sso_portal/src/sso_portal/warden_records.gleam`, `session_store.gleam`, `web.gleam`, and `billing_api.gleam`.
