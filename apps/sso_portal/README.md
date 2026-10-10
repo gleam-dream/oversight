@@ -19,6 +19,10 @@ The [ecosystem design](../../docs/design/design-layer.pdf) records the current c
 Warden keeps its sessions and pending logins in Postgres
 (`src/sso_portal/warden_records.gleam`, a `warden/store` adapter on pog), sealed
 with a key the app holds, so a Warden restart keeps every session.
+The adapter uses Warden's explicit write conditions and outcomes. Guarded writes
+lock the row, check its version, then sample PostgreSQL's `clock_timestamp()`
+before updating. Login validity is separate from record retention. A failed
+commit acknowledgement remains an unknown outcome.
 
 Everything external runs on loopback:
 
@@ -59,5 +63,6 @@ refresh; provider clock ahead with and without
 `config.with_clock_tolerance`; tampered callback state; revoked
 refresh token → forced re-login; billing API down; sessions across a web-tier
 restart and a Warden restart; Warden's rows hold nothing readable;
-the Postgres store passes `testing.check_store`; a session ended elsewhere;
+the Postgres store passes `testing.check_store` and refuses a guarded write
+after an observed row-lock wait crosses expiry; a session ended elsewhere;
 logout with a stale session revision.

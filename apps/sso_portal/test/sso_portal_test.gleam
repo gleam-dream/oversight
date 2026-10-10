@@ -6,6 +6,7 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import gleam/time/duration
+import gleam/time/timestamp
 import gleeunit
 import pog
 import sso_portal/app.{type App}
@@ -15,6 +16,7 @@ import sso_portal/session_store
 import sso_portal/telemetry
 import sso_portal/warden_records
 import warden
+import warden/store
 import warden/testing
 
 pub fn main() -> Nil {
@@ -329,4 +331,79 @@ fn custody_reference(portal: App) -> String {
     |> pog.returning(decode.at([0], decode.string))
     |> pog.execute(portal.db)
   reference
+}
+
+// The writer must actually wait on PostgreSQL's row lock before expiry.
+pub fn guarded_write_waiting_on_a_row_lock_cannot_outlive_its_deadline_test() {
+  let assert Ok(db) = app.connect_database()
+  let table = "warden_deadline_records"
+  let assert Ok(Nil) = warden_records.migrate(db, table)
+  let records = warden_records.new(db, table)
+  let original =
+    store.Record(
+      key: "queued",
+      version: 1,
+      expires_at: timestamp.add(timestamp.system_time(), duration.hours(1)),
+      sealed: <<1, 2, 3>>,
+    )
+  let assert Ok(store.Written) = store.put(records, original, store.Absent)
+  let assert Ok(Some(original)) = store.get(records, original.key)
+  let replies = process.new_subject()
+  let assert Ok(Nil) =
+    pog.transaction(db, fn(connection) {
+      let assert Ok(_) =
+        pog.query(
+          "select version from warden_deadline_records where key = 'queued' for update",
+        )
+        |> pog.execute(connection)
+      let assert Ok(pog.Returned(rows: [deadline], ..)) =
+        pog.query(
+          "select (extract(epoch from clock_timestamp() + interval '2 seconds') * 1000000)::bigint",
+        )
+        |> pog.returning(decode.at([0], pog.timestamp_decoder()))
+        |> pog.execute(connection)
+      process.spawn(fn() {
+        process.send(
+          replies,
+          store.put(
+            records,
+            store.Record(..original, version: 2, sealed: <<9>>),
+            store.AtVersionBefore(1, deadline),
+          ),
+        )
+      })
+      wait_for_guarded_writer(db, 100)
+      // Assert that the observed lock wait began while the guard was valid.
+      let #(seconds, nanos) =
+        timestamp.to_unix_seconds_and_nanoseconds(deadline)
+      let assert Ok(pog.Returned(rows: [True], ..)) =
+        pog.query(
+          "select clock_timestamp() < to_timestamp($1::bigint / 1000000.0)",
+        )
+        |> pog.parameter(pog.int(seconds * 1_000_000 + nanos / 1000))
+        |> pog.returning(decode.at([0], decode.bool))
+        |> pog.execute(connection)
+      let assert Ok(_) =
+        pog.query("select 1 from pg_sleep(2.1)") |> pog.execute(connection)
+      Ok(Nil)
+    })
+  assert process.receive(replies, 3000) == Ok(Ok(store.DeadlineElapsed))
+  assert store.get(records, original.key) == Ok(Some(original))
+}
+
+fn wait_for_guarded_writer(db: pog.Connection, remaining: Int) -> Nil {
+  let assert Ok(pog.Returned(rows: [waiting], ..)) =
+    pog.query(
+      "select exists (select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like 'select version from warden_deadline_records%')",
+    )
+    |> pog.returning(decode.at([0], decode.bool))
+    |> pog.execute(db)
+  case waiting {
+    True -> Nil
+    False -> {
+      assert remaining > 0
+      process.sleep(10)
+      wait_for_guarded_writer(db, remaining - 1)
+    }
+  }
 }
