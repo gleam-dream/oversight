@@ -61,10 +61,12 @@ pub fn stop(server: Server) -> Nil {
   process.unlink(server.pid)
   // `shutdown`, not `kill`: supervisors stop children quietly.
   exit(server.pid, atom.create("shutdown"))
-  let _ =
+  // A child may use its own five-second shutdown allowance before the
+  // supervisor closes the listener. Do not treat a timed-out wait as stopped.
+  let assert Ok(Nil) =
     process.new_selector()
     |> process.select_specific_monitor(monitor, fn(_) { Nil })
-    |> process.selector_receive(5000)
+    |> process.selector_receive(30_000)
   Nil
 }
 

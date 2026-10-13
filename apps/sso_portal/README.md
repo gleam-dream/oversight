@@ -66,3 +66,7 @@ restart and a Warden restart; Warden's rows hold nothing readable;
 the Postgres store passes `testing.check_store` and refuses a guarded write
 after an observed row-lock wait crosses expiry; a session ended elsewhere;
 logout with a stale session revision.
+
+Web-tier restart waits for the old supervisor to finish shutting down before
+rebinding its port. The wait allows 30 seconds for child cleanup and fails
+explicitly on timeout; it does not treat an occupied listener as stopped.
