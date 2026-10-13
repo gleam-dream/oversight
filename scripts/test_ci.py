@@ -5,12 +5,34 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import ci
 import sibling_refs
 
 
 class GateTests(unittest.TestCase):
+    def test_compatibility_refuses_to_rewrite_a_local_checkout(self):
+        with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}):
+            with self.assertRaises(ValueError):
+                ci.current_sources()
+
+    def test_current_sources_preserve_adapter_paths_and_frozen_inputs(self):
+        source = (
+            '[dependencies]\n'
+            'saga_postgres = { git = "https://github.com/gleam-dream/saga.git", '
+            f'ref = "{"a" * 40}", path = "integrations/saga_postgres" }}\n'
+            'json_blueprint = "== 1.1.0"\n'
+            'other = { git = "https://github.com/example/other.git", ref = "v1" }\n'
+        )
+        changed = ci.replace_git_refs(source, {"saga": "b" * 40})
+        self.assertIn('path = "integrations/saga_postgres"', changed)
+        self.assertIn('ref = "' + "b" * 40 + '"', changed)
+        self.assertIn('json_blueprint = "== 1.1.0"', changed)
+        self.assertIn('ref = "v1"', changed)
+        with self.assertRaises(ValueError):
+            ci.replace_git_refs(source.replace("a" * 40, "master"), {"saga": "b" * 40})
+
     def test_sibling_pins_reject_missing_duplicate_and_untrusted_refs(self):
         pins = "".join(f"{name}={'a' * 40}\n" for name in ci.SIBLINGS)
         self.assertEqual(set(sibling_refs.parse_pins(pins)), set(ci.SIBLINGS))

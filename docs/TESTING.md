@@ -1,8 +1,9 @@
 # Validation
 
-Run checks from the repository root through its Nix shell. Local checks use
-the sibling working trees beside Oversight and record their revisions and dirty
-status. Required CI checks use the revisions in `sibling-revisions.txt`.
+Run checks from the repository root through its Nix shell. Composition consumers
+resolve immutable Git dependencies; `sibling-revisions.txt` records the same
+revision set for CI source inspection and historical oracle access. The runner
+records those checkouts separately from the actual consumer inputs.
 Tests use scripted services and disposable PostgreSQL; they need no provider
 accounts.
 
@@ -58,25 +59,31 @@ libraries.
 Each required CI run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.
 The separate weekly compatibility workflow resolves sibling default branches
-and records the actual revisions; it does not update pins or replace required
-PR evidence. It can also be run manually.
+and substitutes their exact commits in consumer declarations inside its disposable
+checkout. It retains those temporary inputs without changing checked-in pins or
+replacing required PR evidence. It can also be run manually. Inconsistent source
+requirements remain a compatibility failure.
 
-For local reproduction, keep the nine sibling repositories beside Oversight.
+To run an individual application, no sibling checkout is required. The complete
+evidence runner also needs the nine sibling repositories beside Oversight for
+source inspection and historical oracle access.
 The [checkout action](../.github/actions/siblings/action.yml) records their
 repository locations; the manifest records the revisions. Use separate clean
 checkouts when reproducing that set so existing work remains intact. The local
 runner records the trees it actually uses and never changes their revisions.
 The Nix lock supplies the toolchain, including Erlang/OTP 28 and PostgreSQL 16.
 
-A passing run with dirty siblings qualifies that workspace. It does not qualify
-the manifest's frozen revisions. After coordinated library changes are committed,
-update the pins and rerun the affected consumer against those clean revisions
-before presenting the set as reproducible release evidence.
+Consumer runtime code comes from its Git declarations and generated lockfile;
+editing a sibling working tree does not alter that code. Checkout revisions and
+dirty flags describe the inspection/oracle inputs. Qualifying coordinated library
+changes requires updating consumer declarations, lockfiles and the CI pin set
+together, then rerunning the affected consumers.
 
 ## Results and release evidence
 
-The runner writes command logs, exit codes, durations, source revisions and
-toolchain identity under `.artifacts/ci/`. CI uploads these on success or
+The runner writes command logs, exit codes, durations, checkout revisions,
+consumer revision choices, actual package declarations/lockfiles and toolchain
+identity under `.artifacts/ci/`. CI uploads these on success or
 failure. Database logs survive cluster cleanup when the gate supplies
 `OVERSIGHT_PG_LOG_DIR`. Missing services and failed tests remain failures.
 

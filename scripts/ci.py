@@ -5,11 +5,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +25,52 @@ SIBLINGS = (
     "sinal", "json_blueprint", "http_gun", "saga", "grind",
     "llm_wire", "relay", "warden", "fabric",
 )
+
+
+def replace_git_refs(text: str, pins: dict[str, str]) -> str:
+    """Select current revisions without changing frozen external or Hex inputs."""
+    config = tomllib.loads(text)
+    for section in ("dependencies", "dev-dependencies"):
+        for name, dependency in config.get(section, {}).items():
+            if not isinstance(dependency, dict) or "git" not in dependency:
+                continue
+            match = re.fullmatch(
+                r"https://github.com/(gleam-dream|lostbean)/([a-z_]+)\.git",
+                dependency["git"],
+            )
+            if not match or match[2] not in pins:
+                continue
+            owner = "lostbean" if match[2] == "json_blueprint" else "gleam-dream"
+            if match[1] != owner or not re.fullmatch(r"[0-9a-f]{40}", dependency["ref"]):
+                raise ValueError(f"Unexpected Git source for {name}")
+            pattern = rf'(?m)^({re.escape(name)}\s*=\s*\{{[^\n]*ref\s*=\s*")[0-9a-f]{{40}}(")'
+            text, count = re.subn(pattern, lambda m: m[1] + pins[match[2]] + m[2], text)
+            if count != 1:
+                raise ValueError(f"Expected one Git declaration for {name}")
+    return text
+
+
+def current_sources() -> None:
+    """Alter inputs only in the compatibility workflow's disposable checkout."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise ValueError("Compatibility source selection requires a disposable CI checkout")
+    pins = {
+        name: subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT.parent / name, text=True,
+        ).strip()
+        for name in SIBLINGS
+    }
+    if any(not re.fullmatch(r"[0-9a-f]{40}", revision) for revision in pins.values()):
+        raise ValueError("Current sources must resolve to immutable commits")
+    paths = subprocess.check_output(
+        ["git", "ls-files", "**/gleam.toml"], cwd=ROOT, text=True,
+    ).splitlines()
+    for path in paths:
+        file = ROOT / path
+        file.write_text(replace_git_refs(file.read_text(), pins))
+    (ROOT / "sibling-revisions.txt").write_text(
+        "".join(f"{name}={revision}\n" for name, revision in pins.items())
+    )
 
 
 def require_success(results: object, expected: tuple[str, ...]) -> None:
@@ -64,6 +112,13 @@ def run(
             "command": command, "cwd": str(cwd), "exit": code,
             "seconds": time.monotonic() - started, "log": log.name,
         }) + "\n")
+    if cwd.is_relative_to(ROOT) and (cwd / "gleam.toml").is_file():
+        inputs = evidence / "inputs" / cwd.relative_to(ROOT)
+        inputs.mkdir(parents=True, exist_ok=True)
+        for name in ("gleam.toml", "manifest.toml"):
+            file = cwd / name
+            if file.is_file():
+                (inputs / name).write_bytes(file.read_bytes())
     if code:
         print(log.read_text()[-24000:], file=sys.stderr)
         raise subprocess.CalledProcessError(code, command)
@@ -96,6 +151,7 @@ def inventory() -> None:
 
 def provenance() -> None:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
+    (EVIDENCE / "consumer-revisions.txt").write_bytes((ROOT / "sibling-revisions.txt").read_bytes())
     revisions = {}
     for name in ("oversight", *SIBLINGS):
         path = ROOT if name == "oversight" else ROOT.parent / name
@@ -166,7 +222,7 @@ def experiments() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("quality", "application", "experiments", "full", "result", "inventory"))
+    parser.add_argument("profile", choices=("quality", "application", "experiments", "full", "compatibility", "result", "inventory"))
     parser.add_argument("names", nargs="*")
     args = parser.parse_args()
     if args.profile == "result":
@@ -183,6 +239,9 @@ def main() -> None:
             parser.error("application requires one registered application name")
     elif args.names:
         parser.error("this profile accepts no extra arguments")
+    if args.profile == "compatibility":
+        current_sources()
+        args.profile = "full"
     if args.profile in ("application", "experiments", "full"):
         provenance()
     if args.profile in ("quality", "full"):

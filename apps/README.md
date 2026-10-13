@@ -34,7 +34,8 @@ Applications that need PostgreSQL use the disposable cluster helper:
 ```
 
 The helper creates and removes its own local database. No existing database or
-provider account is needed. Dependencies resolve from sibling checkouts.
+provider account is needed. Gleam resolves library dependencies from immutable
+Git revisions; no sibling checkout is required to run an application.
 
 ## What the examples test
 

@@ -28,8 +28,8 @@ provide persistent storage. Each package README links its detailed design.
 
 ## Run an example
 
-Keep the repositories side by side, enter the Oversight shell, and run an
-application:
+Enter the Oversight shell and run an application. Gleam fetches the libraries
+from their recorded immutable Git revisions:
 
 ```sh
 nix develop

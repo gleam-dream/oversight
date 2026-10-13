@@ -25,7 +25,7 @@ jobs:
           current: "true"
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
       - working-directory: oversight
-        run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py full
+        run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py compatibility
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

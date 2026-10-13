@@ -16,11 +16,11 @@ pog = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 gleam_crypto = ">= 1.6.0 and < 2.0.0"
-relay = { path = "../../../relay" }
-warden = { path = "../../../warden" }
-grind = { path = "../../../grind" }
-json_blueprint = { path = "../../../json_blueprint" }
-sinal = { path = "../../../sinal" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "ef58066e31a11ef5d9b469867e4beec90eba97b5" }
+warden = { git = "https://github.com/gleam-dream/warden.git", ref = "f28183ebcb8085707054ea7d9b423abd36b649c4" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "84f263e6e355b20424846508bc730ce9aca7f1ed" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "0015fc50ddfd334b9c44253c36dc429d29a5845d" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "4aee4c3b920bd7241da7659995dfc0a0b5767348" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
