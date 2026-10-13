@@ -80,6 +80,7 @@
           # Elixir to run the upstream libraries (Oban, Reactor, oidcc, ...)
           # side by side for direct behavioral comparison.
           packages = with pkgs; [
+            git
             lefthook
             gleam
             beam28Packages.erlang

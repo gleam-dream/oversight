@@ -1,0 +1,40 @@
+# Resolve composition consumers from recorded Git sources
+
+<a id="adr-0015"></a>
+
+## Decision
+
+Composition applications and retained runtime experiments declare immutable Git
+sources for ecosystem libraries and optional adapters. Their generated lockfiles
+and the CI source inventory identify the same revision set. In-repository paths
+remain appropriate for packages owned by Oversight itself.
+
+The development shell supplies Git. Evidence retains each executed consumer's
+declarations and resolved manifest, separately from inspected sibling checkout
+revisions and dirty flags. The scheduled compatibility run selects captured
+default-branch commits in its disposable checkout and preserves those temporary
+inputs; it does not change the checked-in qualification set.
+
+## Rationale and alternatives
+
+The dependency review found that individually consumable Git packages conflict
+with Oversight consumers supplying the same package through a sibling path.
+Gleam treats those as different provided sources even at the same commit. Stale
+CI pins also omitted Warden's conditional-write types and Fabric's history API
+already used by retained applications.
+
+Reverting libraries to sibling paths would restore the consumer installation
+failure. Rewriting their manifests during ordinary validation would qualify a
+modified graph instead of the declared package graph. Consistent immutable
+sources preserve standalone consumption and executable composition evidence.
+
+## Consequences and provenance
+
+Local sibling edits do not change ordinary consumer runtime dependencies. The
+default-branch compatibility check still exercises current sources and reports
+incompatible source requirements as failures. Frozen older oracle and compatibility
+inputs retain their own revisions.
+
+Accepted during the contribution integration on 13 October 2026. The reproduced
+failures were SSO's missing `WriteCondition`/`WriteOutcome` types, research history's
+missing Fabric modules, and Gleam's path/Git source conflict for Sinal.
