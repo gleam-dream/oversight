@@ -10,12 +10,13 @@ accounts.
 ```sh
 nix develop --command python3 -B scripts/ci.py quality
 nix develop --command python3 -B scripts/ci.py application checkout
+nix develop --command python3 -B scripts/ci.py application session_replay
 nix develop --command python3 -B scripts/ci.py application financial_recovery
 nix develop --command python3 -B scripts/ci.py experiments
 nix develop --command python3 -B scripts/ci.py full
 ```
 
-The full gate runs quality checks, all nine applications, retained experiments
+The full gate runs quality checks, all registered applications, retained experiments
 and the design gate. CI divides the same commands into jobs. Its final `CI`
 status requires every mandatory job to succeed; failures, cancellations and
 unexpected skips cannot satisfy it.
@@ -50,7 +51,7 @@ experiment independently.
 
 ## Sibling access
 
-All nine library repositories are public. CI checks them out with the default
+All tracked library repositories are public. CI checks them out with the default
 read-only GitHub Actions token; no GitHub App or personal access token is needed.
 Tokens are not persisted in Git configuration or passed to the test commands.
 Oversight remains private; its visibility does not restrict access to the public
@@ -65,7 +66,7 @@ replacing required PR evidence. It can also be run manually. Inconsistent source
 requirements remain a compatibility failure.
 
 To run an individual application, no sibling checkout is required. The complete
-evidence runner also needs the nine sibling repositories beside Oversight for
+evidence runner also needs the tracked sibling repositories beside Oversight for
 source inspection and historical oracle access.
 The [checkout action](../.github/actions/siblings/action.yml) records their
 repository locations; the manifest records the revisions. Use separate clean

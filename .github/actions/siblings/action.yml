@@ -76,3 +76,10 @@ runs:
         ref: ${{ steps.revisions.outputs.fabric }}
         path: fabric
         persist-credentials: false
+    - name: Checkout retrace
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      with:
+        repository: gleam-dream/retrace
+        ref: ${{ steps.revisions.outputs.retrace }}
+        path: retrace
+        persist-credentials: false
