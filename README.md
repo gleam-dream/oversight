@@ -21,7 +21,8 @@ they need and supply domain types and policies.
 | [Warden](../warden/README.md)                 | OIDC/OAuth client and access-token validation   |
 | [Fabric](../fabric/README.md)                 | Agents, durable graphs and approvals            |
 
-[Saga's PostgreSQL adapter](../saga/integrations/saga_postgres/README.md) and
+[Saga's PostgreSQL adapter](../saga/integrations/saga_postgres/README.md),
+[Warden's PostgreSQL adapter](../warden/integrations/warden_postgres/README.md) and
 [Fabric's PostgreSQL adapter](../fabric/integrations/fabric_postgres/README.md)
 provide persistent storage. Each package README links its detailed design.
 

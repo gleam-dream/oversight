@@ -28,7 +28,7 @@
   )
 
   #pagebreak(weak: true)
-  #section(title: "System at a glance", lead: "The ecosystem contains nine core libraries and two PostgreSQL adapters. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
+  #section(title: "System at a glance", lead: "The ecosystem contains nine core libraries and three PostgreSQL adapters. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
     altitude: "L1", viewpoint: "runtime", title: "Applications select independent library authorities",
     nodes: (
       (id: "app", label: "Application", kind: "external-system"),
@@ -76,11 +76,12 @@
       [Fabric], [Agents, durable graphs, approvals and managed children], [LLM Wire, HTTP Gun, JSON Blueprint, Sinal], [Job delivery and Saga effect semantics],
       [saga_postgres], [Saga persistence, leases and fencing], [Saga, Sinal], [Pool ownership and driver scheduling],
       [fabric_postgres], [Fabric persistence and family retention], [Fabric], [Pool ownership and model/tool policy],
+      [warden_postgres], [Warden sealed-record persistence and conditional writes], [Warden, HTTP Gun, Sinal], [Pool ownership, sealing keys and application authorization],
     ))
     #points(
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
       [A #term("term-consumer-recipe") may join packages absent from each other's dependency graph. The recipe must understand their public semantics, not their private representation.],
-      [The application selects the participating libraries; no package imports Oversight at runtime. The aggregate package set and removed bridge rationale are recorded in #adr(3).],
+      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14); removed bridge rationale remains in #adr(3).],
     )
   ])
 
@@ -167,7 +168,7 @@
     ]
       #subsection(title: "Pool and process lifetimes are explicit")[
       #contract(name: "Shared PostgreSQL lifetime", mission: "Share one application database without merging recovery authorities.", answers: answers-data(
-        responsibility: [Grind owns the pool it creates from caller configuration; application queries and both PostgreSQL adapters borrow connections.],
+        responsibility: [Grind owns the pool it creates from caller configuration; application queries and the three PostgreSQL adapters borrow connections.],
         interface: [Public connection accessors and borrowed transaction APIs; each adapter's migration and storage constructor.],
         interactions: [Startup establishes schema compatibility before admitting work. Shutdown stops producers and dependent runtimes before releasing the pool.],
         invariants: [A borrowed transaction is not committed by an enqueue helper. Claim fencing and destination effect fencing are distinct. Renewal connection reservations count toward deployment capacity.],

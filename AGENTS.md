@@ -3,7 +3,7 @@
 ## Repository responsibility
 
 - Oversight owns ecosystem composition contracts and executable consumer evidence.
-  The nine core libraries and two PostgreSQL adapters own their detailed designs
+  The nine core libraries and three PostgreSQL adapters own their detailed designs
   in their respective repositories.
 - Read [the ecosystem design](docs/design/design.typ), its
   [vocabulary](docs/design/CONTEXT.typ), [coverage](docs/COVERAGE.md), and relevant
