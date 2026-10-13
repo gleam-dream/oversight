@@ -28,7 +28,7 @@
   )
 
   #pagebreak(weak: true)
-  #section(title: "System at a glance", lead: "The ecosystem contains nine core libraries and three PostgreSQL adapters. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
+  #section(title: "System at a glance", lead: "The ecosystem contains independent libraries, three PostgreSQL adapters and Retrace core, frontend and server packages. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
     altitude: "L1", viewpoint: "runtime", title: "Applications select independent library authorities",
     nodes: (
       (id: "app", label: "Application", kind: "external-system"),
@@ -41,6 +41,7 @@
       (id: "http", label: "HTTP Gun", kind: "component"),
       (id: "json", label: "JSON Blueprint", kind: "component"),
       (id: "sinal", label: "Sinal", kind: "component"),
+      (id: "retrace", label: "Retrace", kind: "component"),
     ),
     edges: (
       (from: "app", to: "fabric", relation: "call", label: "uses"),
@@ -48,6 +49,7 @@
       (from: "app", to: "warden", relation: "call", label: "uses"),
       (from: "app", to: "saga", relation: "call", label: "uses"),
       (from: "app", to: "grind", relation: "call", label: "uses"),
+      (from: "app", to: "retrace", relation: "call", label: "uses"),
       (from: "fabric", to: "llm", relation: "dependency", label: "imports"),
       (from: "llm", to: "http", relation: "dependency", label: "imports"),
       (from: "relay", to: "http", relation: "dependency", label: "imports"),
@@ -59,7 +61,7 @@
       (from: "saga", to: "sinal", relation: "dependency", label: "imports"),
       (from: "grind", to: "sinal", relation: "dependency", label: "imports"),
     ),
-    caption: [The map shows the principal runtime dependencies. The complete direct-dependency table includes direct observation and transport dependencies omitted from this overview. PostgreSQL adapters borrow an application-owned connection pool.],
+    caption: [The map shows the principal runtime dependencies. The complete direct-dependency table includes direct observation and transport dependencies omitted from this overview. The Retrace node groups its independently selected core, frontend and server packages. PostgreSQL adapters borrow an application-owned connection pool.],
   ), body: [
     #pagebreak(weak: true)
     #subsection(title: "Package responsibilities and dependencies")[The table lists every direct sibling dependency and its semantic exclusion.]
@@ -74,6 +76,9 @@
       [Relay], [MCP client/server contracts and transport], [HTTP Gun, JSON Blueprint, Sinal], [OIDC custody and application authorization],
       [Warden], [OIDC/OAuth client behavior and token custody/validation], [HTTP Gun, Sinal], [MCP-specific policy and application sessions],
       [Fabric], [Agents, durable graphs, approvals and managed children], [LLM Wire, HTTP Gun, JSON Blueprint, Sinal], [Job delivery and Saga effect semantics],
+      [Retrace core], [Typed recording, checkpoints, wire validation and pure reconstruction], [None], [Capture policy, UI and storage ownership],
+      [retrace_frontend], [Browser/Tauri delivery, Lustre capture and optional replay viewer], [Retrace core], [Application state, safe projections and historical build publication],
+      [retrace_server], [Session admission, indexing and object archival], [Retrace core], [Pool/worker lifetime, authentication and retention policy],
       [saga_postgres], [Saga persistence, leases and fencing], [Saga, Sinal], [Pool ownership and driver scheduling],
       [fabric_postgres], [Fabric persistence and family retention], [Fabric], [Pool ownership and model/tool policy],
       [warden_postgres], [Warden sealed-record persistence and conditional writes], [Warden, HTTP Gun, Sinal], [Pool ownership, sealing keys and application authorization],
@@ -82,7 +87,7 @@
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
       [Composition consumers declare immutable Git sources with matching lockfiles and CI source revisions. Local paths stay within the consuming repository. Evidence retains executed package inputs separately from inspected sibling checkouts. Scheduled compatibility selects captured current revisions in a disposable checkout. #adr(15)],
       [A #term("term-consumer-recipe") may join packages absent from each other's dependency graph. The recipe must understand their public semantics, not their private representation.],
-      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14); removed bridge rationale remains in #adr(3).],
+      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14) and #adr(16); removed bridge rationale remains in #adr(3).],
     )
   ])
 
@@ -222,6 +227,7 @@
       [Diagnostic rendering excludes credentials and private application payloads unless the caller deliberately supplies a safe public projection. Typed evidence is retained before rendering.],
       [An exporter may map #term("term-observation-correlation") into a trace system. Exporter policy and parent/child span semantics remain outside the core correlation contract.],
     )
+    #points([Retrace reconstructs selected application state from safe checkpoints and messages. It does not replace Sinal correlation or infer business completion. Applications own deterministic reducers, disclosure policy and build-compatible renderers; the frontend and server introduce no mandatory ecosystem runtime.])
     #adr(6)
   ])
 
@@ -231,6 +237,27 @@
       #attribute(name: "Package configuration", type: "Public typed configuration values", provenance: "authored")[The participating packages and policies chosen by the application.]
       #attribute(name: "Evidence", type: "Observed assertions and outcomes", provenance: "observed")[Results of actually executed scenarios, with toolchain and environment limits attached to the claim.]
       #relates(cardinality: "1 : n")[A composition application exercises multiple package authorities, each of which may participate in several applications.]
+    ]
+    #subsection(title: "Session replay")[
+      #answers(title: "Application-owned cart reconstruction",
+        responsibility: [Demonstrate portable recording and pure reconstruction without a browser, database or native shell.],
+        interface: [The separate public consumer under `apps/session_replay` supplies Cart, Message and CartError types, a pure reducer, an explicit session contract and elapsed times.],
+        interactions: [The application accepts positive additions/removals without a negative cart quantity, then records each accepted message. Retrace numbers entries and reconstructs state. The application may resume at a trusted checkpoint and append further accepted messages.],
+        invariants: [Only accepted state transitions enter the stream. Replay runs the same pure reducer and performs no external effects. A failed step leaves the previous player available. An in-memory checkpoint is not proof of durable persistence.],
+        failure: [Missing entries and incompatible contracts are refused explicitly. Invalid quantities and removal beyond the cart retain native domain errors; the application can replay a corrected contiguous sequence or start from a trusted later checkpoint.],
+      )
+      #behavior(title: "Accepted cart messages reconstruct the same state", area: "Session replay", level: "boundary")[
+        #given[A safe initial cart and its accepted messages, or a trusted checkpoint and the accepted messages following it.]
+        #when[The application reconstructs the contiguous stream with its matching contract and pure reducer.]
+        #then[The reconstructed cart equals the application's recorded cart at the same cursor.]
+      ]
+      #behavior(title: "Replay refusal preserves a recovery point", area: "Session replay", level: "boundary")[
+        #given[A replay encounters a gap, incompatible contract or a message refused by the cart reducer.]
+        #when[The consumer attempts reconstruction.]
+        #then[It receives a typed failure without advancing the previous player, so it can retry from that recovery point with valid input.]
+      ]
+      #points([This consumer establishes core behavior only. Retrace owns the maintained basic browser and advanced Tauri examples and their separate UI, delivery and storage evidence.])
+      #adr(16)
     ]
     #subsection(title: "Checkout")[
       #answers(title: "Checkout authority and recovery",

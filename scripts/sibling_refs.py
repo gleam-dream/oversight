@@ -29,7 +29,7 @@ def main() -> None:
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
         for name, revision in pins.items():
             if current == "true":
-                revision = "main" if name == "json_blueprint" else "master"
+                revision = "main" if name in {"json_blueprint", "retrace"} else "master"
             output.write(f"{name}={revision}\n")
 
 

@@ -1,7 +1,7 @@
 # Gleam Dream
 
 Gleam libraries for HTTP, JSON, background jobs, workflows, authentication and
-agents. Oversight contains the ecosystem design and runnable applications that
+agents, plus application session recording and replay. Oversight contains the ecosystem design and runnable applications that
 combine the libraries.
 
 ## Libraries
@@ -9,17 +9,27 @@ combine the libraries.
 Each library owns its API, design and runtime. Applications choose the libraries
 they need and supply domain types and policies.
 
-| Library                                       | Purpose                                         |
-| --------------------------------------------- | ----------------------------------------------- |
-| [Sinal](../sinal/README.md)                   | Typed telemetry and correlation                 |
-| [JSON Blueprint](../json_blueprint/README.md) | JSON codecs, schemas and runtime contracts      |
-| [HTTP Gun](../http_gun/README.md)             | HTTP client, streaming, redaction and cassettes |
-| [Saga](../saga/README.md)                     | Compensating workflows                          |
-| [Grind](../grind/README.md)                   | PostgreSQL job queue                            |
-| [LLM Wire](../llm_wire/README.md)             | Model-provider protocols and classification     |
-| [Relay](../relay/README.md)                   | MCP server and client                           |
-| [Warden](../warden/README.md)                 | OIDC/OAuth client and access-token validation   |
-| [Fabric](../fabric/README.md)                 | Agents, durable graphs and approvals            |
+| Library                                                                                        | Purpose                                          |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| [Sinal](../sinal/README.md)                                                                    | Typed telemetry and correlation                  |
+| [JSON Blueprint](../json_blueprint/README.md)                                                  | JSON codecs, schemas and runtime contracts       |
+| [HTTP Gun](../http_gun/README.md)                                                              | HTTP client, streaming, redaction and cassettes  |
+| [Saga](../saga/README.md)                                                                      | Compensating workflows                           |
+| [Grind](../grind/README.md)                                                                    | PostgreSQL job queue                             |
+| [LLM Wire](../llm_wire/README.md)                                                              | Model-provider protocols and classification      |
+| [Relay](../relay/README.md)                                                                    | MCP server and client                            |
+| [Warden](../warden/README.md)                                                                  | OIDC/OAuth client and access-token validation    |
+| [Fabric](../fabric/README.md)                                                                  | Agents, durable graphs and approvals             |
+| [Retrace core](https://github.com/gleam-dream/retrace)                                         | Typed session recording and deterministic replay |
+| [Retrace frontend](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_frontend) | Browser/Tauri capture, delivery and replay UI    |
+| [Retrace server](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_server)     | PostgreSQL session indexing and object archival  |
+
+[Retrace](https://github.com/gleam-dream/retrace) adds three independently selected
+packages: portable `retrace`, browser/Tauri `retrace_frontend`, and BEAM
+`retrace_server`. Its [design](https://github.com/gleam-dream/retrace/blob/main/docs/design/design.typ)
+owns recording, delivery and replay contracts;
+[installation](https://github.com/gleam-dream/retrace/blob/main/docs/releases.md)
+uses Git dependencies. The current release is experimental.
 
 [Saga's PostgreSQL adapter](../saga/integrations/saga_postgres/README.md),
 [Warden's PostgreSQL adapter](../warden/integrations/warden_postgres/README.md) and
@@ -42,7 +52,8 @@ gleam run
 itself served as an MCP tool. Its model provider and tools run locally.
 
 The [application catalog](apps/README.md) also covers checkout, webhooks,
-document extraction, approvals, login and crash recovery. Applications use
+document extraction, approvals, login, crash recovery and
+[session replay](apps/session_replay/README.md). Applications use
 scripted services and disposable PostgreSQL; no provider credentials are needed.
 
 ## Design and experiments

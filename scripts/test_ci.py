@@ -12,6 +12,21 @@ import sibling_refs
 
 
 class GateTests(unittest.TestCase):
+    def test_retrace_checkout_uses_pin_or_main_for_compatibility(self):
+        pins = (ci.ROOT / "sibling-revisions.txt").read_text()
+        self.assertIn("retrace", sibling_refs.parse_pins(pins))
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "outputs"
+            for current in ("false", "true"):
+                output.write_text("")
+                with patch.dict("os.environ", {
+                    "CURRENT": current, "GITHUB_OUTPUT": str(output),
+                }):
+                    sibling_refs.main()
+                refs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                expected = "main" if current == "true" else sibling_refs.parse_pins(pins)["retrace"]
+                self.assertEqual(refs["retrace"], expected)
+
     def test_compatibility_refuses_to_rewrite_a_local_checkout(self):
         with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}):
             with self.assertRaises(ValueError):
