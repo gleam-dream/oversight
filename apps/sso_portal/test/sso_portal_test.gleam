@@ -3,7 +3,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
@@ -12,12 +12,14 @@ import pog
 import sso_portal/app.{type App}
 import sso_portal/billing_api
 import sso_portal/browser.{type Browser}
+import sso_portal/server
 import sso_portal/session_store
 import sso_portal/telemetry
 import sso_portal/warden_records
 import warden
 import warden/store
 import warden/testing
+import wisp
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -229,6 +231,52 @@ pub fn billing_down_keeps_the_session_test() {
 }
 
 // --- Durable sessions --------------------------------------------------------------
+
+pub fn occupied_port_start_failure_does_not_kill_the_caller_test() {
+  let handler = fn(_) { wisp.response(200) }
+  let secret = wisp.random_string(64)
+  let assert Ok(held) = server.start(handler, secret, None)
+  let replies = process.new_subject()
+  let caller =
+    process.spawn_unlinked(fn() {
+      let assert Error(_) = server.start_on(handler, secret, held.port, None)
+      // A refused bind is a returned error. The caller must remain able to
+      // start and stop another listener after handling it.
+      let assert Ok(recovered) = server.start(handler, secret, None)
+      server.stop(recovered)
+      process.send(replies, True)
+    })
+  let monitor = process.monitor(caller)
+  let observed =
+    process.new_selector()
+    |> process.select(replies)
+    |> process.select_specific_monitor(monitor, fn(_) { False })
+    |> process.selector_receive(5000)
+  server.stop(held)
+  assert observed == Ok(True)
+}
+
+pub fn caller_exit_releases_its_listener_test() {
+  let handler = fn(_) { wisp.response(200) }
+  let secret = wisp.random_string(64)
+  let replies = process.new_subject()
+  let _caller =
+    process.spawn_unlinked(fn() {
+      let release = process.new_subject()
+      let assert Ok(listener) = server.start(handler, secret, None)
+      process.send(replies, #(listener, release))
+      let assert Ok(Nil) = process.receive(release, 5000)
+    })
+  let assert Ok(#(listener, release)) = process.receive(replies, 5000)
+  let monitor = process.monitor(listener.pid)
+  process.send(release, Nil)
+  let assert Ok(Nil) =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(_) { Nil })
+    |> process.selector_receive(5000)
+  let assert Ok(rebound) = server.start_on(handler, secret, listener.port, None)
+  server.stop(rebound)
+}
 
 pub fn sessions_survive_web_and_warden_restarts_test() {
   let assert Ok(portal) = app.start(options())
