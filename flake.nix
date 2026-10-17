@@ -3,7 +3,7 @@
 
   inputs = {
     design-layer.url = "github:lostbean/design-layer";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
@@ -52,7 +52,7 @@
         # One derivation shared by the devShell and the mix-format formatter,
         # so `nix fmt` never formats with a different Elixir/OTP than the
         # shell actually runs prototypes on.
-        elixirPackage = pkgs.beam28Packages.elixir;
+        elixirPackage = pkgs.beam29Packages.elixir_1_20;
 
         treefmtEval = treefmt-nix.lib.evalModule pkgs {
           projectRootFile = "flake.nix";
@@ -83,8 +83,8 @@
             git
             lefthook
             gleam
-            beam28Packages.erlang
-            rebar3
+            beam29Packages.erlang
+            beam29Packages.rebar3
             elixirPackage
             actionlint
             shellcheck
