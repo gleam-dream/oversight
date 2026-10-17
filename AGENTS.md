@@ -24,7 +24,7 @@
 
 ## Tooling and workspace
 
-- `nix develop` supplies Gleam, Erlang/OTP 28, rebar3, Elixir, Python with
+- `nix develop` supplies Gleam, Erlang/OTP 29, rebar3, Elixir, Python with
   jsonschema, PostgreSQL 16, and lefthook. Run each experiment from its documented
   consumer directory in this shell.
 - Use `apps/scripts/with-postgres.sh` for disposable local database experiments.

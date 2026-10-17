@@ -79,7 +79,16 @@ The [checkout action](../.github/actions/siblings/action.yml) records their
 repository locations; the manifest records the revisions. Use separate clean
 checkouts when reproducing that set so existing work remains intact. The local
 runner records the trees it actually uses and never changes their revisions.
-The Nix lock supplies the toolchain, including Erlang/OTP 28 and PostgreSQL 16.
+The Nix lock supplies Gleam 1.19.2, Erlang/OTP 29.1.2, Elixir 1.20.4 and
+PostgreSQL 16. The package channel is `nixpkgs-unstable`; only its lock input
+changes during a toolchain refresh. Rebar3 and Elixir use the same OTP package
+as the shell. HTTP Gun retains its separate OTP 27 and OTP 28 compatibility
+shells.
+
+Gleam 1.19 includes the [multiple-path-dependency resolution fix](https://github.com/gleam-lang/gleam/blob/v1.19.0/CHANGELOG.md).
+After the initial dependency download and build, repeated builds of an unchanged
+local-source consumer reuse its dependency resolution. This avoids repeated Hex
+requests; independent consumers still perform their own initial resolution.
 
 Consumer runtime code comes from its Git declarations and generated lockfile;
 editing a sibling working tree does not alter that code. Checkout revisions and

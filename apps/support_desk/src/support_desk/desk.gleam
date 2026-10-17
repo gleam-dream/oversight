@@ -315,7 +315,8 @@ fn explain_lookup(error: LookupError) -> tool.Failure {
   }
 }
 
-const system_prompt = "You are a customer-support agent. Look the order up, check refund eligibility, and refund only when eligible. Never resubmit a refund whose outcome is unknown."
+const system_prompt =
+  "You are a customer-support agent. Look the order up, check refund eligibility, and refund only when eligible. Never resubmit a refund whose outcome is unknown."
 
 pub fn describe(resolution: Resolution) -> String {
   let outcome = case resolution.outcome {

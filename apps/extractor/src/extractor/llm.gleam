@@ -88,7 +88,8 @@ pub type ExtractError {
   UnexpectedToolCall
 }
 
-const instructions = "Extract the invoice in the document. Answer only with the JSON object described by the schema. Amounts are integer cents."
+const instructions =
+  "Extract the invoice in the document. Answer only with the JSON object described by the schema. Amounts are integer cents."
 
 pub fn request(
   model: Model,
