@@ -91,7 +91,7 @@
     ))
     #points(
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
-      [Composition consumers declare immutable Git sources with matching lockfiles and CI source revisions. Local paths stay within the consuming repository. Evidence retains executed package inputs separately from inspected sibling checkouts. Scheduled compatibility selects captured current revisions in a disposable checkout. #adr(15)],
+      [Composition consumers declare immutable Git sources with matching lockfiles and CI source revisions. Published baselines use local paths only within the consuming repository. Experiments for unpublished contracts use disposable copies of all participating working trees, normalize the full sibling graph and retain source hashes; they do not qualify the published baseline. Evidence retains executed package inputs separately from inspected sibling checkouts. Scheduled compatibility selects captured current revisions in a disposable checkout. #adr(15)],
       [A #term("term-consumer-recipe") may join packages absent from each other's dependency graph. The recipe must understand their public semantics, not their private representation.],
       [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14) and #adr(16); removed bridge rationale remains in #adr(3).],
     )

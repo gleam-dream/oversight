@@ -1,4 +1,4 @@
-# Relay admission deadline consumer
+# Relay request deadline consumer
 
 - This separate consumer checks Relay's admitted request deadline through public
   APIs. The deadline covers context creation, token verification, execution, and
@@ -9,16 +9,24 @@
 - Relay owns the contract in its [HTTP endpoint design](../../../relay/docs/design/design.typ).
   [ADR 0010](../../../relay/docs/adr/0010-own-admission-and-execution-under-one-deadline.md)
   records the accepted process-ownership decision.
+- Client tests also exercise dynamic headers, request budgets, cancellation and
+  subscription opening through native typed calls and real loopback peers.
+  [ADR 0011](../../../relay/docs/adr/0011-own-client-header-acquisition-and-opening.md)
+  records client callback ownership. The coordinated local-source experiment
+  includes HTTP Gun's unpublished additive cancellation port.
 
 ## Run
 
-- Run these commands from this directory with the sibling repositories present:
+- This experiment requires unpublished Relay source. From Oversight, capture
+  the whole local dependency graph and run from its disposable copy:
 
 ```sh
-nix develop ../.. --command gleam build --warnings-as-errors
-nix develop ../.. --command gleam test
-nix develop ../.. --command gleam run -m deadline_contract
+nix develop --command python3 -B scripts/local_sources.py --output /tmp/relay-admission-sources
+nix develop --command sh -c 'cd /tmp/relay-admission-sources/oversight/playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
 ```
+
+- Choose a new output directory for each capture. Original manifests remain
+  unchanged. This evidence does not qualify the immutable Git baseline.
 
 - `gleam test` checks the accepted deadline and lifecycle contract, ordinary use,
   application-native principals, refusal and recovery, and native BEAM ownership
@@ -30,6 +38,32 @@ nix develop ../.. --command gleam run -m deadline_contract
   credentials, a live identity provider, or a database.
 
 ## Consumer coverage
+
+Client scenarios in `client_headers_test.gleam` cover:
+
+- Blocked headers return `TimedOut(NotSent)` before their barrier is released.
+  Explicit cancellation, owned-client close and caller death stop the callback;
+  releasing an old barrier never dispatches the tool.
+- Callback panic returns sanitized `InvalidConfig(Headers)`. The borrowed HTTP
+  client remains usable for a later native `Input` to `String` call.
+- Header acquisition consumes part of one request budget. Transport receives
+  only the remainder, and post-dispatch failures retain `MaybeSent` evidence.
+- Existing borrowed HTTP cancellation and absolute deadlines remain effective.
+  Relay timeout does not cancel an application token. Borrowed-client close
+  does not terminate acquisition or stop the shared pool.
+- Subscription headers, HTTP opening and acknowledgement share one opening
+  budget. An established stream remains readable past its relative opening
+  timeout while explicit deadlines and cancellation still apply.
+- A malformed notification closes the socket without requiring a separate
+  close call. Repeated cancelled acquisitions terminate their workers and leave
+  the shared pool usable.
+
+Client callbacks use entry/release barriers and process monitors. A one-second
+budget has a separate observation bound. The shared-budget test deliberately
+spends two seconds of a three-second budget after observed callback entry.
+The raw HTTP fixture reads the actual request id and acknowledges socket closure;
+it imports no Relay or HTTP Gun internals. These are functional checks, not
+latency or throughput benchmarks.
 
 | Scenario                                                | Required observation                                                                                                                       |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -137,9 +171,9 @@ http.new_with_context(service, fn(_) { Ok(AppContext(replies)) })
 
 - The listener fixture reads response headers, not the complete body. Separate
   callback events prove tool invocation and the native tenant value.
-- This consumer does not exercise finite SSE or established subscriptions.
-  Their socket handoff and lifetime guarantees require Relay's own transport
-  tests.
+- The server admission probes do not exercise finite SSE. Client probes cover
+  subscription opening, established reads and terminal stream errors; broader
+  socket handoff guarantees still require Relay's own transport tests.
 - No claim is made for incomplete-body bounds, slowloris protection, complete-body
   delivery, production throughput, allocation, external-effect rollback, or
   arbitrary child cleanup.

@@ -372,7 +372,11 @@ pub fn guarded_write_waiting_on_a_row_lock_cannot_outlive_its_deadline_test() {
           ),
         )
       })
-      wait_for_guarded_writer(db, 100)
+      let assert Ok(pog.Returned(rows: [holder], ..)) =
+        pog.query("select pg_backend_pid()")
+        |> pog.returning(decode.at([0], decode.int))
+        |> pog.execute(connection)
+      wait_for_guarded_writer(db, holder, 100)
       // Assert that the observed lock wait began while the guard was valid.
       let #(seconds, nanos) =
         timestamp.to_unix_seconds_and_nanoseconds(deadline)
@@ -391,11 +395,16 @@ pub fn guarded_write_waiting_on_a_row_lock_cannot_outlive_its_deadline_test() {
   assert store.get(records, original.key) == Ok(Some(original))
 }
 
-fn wait_for_guarded_writer(db: pog.Connection, remaining: Int) -> Nil {
+fn wait_for_guarded_writer(
+  db: pog.Connection,
+  holder: Int,
+  remaining: Int,
+) -> Nil {
   let assert Ok(pog.Returned(rows: [waiting], ..)) =
     pog.query(
-      "select exists (select 1 from pg_stat_activity where wait_event_type = 'Lock' and query like 'select version from warden_deadline_records%')",
+      "select exists (select 1 from pg_stat_activity where $1 = any(pg_blocking_pids(pid)))",
     )
+    |> pog.parameter(pog.int(holder))
     |> pog.returning(decode.at([0], decode.bool))
     |> pog.execute(db)
   case waiting {
@@ -403,7 +412,46 @@ fn wait_for_guarded_writer(db: pog.Connection, remaining: Int) -> Nil {
     False -> {
       assert remaining > 0
       process.sleep(10)
-      wait_for_guarded_writer(db, remaining - 1)
+      wait_for_guarded_writer(db, holder, remaining - 1)
     }
   }
+}
+
+// A connection lost during COMMIT is not a confirmed storage refusal.
+pub fn commit_connection_loss_preserves_unknown_outcome_test() {
+  let assert Ok(db) = app.connect_database()
+  let table = "warden_commit_loss_records"
+  let assert Ok(Nil) = warden_records.migrate(db, table)
+  let records = warden_records.new(db, table)
+  let original =
+    store.Record(
+      key: "commit_loss",
+      version: 1,
+      expires_at: timestamp.add(timestamp.system_time(), duration.hours(1)),
+      sealed: <<1, 2, 3>>,
+    )
+  let assert Ok(store.Written) = store.put(records, original, store.Absent)
+  let assert Ok(Some(original)) = store.get(records, original.key)
+  let assert Ok(_) =
+    pog.query(
+      "create function disconnect_custody_commit() returns trigger language plpgsql as $$ begin perform pg_terminate_backend(pg_backend_pid()); return new; end $$",
+    )
+    |> pog.execute(db)
+  let assert Ok(_) =
+    pog.query(
+      "create constraint trigger disconnect_custody_commit after update on warden_commit_loss_records deferrable initially deferred for each row execute function disconnect_custody_commit()",
+    )
+    |> pog.execute(db)
+  assert store.put(
+      records,
+      store.Record(..original, version: 2, sealed: <<9>>),
+      store.AtVersionBefore(
+        1,
+        timestamp.add(timestamp.system_time(), duration.minutes(1)),
+      ),
+    )
+    == Error(store.StoreOutcomeUnknown)
+  // Independent subsequent evidence can settle this attempt; the failed
+  // acknowledgement itself must not claim that knowledge.
+  assert store.get(records, original.key) == Ok(Some(original))
 }
