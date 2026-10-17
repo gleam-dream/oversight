@@ -50,6 +50,7 @@ class GateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ci.replace_git_refs(source.replace("a" * 40, "master"), {"saga": "b" * 40})
 
+
     def test_sibling_checkout_selects_pins_and_default_branches(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

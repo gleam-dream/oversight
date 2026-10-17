@@ -61,10 +61,8 @@ experiment independently.
 All tracked library repositories are public. CI checks them out with the default
 read-only GitHub Actions token; no GitHub App or personal access token is needed.
 Tokens are not persisted in Git configuration or passed to the test commands.
-The existing nine library repositories are public. Correio's recorded baseline
-is a local commit; remote CI requires that commit to be published at the
-configured `gleam-dream/correio` repository with public read access.
-The local gate does not establish remote availability.
+The existing nine library repositories are public. Correio's recorded baseline is present on its tracked origin/main. Fresh
+consumer dependency resolution establishes whether that source remains available.
 
 Each required CI run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.
@@ -105,3 +103,28 @@ Oversight publishes no library artifact. Release qualification uses these
 composition results alongside each library's package validation. Workflows do
 not publish packages or modify repository settings. Making `CI` a required
 merge check is a separate GitHub branch-protection setting.
+
+## Unpublished local-source experiments
+
+Create a disposable source copy before exercising uncommitted sibling changes:
+
+```sh
+nix develop --command python3 -B scripts/local_sources.py --output /tmp/oversight-local-sources
+nix develop --command sh -c 'cd /tmp/oversight-local-sources/oversight/playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
+```
+
+Choose a new output directory for each capture. The command refuses an existing
+directory and never rewrites the original checkout. It includes tracked authored
+files and new source files, excludes credentials, local settings, caches and
+symlinks, and normalizes sibling dependencies throughout the copied graph.
+External sources and exact Hex oracle versions remain unchanged. Historical
+reader scripts retain their explicit revision selection and still require the
+original Git repositories when run. The copy records revisions, dirty flags,
+original file hashes and overridden manifests in `sources.json` and
+`resolution-overrides.json`.
+
+`playground/relay_admission` exercises an unpublished local Relay contract and
+uses this mode. It is not evidence for the recorded Git baseline. The same mode
+supports unpublished cross-package changes before their commits can be pinned.
+Run consumers from their copied directories through the original Oversight Nix
+shell; use the copied PostgreSQL wrapper when required.

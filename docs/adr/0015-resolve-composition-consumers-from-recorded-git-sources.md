@@ -38,3 +38,11 @@ inputs retain their own revisions.
 Accepted during the contribution integration on 13 October 2026. The reproduced
 failures were SSO's missing `WriteCondition`/`WriteOutcome` types, research history's
 missing Fabric modules, and Gleam's path/Git source conflict for Sinal.
+
+On 16 October 2026 the owner approved retaining this dependency baseline while
+implementing unpublished changes without commits or pushes. Explicit local-source
+experiments copy authored sources into a new directory, normalize sibling
+dependencies throughout that copy, and retain revisions, dirty flags and content
+hashes. They preserve frozen Hex oracle versions and generated historical readers.
+The Relay admission experiment requires this mode until its local contract is
+published. These results do not qualify the immutable Git baseline.
