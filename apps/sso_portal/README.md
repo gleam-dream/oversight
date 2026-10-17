@@ -67,6 +67,8 @@ the Postgres store passes `testing.check_store` and refuses a guarded write
 after an observed row-lock wait crosses expiry; a session ended elsewhere;
 logout with a stale session revision.
 
-Web-tier restart waits for the old supervisor to finish shutting down before
-rebinding its port. The wait allows 30 seconds for child cleanup and fails
-explicitly on timeout; it does not treat an occupied listener as stopped.
+An application-owned actor traps Mist startup exits, so a refused bind returns
+an error and the caller can recover. It also stops the listener when the caller
+exits. Web-tier restart waits for this owner to retire the old Mist subtree
+before rebinding its port. The wait allows 30 seconds for child cleanup and
+fails explicitly on timeout. See [the ownership decision](../../docs/adr/0018-isolate-sso-listener-startup-and-shutdown.md).

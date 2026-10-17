@@ -4,11 +4,13 @@ import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Pid}
 import gleam/option.{type Option, None, Some}
+import gleam/otp/actor
 import gleam/result
 import mist
 import wisp
 import wisp/wisp_mist
 
+/// The PID identifies the application owner of the Mist supervision tree.
 pub type Server {
   Server(pid: Pid, port: Int)
 }
@@ -33,6 +35,55 @@ pub fn start_on(
   port: Int,
   tls: Option(Tls),
 ) -> Result(Server, String) {
+  // Failed OTP supervisor startup can send a linked exit after returning an
+  // error. Only this owner traps it; the caller's process flags stay unchanged.
+  actor.new_with_initialiser(30_000, fn(_) {
+    process.trap_exits(True)
+    use #(listener, port) <- result.try(start_listener(
+      handler,
+      secret_key_base,
+      port,
+      tls,
+    ))
+    Ok(
+      actor.initialised(listener)
+      |> actor.selecting(
+        process.new_selector()
+        |> process.select_trapped_exits(fn(message) { message }),
+      )
+      |> actor.returning(port),
+    )
+  })
+  |> actor.on_message(fn(listener, message) {
+    case message.pid == listener {
+      True ->
+        case message.reason {
+          process.Normal -> actor.stop()
+          _ -> actor.stop_abnormal("SSO listener stopped unexpectedly")
+        }
+      False -> {
+        // Explicit stop and caller death both retire the owned Mist subtree.
+        stop_process(listener)
+        actor.stop()
+      }
+    }
+  })
+  |> actor.start()
+  |> result.map(fn(started) { Server(pid: started.pid, port: started.data) })
+  |> result.map_error(fn(error) {
+    case error {
+      actor.InitFailed(message) -> message
+      _ -> "mist did not start"
+    }
+  })
+}
+
+fn start_listener(
+  handler: fn(wisp.Request) -> wisp.Response,
+  secret_key_base: String,
+  port: Int,
+  tls: Option(Tls),
+) -> Result(#(Pid, Int), String) {
   let ports = process.new_subject()
   let builder =
     wisp_mist.handler(handler, secret_key_base)
@@ -48,19 +99,26 @@ pub fn start_on(
   use started <- result.try(
     mist.start(builder) |> result.replace_error("mist did not start"),
   )
-  use port <- result.try(
-    process.receive(ports, 5000) |> result.replace_error("no port reported"),
-  )
-  Ok(Server(pid: started.pid, port:))
+  case process.receive(ports, 5000) {
+    Ok(port) -> Ok(#(started.pid, port))
+    Error(Nil) -> {
+      stop_process(started.pid)
+      Error("no port reported")
+    }
+  }
 }
 
 /// Stop the server without taking the caller down with it, and wait until
 /// its listener is gone so the port can be bound again.
 pub fn stop(server: Server) -> Nil {
-  let monitor = process.monitor(server.pid)
-  process.unlink(server.pid)
+  stop_process(server.pid)
+}
+
+fn stop_process(pid: Pid) -> Nil {
+  let monitor = process.monitor(pid)
+  process.unlink(pid)
   // `shutdown`, not `kill`: supervisors stop children quietly.
-  exit(server.pid, atom.create("shutdown"))
+  exit(pid, atom.create("shutdown"))
   // A child may use its own five-second shutdown allowance before the
   // supervisor closes the listener. Do not treat a timed-out wait as stopped.
   let assert Ok(Nil) =

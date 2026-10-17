@@ -93,7 +93,7 @@
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
       [Composition consumers declare immutable Git sources with matching lockfiles and CI source revisions. Published baselines use local paths only within the consuming repository. Experiments for unpublished contracts use disposable copies of all participating working trees, normalize the full sibling graph and retain source hashes; they do not qualify the published baseline. Evidence retains executed package inputs separately from inspected sibling checkouts. Scheduled compatibility selects captured current revisions in a disposable checkout. #adr(15)],
       [A #term("term-consumer-recipe") may join packages absent from each other's dependency graph. The recipe must understand their public semantics, not their private representation.],
-      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14) and #adr(16); removed bridge rationale remains in #adr(3).],
+      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14), #adr(16) and #adr(17); removed bridge rationale remains in #adr(3).],
     )
   ])
 
@@ -442,9 +442,11 @@
         interface: [Login/callback/logout routes, application session cookie, and native principal/account views.],
         interactions: [Warden owns transactions and token custody; the application implements Warden's conditional sealed-record writes on PostgreSQL and separately manages its browser session. HTTP Gun performs resource calls.],
         invariants: [The application does not implement a second refresh state machine. Custody records and browser session references have separate owners and lifetimes. Guarded consumption checks version and database wall time under row ownership after lock waiting; validity and storage retention remain separate.],
-        failure: [The application may refresh once after a resource refusal and recover uncertain publication once, then maps Warden's typed action to user-visible decisions. Storage uncertainty is not treated as definite non-action.],
+        failure: [The application may refresh once after a resource refusal and recover uncertain publication once, then maps Warden's typed action to user-visible decisions. Storage uncertainty is not treated as definite non-action. Listener startup refusal returns a recoverable error without terminating its caller. Listener shutdown and caller exit retire the owned Mist subtree.],
       )
-      Source owners: `apps/sso_portal/src/sso_portal/warden_records.gleam`, `session_store.gleam`, `web.gleam`, and `billing_api.gleam`.
+      #behavior(title: "Listener startup refusal preserves its caller", area: "SSO portal", level: "boundary")[#given[Another listener already owns the requested address.] #when[The application attempts to start its listener.] #then[Startup returns an error without terminating the caller.] #then[The caller can start and stop a listener at an available address.]]
+      #adr(18)
+      Source owners: `apps/sso_portal/src/sso_portal/warden_records.gleam`, `session_store.gleam`, `web.gleam`, `billing_api.gleam`, and `server.gleam`.
     ]
     #subsection(title: "Durable research and publication")[
       #answers(title: "Independent delivery, conversation and publication",
