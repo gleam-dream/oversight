@@ -16,11 +16,11 @@ pog = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 gleam_crypto = ">= 1.6.0 and < 2.0.0"
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "ef58066e31a11ef5d9b469867e4beec90eba97b5" }
-warden = { git = "https://github.com/gleam-dream/warden.git", ref = "f28183ebcb8085707054ea7d9b423abd36b649c4" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "84f263e6e355b20424846508bc730ce9aca7f1ed" }
-json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "0015fc50ddfd334b9c44253c36dc429d29a5845d" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "4aee4c3b920bd7241da7659995dfc0a0b5767348" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "d6ad27d193d240101c0f1c150b6c731698c9224b" }
+warden = { git = "https://github.com/gleam-dream/warden.git", ref = "0cd5c446bf2c95128bc84084a71e0ef749778540" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "bd111adff515d120713e4e22d64798d8bcc6eef3" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "8a67eb858d2476a87bd7cc76ab31628a6aeae813" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "9727f9baab6ed4f796780a0c3a1027c3292c5fc7" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

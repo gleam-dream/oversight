@@ -12,21 +12,20 @@
 - Client tests also exercise dynamic headers, request budgets, cancellation and
   subscription opening through native typed calls and real loopback peers.
   [ADR 0011](../../../relay/docs/adr/0011-own-client-header-acquisition-and-opening.md)
-  records client callback ownership. The coordinated local-source experiment
-  includes HTTP Gun's unpublished additive cancellation port.
+  records client callback ownership. The pinned HTTP Gun revision includes the
+  additive cancellation port used by those tests.
 
 ## Run
 
-- This experiment requires unpublished Relay source. From Oversight, capture
-  the whole local dependency graph and run from its disposable copy:
+- From Oversight, run the consumer against its immutable Git dependencies:
 
 ```sh
-nix develop --command python3 -B scripts/local_sources.py --output /tmp/relay-admission-sources
-nix develop --command sh -c 'cd /tmp/relay-admission-sources/oversight/playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
+nix develop --command sh -c 'cd playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
 ```
 
-- Choose a new output directory for each capture. Original manifests remain
-  unchanged. This evidence does not qualify the immutable Git baseline.
+- For unpublished coordinated changes, use the separate
+  [local-source experiment](../../docs/TESTING.md#unpublished-local-source-experiments).
+  Its disposable overrides do not qualify the immutable Git baseline.
 
 - `gleam test` checks the accepted deadline and lifecycle contract, ordinary use,
   application-native principals, refusal and recovery, and native BEAM ownership

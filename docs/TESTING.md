@@ -61,8 +61,8 @@ experiment independently.
 All tracked library repositories are public. CI checks them out with the default
 read-only GitHub Actions token; no GitHub App or personal access token is needed.
 Tokens are not persisted in Git configuration or passed to the test commands.
-The existing nine library repositories are public. Correio's recorded baseline is present on its tracked origin/main. Fresh
-consumer dependency resolution establishes whether that source remains available.
+Fresh consumer dependency resolution checks the availability of the recorded
+sources independently of the sibling working trees.
 
 Each required CI run reads immutable revisions from `sibling-revisions.txt`.
 Change that file deliberately when qualifying a new ecosystem revision set.

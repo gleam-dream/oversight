@@ -24,7 +24,7 @@ Gap refused: expected event 1, received 2
 ```
 
 No database, frontend toolchain or service is needed. The manifest pins Retrace
-v0.1.0's immutable Git commit; a sibling checkout is not needed to run the example.
+at an immutable Git revision; a sibling checkout is not needed to run the example.
 
 ## Read the code
 

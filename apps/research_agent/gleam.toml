@@ -13,15 +13,15 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "15f1391f545a8e56f76d2384d231d55a30f47c2a" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "15f1391f545a8e56f76d2384d231d55a30f47c2a", path = "integrations/fabric_postgres" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "84f263e6e355b20424846508bc730ce9aca7f1ed" }
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "5c04121e2a98f93d0260902bad821b7449462095" }
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "5c04121e2a98f93d0260902bad821b7449462095", path = "integrations/saga_postgres" }
-llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "f9c597fcf5a3f37c0c67d75f0cae669dc9142f63" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "9360c2481d920d2fdcddcf517886b337c28ec162" }
-json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "0015fc50ddfd334b9c44253c36dc429d29a5845d" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "4aee4c3b920bd7241da7659995dfc0a0b5767348" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "737dcf5730323f047837a04728694a3e64e9e4d2" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "737dcf5730323f047837a04728694a3e64e9e4d2", path = "integrations/fabric_postgres" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "bd111adff515d120713e4e22d64798d8bcc6eef3" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "4c48ffa63638cf007c574a8b2e7c3394d1ad7d85" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "4c48ffa63638cf007c574a8b2e7c3394d1ad7d85", path = "integrations/saga_postgres" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "ec1f47b59247840d6588fbf461a7115e1dd42aeb" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "e4f00b8525e20a7b568b2cd585fe4e37db161b26" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "8a67eb858d2476a87bd7cc76ab31628a6aeae813" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "9727f9baab6ed4f796780a0c3a1027c3292c5fc7" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

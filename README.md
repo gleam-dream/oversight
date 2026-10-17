@@ -9,21 +9,21 @@ combine the libraries.
 Each library owns its API, design and runtime. Applications choose the libraries
 they need and supply domain types and policies.
 
-| Library                                                                                        | Purpose                                          |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| [Sinal](../sinal/README.md)                                                                    | Typed telemetry and correlation                  |
-| [JSON Blueprint](../json_blueprint/README.md)                                                  | JSON codecs, schemas and runtime contracts       |
-| [HTTP Gun](../http_gun/README.md)                                                              | HTTP client, streaming, redaction and cassettes  |
-| [Saga](../saga/README.md)                                                                      | Compensating workflows                           |
-| [Grind](../grind/README.md)                                                                    | PostgreSQL job queue                             |
-| [LLM Wire](../llm_wire/README.md)                                                              | Model-provider protocols and classification      |
-| [Relay](../relay/README.md)                                                                    | MCP server and client                            |
-| [Warden](../warden/README.md)                                                                  | OIDC/OAuth client and access-token validation    |
-| [Correio](../correio/README.md)               | Transactional email and passwordless verification |
-| [Fabric](../fabric/README.md)                                                                  | Agents, durable graphs and approvals             |
-| [Retrace core](https://github.com/gleam-dream/retrace)                                         | Typed session recording and deterministic replay |
-| [Retrace frontend](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_frontend) | Browser/Tauri capture, delivery and replay UI    |
-| [Retrace server](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_server)     | PostgreSQL session indexing and object archival  |
+| Library                                                                                        | Purpose                                           |
+| ---------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| [Sinal](../sinal/README.md)                                                                    | Typed telemetry and correlation                   |
+| [JSON Blueprint](../json_blueprint/README.md)                                                  | JSON codecs, schemas and runtime contracts        |
+| [HTTP Gun](../http_gun/README.md)                                                              | HTTP client, streaming, redaction and cassettes   |
+| [Saga](../saga/README.md)                                                                      | Compensating workflows                            |
+| [Grind](../grind/README.md)                                                                    | PostgreSQL job queue                              |
+| [LLM Wire](../llm_wire/README.md)                                                              | Model-provider protocols and classification       |
+| [Relay](../relay/README.md)                                                                    | MCP server and client                             |
+| [Warden](../warden/README.md)                                                                  | OIDC/OAuth client and access-token validation     |
+| [Correio](../correio/README.md)                                                                | Transactional email and passwordless verification |
+| [Fabric](../fabric/README.md)                                                                  | Agents, durable graphs and approvals              |
+| [Retrace core](https://github.com/gleam-dream/retrace)                                         | Typed session recording and deterministic replay  |
+| [Retrace frontend](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_frontend) | Browser/Tauri capture, delivery and replay UI     |
+| [Retrace server](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_server)     | PostgreSQL session indexing and object archival   |
 
 [Retrace](https://github.com/gleam-dream/retrace) adds three independently selected
 packages: portable `retrace`, browser/Tauri `retrace_frontend`, and BEAM
