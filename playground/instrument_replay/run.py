@@ -10,6 +10,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import tomllib
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -148,25 +149,24 @@ def main():
             "oracle": "authored synthetic fixtures; no external oracle",
         }
         (EVIDENCE / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
-        repositories = {
-            "oversight": ROOT.parent.parent,
-            "http_gun": ROOT.parent.parent.parent / "http_gun",
-            "json_blueprint": ROOT.parent.parent.parent / "json_blueprint",
-            "sinal": ROOT.parent.parent.parent / "sinal",
+        locked = {
+            package["name"]: package["commit"]
+            for package in tomllib.loads((ROOT / "manifest.toml").read_text())["packages"]
+            if package.get("source") == "git"
         }
         revisions = {
-            name: subprocess.check_output(
-                ["git", "-C", str(path), "rev-parse", "HEAD"], text=True
-            ).strip()
-            for name, path in repositories.items()
+            "oversight": subprocess.check_output(
+                ["git", "-C", str(ROOT.parent.parent), "rev-parse", "HEAD"], text=True
+            ).strip(),
+            **locked,
         }
         tracked_dirty = {
-            name: bool(
+            "oversight": bool(
                 subprocess.check_output(
                     [
                         "git",
                         "-C",
-                        str(path),
+                        str(ROOT.parent.parent),
                         "status",
                         "--porcelain",
                         "--untracked-files=no",
@@ -174,7 +174,6 @@ def main():
                     text=True,
                 ).strip()
             )
-            for name, path in repositories.items()
         }
         runtime = subprocess.check_output(
             [

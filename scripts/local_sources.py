@@ -11,7 +11,10 @@ import tempfile
 import tomllib
 from pathlib import Path
 
-import ci
+SIBLINGS = (
+    "sinal", "json_blueprint", "http_gun", "saga", "grind",
+    "llm_wire", "relay", "warden", "fabric", "correio", "retrace",
+)
 
 
 def git(repo: Path, *args: str) -> str:
@@ -111,7 +114,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[2]
     if target.is_relative_to(root):
         parser.error("output must be outside the source workspace")
-    snapshot(root, target, ("oversight", *ci.SIBLINGS))
+    snapshot(root, target, ("oversight", *SIBLINGS))
     print(target)
     print("Unpublished local-source experiment; original manifests were not changed.")
 

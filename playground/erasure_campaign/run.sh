@@ -19,12 +19,11 @@ trap cleanup EXIT
   erl -noshell -eval 'io:format("OTP ~s ERTS ~s~n", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().'
   postgres --version
   python3 --version
-  for package in oversight saga grind http_gun sinal; do
-    repo="../../../$package"
-    revision="$(git -C "$repo" rev-parse HEAD)"
-    changes="$(git -C "$repo" status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
-    printf '%s %s tracked-change-lines=%s\n' "$package" "$revision" "$changes"
-  done
+  revision="$(git -C ../.. rev-parse HEAD)"
+  changes="$(git -C ../.. status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
+  printf 'oversight %s tracked-change-lines=%s\n' "$revision" "$changes"
+  grep -oE 'name = "[a-z_]+"[^}]*source = "git", repo = "[^"]+", commit = "[0-9a-f]{40}"' manifest.toml |
+    sed -E 's/name = "([a-z_]+)".*repo = "([^"]+)", commit = "([0-9a-f]{40})"/locked \1 \2 \3/'
   sha256sum gleam.toml manifest.toml ../../flake.lock
 } > .artifacts/provenance.txt
 gleam format --check src test

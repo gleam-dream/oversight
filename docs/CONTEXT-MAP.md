@@ -16,5 +16,5 @@
 
 - Composition owns package authority, composition boundary, consumer recipe, effect evidence, unresolved effect, admission identity, capability scope, observation correlation and borrowed resource.
 - Applications owns composition application, scripted peer, business identity, reconciliation decision, applied marker and session publication.
-- Evidence owns public consumer, retained experiment, behavioral oracle, sibling revision set, source provenance, validation profile, local-source capture and rendered layer.
+- Evidence owns public consumer, retained experiment, behavioral oracle, locked source, source provenance, validation profile, local-source capture and rendered layer.
 - A context cites another context's term by slug and never redefines it.

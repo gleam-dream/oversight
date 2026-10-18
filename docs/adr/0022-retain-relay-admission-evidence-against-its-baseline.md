@@ -6,7 +6,7 @@
 
 - On 8 October 2026 the repository retained a separate consumer that checks Relay's admitted request deadline through public APIs. It covers buffered mounting and a real loopback listener, and a native Erlang fixture uses process monitors and sockets without importing Relay or Mist internals.
 - Relay owns the contract, and its decision records own the process-ownership and client header-acquisition rules. The consumer asserts them.
-- The consumer runs against the recorded revision set in the `experiments` profile. A local-source capture exercises an unpublished coordinated Relay change, and its results do not qualify the recorded revision set.
+- The consumer runs against its locked sources in the `experiments` profile. A local-source capture exercises an unpublished coordinated Relay change, and its results do not qualify the locked sources.
 
 ## Rationale and alternatives
 

@@ -27,8 +27,7 @@ copied into Oversight. Sinal continues to own typed observation and correlation;
 Retrace owns reconstruction of selected application state. Neither package gains
 a dependency on the other merely because an application may use both.
 
-The sibling checkout action and compatibility pin selection include Retrace's
-`main` branch. Required CI continues to use immutable commits. No package is
+Retrace is a locked Git source like the other unpublished libraries. No package is
 published by Oversight's workflows.
 
 ## Provenance

@@ -1,19 +1,20 @@
-# Resolve composition consumers from recorded Git sources
+# Resolve composition consumers from locked Git sources
 
 <a id="adr-0015"></a>
 
 ## Decision
 
-Composition applications and retained runtime experiments declare immutable Git
-sources for ecosystem libraries and optional adapters. Their generated lockfiles
-and the CI source inventory identify the same revision set. In-repository paths
-remain appropriate for packages owned by Oversight itself.
+Composition applications and retained runtime experiments declare Git sources for
+unpublished ecosystem libraries and optional adapters. Their lockfiles
+(`manifest.toml`) are the only record of the resolved revisions; no second
+revision list exists. Updating a library is a manual `gleam update <package>`,
+and no scheduled run moves one. In-repository paths remain appropriate for
+packages owned by Oversight itself.
 
 The development shell supplies Git. Evidence retains each executed consumer's
-declarations and resolved manifest, separately from inspected sibling checkout
-revisions and dirty flags. The scheduled compatibility run selects captured
-default-branch commits in its disposable checkout and preserves those temporary
-inputs; it does not change the checked-in qualification set.
+declarations and resolved manifest and the Git commits they lock, separately from
+the repository's own revision and dirty flag. No sibling checkout is needed to build
+or qualify a consumer.
 
 ## Rationale and alternatives
 
@@ -25,15 +26,17 @@ already used by retained applications.
 
 Reverting libraries to sibling paths would restore the consumer installation
 failure. Rewriting their manifests during ordinary validation would qualify a
-modified graph instead of the declared package graph. Consistent immutable
-sources preserve standalone consumption and executable composition evidence.
+modified graph instead of the declared package graph. A separate revision file and a
+checkout-at-revision step duplicated the lock and fetched working trees that no
+build used. Locked Git sources preserve standalone consumption and executable
+composition evidence.
 
 ## Consequences and provenance
 
-Local sibling edits do not change ordinary consumer runtime dependencies. The
-default-branch compatibility check still exercises current sources and reports
-incompatible source requirements as failures. Frozen older oracle and compatibility
-inputs retain their own revisions.
+Local sibling edits do not change ordinary consumer runtime dependencies.
+Incompatible source requirements between libraries fail dependency resolution when
+someone updates a lock. Frozen older oracle and compatibility inputs retain their
+own revisions.
 
 Accepted during the contribution integration on 13 October 2026. The reproduced
 failures were SSO's missing `WriteCondition`/`WriteOutcome` types, research history's

@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -21,56 +20,6 @@ APPLICATIONS = (
     "sso_portal", "support_desk", "tool_hub", "webhooks", "session_replay",
 )
 DATABASE_APPS = frozenset(APPLICATIONS) - {"email_portal", "support_desk", "tool_hub", "session_replay"}
-SIBLINGS = (
-    "sinal", "json_blueprint", "http_gun", "saga", "grind",
-    "llm_wire", "relay", "warden", "fabric", "correio", "retrace",
-)
-
-
-def replace_git_refs(text: str, pins: dict[str, str]) -> str:
-    """Select current revisions without changing frozen external or Hex inputs."""
-    config = tomllib.loads(text)
-    for section in ("dependencies", "dev-dependencies"):
-        for name, dependency in config.get(section, {}).items():
-            if not isinstance(dependency, dict) or "git" not in dependency:
-                continue
-            match = re.fullmatch(
-                r"https://github.com/(gleam-dream|lostbean)/([a-z_]+)\.git",
-                dependency["git"],
-            )
-            if not match or match[2] not in pins:
-                continue
-            owner = "lostbean" if match[2] == "json_blueprint" else "gleam-dream"
-            if match[1] != owner or not re.fullmatch(r"[0-9a-f]{40}", dependency["ref"]):
-                raise ValueError(f"Unexpected Git source for {name}")
-            pattern = rf'(?m)^({re.escape(name)}\s*=\s*\{{[^\n]*ref\s*=\s*")[0-9a-f]{{40}}(")'
-            text, count = re.subn(pattern, lambda m: m[1] + pins[match[2]] + m[2], text)
-            if count != 1:
-                raise ValueError(f"Expected one Git declaration for {name}")
-    return text
-
-
-def current_sources() -> None:
-    """Alter inputs only in the compatibility workflow's disposable checkout."""
-    if os.environ.get("GITHUB_ACTIONS") != "true":
-        raise ValueError("Compatibility source selection requires a disposable CI checkout")
-    pins = {
-        name: subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT.parent / name, text=True,
-        ).strip()
-        for name in SIBLINGS
-    }
-    if any(not re.fullmatch(r"[0-9a-f]{40}", revision) for revision in pins.values()):
-        raise ValueError("Current sources must resolve to immutable commits")
-    paths = subprocess.check_output(
-        ["git", "ls-files", "**/gleam.toml"], cwd=ROOT, text=True,
-    ).splitlines()
-    for path in paths:
-        file = ROOT / path
-        file.write_text(replace_git_refs(file.read_text(), pins))
-    (ROOT / "sibling-revisions.txt").write_text(
-        "".join(f"{name}={revision}\n" for name, revision in pins.items())
-    )
 
 
 def require_success(results: object, expected: tuple[str, ...]) -> None:
@@ -149,23 +98,33 @@ def inventory() -> None:
         raise ValueError(f"Application gate inventory differs: {found ^ set(APPLICATIONS)}")
 
 
+def locked_sources() -> dict[str, list[str]]:
+    """Return every Git commit that a consumer manifest locks, by repository."""
+    manifests = subprocess.check_output(
+        ["git", "ls-files", "**/manifest.toml"], cwd=ROOT, text=True,
+    ).splitlines()
+    locked: dict[str, set[str]] = {}
+    for path in manifests:
+        for package in tomllib.loads((ROOT / path).read_text()).get("packages", []):
+            if package.get("source") == "git":
+                locked.setdefault(package["repo"], set()).add(package["commit"])
+    return {repo: sorted(commits) for repo, commits in sorted(locked.items())}
+
+
 def provenance() -> None:
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    (EVIDENCE / "consumer-revisions.txt").write_bytes((ROOT / "sibling-revisions.txt").read_bytes())
-    revisions = {}
-    for name in ("oversight", *SIBLINGS):
-        path = ROOT if name == "oversight" else ROOT.parent / name
-        if not path.is_dir():
-            raise ValueError(f"Missing sibling checkout: {path}")
-        revisions[name] = {
+    sources = {
+        "oversight": {
             "revision": subprocess.check_output(
-                ["git", "rev-parse", "HEAD"], cwd=path, text=True,
+                ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
             ).strip(),
             "dirty": bool(subprocess.check_output(
-                ["git", "status", "--porcelain", "--untracked-files=no"], cwd=path, text=True,
+                ["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True,
             )),
-        }
-    (EVIDENCE / "sources.json").write_text(json.dumps(revisions, indent=2) + "\n")
+        },
+        "locked": locked_sources(),
+    }
+    (EVIDENCE / "sources.json").write_text(json.dumps(sources, indent=2) + "\n")
     (EVIDENCE / "flake-lock.sha256").write_text(
         hashlib.sha256((ROOT / "flake.lock").read_bytes()).hexdigest() + "\n"
     )
@@ -228,7 +187,7 @@ def experiments() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("quality", "application", "experiments", "full", "compatibility", "result", "inventory"))
+    parser.add_argument("profile", choices=("quality", "application", "experiments", "full", "result", "inventory"))
     parser.add_argument("names", nargs="*")
     args = parser.parse_args()
     if args.profile == "result":
@@ -245,9 +204,6 @@ def main() -> None:
             parser.error("application requires one registered application name")
     elif args.names:
         parser.error("this profile accepts no extra arguments")
-    if args.profile == "compatibility":
-        current_sources()
-        args.profile = "full"
     if args.profile in ("application", "experiments", "full"):
         provenance()
     if args.profile in ("quality", "full"):
