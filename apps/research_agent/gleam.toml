@@ -13,15 +13,15 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "737dcf5730323f047837a04728694a3e64e9e4d2" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "737dcf5730323f047837a04728694a3e64e9e4d2", path = "integrations/fabric_postgres" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "bd111adff515d120713e4e22d64798d8bcc6eef3" }
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "4c48ffa63638cf007c574a8b2e7c3394d1ad7d85" }
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "4c48ffa63638cf007c574a8b2e7c3394d1ad7d85", path = "integrations/saga_postgres" }
-llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "ec1f47b59247840d6588fbf461a7115e1dd42aeb" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "e4f00b8525e20a7b568b2cd585fe4e37db161b26" }
-json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "8a67eb858d2476a87bd7cc76ab31628a6aeae813" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "9727f9baab6ed4f796780a0c3a1027c3292c5fc7" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "main" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "main", path = "integrations/fabric_postgres" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "main" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "main", path = "integrations/saga_postgres" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

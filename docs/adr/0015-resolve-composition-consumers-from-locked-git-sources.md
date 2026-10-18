@@ -5,7 +5,7 @@
 ## Decision
 
 Composition applications and retained runtime experiments declare Git sources for
-unpublished ecosystem libraries and optional adapters. Their lockfiles
+unpublished ecosystem libraries and optional adapters, each at `ref = "main"`. Their lockfiles
 (`manifest.toml`) are the only record of the resolved revisions; no second
 revision list exists. Updating a library is a manual `gleam update <package>`,
 and no scheduled run moves one. In-repository paths remain appropriate for

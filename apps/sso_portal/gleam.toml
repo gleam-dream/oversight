@@ -16,9 +16,9 @@ wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 5.0.0 and < 7.0.0"
 pog = ">= 4.0.0 and < 5.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-warden = { git = "https://github.com/gleam-dream/warden.git", ref = "0cd5c446bf2c95128bc84084a71e0ef749778540" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "e4f00b8525e20a7b568b2cd585fe4e37db161b26" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "9727f9baab6ed4f796780a0c3a1027c3292c5fc7" }
+warden = { git = "https://github.com/gleam-dream/warden.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
