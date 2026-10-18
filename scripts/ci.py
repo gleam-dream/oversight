@@ -210,6 +210,12 @@ def experiments() -> None:
     run(["gleam", "build", "--warnings-as-errors"], cwd=pilot)
     compile_erlang(pilot)
     run(["gleam", "test"], cwd=pilot)
+    admission = ROOT / "playground/relay_admission"
+    run(["gleam", "build", "--warnings-as-errors"], cwd=admission)
+    compile_erlang(admission)
+    admission_env = dict(os.environ)
+    admission_env["ERL_FLAGS"] = "+S 4:4"
+    run(["gleam", "test"], cwd=admission, env=admission_env)
     for name, command in (
         ("archive_release", ["bash", "run.sh"]),
         ("instrument_replay", [sys.executable, "-B", "run.py"]),
