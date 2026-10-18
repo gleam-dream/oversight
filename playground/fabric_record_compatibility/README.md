@@ -9,7 +9,7 @@ public Fabric modules only, and the old reader's model panics if called.
 ## Run
 
 Supply the Fabric checkout being evaluated; it must contain the pinned reader commit, and its sibling
-repositories must contain the commits in the reader's `sibling-revisions.txt`. From the Oversight root:
+repositories must contain the commits recorded in `sibling-revisions.txt` at the reader commit. From the Oversight root:
 
 ```sh
 mkdir -p .artifacts/history-tmp

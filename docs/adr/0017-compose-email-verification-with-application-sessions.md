@@ -19,4 +19,4 @@
 ## Scope
 
 - The consumer uses memory storage and in-process mailbox HTTP requests.
-- The local Correio baseline revision can be pinned before publication. Remote CI requires that revision to be available from the configured sibling repository.
+- The consumer locks the Correio baseline revision through its manifest. Remote CI requires that commit to be available from the Correio repository.

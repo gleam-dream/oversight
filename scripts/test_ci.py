@@ -1,7 +1,5 @@
 """Failure controls for the CI runner, without application services."""
 
-import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,82 +8,31 @@ from pathlib import Path
 from unittest.mock import patch
 
 import ci
-import sibling_refs
 
 
 class GateTests(unittest.TestCase):
-    def test_retrace_checkout_uses_pin_or_main_for_compatibility(self):
-        pins = (ci.ROOT / "sibling-revisions.txt").read_text()
-        self.assertIn("retrace", sibling_refs.parse_pins(pins))
-        with tempfile.TemporaryDirectory() as folder:
-            output = Path(folder) / "outputs"
-            for current in ("false", "true"):
-                output.write_text("")
-                with patch.dict("os.environ", {
-                    "CURRENT": current, "GITHUB_OUTPUT": str(output),
-                }):
-                    sibling_refs.main()
-                refs = dict(line.split("=", 1) for line in output.read_text().splitlines())
-                expected = "main" if current == "true" else sibling_refs.parse_pins(pins)["retrace"]
-                self.assertEqual(refs["retrace"], expected)
-
-    def test_compatibility_refuses_to_rewrite_a_local_checkout(self):
-        with patch.dict("os.environ", {"GITHUB_ACTIONS": "false"}):
-            with self.assertRaises(ValueError):
-                ci.current_sources()
-
-    def test_current_sources_preserve_adapter_paths_and_frozen_inputs(self):
-        source = (
-            '[dependencies]\n'
-            'saga_postgres = { git = "https://github.com/gleam-dream/saga.git", '
-            f'ref = "{"a" * 40}", path = "integrations/saga_postgres" }}\n'
-            'json_blueprint = "== 1.1.0"\n'
-            'other = { git = "https://github.com/example/other.git", ref = "v1" }\n'
-        )
-        changed = ci.replace_git_refs(source, {"saga": "b" * 40})
-        self.assertIn('path = "integrations/saga_postgres"', changed)
-        self.assertIn('ref = "' + "b" * 40 + '"', changed)
-        self.assertIn('json_blueprint = "== 1.1.0"', changed)
-        self.assertIn('ref = "v1"', changed)
-        with self.assertRaises(ValueError):
-            ci.replace_git_refs(source.replace("a" * 40, "master"), {"saga": "b" * 40})
-
-
-    def test_sibling_checkout_selects_pins_and_default_branches(self):
+    def test_locked_sources_list_each_git_commit_once_per_repository(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
-            scripts = root / "scripts"
-            scripts.mkdir()
-            for name in ("ci.py", "sibling_refs.py"):
-                shutil.copyfile(Path(__file__).parent / name, scripts / name)
-            pins = {name: "a" * 40 for name in ci.SIBLINGS}
-            pins["correio"] = "b" * 40
-            (root / "sibling-revisions.txt").write_text(
-                "".join(f"{name}={revision}\n" for name, revision in pins.items())
-            )
-            for current in ("false", "true"):
-                with self.subTest(current=current):
-                    output = root / f"{current}.txt"
-                    subprocess.run(
-                        [sys.executable, "-B", str(scripts / "sibling_refs.py")],
-                        env={**os.environ, "CURRENT": current, "GITHUB_OUTPUT": str(output)},
-                        check=True,
-                    )
-                    refs = dict(line.split("=", 1) for line in output.read_text().splitlines())
-                    if current == "false":
-                        self.assertEqual(refs, pins)
-                    else:
-                        self.assertEqual(refs["correio"], "main")
-                        self.assertEqual(refs["json_blueprint"], "main")
-                        self.assertEqual(refs["warden"], "master")
-                        self.assertEqual(set(refs), set(pins))
-
-    def test_sibling_pins_reject_missing_duplicate_and_untrusted_refs(self):
-        pins = "".join(f"{name}={'a' * 40}\n" for name in ci.SIBLINGS)
-        self.assertEqual(set(sibling_refs.parse_pins(pins)), set(ci.SIBLINGS))
-        for invalid in ("", pins + pins, pins.replace("a" * 40, "master", 1), pins + f"other={'a' * 40}\n"):
-            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
-                sibling_refs.parse_pins(invalid)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            for name, commit in (("one", "a" * 40), ("two", "a" * 40), ("three", "b" * 40)):
+                package = root / name
+                package.mkdir()
+                (package / "manifest.toml").write_text(
+                    "packages = [\n"
+                    '  { name = "sinal", version = "0.1.0", build_tools = ["gleam"], '
+                    'requirements = [], source = "git", '
+                    f'repo = "https://github.com/gleam-dream/sinal.git", commit = "{commit}" }},\n'
+                    '  { name = "gleam_stdlib", version = "1.0.5", build_tools = ["gleam"], '
+                    'requirements = [], source = "hex", outer_checksum = "00" },\n'
+                    "]\n"
+                )
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            with patch.object(ci, "ROOT", root):
+                self.assertEqual(
+                    ci.locked_sources(),
+                    {"https://github.com/gleam-dream/sinal.git": ["a" * 40, "b" * 40]},
+                )
 
     def test_required_jobs_must_all_succeed(self):
         expected = ("quality", "applications", "experiments", "design")

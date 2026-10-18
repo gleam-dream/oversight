@@ -36,28 +36,28 @@ nix develop --command python3 -B scripts/ci.py full")
       [The full profile runs the quality checks, every registered application, the retained experiments and the design gate. The final continuous-integration status requires every mandatory job to succeed; failures, cancellations and unexpected skips cannot satisfy it.],
       [The runner's application inventory is the authority for discovery. Adding an application requires registering it and declaring whether it needs PostgreSQL; the continuous-integration matrix derives from that inventory.],
       [Handwritten Erlang in application source and tests compiles strictly after the Gleam dependency build.],
-      [The experiments profile runs every retained experiment except the Fabric reader check, which needs the older Fabric commit and the sibling commits pinned in that reader's own revision file. Continuous integration carries one revision per sibling, so that check runs manually from a checkout with Git history. The applications and experiments are the usage examples, so a public API change that breaks one fails its profile.],
-      [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their own compiler checkers are their acceptance boundary, and linting does not rewrite frozen upstream inputs or captured evidence.],
+      [The experiments profile runs every retained experiment except the Fabric reader check, which needs the older Fabric commit and the sibling commits recorded in that commit's own revision file. Continuous integration holds no sibling checkouts, so that check runs manually from a checkout with Git history. The applications and experiments are the usage examples, so a public API change that breaks one fails its profile.],
+      [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their own compiler checkers are their acceptance boundary, and linting does not rewrite pinned upstream inputs or captured evidence.],
       [Applications have no stable library-performance benchmark. Test durations are operational diagnostics, not throughput or latency claims; package benchmarks belong to the package that owns the workload.],
     )
     #adr(19)
   ])
 
-  #section(title: "Source qualification", lead: "A consumer's runtime code comes from its recorded Git declarations. Inspected sibling checkouts and the executed inputs are recorded separately.", body: [
+  #section(title: "Source qualification", lead: "A consumer's runtime code comes from its locked Git sources. The executed inputs are recorded separately from the repository's own revision.", body: [
     #points(
-      [Composition consumers declare immutable Git sources with matching lockfiles. The #term("term-sibling-revision-set") records the same revisions for continuous-integration source inspection and historical oracle access. Editing a sibling working tree does not change consumer runtime code.],
-      [The runner records command logs, exit codes, durations, checkout revisions and dirty flags, consumer revision choices, the executed package declarations and lockfiles, and the toolchain identity as #term("term-source-provenance"). Database logs survive cluster cleanup when the gate supplies a log directory. Missing services and failed tests remain failures.],
-      [All tracked library repositories are public, so continuous integration checks them out with the default read-only token, which is not persisted or passed to test commands. Fresh dependency resolution separately verifies that the recorded sources are available.],
-      [A scheduled compatibility run resolves sibling default branches and substitutes their exact commits into consumer declarations inside a disposable checkout. It retains those temporary inputs, never changes the recorded revision set, and never replaces required evidence. Inconsistent source requirements are a compatibility failure.],
-      [A #term("term-local-source-capture") copies tracked and new authored sources into a fresh directory, refuses an existing directory, excludes credentials, local settings, caches and symlinks, and normalizes sibling dependencies throughout the copied graph. External sources and exact Hex oracle versions stay unchanged, and historical readers keep their explicit revision selection. The capture records revisions, dirty flags, original file hashes and overridden manifests. Its results do not qualify the recorded revision set.],
+      [Composition consumers declare Git sources with matching lockfiles. The #term("term-locked-source") is the commit a lockfile resolves for such a source, and historical readers keep their explicit revision selection. Editing a sibling working tree does not change consumer runtime code.],
+      [The runner records command logs, exit codes, durations, the repository's revision and dirty flag, the locked Git commits, the executed package declarations and lockfiles, and the toolchain identity as #term("term-source-provenance"). Database logs survive cluster cleanup when the gate supplies a log directory. Missing services and failed tests remain failures.],
+      [All tracked library repositories are public, so dependency resolution needs no credential, and continuous integration persists none and passes none to test commands. Fresh dependency resolution verifies that the locked sources are available.],
+      [Updating a library is a deliberate act: moving a lockfile reruns the affected consumers, and no scheduled job moves one. Inconsistent source requirements between libraries fail dependency resolution.],
+      [A #term("term-local-source-capture") copies tracked and new authored sources into a fresh directory, refuses an existing directory, excludes credentials, local settings, caches and symlinks, and normalizes sibling dependencies throughout the copied graph. External sources and exact Hex oracle versions stay unchanged, and historical readers keep their explicit revision selection. The capture records revisions, dirty flags, original file hashes and overridden manifests. Its results do not qualify the locked sources.],
       [The Nix lock supplies the Gleam, Erlang/OTP, Elixir and PostgreSQL versions; only its lock input changes during a toolchain refresh. Rebar3 and Elixir use the shell's OTP package. After the first dependency build, repeated builds of an unchanged local-source consumer reuse its dependency resolution.],
-      [Qualifying a coordinated library change updates consumer declarations, lockfiles and the recorded revision set together, then reruns the affected consumers. Oversight publishes no library artifact; release qualification combines these results with each library's own validation, and no workflow publishes packages or changes repository settings.],
+      [Qualifying a coordinated library change updates consumer declarations and lockfiles together, then reruns the affected consumers. Oversight publishes no library artifact; release qualification combines these results with each library's own validation, and no workflow publishes packages or changes repository settings.],
     )
     #behavior(title: "Qualification records the inputs actually executed", area: "Source qualification", level: "boundary")[
       #given[A consumer builds from its recorded declarations while a sibling working tree holds uncommitted edits.]
       #when[The runner records the run.]
-      #then[The receipt holds the consumer's executed declarations and lockfile separately from the sibling revisions and dirty flags.]
-      #then[The uncommitted edits do not change the consumer's runtime code or the recorded revision set.]
+      #then[The receipt holds the consumer's executed declarations and lockfile separately from the repository's revision and dirty flag.]
+      #then[The uncommitted edits do not change the consumer's runtime code or the locked sources.]
     ]
     #adr(15)
   ])

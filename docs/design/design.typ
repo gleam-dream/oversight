@@ -86,7 +86,7 @@
       [*Context*], [*Owns*], [*Vocabulary*],
       [#ctx("composition")], [Caller contracts, execution and evidence boundaries, protocol and authorization composition, observation joins], [Package authority, composition boundary, effect evidence, admission identity],
       [#ctx("applications")], [The composition applications and each application's task, ownership and recovery behavior], [Composition application, business identity, reconciliation decision, applied marker],
-      [#ctx("evidence")], [Retained experiments, validation profiles, source qualification and design maintenance], [Public consumer, behavioral oracle, sibling revision set, validation profile],
+      [#ctx("evidence")], [Retained experiments, validation profiles, source qualification and design maintenance], [Public consumer, behavioral oracle, locked source, validation profile],
     ))
     #points(
       [#ctx("applications") conforms to the contracts of #ctx("composition"); each application demonstrates one or more composition boundaries.],

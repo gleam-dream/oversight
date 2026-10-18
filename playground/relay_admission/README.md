@@ -18,7 +18,7 @@ nix develop --command sh -c 'cd playground/relay_admission && ERL_FLAGS="+S 4:4"
 `deadline_contract` is a diagnostic runner that prints observations from eight deadline scenarios before
 asserting the contract that the normal suite also asserts. For unpublished coordinated changes, run the
 consumer from a local-source capture (`python3 -B scripts/local_sources.py --output <new-directory>`); its
-results do not qualify the recorded revision set.
+results do not qualify the locked sources.
 
 Relay owns the contract in its design. The [evidence design](../../docs/design/evidence/design.typ#admission-deadline-and-capacity)
 states the behavior and [ADR 0022](../../docs/adr/0022-retain-relay-admission-evidence-against-its-baseline.md)
