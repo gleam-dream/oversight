@@ -1,76 +1,25 @@
 # Instrument replay experiment
 
-## Question and pre-implementation expectations
+Tests whether an application can capture bounded HTTP acquisition once, replay it with the instrument unavailable,
+and evaluate two schema policies with native observations while keeping transport and contract failures distinct.
+HTTP Gun owns transport, cassettes and redaction, JSON Blueprint owns parsing and validation, Sinal owns observations,
+and the application owns pagination, run identity and recovery. The instrument and measurements are authored synthetic fixtures.
 
-- Can an application capture bounded HTTP acquisition once, replay it with the instrument unavailable, and evaluate two schema policies using native observations while preserving correlation and distinct transport/contract failures?
-- The instrument and all measurements are authored synthetic fixtures. No scientific accuracy, live-provider qualification, or upstream conformance is claimed.
-- Minimal composition: HTTP Gun owns transport, cassette recording, redaction and client lifetime; JSON Blueprint owns bounded JSON parsing, native codecs and schema validation; Sinal owns typed observations. The consumer owns pagination, run identity, schema version selection and recovery policy.
+## Run
 
-| Case                       | Expected outcome before implementation                                                                                                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Two-page acquisition       | Live HTTP returns native `Instrument`, `Measurement`, and `Page` values; the application follows one bounded continuation.                                                                                                                  |
-| Offline replay             | Stop the loopback server before replay. The recorded pages yield identical admitted native measurements without a network server.                                                                                                           |
-| Contract evolution         | The historical integer range admits both pages. A narrower range rejects the second page with a located schema failure. Decoding a validated old contract with a new codec returns `ContractMismatch`. Transport history remains unchanged. |
-| Failure separation         | A truncated HTTP 200 and a body over the configured limit remain transport failures with status evidence. A complete HTTP 200 with a wrong measurement type remains a contract failure.                                                     |
-| Redaction and identity     | Dummy header/query/body fixture markers are absent from published cassettes. Changing a redacted token still matches; changing the page does not, and mismatch leaves the next exchange available.                                          |
-| Concurrent correlation     | Two independent playback clients consume the same immutable capture concurrently with distinct correlations. Both runs recover their own data and observations. A shared cassette queue is not presumed to provide run routing.             |
-| Ownership and cancellation | Finish recording separately from stopping the client. Completed sends leave no open bodies/queued requests. Stopped clients refuse new work; pre-cancelled views return `Cancelled` with `NotSent`. No automatic retry is expected.         |
-
-## Actual outcomes
-
-- All seven expected cases passed on the recorded checkout. The expectation matrix was written before source implementation. No reproduced package defect was found.
-
-| Case                       | Executed result                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Two-page acquisition       | Two native measurements, `(500 nm, 42 counts)` and `(600 nm, 4090 counts)`, came from real loopback HTTP. Instrument identity remained `synthetic-spectrometer`.                                                                                                                                                                                                 |
-| Offline replay             | The fixture shut down and a TCP probe was refused before starting replay. Both native measurements matched capture expectations. The harness verified unchanged cassette bytes after all replay policies.                                                                                                                                                        |
-| Contract evolution         | Historical range `0..4095` admitted both pages. New range `0..100` rejected page two at `measurements[0].counts`. A value valid under both ranges still produced `ContractMismatch` when the old validation witness was decoded with the new codec.                                                                                                              |
-| Failure separation         | Capture and replay returned `RequestFailed(PeerClosed)`, `MaybeSent`, status 200 for truncation. Oversize returned `LimitExceeded(ResponseBodyBytes, 512, 2154)`, `MaybeSent`, status 200. The complete wrong-type body returned a located `Schema` failure.                                                                                                     |
-| Redaction and identity     | All four dummy fixture markers were absent from the cassette. A changed token matched. Requesting page two at cursor zero returned `PlaybackMismatch(0)`; page one still succeeded afterward. Exhaustion returned `PlaybackExhausted`.                                                                                                                           |
-| Concurrent correlation     | Two workers each reached a barrier after page one before either proceeded to page two. Independent playback cursors returned equal native data. Four application observations and four HTTP terminal observations retained the correct run correlation and client label.                                                                                         |
-| Ownership and cancellation | Finished recording refused further capture with `RecordingClosed`. Idle clients had zero open bodies and queued requests. Stopped clients returned `ClientClosed/NotSent`. Pre-cancelled requests returned `Cancelled/NotSent` without advancing playback. Both Sinal attachments detached; a second detach was refused. No cassette staging directory remained. |
-
-## Reproduce and evidence
+From this directory:
 
 ```sh
-cd /code/gleam-dream/oversight/playground/instrument_replay
-nix develop /code/gleam-dream/oversight --command python3 -B run.py
+nix develop ../.. --command python3 -B run.py
+nix develop ../.. --command ruff check run.py
+nix develop ../.. --command ruff format --check run.py
 ```
 
-- `run.py` checks Gleam formatting, builds with warnings as errors, and compiles the tiny environment-variable FFI with `erlc -Werror`. It then starts the fixture, captures, stops the fixture, probes the closed port, and replays using the compiled BEAM application. It uses no network service beyond loopback after dependency acquisition.
-- `nix develop /code/gleam-dream/oversight --command ruff check run.py` and `ruff format --check run.py` check the Python fixture with the repository configuration. These checks were also executed.
-- Reruns write fresh logs, capture, receipts and provenance to ignored `.artifacts/`. They do not rewrite the retained [capture log](evidence/capture.log), [replay log](evidence/replay.log), [cassette](evidence/capture.cassette), [receipt](evidence/receipt.json), or [provenance](evidence/provenance.json). The cassette keeps its exact JSON bytes under a `.cassette` extension so formatting does not change the receipt's hash.
-- The snapshot uses Gleam 1.18.1, Erlang/OTP 28 and Python 3.14.7. Provenance retains exact sibling revisions, tracked-dirty flags and the dependency-manifest hash. All three sibling working trees were clean; Oversight contained concurrent work. The generated port and HTTP date are fixture facts, not stable API expectations.
-- The oracle is the authored fixture and the pre-implementation matrix. No external oracle was copied, and no upstream or scientific conformance is claimed.
+`run.py` checks formatting, builds with warnings as errors, compiles the small environment-variable FFI with `erlc -Werror`,
+then starts the fixture, captures, stops the fixture, probes the closed port and replays from the compiled application.
+Reruns write to ignored `.artifacts/` and do not rewrite the retained [capture log](evidence/capture.log),
+[replay log](evidence/replay.log), [cassette](evidence/capture.cassette), [receipt](evidence/receipt.json) or
+[provenance](evidence/provenance.json).
 
-## Public call sites and ownership
-
-| Consumer call site                                                                       | Public API and caller decision                                                                                                                                                                                                                                                                    |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`ordinary_decode`](src/instrument_replay.gleam#L238)                                    | `codec.decode_json_with_limits` is the ordinary one-call route when the codec is known. It returns native application records directly.                                                                                                                                                           |
-| [`instrument_codec`, `measurement_codec`, `page_codec`](src/instrument_replay.gleam#L66) | `codec.field`, `list`, `nullable`, `integer_between` and `success` define the native records and ranges. Changing one range changes both decoding and projected schema.                                                                                                                           |
-| [`runtime_policy`](src/instrument_replay.gleam#L106)                                     | `codec.schema_json` and `contract.parse` create a runtime contract once per acquisition. Rendering and reloading a known schema is deliberate evidence of the runtime-document path; ordinary callers do not need that round trip.                                                                |
-| [`settings`](src/instrument_replay.gleam#L139)                                           | HTTP response cap 512 bytes, request timeout two seconds, shutdown allowance one second, explicit loopback admission, label, extra header/query/body redaction. Parser admission separately caps bytes at 512, depth at eight and elements at 64. Schema admission uses a separate 4096-byte cap. |
-| [`fetch`](src/instrument_replay.gleam#L171)                                              | `http_gun.send`, `value.parse_bits`, `contract.validate`, `contract.decode` preserve distinct `Transport`, `Parse`, `Schema`, and `Decode` outcomes. HTTP status and truncation are checked before JSON admission.                                                                                |
-| [`capture`, `playback`](src/instrument_replay.gleam#L284)                                | `cassette.record`, `finish`, `load`, `testing.playback`; the capture budget is 64 KiB. The application separately owns each client and its stop operation.                                                                                                                                        |
-| [`concurrent`](src/instrument_replay.gleam#L381)                                         | `sinal.observe`, `sinal.emit`, `sinal.detach`, `http_gun.with_correlation` and `telemetry.event` connect native observations. The application installs observers before spawning workers and detaches after all expected observations arrive.                                                     |
-
-## Ergonomics and configuration findings
-
-- HTTP Gun's [independent replay recipe](https://github.com/gleam-dream/http_gun/blob/master/docs/USAGE.md#independent-replay-runs) documents the cursor and correlation distinction, with a compiled consumer over one shared script.
-- Keep the single HTTP client boundary. The acquisition function accepts the same `Client` for native capture and offline replay. It needs no transport adapter, mock, or private import.
-- Keep Blueprint's distinction between validation and native decoding. `ValidatedValue` carries the schema that admitted it; a new decoder cannot silently reinterpret that witness. Ordinary known-codec use remains one call, while the extra runtime-contract steps buy separately observable policy admission.
-- Keep explicit error translation in the consumer. HTTP submission evidence cannot be replaced by a schema error. The `AdmissionFailure` sum retains the underlying typed failure for retry or review decisions; diagnostic strings are only printed in the receipt.
-- Keep independent cassette cursors for independent runs. Correlation is observation metadata and does not participate in request matching. This is an ordered fixture model, not a library defect or a request router. Redacting a token deliberately removes that value from identity; a token that selects different scientific data must not be treated this way without another distinguishing request field.
-- Keep redaction configuration explicit. Default credential stripping does not imply query or body sanitization. The body scrubber operates on complete recorded bodies, including the invalid-body marker, and the consumer's synthetic data makes its replacement rule safe for this experiment.
-- The consumer must choose four different budgets: HTTP collection, JSON admission, cassette capture, and waiting. They protect different resources. Combining them into one unexplained limit would conceal that distinction.
-- The public README and module documentation made the tested capabilities discoverable. `cassette.finish` versus `http_gun.stop`, contract schema identity, ordered matching and Sinal callback process ownership were especially consequential details.
-- The public cassette recipe shows two independent `testing.playback` clients over one loaded script with distinct `with_correlation` views. The existing APIs suffice; an ecosystem facade or a shared retry/configuration abstraction is not warranted by this experiment.
-
-## Boundaries and development findings
-
-- `pages` handles this fixed two-page fixture. It asserts continuation 2, then no continuation, and constant instrument identity. This is a bounded acquisition example rather than a general pagination implementation.
-- The fixture's Python HTTP handler, environment FFI, strict assertions, subprocess launcher and two-worker barrier are test infrastructure. They are not required production wrappers around the libraries. Native schemas and Sinal event codecs have different wire responsibilities, so their separate definitions are intentional.
-- Cleanup evidence covers normal completed and refused operations, recorder publication, ordinary local stop and attachment removal. It does not prove crash durability, filesystem-failure cleanup, active-request cancellation settlement, handler quiescence, whole-VM memory bounds, or arbitrary concurrent cassette recording.
-- The harness sends exactly five live requests; no retry occurs. It exercises pre-cancellation only. HTTP Gun does not promise automatic application retry.
-- Development failures were consumer/environment issues: incorrect boolean assertion syntax at first compile; a barrier subject created in the wrong process at runtime; and a transient Hex API rate limit while repeatedly invoking `gleam run`. The barrier now creates its receiving subject inside its worker. The runner builds once and runs compiled BEAM code for capture/replay. These failures do not establish package defects.
+The [evidence design](../../docs/design/evidence/design.typ#irreversible-effects-and-replay) states the behavior and
+[ADR 0023](../../docs/adr/0023-separate-transport-failure-from-contract-failure-in-replay.md) records the findings.
