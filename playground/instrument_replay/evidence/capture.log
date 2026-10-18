@@ -1,3 +1,0 @@
-truncated reason: Request failed: peer closed; status 200; request may have been sent
-oversized reason: Response body bytes limit 512; observed 2154; status 200; request may have been sent
-PASS capture: native pages, separated failures, finish and stop
