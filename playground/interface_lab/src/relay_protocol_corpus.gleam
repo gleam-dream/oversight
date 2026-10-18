@@ -1,4 +1,4 @@
-// THROWAWAY: Export actual server output for the frozen upstream schema oracle.
+// THROWAWAY: Export actual server output for the pinned upstream schema oracle.
 import consumers/modern_relay
 import lab/value
 
