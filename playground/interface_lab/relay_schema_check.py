@@ -1,16 +1,20 @@
-"""Validate actual Relay output against a frozen upstream MCP schema."""
+"""Validate actual Relay output against the pinned upstream MCP schema."""
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 import subprocess
 
 from jsonschema import Draft202012Validator
 
+from oracle_input import fetch
+
 
 ROOT = Path(__file__).resolve().parent
-SCHEMA = ROOT / "oracles/mcp_2026/schema.json.source"
+SCHEMA_URL = (
+    "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/"
+    "5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json"
+)
 SHA256 = "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203"
 REQUIRED_DEFINITIONS = {
     "DiscoverResultResponse",
@@ -21,10 +25,7 @@ REQUIRED_DEFINITIONS = {
 
 
 def main():
-    raw = SCHEMA.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != SHA256:
-        raise SystemExit("FAIL: frozen MCP schema checksum changed")
-    schema = json.loads(raw)
+    schema = json.loads(fetch("mcp-2026-07-28-schema.json", SCHEMA_URL, SHA256))
     Draft202012Validator.check_schema(schema)
     result = subprocess.run(
         ["gleam", "run", "-m", "relay_protocol_corpus"],
@@ -93,7 +94,7 @@ def main():
     if tool_results != {True, False}:
         raise SystemExit("FAIL: Relay corpus must contain tool success and tool error")
     print(
-        f"PASS: {len(cases)} Relay outputs match the frozen MCP schema; "
+        f"PASS: {len(cases)} Relay outputs match the pinned MCP schema; "
         f"{mutations} malformed mutations are rejected"
     )
 

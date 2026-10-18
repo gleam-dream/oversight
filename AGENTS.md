@@ -16,6 +16,7 @@
 - `nix develop` supplies Gleam, Erlang/OTP 29, rebar3, Elixir, Python with jsonschema, PostgreSQL 16 and lefthook. Run each experiment from its documented directory in this shell.
 - `apps/scripts/with-postgres.sh` creates and removes a disposable PostgreSQL cluster. No existing database or live provider is needed.
 - Use repository-scoped Git, respect each sibling repository's instructions, and never read or copy credential files such as `.env.local`.
+- Oracle inputs are fetched into `.artifacts/oracle-inputs/` at run time and never committed.
 - `nix fmt -- PATH...` formats named files through treefmt. Avoid whole-repository formatting during a scoped change. The pre-commit hook formats staged files, and `nix flake check` validates formatting.
 
 ## Validation commands
@@ -30,7 +31,7 @@
 
 ## References
 
-- [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the frozen MCP schema, the exact-number checker, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
+- [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the pinned MCP schema, the exact-number checker, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
 - This repository has no `BENCHMARKS.md`: it owns no benchmark workload ([ADR 0019](docs/adr/0019-qualify-composition-through-validation-profiles.md)). Benchmarks belong to the library that owns each workload; find the libraries in the [README](README.md#libraries).
 
 <!-- agent-skills:begin -->
