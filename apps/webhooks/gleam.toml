@@ -5,9 +5,9 @@ gleam = ">= 1.18.0"
 description = "Composition app: durable, signed outbound webhooks on grind + http_gun + sinal, served by wisp/mist on pog."
 
 [dependencies]
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "bd111adff515d120713e4e22d64798d8bcc6eef3" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "e4f00b8525e20a7b568b2cd585fe4e37db161b26" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "9727f9baab6ed4f796780a0c3a1027c3292c5fc7" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_otp = ">= 1.3.0 and < 2.0.0"
