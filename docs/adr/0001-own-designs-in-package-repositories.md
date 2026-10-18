@@ -18,14 +18,14 @@
 
 ## Consolidation ownership
 
-| Retired material                                                                                          | Owner of surviving content                                                                                                 |
-| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| The nine root package designs, package API coverage rows, package review cards, and package research      | Each package's `docs/design/` and `docs/adr/`                                                                              |
-| `PUBLIC-API-GUIDELINES.md`, `PUBLIC-API.md`, `ECOSYSTEM-PLAN.md`, `DESIGN-DRIFT.md`, and `EXPLORATION.md` | Oversight caller contracts, responsibility map, evidence rules, and ADRs 0002–0009                                         |
-| `docs/release-api/` and `docs/composition/`                                                               | Owning package contracts and ADRs; Oversight composition contracts and ADRs                                                |
-| `docs/implementation/` and interface-lab contract/status notes                                            | Owning package contracts and rationale; executable experiment instructions stay beside retained consumers                  |
-| Application `FEEDBACK.md` files                                                                           | Oversight application contracts and relevant package decisions; current running instructions remain in application READMEs |
-| Unpublished migration guides                                                                              | Current package contract and material API rationale; published-version migration guidance is retained                      |
+| Retired material                                                                                          | Owner of surviving content                                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The nine root package designs, package API coverage rows, package review cards, and package research      | Each package's `docs/design/` and `docs/adr/`                                                                                                                 |
+| `PUBLIC-API-GUIDELINES.md`, `PUBLIC-API.md`, `ECOSYSTEM-PLAN.md`, `DESIGN-DRIFT.md`, and `EXPLORATION.md` | Oversight caller contracts, responsibility map, evidence rules, and ADRs 0002–0009                                                                            |
+| `docs/release-api/` and `docs/composition/`                                                               | Owning package contracts and ADRs; the `docs/design/composition/` context and the Oversight ADRs                                                              |
+| `docs/implementation/` and interface-lab contract/status notes                                            | Owning package contracts and rationale; the `docs/design/evidence/` context; experiment instructions stay in the playground READMEs beside retained consumers |
+| Application `FEEDBACK.md` files                                                                           | Oversight application contracts and relevant package decisions; current running instructions remain in application READMEs                                    |
+| Unpublished migration guides                                                                              | Current package contract and material API rationale; published-version migration guidance is retained                                                         |
 
 ## Consequences
 
