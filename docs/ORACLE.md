@@ -1,0 +1,61 @@
+# Oracles and pinned references
+
+An oracle is a pinned external implementation, specification or recorded baseline that judges a stated subset of observable behavior. Its authority stops at that subset. This page lists every reference the retained experiments compare against, what each comparison covers, and where the claim ends.
+
+- The design states the rule in [Experiments and acceptance evidence](design/evidence/design.typ#experiments-and-acceptance-evidence) and defines the term in the [evidence vocabulary](design/evidence/CONTEXT.typ).
+- [ADR 0009](adr/0009-retain-executable-evidence-with-scoped-claims.md) records why executable evidence and its provenance are retained. [ADR 0015](adr/0015-resolve-composition-consumers-from-recorded-git-sources.md) records how recorded sources resolve, and [ADR 0027](adr/0027-keep-oracle-references-in-a-linked-document.md) records why this page exists.
+- Oversight owns no benchmark workload ([ADR 0019](adr/0019-qualify-composition-through-validation-profiles.md)), so it has no `BENCHMARKS.md`. Benchmarks and upstream comparisons for a library belong to that library's repository; start from the [library table](../README.md#libraries).
+
+## References
+
+| Reference                         | Pin                                                                                                                                                                                                                                                                                                                                      | Compared against                                             | Outcome                                                                                     | Retained at                                                                                            |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| MCP schema, revision `2026-07-28` | Upstream `modelcontextprotocol/modelcontextprotocol` commit [`5f5440bb26a62e2cf3440b92da5a667efa03b267`](https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json); SHA-256 `ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203` | Relay wire output                                            | Structural agreement per named definition                                                   | [`playground/interface_lab/oracles/mcp_2026/`](../playground/interface_lab/oracles/mcp_2026/README.md) |
+| Independent exact-number checker  | Authored Python (`Decimal`, `Fraction`, `struct`); no upstream pin                                                                                                                                                                                                                                                                       | The interface laboratory's Erlang numeric kernel             | Per-row agreement on parse status, integer and float projection, ordering and bit witnesses | [`playground/interface_lab/number_check.py`](../playground/interface_lab/number_check.py)              |
+| Host JSON probe receipt           | Observed 2026-09-20 with Node v22.21.1 and OTP 28 (ERTS 16.2)                                                                                                                                                                                                                                                                            | Host-parser behavior for number tokens                       | Raw observation, not a pass/fail comparison                                                 | [`host-json-probes.txt`](../playground/interface_lab/oracles/numbers/host-json-probes.txt)             |
+| JSON Blueprint 1.7.1 and 1.1.0    | Hex package checksums `6260f1e9a609a5ec3fbe638745744a3bbbd5fcec37b0792ac7ea631efa4d20d7` (1.7.1) and `879833acfaf7ef9fac1e90ef78e41e5d3cbb0fa718d63105efc597fe520930bf` (1.1.0), checked against each project's `manifest.toml`                                                                                                          | Legacy decoder acceptance and emitted Draft 7 schema         | Confirmed mismatches and two intended compiler diagnostics                                  | [`playground/blueprint_compatibility/`](../playground/blueprint_compatibility/README.md)               |
+| Previous public Fabric reader     | Fabric commit [`c92e97ca3357c15dd26a2fcb59a77bedcffda539`](https://github.com/gleam-dream/fabric/tree/c92e97ca3357c15dd26a2fcb59a77bedcffda539)                                                                                                                                                                                          | A version 8 record written through the current public facade | The reader returns `Error(fabric.UnsupportedVersion(8))` without executing its model        | [`playground/fabric_record_compatibility/`](../playground/fabric_record_compatibility/README.md)       |
+| Relay 0.1.0 deadline baseline     | Recorded in [ADR 0022](adr/0022-retain-relay-admission-evidence-against-its-baseline.md)                                                                                                                                                                                                                                                 | Admission deadline behavior through public APIs              | Expectation matrix fixed before the implementation it judges                                | [`playground/relay_admission/`](../playground/relay_admission/README.md)                               |
+| Sibling revision set              | [`sibling-revisions.txt`](../sibling-revisions.txt)                                                                                                                                                                                                                                                                                      | Source inspection and historical-reader access               | Recorded revisions and dirty flags, not a behavioral comparison                             | repository root                                                                                        |
+
+Instrument replay compares against authored synthetic fixtures and names no external oracle. Archive release and erasure campaign fix their expectation tables before implementation and retain them as the oracle for the run they judge.
+
+## What each comparison establishes
+
+- **MCP schema.** The Python checker verifies the schema hash before loading it and checks the schema with a Draft 2020-12 validator. It then runs `relay_protocol_corpus`, validates every emitted Relay output against its named definition (`DiscoverResultResponse`, `ListToolsResultResponse`, `CallToolResultResponse`, `UnsupportedProtocolVersionError`), and requires each malformed mutation to be rejected: missing JSON-RPC version, missing result type, missing cache scope or lifetime, and missing supported versions. The corpus must contain both tool success and tool error.
+- **Exact numbers.** `consumers/json_numbers` emits parse, comparison, integer-origin and float-origin rows. The checker recomputes each independently and requires the full set of parse statuses (`accepted`, `invalid_syntax`, `token_too_long`, `significand_too_long`, `exponent_out_of_range`), all three comparison orders, and the required token, bit-pattern and integer fixtures.
+- **JSON Blueprint releases.** The experiment checks both manifests, runs both projects, validates the emitted schemas with `Draft7Validator`, and requires each of two compiler negatives to fail with exactly one intended diagnostic. Findings are in [ADR 0025](adr/0025-treat-legacy-decoders-and-their-schemas-separately.md).
+- **Fabric reader.** A writer built from the Fabric checkout under evaluation completes a run, and a separate reader pinned to the old commit opens the directory record. Success prints `PASS new v8 record written through public facade` and `PASS c92e97c public reader rejects v8 without execution`.
+- **Relay baseline.** The consumer asserts Relay's request-deadline contract through public APIs and a native fixture. [ADR 0022](adr/0022-retain-relay-admission-evidence-against-its-baseline.md) holds the baseline and the observed counts.
+
+## Run a comparison
+
+From the repository root, inside `nix develop`:
+
+```sh
+# Frozen MCP schema against Relay output, each malformed mutation rejected
+python3 -B playground/interface_lab/relay_schema_check.py
+# Independent exact-number checker against the Erlang numeric kernel
+python3 -B playground/interface_lab/number_check.py
+# JSON Blueprint releases and independent Draft 7 validation
+python3 -B playground/blueprint_compatibility/scripts/check.py
+# Relay deadline consumer against the recorded revisions
+sh -c 'cd playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
+```
+
+The first two checkers also run at the end of `python3 -B playground/interface_lab/check.py`, after that experiment's compiler checks. All four comparisons run in the `experiments` profile (`python3 -B scripts/ci.py experiments`). The Fabric reader check is manual because it needs the Fabric commit above and the sibling commits pinned in the reader's own `sibling-revisions.txt`, which CI's single-revision checkouts do not carry:
+
+```sh
+mkdir -p .artifacts/history-tmp
+TMPDIR="$PWD/.artifacts/history-tmp" python3 playground/fabric_record_compatibility/check.py "$PWD/../fabric"
+```
+
+## Limits of the claims
+
+- Agreement with the MCP schema establishes structural agreement of emitted fixtures with named definitions. It does not establish complete protocol conformance, HTTP behavior, authorization correctness or runtime resource ownership.
+- The exact-number checker is an independent computation for a throwaway kernel. It does not establish the exact-number behavior of JSON Blueprint, and the host probe receipt records original host-parser observations only.
+- The JSON Blueprint comparison is a migration probe over a small corpus. It excludes floating-point values, recursive schemas, general schema conversion, resource bounds and error-path parity.
+- The Fabric reader check establishes refusal by a previous reader, not mixed-version execution, PostgreSQL behavior or live-provider compatibility.
+- The Relay evidence is compiler and native-runtime observation, not upstream MCP conformance. It makes no claim about incomplete-body bounds, slow-sender protection, throughput, allocation, effect rollback or arbitrary child cleanup.
+- A comparator is not a production dependency because it informed a contract. Proprietary features need an original contract or a licensed oracle; public descriptions do not establish source parity.
+- The frozen schema keeps its upstream license beside the bytes. It remains upstream code, not a local declaration of the protocol.

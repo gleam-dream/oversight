@@ -1,4 +1,4 @@
-# ADR 0009: Retain executable evidence with scoped claims
+# Retain executable evidence with scoped claims
 
 <a id="adr-0009"></a>
 
@@ -6,7 +6,7 @@
 
 - Keep composition applications, compiler probes, scripted transports, database fixtures, pinned oracle inputs, and their useful running instructions.
 - Distinguish compilation, pure behavior, native-runtime behavior, storage fault behavior, protocol conformance, and live-provider qualification.
-- Preserve source revision and license provenance where a fixture or oracle depends on it. A comparator is not a production dependency merely because it informed a contract.
+- Preserve source revision and license provenance where a fixture or oracle depends on it, and record each oracle's pin, comparison scope and limits in [`docs/ORACLE.md`](../ORACLE.md). A comparator is not a production dependency merely because it informed a contract.
 
 ## Alternatives and consequences
 
