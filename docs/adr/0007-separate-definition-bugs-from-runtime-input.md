@@ -1,4 +1,4 @@
-# ADR 0007: Separate definition bugs from runtime input
+# Separate definition bugs from runtime input
 
 <a id="adr-0007"></a>
 

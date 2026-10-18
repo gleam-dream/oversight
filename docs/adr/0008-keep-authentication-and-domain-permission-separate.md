@@ -1,4 +1,4 @@
-# ADR 0008: Keep authentication and domain permission separate
+# Keep authentication and domain permission separate
 
 <a id="adr-0008"></a>
 

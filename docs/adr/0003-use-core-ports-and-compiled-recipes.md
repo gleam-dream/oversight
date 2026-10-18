@@ -1,4 +1,4 @@
-# ADR 0003: Use core ports and compiled recipes
+# Use core ports and compiled recipes
 
 <a id="adr-0003"></a>
 

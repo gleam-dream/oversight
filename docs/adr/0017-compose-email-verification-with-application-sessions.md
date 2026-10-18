@@ -1,4 +1,4 @@
-# ADR 0017: Compose email verification with application sessions
+# Compose email verification with application sessions
 
 <a id="adr-0017"></a>
 

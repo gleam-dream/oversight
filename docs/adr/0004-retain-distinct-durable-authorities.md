@@ -1,4 +1,4 @@
-# ADR 0004: Retain distinct durable authorities
+# Retain distinct durable authorities
 
 <a id="adr-0004"></a>
 

@@ -1,4 +1,4 @@
-# ADR 0002: Preserve caller-owned values and decisions
+# Preserve caller-owned values and decisions
 
 <a id="adr-0002"></a>
 

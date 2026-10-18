@@ -1,4 +1,4 @@
-# ADR 0006: Share correlation without owning tracing
+# Share correlation without owning tracing
 
 <a id="adr-0006"></a>
 

@@ -1,4 +1,4 @@
-# ADR 0001: Own designs in package repositories
+# Own designs in package repositories
 
 <a id="adr-0001"></a>
 

@@ -1,4 +1,4 @@
-# ADR 0005: Bound owned work with explicit policy
+# Bound owned work with explicit policy
 
 <a id="adr-0005"></a>
 
