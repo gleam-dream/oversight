@@ -15,6 +15,7 @@
 
   #pending-ledger(
     pending-entry(title: "Provider contract lacks proof of non-execution", kind: "ruling", since: "2026-10-07")[Releasing an unconfirmed payment reservation needs a provider contract that excludes late execution. The scripted provider supplies lookup evidence only for completed payments, so an unavailable lookup or an absence never releases a reservation. See #adr(11).],
+    pending-entry(title: "Application invariants are unchecked against the apps", kind: "verify", since: "2026-10-17")[The invariants and behavior rules for the compiled applications were folded from retired application READMEs and feedback notes. Each needs a comparison against the application source and its tests before the section counts as verified.],
   )
 
   #section(title: "Composition applications", lead: "Each application is a separately compiled consumer with its own domain types, policies, startup, and shutdown. Scripted peers expose deterministic failure paths without production credentials.", body: [

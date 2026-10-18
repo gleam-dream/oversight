@@ -25,7 +25,7 @@
 | `docs/release-api/` and `docs/composition/`                                                               | Owning package contracts and ADRs; Oversight composition contracts and ADRs                                                |
 | `docs/implementation/` and interface-lab contract/status notes                                            | Owning package contracts and rationale; executable experiment instructions stay beside retained consumers                  |
 | Application `FEEDBACK.md` files                                                                           | Oversight application contracts and relevant package decisions; current running instructions remain in application READMEs |
-| Unpublished migration-wave guides                                                                         | Current package contract and material API rationale; published-version migration guidance is retained                      |
+| Unpublished migration guides                                                                              | Current package contract and material API rationale; published-version migration guidance is retained                      |
 
 ## Consequences
 
