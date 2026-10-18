@@ -19,32 +19,24 @@ resource cleanup. External services are scripted locally.
 
 ## Run an application
 
-From the Oversight repository, enter `nix develop`, then change to the
-application directory. Its README gives the commands to run the tests and demo.
-For applications without PostgreSQL:
+From the Oversight repository, enter `nix develop` and change to the application
+directory. For applications without PostgreSQL:
 
 ```sh
 gleam test
 gleam run
 ```
 
-Applications that need PostgreSQL use the disposable cluster helper:
+Applications that need PostgreSQL use the disposable cluster helper, which creates
+and removes its own local database:
 
 ```sh
 ../scripts/with-postgres.sh gleam test
 ../scripts/with-postgres.sh gleam run
 ```
 
-The helper creates and removes its own local database. No existing database or
-provider account is needed. Gleam resolves library dependencies from immutable
-Git revisions; no sibling checkout is required to run an application.
+No existing database or provider account is needed, and no sibling checkout is
+required: Gleam resolves library dependencies from immutable Git revisions.
 
-## What the examples test
-
-The examples cover ordinary use, application types, advanced configuration and
-failure recovery. They exercise local HTTP, process lifetimes and PostgreSQL
-where the scenario requires them. Compilation alone does not prove timing,
-persistence or external-effect guarantees.
-
-The [ecosystem design](../docs/design/design-layer.pdf) describes the composition
-contracts. Package designs describe each library's behavior.
+The [ecosystem design](../docs/design/applications/design.typ) describes each
+application's contract. Package designs describe each library's behavior.

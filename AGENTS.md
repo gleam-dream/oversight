@@ -2,40 +2,36 @@
 
 ## Repository responsibility
 
-- Oversight owns ecosystem composition contracts and executable consumer evidence.
-  The independent libraries, PostgreSQL adapters and Retrace packages own their
-  detailed designs in their respective repositories.
-- Read [the ecosystem design](docs/design/design.typ), its
-  [vocabulary](docs/design/CONTEXT.typ), [coverage](docs/COVERAGE.md), and relevant
-  [ADRs](docs/adr/0001-own-designs-in-package-repositories.md) before changing a
-  composition boundary. The README links each package's design owner.
-- Keep current design timeless. Put rationale, alternatives, migration history,
-  and attributable dates in ADRs. Do not restore review plans or status reports
-  as competing current authorities.
-- Preserve intended capabilities without presenting unbuilt features as working
-  behavior. Use the owning design's native pending entries for genuine unresolved
-  requirements; chronology belongs in ADRs.
-- Before proposing or changing a public facade, exercise ordinary use, distinct
-  advanced configuration, application-native types, and recovery from a separate
-  consumer. Preserve the full capability scope and explicit runtime ownership.
-- Keep compiler evidence, scripted behavior, native runtime checks, database
-  fault tests, and upstream conformance claims distinct. Preserve executable
-  inputs and oracle revision/license provenance.
+- Oversight owns ecosystem composition contracts and executable consumer evidence. The independent libraries, PostgreSQL adapters and Retrace packages own their detailed designs in their own repositories.
+- Read the [ecosystem design](docs/design/design.typ), the three context vocabularies ([composition](docs/design/composition/CONTEXT.typ), [applications](docs/design/applications/CONTEXT.typ), [evidence](docs/design/evidence/CONTEXT.typ)), the [context map](docs/CONTEXT-MAP.md), [coverage](docs/COVERAGE.md) and the relevant [ADRs](docs/adr/) before changing a composition boundary.
+- Keep the current design timeless. Put rationale, alternatives, findings and attributable dates in ADRs. Do not restore review plans, status reports or change logs as competing authorities.
+- Preserve intended capabilities without presenting unbuilt features as working behavior. Record genuine unresolved requirements in the owning context's pending ledger.
+- Before proposing or changing a public facade, exercise ordinary use, distinct advanced configuration, application-native types and recovery from a separate consumer.
+- Keep compiler evidence, scripted behavior, native runtime checks, database fault tests and upstream conformance claims distinct. Preserve executable inputs and oracle revision and license provenance.
+- The compiled applications under `apps/` and experiments under `playground/` are the usage examples; keep a prose usage guide out of the repository so a public API change fails a gate instead of leaving a stale guide. Keep example and fixture READMEs to what the directory is and how to run it.
+- Record every oracle's pin, comparison scope and limits in [docs/ORACLE.md](docs/ORACLE.md) in the same change that repins it. Link other repositories by their GitHub address.
 
 ## Tooling and workspace
 
-- `nix develop` supplies Gleam, Erlang/OTP 29, rebar3, Elixir, Python with
-  jsonschema, PostgreSQL 16, and lefthook. Run each experiment from its documented
-  consumer directory in this shell.
-- Use `apps/scripts/with-postgres.sh` for disposable local database experiments.
-  No existing database or live provider is needed for the retained consumers.
-- Use repository-scoped Git. Respect each sibling repository's instructions and
-  existing work. Never read or copy credential files such as `.env.local`.
-- `nix fmt -- PATH...` formats named files through treefmt. Avoid whole-repository
-  formatting during a scoped change. The pre-commit hook formats staged files;
-  `nix flake check` includes formatting validation.
-- Run only checks relevant to the changed contract. A documentation change does
-  not require every ecosystem runtime gate. Report exactly what was executed.
+- `nix develop` supplies Gleam, Erlang/OTP 29, rebar3, Elixir, Python with jsonschema, PostgreSQL 16 and lefthook. Run each experiment from its documented directory in this shell.
+- `apps/scripts/with-postgres.sh` creates and removes a disposable PostgreSQL cluster. No existing database or live provider is needed.
+- Use repository-scoped Git, respect each sibling repository's instructions, and never read or copy credential files such as `.env.local`.
+- `nix fmt -- PATH...` formats named files through treefmt. Avoid whole-repository formatting during a scoped change. The pre-commit hook formats staged files, and `nix flake check` validates formatting.
+
+## Validation commands
+
+- Run only the checks relevant to the changed contract, and report exactly what was executed. A documentation change does not require every runtime gate.
+- Quality: `nix develop --command python3 -B scripts/ci.py quality`.
+- One application: `nix develop --command python3 -B scripts/ci.py application <name>` (for example `checkout`, `session_replay`, `financial_recovery`, `email_portal`).
+- Retained experiments: `nix develop --command python3 -B scripts/ci.py experiments`. Fabric record compatibility is the one experiment outside this profile; run it by hand from a Fabric checkout with Git history (see its README).
+- Everything, including the design gate: `nix develop --command python3 -B scripts/ci.py full`.
+- Unpublished sibling changes: `nix develop --command python3 -B scripts/local_sources.py --output <new-directory>`, then run the consumer from the copy.
+- Design layer, run in order: `nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf`, `nix run .#design-gate-check -- docs/design .` and `nix run .#design-gate-context -- docs/design --estimate`.
+
+## References
+
+- [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the frozen MCP schema, the exact-number checker, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
+- This repository has no `BENCHMARKS.md`: it owns no benchmark workload ([ADR 0019](docs/adr/0019-qualify-composition-through-validation-profiles.md)). Benchmarks belong to the library that owns each workload; find the libraries in the [README](README.md#libraries).
 
 <!-- agent-skills:begin -->
 <!-- framework-commit: cab7c0590036edaa66d8430cc5016399a9fd2c71 origin: git@github.com:lostbean/skills.git -->
@@ -44,10 +40,12 @@
 
 ## Agent skills
 
-**Design layer** — `docs/design/design.typ` describes the design,
-`docs/design/CONTEXT.typ` defines its vocabulary, and `docs/adr/` records
-decision rationale. The rendered document is `docs/design/design-layer.pdf`.
-`docs/COVERAGE.md` maps repository parts to their design owners.
+**Design layer** — `docs/CONTEXT-MAP.md` indexes the design documents:
+the root design is `docs/design/design.typ`, each context has its own
+`design.typ` and `CONTEXT.typ` under `docs/design/<context>/`, and
+`docs/adr/` records decision rationale. The layer renders to one
+`docs/design/design-layer.pdf`. `docs/COVERAGE.md` maps repository parts to
+their design owners.
 
 **Tracker** — GitHub issues in `gleam-dream/oversight`, accessed with
 `gh issue list --repo gleam-dream/oversight` and `gh issue view NUMBER --repo gleam-dream/oversight`.

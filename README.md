@@ -9,41 +9,26 @@ combine the libraries.
 Each library owns its API, design and runtime. Applications choose the libraries
 they need and supply domain types and policies.
 
-| Library                                                                                        | Purpose                                           |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| [Sinal](../sinal/README.md)                                                                    | Typed telemetry and correlation                   |
-| [JSON Blueprint](../json_blueprint/README.md)                                                  | JSON codecs, schemas and runtime contracts        |
-| [HTTP Gun](../http_gun/README.md)                                                              | HTTP client, streaming, redaction and cassettes   |
-| [Saga](../saga/README.md)                                                                      | Compensating workflows                            |
-| [Grind](../grind/README.md)                                                                    | PostgreSQL job queue                              |
-| [LLM Wire](../llm_wire/README.md)                                                              | Model-provider protocols and classification       |
-| [Relay](../relay/README.md)                                                                    | MCP server and client                             |
-| [Warden](../warden/README.md)                                                                  | OIDC/OAuth client and access-token validation     |
-| [Correio](../correio/README.md)                                                                | Transactional email and passwordless verification |
-| [Fabric](../fabric/README.md)                                                                  | Agents, durable graphs and approvals              |
-| [Retrace core](https://github.com/gleam-dream/retrace)                                         | Typed session recording and deterministic replay  |
-| [Retrace frontend](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_frontend) | Browser/Tauri capture, delivery and replay UI     |
-| [Retrace server](https://github.com/gleam-dream/retrace/tree/main/packages/retrace_server)     | PostgreSQL session indexing and object archival   |
+| Library                                                         | Purpose                                                                                                       |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [Sinal](https://github.com/gleam-dream/sinal)                   | Typed telemetry and correlation                                                                               |
+| [JSON Blueprint](https://github.com/gleam-dream/json_blueprint) | JSON codecs, schemas and runtime contracts                                                                    |
+| [HTTP Gun](https://github.com/gleam-dream/http_gun)             | HTTP client, streaming, redaction and cassettes                                                               |
+| [Saga](https://github.com/gleam-dream/saga)                     | Compensating workflows, with a PostgreSQL adapter                                                             |
+| [Grind](https://github.com/gleam-dream/grind)                   | PostgreSQL job queue                                                                                          |
+| [LLM Wire](https://github.com/gleam-dream/llm_wire)             | Model-provider protocols and classification                                                                   |
+| [Relay](https://github.com/gleam-dream/relay)                   | MCP server and client                                                                                         |
+| [Warden](https://github.com/gleam-dream/warden)                 | OIDC/OAuth client and access-token validation, with a PostgreSQL adapter                                      |
+| [Correio](https://github.com/gleam-dream/correio)               | Transactional email and passwordless verification, with PostgreSQL, Postmark and development mailbox adapters |
+| [Fabric](https://github.com/gleam-dream/fabric)                 | Agents, durable graphs and approvals, with a PostgreSQL adapter                                               |
+| [Retrace](https://github.com/gleam-dream/retrace)               | Typed session recording and replay: portable core, browser/Tauri frontend and PostgreSQL server               |
 
-[Retrace](https://github.com/gleam-dream/retrace) adds three independently selected
-packages: portable `retrace`, browser/Tauri `retrace_frontend`, and BEAM
-`retrace_server`. Its [design](https://github.com/gleam-dream/retrace/blob/main/docs/design/design.typ)
-owns recording, delivery and replay contracts;
-[installation](https://github.com/gleam-dream/retrace/blob/main/docs/releases.md)
-uses Git dependencies. The current release is experimental.
-
-[Saga's PostgreSQL adapter](../saga/integrations/saga_postgres/README.md),
-[Warden's PostgreSQL adapter](../warden/integrations/warden_postgres/README.md),
-[Fabric's PostgreSQL adapter](../fabric/integrations/fabric_postgres/README.md) and
-[Correio's PostgreSQL adapter](../correio/adapters/correio_postgres/README.md)
-provide persistent storage. Each package README links its detailed design.
-
-Correio also provides a [Postmark adapter](../correio/adapters/correio_postmark/README.md)
-and an optional [development mailbox](../correio/adapters/correio_mailbox/README.md).
-The [Correio design](../correio/docs/design/design.typ) owns their contracts.
+Each package README links its detailed design. The Retrace release is experimental and installs through Git dependencies.
 
 ## Run an example
 
+The applications and experiments are the usage examples: each compiles and runs
+against the libraries' public APIs, and a gate fails when an API change breaks one.
 Enter the Oversight shell and run an application. Gleam fetches the libraries
 from their recorded immutable Git revisions:
 
@@ -55,78 +40,25 @@ gleam run
 ```
 
 [Tool Hub](apps/tool_hub/README.md) runs an agent that calls MCP tools and is
-itself served as an MCP tool. Its model provider and tools run locally.
-
-The [application catalog](apps/README.md) also covers checkout, webhooks,
-document extraction, approvals, login, crash recovery and
-[session replay](apps/session_replay/README.md).
-[Email Portal](apps/email_portal/README.md) exercises captured delivery, mailbox
-inspection, passwordless verification and application session recovery.
-Applications use scripted services and disposable PostgreSQL; no provider
-credentials are needed.
+itself served as an MCP tool. The [application catalog](apps/README.md) lists the
+other applications, which use scripted services and disposable PostgreSQL and need
+no provider credentials.
 
 ## Design and experiments
 
-The [ecosystem design](docs/design/design-layer.pdf) explains package
-responsibilities, resource ownership and composition. Its
-[source](docs/design/design.typ), [vocabulary](docs/design/CONTEXT.typ) and
-[coverage map](docs/COVERAGE.md) live here. [ADRs](docs/adr/) record decisions and
-their rationale.
-
-Retained experiments answer narrower questions:
-
-- [Relay admission](playground/relay_admission/README.md): callback deadlines,
-  disconnects, and process ownership through buffered and local HTTP consumers.
-- [Interface laboratory](playground/interface_lab/README.md): candidate typed
-  APIs, with explicit limits on what compilation proves.
-- [Blueprint compatibility](playground/blueprint_compatibility/README.md):
-  decoding and schema behavior in pinned published releases.
-- [Protocol pilot](playground/ecosystem_pilot/README.md): MCP and model-provider
-  calls over local HTTP.
-- [HTTP API probe](playground/http_gun_interface/README.md): a declaration-only
-  consumer experiment.
-- [Archive release](playground/archive_release/README.md): requester identity,
-  current permissions and exact document revisions across durable approval.
-- [Instrument replay](playground/instrument_replay/README.md): offline HTTP
-  evidence evaluated under different measurement contracts.
-- [Erasure campaign](playground/erasure_campaign/README.md): reversible
-  preparation followed by irreversible deletion and forward reconciliation.
-
-## Benchmarks
-
-Package benchmark guides record measured workloads, environments and limits.
-
-| Package                                                          | Measurements                                        |
-| ---------------------------------------------------------------- | --------------------------------------------------- |
-| [Sinal](../sinal/docs/benchmarks/README.md)                      | Event emission, field codecs and spans              |
-| [JSON Blueprint](../json_blueprint/docs/benchmarks.md)           | Parsing, validation, codecs and memory observations |
-| [HTTP Gun](../http_gun/examples/comparison/README.md)            | Local HTTP requests and streaming                   |
-| [Saga](../saga/bench/README.md)                                  | Workflow construction and execution                 |
-| [Grind](../grind/bench/README.md)                                | PostgreSQL job throughput and latency               |
-| [LLM Wire](../llm_wire/docs/benchmarks.md)                       | Local HTTP/2 concurrency, latency and VM memory     |
-| [Warden](../warden/docs/BENCHMARKS.md)                           | Token validation, key refresh and cache allocation  |
-| [Correio](../correio/benchmarks/README.md)                       | MIME rendering and memory/PostgreSQL verification   |
-| [Fabric](../fabric/consumers/writing/README.md#retained-timings) | Review-call latency in a graph application          |
-
-These are separate workloads, so their numbers are not an ecosystem ranking.
+- The [ecosystem design](docs/design/design.typ) explains package responsibilities, resource ownership and composition. Its three contexts are [composition](docs/design/composition/design.typ), [applications](docs/design/applications/design.typ) and [evidence](docs/design/evidence/design.typ).
+- The [context map](docs/CONTEXT-MAP.md), [coverage map](docs/COVERAGE.md) and [ADRs](docs/adr/) record vocabulary ownership, repository coverage and decisions.
+- Retained experiments answer narrower questions: [relay admission](playground/relay_admission/README.md), [interface laboratory](playground/interface_lab/README.md), [Blueprint compatibility](playground/blueprint_compatibility/README.md), [protocol pilot](playground/ecosystem_pilot/README.md), [HTTP API probe](playground/http_gun_interface/README.md), [archive release](playground/archive_release/README.md), [instrument replay](playground/instrument_replay/README.md), [erasure campaign](playground/erasure_campaign/README.md) and [Fabric record compatibility](playground/fabric_record_compatibility/README.md).
+- The [oracle reference](docs/ORACLE.md) pins every external reference the experiments compare against, states what each comparison covers and how to run it, and states where each claim ends.
+- Package benchmarks belong to the package that owns each workload; see each library's README.
 
 ## Development
 
 The Nix shell supplies Gleam, Erlang/OTP, Elixir, Python and PostgreSQL. Run the
-checks for the application or contract you change. See [AGENTS.md](AGENTS.md)
-for repository instructions. Run the complete consumer gate with:
+complete consumer gate with:
 
 ```sh
 nix develop --command python3 -B scripts/ci.py full
 ```
 
-[Validation](docs/TESTING.md) lists individual checks, CI dependency access,
-artifacts and the scheduled ecosystem compatibility run.
-
-To rebuild and check the design document:
-
-```sh
-nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf
-nix run .#design-gate-check -- docs/design .
-nix run .#design-gate-context -- docs/design --estimate
-```
+[AGENTS.md](AGENTS.md) lists the individual validation commands and the design-gate commands.
