@@ -15,8 +15,8 @@ nix develop ../.. --command bash run.sh
 
 The runner checks formatting, builds with warnings as errors, starts a loopback HTTP fixture, and runs one integration
 test with seven named behavioral checks against the disposable PostgreSQL helper. It removes the fixture and database on
-success or failure and writes ignored `.artifacts/latest.log` and `.artifacts/provenance.txt`. The accepted snapshot is
-[evidence/accepted.log](evidence/accepted.log), with revisions and toolchain in [evidence/provenance.txt](evidence/provenance.txt).
+success or failure and writes ignored `.artifacts/latest.log` and `.artifacts/provenance.txt`, which record the run and
+the revisions and toolchain it used. The accepted run's log and provenance are in repository history at commit `26422a6`.
 
 The [evidence design](../../docs/design/evidence/design.typ#irreversible-effects-and-replay) states the behavior and
 [ADR 0020](../../docs/adr/0020-record-evidence-before-irreversible-effects.md) records the expectations, findings and limits.
