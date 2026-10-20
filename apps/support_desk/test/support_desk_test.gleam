@@ -3,12 +3,21 @@ import fabric/agent
 import fabric/approvers as fabric_approvers
 import fabric/reviewer
 import fabric/run
+import fabric/store
+import gleam/erlang/process
+import gleam/http/request
 import gleam/list
 import gleam/option.{Some}
+import gleam/result
 import gleam/string
 import gleam/time/duration
 import gleeunit
+import http_gun
+import http_gun/config as http_config
+import http_gun/destination
 import saga/execution
+import saga/telemetry as saga_events
+import sinal
 import sinal/correlation
 import sinal/fields
 import support_desk
@@ -29,6 +38,164 @@ import warden/testing
 pub fn main() -> Nil {
   gleeunit.main()
 }
+
+/// Each boot owns fresh listeners, recorders and an in-memory execution store.
+/// Stopping one desk must release them before another desk is started.
+pub fn repeated_stop_releases_owned_resources_test() {
+  list.each([1, 2], fn(_) {
+    let before = linked_processes()
+    let handlers = ticket_handler_count()
+    let assert Ok(app) = app.start()
+    let owned = owned_since(before)
+    let assert Ok(service_recorder) = process.subject_owner(app.services.calls)
+    let assert Ok(provider_recorder) =
+      process.subject_owner(app.provider.requests)
+    // This independent client remains usable after app.client is stopped.
+    let assert Ok(probe) =
+      http_config.default()
+      |> http_config.with_destination(destination.loopback_only())
+      |> http_gun.start
+    assert get(probe, app.services.base_url <> "/orders/A-100") |> result.is_ok
+    assert get(probe, app.provider.base_url) |> result.is_ok
+    let assert Ok(Nil) = app.stop(app)
+    assert !process.is_alive(service_recorder)
+    assert !process.is_alive(provider_recorder)
+    assert store.readiness(app.desk.store) |> result.is_error
+    assert get(probe, app.services.base_url <> "/orders/A-100")
+      |> result.is_error
+    assert get(probe, app.provider.base_url) |> result.is_error
+    assert get(app.client, app.services.base_url) |> result.is_error
+    assert ticket_handler_count() == handlers
+    list.each(owned, assert_stopped)
+    http_gun.stop(probe)
+  })
+}
+
+pub fn rejected_configuration_unwinds_partial_startup_test() {
+  let before = linked_processes()
+  let handlers = ticket_handler_count()
+  let acquired = process.new_subject()
+  let refused =
+    app.start_with(
+      fn(spec) {
+        // This public tuning callback runs after the other resources started.
+        process.send(acquired, owned_since(before))
+        agent.with_max_turns(spec, 0)
+      },
+      shop_deadline: duration.seconds(1),
+    )
+  let assert Error(error) = refused
+  assert string.starts_with(error, "agent:")
+  let assert Ok(owned) = process.receive(acquired, 1000)
+  assert owned != []
+  list.each(owned, assert_stopped)
+  assert ticket_handler_count() == handlers
+}
+
+pub fn stopping_suspended_ticket_retires_its_store_test() {
+  let assert Ok(app) = app.start()
+  let #(session, handle) = open(app, "T-stop-pending", "Refund A-100", 0)
+  let _ = awaiting_refund_approval(handle)
+  assert services.calls_matching(app.services, "POST /payments") == []
+  let assert Ok(Nil) = app.stop(app)
+  assert fabric.snapshot(handle) |> result.is_error
+  assert desk.open_ticket(app.desk, session, "Refund A-100") |> result.is_error
+}
+
+pub fn stopping_active_refund_drains_before_releasing_borrowed_resources_test() {
+  stop_active_refund(False)
+}
+
+pub fn forced_drain_waits_for_saga_cleanup_before_releasing_resources_test() {
+  stop_active_refund(True)
+}
+
+fn stop_active_refund(force_drain: Bool) -> Nil {
+  let assert Ok(app) =
+    app.start_with(fn(spec) { spec }, shop_deadline: duration.seconds(3))
+  let app = case force_drain {
+    False -> app
+    True -> {
+      // Exercise the public Store contract with the same app-owned callbacks.
+      let assert Ok(Nil) = store.stop(app.desk.store)
+      let assert Ok(runs) =
+        store.in_memory(process.new_name("support_desk_short_drain"))
+        |> store.with_drain(duration.milliseconds(1))
+      let assert Ok(Nil) = store.start(runs)
+      app.App(..app, desk: desk.Desk(..app.desk, store: runs))
+    }
+  }
+  let assert Ok(ticket) = correlation.from_string("T-stop-active")
+  let settled = process.new_subject()
+  let attachment =
+    sinal.observe(saga_events.run_stopped(), fn(_, metadata) {
+      case metadata.correlation == ticket {
+        True ->
+          process.send(settled, #(
+            metadata.outcome,
+            ledger.entries(app.ledger),
+            get(app.client, app.services.base_url <> "/orders/A-100")
+              |> result.is_ok,
+          ))
+        False -> Nil
+      }
+    })
+  let session = desk.session(ticket, 100_000)
+  let assert Ok(_) = desk.open_ticket(app.desk, session, "Refund A-400")
+  wait_for_payment(app.services, 300)
+  let assert Ok(Nil) = app.stop(app)
+  let assert Ok(#(outcome, entries, True)) = process.receive(settled, 1000)
+  case force_drain {
+    False -> {
+      assert outcome == saga_events.OutcomeCompleted
+      let assert [entry] = entries
+      assert entry.order_id == "A-400"
+    }
+    True -> {
+      assert outcome == saga_events.OutcomeCancelled
+      assert entries == []
+    }
+  }
+  let assert Ok(Nil) = sinal.detach(attachment)
+  Nil
+}
+
+fn get(client: http_gun.Client, url: String) -> Result(http_gun.Buffered, Nil) {
+  let assert Ok(request) = request.to(url)
+  http_gun.send(client, request.set_body(request, <<>>))
+  |> result.replace_error(Nil)
+}
+
+fn wait_for_payment(services: services.Services, attempts: Int) -> Nil {
+  case services.calls_matching(services, "POST /payments/refunds A-400") {
+    [] -> {
+      assert attempts > 0
+      process.sleep(10)
+      wait_for_payment(services, attempts - 1)
+    }
+    [_] -> Nil
+    _ -> panic as "the payment was submitted more than once"
+  }
+}
+
+fn owned_since(before: List(process.Pid)) -> List(process.Pid) {
+  linked_processes() |> list.filter(fn(pid) { !list.contains(before, pid) })
+}
+
+fn assert_stopped(pid: process.Pid) -> Nil {
+  let monitor = process.monitor(pid)
+  let assert Ok(Nil) =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(_) { Nil })
+    |> process.selector_receive(1000)
+  assert !process.is_alive(pid)
+}
+
+@external(erlang, "support_desk_lifecycle_test_ffi", "linked_processes")
+fn linked_processes() -> List(process.Pid)
+
+@external(erlang, "support_desk_lifecycle_test_ffi", "ticket_handler_count")
+fn ticket_handler_count() -> Int
 
 // Helpers -------------------------------------------------------------------
 
@@ -116,7 +283,7 @@ pub fn approved_refund_runs_the_saga_and_resolves_typed_test() {
   assert reviewer.issuer(who) == Some(testing.issuer(app.identity))
   // The name the approvers were built with.
   assert verifier == "warden"
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 // Advanced configuration ----------------------------------------------------
@@ -132,7 +299,7 @@ pub fn refunds_below_the_threshold_skip_approval_test() {
   let resolved = finish(handle)
   assert resolved.outcome == domain.Refunded
   let assert [_] = ledger.entries(app.ledger)
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn a_turn_limit_ends_the_run_without_a_typed_answer_test() {
@@ -145,7 +312,7 @@ pub fn a_turn_limit_ends_the_run_without_a_typed_answer_test() {
   let assert Ok(run.Finished(outcome)) =
     fabric.await(handle, within: duration.seconds(10))
   assert outcome == run.BudgetExhausted(run.TurnLimit(2))
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn a_refused_answer_gets_one_corrective_turn_test() {
@@ -158,7 +325,7 @@ pub fn a_refused_answer_gets_one_corrective_turn_test() {
   assert list.length(requests) == 4
   let assert Ok(last) = list.last(requests)
   assert string.contains(last, "Your final answer could not be read")
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn one_answer_attempt_ends_on_the_refused_answer_test() {
@@ -178,7 +345,7 @@ pub fn one_answer_attempt_ends_on_the_refused_answer_test() {
     telemetry.trail(app.telemetry, session.ticket)
     |> list.find(fn(o) { o.name == "ticket.answered" })
   assert answered.detail == "AnsweredUntyped"
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 // Failure paths -------------------------------------------------------------
@@ -199,7 +366,7 @@ pub fn rejected_refund_is_explained_by_the_agent_test() {
   assert resolved.outcome == domain.Declined
   assert string.contains(resolved.message, "over the goodwill limit")
   assert services.calls_matching(app.services, "POST") == []
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn failed_notification_compensates_the_refund_test() {
@@ -220,7 +387,7 @@ pub fn failed_notification_compensates_the_refund_test() {
       "POST /notify A-300",
       "POST /payments/void rf_A-300",
     ]
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
@@ -244,7 +411,7 @@ pub fn unknown_payment_outcome_pauses_the_run_until_reconciled_test() {
   let resolved = finish(handle)
   assert resolved.outcome == domain.Unconfirmed
   assert resolved.refunded_cents == 0
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn invalid_tool_input_never_reaches_the_policy_test() {
@@ -261,7 +428,7 @@ pub fn invalid_tool_input_never_reaches_the_policy_test() {
   assert detail != ""
   assert refund.approvals == []
   assert services.calls_matching(app.services, "POST") == []
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
@@ -275,7 +442,7 @@ pub fn cancelling_while_awaiting_approval_refunds_nothing_test() {
   assert error == desk.Refused(fabric.RunEnded)
   assert services.calls_matching(app.services, "POST") == []
   assert ledger.entries(app.ledger) == []
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 // Approver authentication ---------------------------------------------------
@@ -317,7 +484,7 @@ pub fn an_approval_without_a_credential_is_refused_test() {
   let assert Ok(_) =
     desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   assert finish(handle).outcome == domain.Refunded
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn an_expired_token_is_refused_test() {
@@ -332,7 +499,7 @@ pub fn an_expired_token_is_refused_test() {
   let assert desk.NotAuthenticated(reason) =
     refused_and_still_pending(app, handle, session, expired)
   assert string.contains(reason, "expired")
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn invalid_tokens_are_refused_test() {
@@ -358,7 +525,7 @@ pub fn invalid_tokens_are_refused_test() {
   refuse(mint(testing.with_issuer(valid(), "https://evil.test")))
   // A genuine token minted for another resource.
   refuse(mint(testing.with_audiences(valid(), ["https://billing.test"])))
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn a_signed_in_approver_without_the_scope_is_not_authorized_test() {
@@ -380,7 +547,7 @@ pub fn a_signed_in_approver_without_the_scope_is_not_authorized_test() {
   let assert Ok(_) =
     desk.approve(app.desk, handle, pending, signed_in(app, "alice"), session)
   assert finish(handle).outcome == domain.Refunded
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn a_proof_from_other_approvers_is_refused_test() {
@@ -401,7 +568,7 @@ pub fn a_proof_from_other_approvers_is_refused_test() {
     fabric.approve(handle, pending.reference, proof:, context: session)
   let _ = awaiting_refund_approval(handle)
   assert services.calls_matching(app.services, "POST") == []
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 // Telemetry -----------------------------------------------------------------
@@ -433,7 +600,7 @@ pub fn telemetry_follows_the_ticket_through_every_package_test() {
   let all = telemetry.observations(app.telemetry)
   assert telemetry.unattributed(all) == []
   assert list.length(trail) == list.length(all)
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
@@ -457,7 +624,7 @@ pub fn one_agent_serves_two_tickets_and_keeps_their_events_apart_test() {
   // The refund and notify calls of each ticket carry that ticket.
   assert list.any(first_trail, fn(o) { string.contains(o.detail, "201") })
   assert list.any(second_trail, fn(o) { string.contains(o.detail, "201") })
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn opening_a_ticket_twice_returns_its_one_run_test() {
@@ -475,7 +642,7 @@ pub fn opening_a_ticket_twice_returns_its_one_run_test() {
     telemetry.trail(app.telemetry, session.ticket)
     |> list.count(fn(o) { o.name == "ticket.opened" })
   assert opened == 1
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 pub fn every_answer_kind_round_trips_through_the_event_fields_test() {
@@ -504,7 +671,7 @@ pub fn the_turn_limit_is_recorded_as_an_answer_of_nothing_test() {
   let assert Ok(answered) =
     list.find(trail, fn(o) { o.name == "ticket.answered" })
   assert answered.detail == "AnsweredNothing"
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }
 
 // Seam evidence: saga names a returned "may have happened" error ------------
@@ -530,5 +697,5 @@ pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
     ),
   ] = execution.unknown_effects(outcome)
   assert ledger.entries(app.ledger) == []
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
 }

@@ -31,6 +31,7 @@ import support_desk/domain.{
   type Eligibility, type OrderQuery, type Resolution, Eligibility,
 }
 import support_desk/events
+import support_desk/executions.{type Executions}
 import support_desk/ledger.{type Ledger}
 import support_desk/refund
 import support_desk/shop.{
@@ -57,6 +58,7 @@ pub type Desk {
     shop: Shop,
     ledger: Ledger,
     approvers: Approvers(String),
+    executions: Executions,
   )
 }
 
@@ -81,18 +83,57 @@ pub type Settings {
 }
 
 pub fn start(settings: Settings) -> Result(Desk, String) {
+  use executions <- result.try(executions.start())
+  case start_execution(settings, executions) {
+    Ok(desk) -> Ok(desk)
+    Error(error) -> {
+      executions.stop(executions)
+      Error(error)
+    }
+  }
+}
+
+fn start_execution(
+  settings: Settings,
+  executions: Executions,
+) -> Result(Desk, String) {
+  use agent <- result.try(build(settings, executions))
   let runs = store.in_memory(process.new_name("support_desk_runs"))
   use Nil <- result.try(
     store.start(runs)
     |> result.map_error(fn(error) { "store: " <> string.inspect(error) }),
   )
-  use agent <- result.map(build(settings))
-  Desk(runs, agent, settings.shop, settings.ledger, settings.approvers)
+  Ok(Desk(
+    runs,
+    agent,
+    settings.shop,
+    settings.ledger,
+    settings.approvers,
+    executions,
+  ))
+}
+
+/// Drain Fabric admission, runners and Saga reports. Only Ok permits
+/// releasing borrowed shop/ledger resources; Error requires retaining them.
+/// This is app.stop's drain phase: the App retains the executions tracker
+/// until its remaining fallible resource cleanup has succeeded.
+pub fn stop(desk: Desk) -> Result(Nil, String) {
+  use Nil <- result.try(
+    store.stop(desk.store)
+    |> result.map_error(fn(error) {
+      "store shutdown: " <> string.inspect(error)
+    }),
+  )
+  // A forced Fabric drain can end a tool while Saga is compensating.
+  executions.await_idle(desk.executions)
 }
 
 /// The one agent every ticket runs on. Each turn's request names its run's
 /// correlation, and `fabric/llm.model` tags the client view with it.
-pub fn build(settings: Settings) -> Result(Agent(Session, Resolution), String) {
+fn build(
+  settings: Settings,
+  executions: Executions,
+) -> Result(Agent(Session, Resolution), String) {
   let config =
     openai.new("sk-scripted")
     |> openai.config
@@ -106,6 +147,7 @@ pub fn build(settings: Settings) -> Result(Agent(Session, Resolution), String) {
       input: fn(_, _, request) { request },
       explain: refund.explain,
       rollback_within: duration.seconds(5),
+      executions:,
     )
   let tools = [
     tool.bind(

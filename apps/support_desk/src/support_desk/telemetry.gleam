@@ -64,6 +64,7 @@ pub opaque type Telemetry {
 }
 
 pub opaque type Message {
+  Stop
   Observed(Observation)
   Read(reply: Subject(List(Observation)))
 }
@@ -85,6 +86,12 @@ pub fn stop(telemetry: Telemetry) -> Nil {
     let _ = sinal.detach(attachment)
     Nil
   })
+  let assert Ok(pid) = process.subject_owner(telemetry.collector)
+  let monitor = process.monitor(pid)
+  process.send(telemetry.collector, Stop)
+  process.new_selector()
+  |> process.select_specific_monitor(monitor, fn(_) { Nil })
+  |> process.selector_receive_forever
 }
 
 /// The ticket an event belongs to: the correlation it carries.
@@ -307,6 +314,7 @@ fn start_collector() -> Result(Subject(Message), String) {
   actor.new([])
   |> actor.on_message(fn(seen: List(Observation), message) {
     case message {
+      Stop -> actor.stop()
       Observed(observation) -> actor.continue([observation, ..seen])
       Read(reply) -> {
         process.send(reply, list.reverse(seen))

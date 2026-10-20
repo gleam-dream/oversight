@@ -25,16 +25,16 @@ import support_desk/domain.{
   type Outcome, Declined, NotEligible, RefundFailed, Refunded, Resolution,
   Unconfirmed,
 }
+import support_desk/listener.{type Listener}
 
 pub type Provider {
-  Provider(base_url: String, requests: Subject(Seen))
+  Provider(base_url: String, requests: Subject(Seen), listener: Listener)
 }
 
 pub fn start() -> Result(Provider, String) {
   use requests <- result.try(start_recorder())
-  let ports = process.new_subject()
-  use _ <- result.try(
-    mist.new(fn(req) {
+  let started =
+    listener.start(fn(req) {
       case req.method, request.path_segments(req) {
         http.Post, ["v1", "responses"] ->
           case mist.read_body(req, 1_048_576) {
@@ -48,17 +48,23 @@ pub fn start() -> Result(Provider, String) {
         _, _ -> status(404)
       }
     })
-    |> mist.bind("127.0.0.1")
-    |> mist.port(0)
-    |> mist.after_start(fn(port, _, _) { process.send(ports, port) })
-    |> mist.start
-    |> result.replace_error("could not start the scripted provider"),
-  )
-  use port <- result.map(
-    process.receive(ports, 2000)
-    |> result.replace_error("scripted provider did not report a port"),
-  )
-  Provider("http://127.0.0.1:" <> int.to_string(port) <> "/v1", requests)
+  case started {
+    Ok(listener) ->
+      Ok(Provider(
+        "http://127.0.0.1:" <> int.to_string(listener.port) <> "/v1",
+        requests,
+        listener,
+      ))
+    Error(error) -> {
+      stop_recorder(requests)
+      Error(error)
+    }
+  }
+}
+
+pub fn stop(provider: Provider) -> Result(Nil, String) {
+  use Nil <- result.map(listener.stop(provider.listener))
+  stop_recorder(provider.requests)
 }
 
 /// Request bodies received so far, oldest first.
@@ -289,12 +295,14 @@ fn status(code: Int) -> Response(mist.ResponseData) {
 pub opaque type Seen {
   Saw(String)
   Requests(reply: Subject(List(String)))
+  Stop
 }
 
 fn start_recorder() -> Result(Subject(Seen), String) {
   actor.new([])
   |> actor.on_message(fn(seen: List(String), message) {
     case message {
+      Stop -> actor.stop()
       Saw(body) -> actor.continue([body, ..seen])
       Requests(reply) -> {
         process.send(reply, list.reverse(seen))
@@ -305,4 +313,13 @@ fn start_recorder() -> Result(Subject(Seen), String) {
   |> actor.start
   |> result.map(fn(started) { started.data })
   |> result.replace_error("could not start the provider recorder")
+}
+
+fn stop_recorder(requests: Subject(Seen)) -> Nil {
+  let assert Ok(pid) = process.subject_owner(requests)
+  let monitor = process.monitor(pid)
+  process.send(requests, Stop)
+  process.new_selector()
+  |> process.select_specific_monitor(monitor, fn(_) { Nil })
+  |> process.selector_receive_forever
 }

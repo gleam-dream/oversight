@@ -14,6 +14,7 @@ pub opaque type Ledger {
 }
 
 type Message {
+  Stop
   Append(
     order_id: String,
     refund_id: String,
@@ -32,6 +33,7 @@ pub fn start() -> Result(Ledger, String) {
   actor.new(State(1, []))
   |> actor.on_message(fn(state: State, message) {
     case message {
+      Stop -> actor.stop()
       Append(order_id, refund_id, amount, reply) -> {
         process.send(reply, state.next)
         let entry = Entry(state.next, order_id, refund_id, amount)
@@ -74,4 +76,14 @@ pub fn remove(ledger: Ledger, id: Int) -> Bool {
 
 pub fn entries(ledger: Ledger) -> List(Entry) {
   process.call(ledger.subject, 1000, Entries)
+}
+
+/// Stop the owned ledger actor and wait for its exit.
+pub fn stop(ledger: Ledger) -> Nil {
+  let assert Ok(pid) = process.subject_owner(ledger.subject)
+  let monitor = process.monitor(pid)
+  process.send(ledger.subject, Stop)
+  process.new_selector()
+  |> process.select_specific_monitor(monitor, fn(_) { Nil })
+  |> process.selector_receive_forever
 }

@@ -105,7 +105,8 @@ pub fn main() -> Nil {
     <> int.to_string(list.length(all))
     <> " events",
   )
-  app.stop(app)
+  let assert Ok(Nil) = app.stop(app)
+  Nil
 }
 
 /// Opens a ticket, answers its approvals, reconciles an uncertain refund

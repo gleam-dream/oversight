@@ -19,13 +19,14 @@ import gleam/string
 import json/blueprint/codec
 import mist
 import support_desk/domain.{type Order, Order}
+import support_desk/listener.{type Listener}
 
 /// How long the payments API stalls for an order whose refund outcome
 /// must stay unknown to the caller.
 pub const payment_stall_ms = 1500
 
 pub type Services {
-  Services(base_url: String, calls: Subject(Recorded))
+  Services(base_url: String, calls: Subject(Recorded), listener: Listener)
 }
 
 /// The order table. `A-300` fails customer notification, `A-400` stalls
@@ -45,20 +46,24 @@ pub fn orders() -> List(Order) {
 
 pub fn start() -> Result(Services, String) {
   use calls <- result.try(start_recorder())
-  let ports = process.new_subject()
-  use _ <- result.try(
-    mist.new(fn(req) { handle(calls, req) })
-    |> mist.bind("127.0.0.1")
-    |> mist.port(0)
-    |> mist.after_start(fn(port, _, _) { process.send(ports, port) })
-    |> mist.start
-    |> result.replace_error("could not start the scripted services"),
-  )
-  use port <- result.map(
-    process.receive(ports, 2000)
-    |> result.replace_error("scripted services did not report a port"),
-  )
-  Services("http://127.0.0.1:" <> int.to_string(port), calls)
+  case listener.start(fn(req) { handle(calls, req) }) {
+    Ok(listener) ->
+      Ok(Services(
+        "http://127.0.0.1:" <> int.to_string(listener.port),
+        calls,
+        listener,
+      ))
+    Error(error) -> {
+      stop_recorder(calls)
+      Error(error)
+    }
+  }
+}
+
+/// Stop the listener before its request recorder.
+pub fn stop(services: Services) -> Result(Nil, String) {
+  use Nil <- result.map(listener.stop(services.listener))
+  stop_recorder(services.calls)
 }
 
 /// Requests seen so far, as `"POST /payments/refunds A-100"`.
@@ -135,6 +140,7 @@ fn reply(status: Int, text: String) -> Response(mist.ResponseData) {
 pub opaque type Recorded {
   Record(String)
   Calls(reply: Subject(List(String)))
+  Stop
 }
 
 fn record(calls: Subject(Recorded), call: String) -> Nil {
@@ -145,6 +151,7 @@ fn start_recorder() -> Result(Subject(Recorded), String) {
   actor.new([])
   |> actor.on_message(fn(seen: List(String), message) {
     case message {
+      Stop -> actor.stop()
       Record(call) -> actor.continue([call, ..seen])
       Calls(reply) -> {
         process.send(reply, list.reverse(seen))
@@ -155,4 +162,13 @@ fn start_recorder() -> Result(Subject(Recorded), String) {
   |> actor.start
   |> result.map(fn(started) { started.data })
   |> result.replace_error("could not start the request recorder")
+}
+
+fn stop_recorder(calls: Subject(Recorded)) -> Nil {
+  let assert Ok(pid) = process.subject_owner(calls)
+  let monitor = process.monitor(pid)
+  process.send(calls, Stop)
+  process.new_selector()
+  |> process.select_specific_monitor(monitor, fn(_) { Nil })
+  |> process.selector_receive_forever
 }
