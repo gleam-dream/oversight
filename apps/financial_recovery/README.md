@@ -21,7 +21,7 @@ TCP payment provider on loopback, so no credentials or external services are nee
 From the Oversight root, the application gate also records source provenance:
 
 ```sh
-nix develop --command python3 -B scripts/ci.py application financial_recovery
+nix develop --command bash scripts/test-applications.sh financial_recovery
 ```
 
 ## Read the consumer

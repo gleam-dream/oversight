@@ -13,7 +13,7 @@ From the repository root:
 nix develop --command python3 playground/blueprint_compatibility/scripts/check.py
 ```
 
-The gate checks the upstream release checksums, runs both projects, validates the emitted schemas
+The integration runner uses the committed dependency locks, runs both projects, validates the emitted schemas
 independently, and requires each of two compiler negatives to fail with one intended diagnostic.
 A source-copy script imports the current laboratory modules; generated copies and fetched
 dependency output are not version controlled.

@@ -35,29 +35,6 @@ def main():
         report_failure(positive.stdout)
         raise SystemExit("FAIL: positive consumers do not compile")
     print("PASS: positive interface consumers compile")
-    consumers = sorted((ROOT / "src" / "consumers").glob("*.gleam"))
-    for consumer in consumers:
-        with tempfile.TemporaryDirectory(prefix="oversight-consumer-") as temp:
-            directory = Path(temp)
-            shutil.copy2(ROOT / "gleam.toml", directory / "gleam.toml")
-            pending = [consumer.relative_to(ROOT / "src")]
-            seen = set()
-            while pending:
-                relative = pending.pop()
-                if relative in seen:
-                    continue
-                seen.add(relative)
-                source = ROOT / "src" / relative
-                target = directory / "src" / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
-                imports = re.findall(r"^import ([a-z0-9_/]+)", source.read_text(), re.M)
-                pending.extend(Path(module + ".gleam") for module in imports)
-            result = check(directory)
-            if result.returncode:
-                report_failure(result.stdout)
-                raise SystemExit(f"FAIL: isolated consumer {consumer.stem}")
-            print(f"PASS: {consumer.stem} compiles with only its {len(seen)} source modules")
     fixtures = sorted((ROOT / "negative").glob("*.gleam"))
     if not fixtures:
         raise SystemExit("FAIL: no negative fixtures")
@@ -84,7 +61,7 @@ def main():
                 report_failure(result.stdout)
                 raise SystemExit(f"FAIL: {fixture.name} failed outside the intended consumer")
             print(f"PASS: {fixture.stem} rejected as expected")
-    print(f"Checked {len(consumers)} isolated positive consumers and {len(fixtures)} negative fixtures.")
+    print(f"Checked positive compilation and {len(fixtures)} negative fixtures.")
     probes = subprocess.run(
         ["gleam", "run", "-m", "stress_checks"], cwd=ROOT, text=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

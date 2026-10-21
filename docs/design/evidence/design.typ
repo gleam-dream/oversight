@@ -4,8 +4,8 @@
 #let accent = "amber"
 
 #let body = [
-  #section(title: "Foundation", lead: "Evidence states what an executed check establishes. Retained experiments answer named questions, and repository checks run from recorded inputs.", body: [
-    #goal(title: "Reproduce acceptance from recorded inputs")[Every check runs from recorded sources, a pinned toolchain and disposable services. It records the inputs it executed, so a later reader can repeat it.]
+  #section(title: "Foundation", lead: "Evidence states what an executed check establishes. Retained experiments answer named questions, and repository checks run from locked dependencies.", body: [
+    #goal(title: "Validate observable behavior")[Unit and integration tests execute public contracts with a pinned toolchain and disposable services. Formatting and compilation use standard tools; design validation uses the pinned shared checker.]
     #goal(title: "Keep experiments tied to named questions")[A #term("term-retained-experiment") states the question it answers, the cases it executes and the limits of its result.]
     #no-goal(title: "Historical reports as present contracts")[Assessment chronology and decision rationale belong to ADRs. Test transcripts, release plans and obsolete signatures do not define the current design.]
     #invariant(title: "Evidence claims name their actual boundary", enforcement: "convention")[Compilation, scripted exchanges, native runtime tests, database tests and upstream conformance establish different claims. An unexecuted scenario is not reported as passing.]
@@ -18,46 +18,45 @@
     pending-entry(title: "A pending evidence marker cannot show an in-flight effect", kind: "ruling", since: "2026-10-07")[A worker that stops after committing its pending marker and before sending leaves a condition that provider evidence alone can distinguish from an in-flight effect. The protocol reports uncertainty rather than inferring non-execution. See #adr(20).],
   )
 
-  #section(title: "Validation profiles", lead: "The runner executes checks as named profiles through the repository's Nix shell. Continuous integration divides the same commands into jobs.", body: [
-    #code-block("sh", "nix develop --command python3 -B scripts/ci.py quality
-nix develop --command python3 -B scripts/ci.py application <name>
-nix develop --command python3 -B scripts/ci.py experiments
-nix develop --command python3 -B scripts/ci.py full")
+  #section(title: "Validation commands", lead: "Nix runs shared validators directly. Small shell launchers run applications and experiments with their service fixtures.", body: [
+    #code-block("sh", "nix flake check
+nix run .#design-gate-check -- docs/design
+nix develop --command bash scripts/test-applications.sh
+nix develop --command bash scripts/test-experiments.sh")
     #md-table(4, (
-      [*Obligation*], [*Check*], [*Profile*], [*Evidence and limit*],
-      [Reproducible authored files], [Flake check, actionlint, ShellCheck, Ruff], [Quality], [Command logs; formatting and selected static rules],
+      [*Obligation*], [*Check*], [*Command group*], [*Evidence and limit*],
+      [Formatted authored files], [Flake formatting check], [Quality], [Standard formatter diagnostics],
       [Warning-free executable consumers], [Gleam warnings-as-errors and separate Erlang `-Werror` compilation], [Each application], [Compiler diagnostics; no claim about dependency warnings],
       [Local protocol, recovery and storage behavior], [Each application's test suite, through the disposable database wrapper where required], [Each application], [Test and database logs; named scenarios only],
       [Bounded compiler and oracle evidence], [Retained experiment runners and protocol-pilot tests], [Experiments], [Positive controls, intended negative diagnostics and scoped oracle comparisons],
-      [Render freshness and vocabulary integrity], [The design gate check], [Full and CI], [Mechanical design checks; semantic fidelity requires review],
-      [Failure reporting by the runner], [The runner's own test suite], [Quality], [Rejected job states, bad pins, native warning and failed-command controls],
     ))
     #points(
-      [The full profile runs the quality checks, every registered application, the retained experiments and the design gate. The final continuous-integration status requires every mandatory job to succeed; failures, cancellations and unexpected skips cannot satisfy it.],
-      [The runner's application inventory is the authority for discovery. Adding an application requires registering it and declaring whether it needs PostgreSQL; the continuous-integration matrix derives from that inventory.],
+      [The required commands run shared checks, applications and retained behavioral experiments. The final continuous-integration status requires every mandatory job to succeed; failures, cancellations and unexpected skips cannot satisfy it.],
+      [The local application launcher discovers application manifests; continuous integration lists applications in its matrix. A new application must be added to that matrix and declare whether it needs PostgreSQL; no inventory checker enforces this convention.],
       [Handwritten Erlang in application source and tests compiles strictly after the Gleam dependency build.],
-      [The experiments profile runs every retained experiment except the Fabric reader check, which needs the older Fabric commit and the sibling commits recorded in that commit's own revision file. Continuous integration holds no sibling checkouts, so that check runs manually from a checkout with Git history. The applications and experiments are the usage examples, so a public API change that breaks one fails its profile.],
-      [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their own compiler checkers are their acceptance boundary, and linting does not rewrite pinned upstream inputs or captured evidence.],
+      [The experiments launcher runs every retained experiment except the Fabric reader check, which needs the older Fabric commit and the sibling commits recorded in that commit's own revision file. Continuous integration holds no sibling checkouts, so that check runs manually from a checkout with Git history. The applications and experiments are the usage examples, so a public API change that breaks one fails its test command.],
+      [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their positive and negative compilation tests are their acceptance boundary.],
       [Applications have no stable library-performance benchmark. Test durations are operational diagnostics, not throughput or latency claims; package benchmarks belong to the package that owns the workload.],
     )
-    #adr(19)
+    #points([Required checks are standard formatting, compilation, behavioral unit and integration tests, and the imported shared design validator. Local documentation equality, architecture conventions, source inventories, runner self-tests and evidence receipts are not validation obligations. Shared checker improvements belong upstream.])
+    #adr(28)
   ])
 
-  #section(title: "Source qualification", lead: "A consumer's runtime code comes from its locked Git sources. The executed inputs are recorded separately from the repository's own revision.", body: [
+  #section(title: "Source qualification", lead: "A consumer's runtime code comes from its locked Git sources. Local-source experiments use explicit snapshots.", body: [
     #points(
       [Composition consumers declare Git sources with matching lockfiles. The #term("term-locked-source") is the commit a lockfile resolves for such a source, and historical readers keep their explicit revision selection. Editing a sibling working tree does not change consumer runtime code.],
-      [The runner records command logs, exit codes, durations, the repository's revision and dirty flag, the locked Git commits, the executed package declarations and lockfiles, and the toolchain identity as #term("term-source-provenance"). Database logs survive cluster cleanup when the gate supplies a log directory. Missing services and failed tests remain failures.],
+      [The runner streams command output and propagates failures. Database logs survive cluster cleanup when a log directory is supplied. Missing services and failed tests remain failures; a custom provenance receipt is not required.],
       [All tracked library repositories are public, so dependency resolution needs no credential, and continuous integration persists none and passes none to test commands. Fresh dependency resolution verifies that the locked sources are available.],
       [Updating a library is a deliberate act: moving a lockfile reruns the affected consumers, and no scheduled job moves one. Inconsistent source requirements between libraries fail dependency resolution.],
       [A #term("term-local-source-capture") copies tracked and new authored sources into a fresh directory, refuses an existing directory, excludes credentials, local settings, caches and symlinks, and normalizes sibling dependencies throughout the copied graph. External sources and exact Hex oracle versions stay unchanged, and historical readers keep their explicit revision selection. The capture records revisions, dirty flags, original file hashes and overridden manifests. Its results do not qualify the locked sources.],
       [The Nix lock supplies the Gleam, Erlang/OTP, Elixir and PostgreSQL versions; only its lock input changes during a toolchain refresh. Rebar3 and Elixir use the shell's OTP package. After the first dependency build, repeated builds of an unchanged local-source consumer reuse its dependency resolution.],
       [Qualifying a coordinated library change updates consumer declarations and lockfiles together, then reruns the affected consumers. Oversight publishes no library artifact; release qualification combines these results with each library's own validation, and no workflow publishes packages or changes repository settings.],
     )
-    #behavior(title: "Qualification records the inputs actually executed", area: "Source qualification", level: "boundary")[
+    #behavior(title: "Consumers execute their locked sources", area: "Source qualification", level: "boundary")[
       #given[A consumer builds from its recorded declarations while a sibling working tree holds uncommitted edits.]
-      #when[The runner records the run.]
-      #then[The receipt holds the consumer's executed declarations and lockfile separately from the repository's revision and dirty flag.]
-      #then[The uncommitted edits do not change the consumer's runtime code or the locked sources.]
+      #when[The consumer executes.]
+      #then[Its dependency resolver selects the locked sources.]
+      #then[The uncommitted sibling edits do not change its runtime code.]
     ]
     #adr(15)
   ])
@@ -85,7 +84,7 @@ nix develop --command python3 -B scripts/ci.py full")
     ))
     #subsection(title: "Interface laboratory")[
       #points(
-        [The laboratory tests candidate typed APIs in one experimental package. Its modules are sketches and not production packages. Isolated source imports test module dependency direction; independently distributable packages need consumer builds against actual package boundaries.],
+        [The laboratory tests candidate typed APIs in one experimental package. Its modules are sketches and not production packages. Positive and negative consumers test compilation; independently distributable packages need consumer builds against actual package boundaries.],
         [A definition contains code and typed codecs. A snapshot contains only data that identifies the definition and records execution progress, never a closure, actor, socket or live lease. Restore receives a fresh definition and validates persisted data against it.],
         [A checkpoint capability distinguishes an execution that may be frozen from one still running. It does not prove exclusive ownership, because values can be copied; runner exclusion, commit ordering, stale revisions and signal deduplication need runtime checks.],
         [Approval is a suspension point and not a blocked worker. An uncertain external effect stays uncertain after freeze and thaw, because restoring a snapshot cannot establish whether a remote effect happened.],

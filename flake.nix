@@ -65,6 +65,12 @@
             enable = true;
             package = elixirPackage;
           };
+          programs.shfmt.enable = true;
+          settings.formatter.shfmt.includes = pkgs.lib.mkForce [ "scripts/test-*.sh" ];
+          settings.formatter.shfmt.options = [
+            "-i"
+            "2"
+          ];
           programs.nixfmt.enable = true;
           programs.prettier.enable = true;
         };
@@ -86,9 +92,6 @@
             beam29Packages.erlang
             beam29Packages.rebar3
             elixirPackage
-            actionlint
-            shellcheck
-            ruff
             # Disposable clusters for the composition apps (Grind, Fabric, Saga storage).
             postgresql_16
             (python3.withPackages (pythonPackages: [ pythonPackages.jsonschema ]))

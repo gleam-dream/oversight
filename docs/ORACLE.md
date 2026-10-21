@@ -43,7 +43,7 @@ python3 -B playground/blueprint_compatibility/scripts/check.py
 sh -c 'cd playground/relay_admission && ERL_FLAGS="+S 4:4" gleam test'
 ```
 
-The first two checkers also run at the end of `python3 -B playground/interface_lab/check.py`, after that experiment's compiler checks. All four comparisons run in the `experiments` profile (`python3 -B scripts/ci.py experiments`). The Fabric reader check is manual because it needs the Fabric commit above and the sibling commits recorded in that commit's own `sibling-revisions.txt`; CI holds no sibling checkouts:
+The first two checkers also run at the end of `python3 -B playground/interface_lab/check.py`, after that experiment's compiler checks. All four comparisons run in the `experiments` profile (`bash scripts/test-experiments.sh`). The Fabric reader check is manual because it needs the Fabric commit above and the sibling commits recorded in that commit's own `sibling-revisions.txt`; CI holds no sibling checkouts:
 
 ```sh
 mkdir -p .artifacts/history-tmp

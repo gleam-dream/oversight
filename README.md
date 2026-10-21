@@ -58,7 +58,10 @@ The Nix shell supplies Gleam, Erlang/OTP, Elixir, Python and PostgreSQL. Run the
 complete consumer gate with:
 
 ```sh
-nix develop --command python3 -B scripts/ci.py full
+nix flake check
+nix run .#design-gate-check -- docs/design
+nix develop --command bash scripts/test-applications.sh
+nix develop --command bash scripts/test-experiments.sh
 ```
 
-[AGENTS.md](AGENTS.md) lists the individual validation commands and the design-gate commands.
+[AGENTS.md](AGENTS.md) lists the individual validation commands and optional design-rendering commands.

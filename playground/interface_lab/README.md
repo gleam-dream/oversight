@@ -15,8 +15,7 @@ From the repository root:
 nix develop --command python3 playground/interface_lab/check.py
 ```
 
-The command compiles the positive sources, compiles each consumer with only its transitive
-source imports, checks each negative example in an isolated project (it passes only when the
+The command compiles the positive sources, checks each negative example in an isolated project (it passes only when the
 compiler rejects it with the expected diagnostic) and executes the interface probe groups through
 `stress_checks`. Named `todo` expressions mark unfinished runtime boundaries and produce expected
 compiler warnings; warnings-as-errors is not this experiment's acceptance gate.
