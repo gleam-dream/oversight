@@ -7,15 +7,7 @@ import subprocess
 
 from jsonschema import Draft202012Validator
 
-from oracle_input import fetch
-
-
 ROOT = Path(__file__).resolve().parent
-SCHEMA_URL = (
-    "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/"
-    "5f5440bb26a62e2cf3440b92da5a667efa03b267/schema/2026-07-28/schema.json"
-)
-SHA256 = "ef70b61f99b6d2e5e3b46863822eab08dff6a45bedc7a08914e0e5b133f40203"
 REQUIRED_DEFINITIONS = {
     "DiscoverResultResponse",
     "ListToolsResultResponse",
@@ -25,7 +17,11 @@ REQUIRED_DEFINITIONS = {
 
 
 def main():
-    schema = json.loads(fetch("mcp-2026-07-28-schema.json", SCHEMA_URL, SHA256))
+    schema_path = subprocess.check_output(
+        ["nix", "run", "--no-update-lock-file", f"{ROOT.parents[1]}#oracle-mcp-schema"],
+        text=True,
+    ).strip()
+    schema = json.loads(Path(schema_path).read_bytes())
     Draft202012Validator.check_schema(schema)
     result = subprocess.run(
         ["gleam", "run", "-m", "relay_protocol_corpus"],

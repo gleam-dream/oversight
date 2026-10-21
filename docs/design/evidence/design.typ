@@ -75,13 +75,13 @@ nix develop --command bash scripts/test-experiments.sh")
       [`playground/interface_lab`], [Can proposed native types, ownership states and protocol boundaries be expressed and distinguished?], [Prototype behavior does not establish production lifecycle conformance.],
       [`playground/blueprint_compatibility`], [How do codec and schema cases compare with the pinned implementation and validator?], [Only executed supported-vocabulary cases establish equivalence.],
       [`playground/ecosystem_pilot`], [Can protocol declarations, model calls and typed observations compose through public imports?], [A pilot does not replace each package's fault and resource tests.],
-      [`playground/http_gun_interface`], [Can transport ownership and provider-neutral use fit separate consumers?], [Laboratory signatures are not public API promises.],
       [`playground/archive_release`], [Can authenticated admission and durable approval bind a release to its requester, revision and current permission?], [Direct authorization admission and orderly store reopen do not establish full MCP transport or mid-effect crash recovery.],
       [`playground/instrument_replay`], [Can bounded recorded transport support offline evaluation under different application contracts?], [Synthetic measurements and local faults do not qualify a scientific instrument or remote service.],
       [`playground/erasure_campaign`], [Can reversible preparation compose with irreversible delivery and forward reconciliation?], [Application evidence, synthetic targets and local restarts do not establish legal erasure or host-loss guarantees.],
       [`playground/fabric_record_compatibility`], [Does a separately pinned earlier Fabric reader refuse the history record envelope?], [Two public consumers preserve exact writer inputs and reader revision; refusal by one older reader does not establish every older release or backend fault case.],
       [`apps/scripts/with-postgres.sh`], [Can a consumer exercise real persistence in an isolated reproducible cluster?], [No production database, remote provider or existing deployment is validated.],
     ))
+    #points([HTTP Gun owns the compiled public consumers for ordinary requests, streaming, offline playback and recording. Its separate-package compiler probes reject forged clients and string-bodied requests. The declaration-only HTTP API sketch is retired; its historical source remains in Git. #adr(29)])
     #subsection(title: "Interface laboratory")[
       #points(
         [The laboratory tests candidate typed APIs in one experimental package. Its modules are sketches and not production packages. Positive and negative consumers test compilation; independently distributable packages need consumer builds against actual package boundaries.],
