@@ -23,4 +23,8 @@ compiler warnings; warnings-as-errors is not this experiment's acceptance gate.
 The [evidence design](../../docs/design/evidence/design.typ#interface-laboratory) states what the
 experiment can and cannot establish. [ADR 0009](../../docs/adr/0009-retain-executable-evidence-with-scoped-claims.md)
 records why these prototypes remain as scoped evidence. The [oracle reference](../../docs/ORACLE.md)
-pins the MCP schema and the exact-number checker this command compares against.
+pins the MCP schema this command compares against.
+
+Numeric, finite-schema and native telemetry checks live with their production
+packages. [ADR 0030](../../docs/adr/0030-retire-production-covered-interface-probes.md#adr-0030)
+records which superseded sketches were removed and where their useful evidence moved.

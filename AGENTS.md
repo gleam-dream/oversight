@@ -32,7 +32,7 @@
 
 ## References
 
-- [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the pinned MCP schema, the exact-number checker, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
+- [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the pinned MCP schema, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
 - This repository has no `BENCHMARKS.md`: it owns no benchmark workload ([ADR 0019](docs/adr/0019-qualify-composition-through-validation-profiles.md)). Benchmarks belong to the library that owns each workload; find the libraries in the [README](README.md#libraries).
 
 <!-- agent-skills:begin -->
