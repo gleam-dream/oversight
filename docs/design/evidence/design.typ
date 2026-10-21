@@ -85,6 +85,7 @@ nix develop --command bash scripts/test-experiments.sh")
     #subsection(title: "Interface laboratory")[
       #points(
         [The laboratory tests candidate typed APIs in one experimental package. Its modules are sketches and not production packages. Positive and negative consumers test compilation; independently distributable packages need consumer builds against actual package boundaries.],
+        [Production-covered numeric, finite-schema and telemetry sketches are retired. JSON Blueprint owns the independent arithmetic and schema oracles; Sinal, Fabric, Saga and Grind own their native observation evidence. Unreferenced checkpoint and workflow examples that only called unfinished runtime APIs are retired. Historical event layouts are not production compatibility obligations. #adr(30)],
         [A definition contains code and typed codecs. A snapshot contains only data that identifies the definition and records execution progress, never a closure, actor, socket or live lease. Restore receives a fresh definition and validates persisted data against it.],
         [A checkpoint capability distinguishes an execution that may be frozen from one still running. It does not prove exclusive ownership, because values can be copied; runner exclusion, commit ordering, stale revisions and signal deduplication need runtime checks.],
         [Approval is a suspension point and not a blocked worker. An uncertain external effect stays uncertain after freeze and thaw, because restoring a snapshot cannot establish whether a remote effect happened.],

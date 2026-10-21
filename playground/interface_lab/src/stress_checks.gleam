@@ -13,16 +13,12 @@ import consumers/config_codec
 import consumers/derived_catalog
 import consumers/enum_codec
 import consumers/execution_ownership
-import consumers/foreign_observation
-import consumers/injected_observation
-import consumers/json_numbers
 import consumers/local_execution
 import consumers/login_consumption
 import consumers/login_transactions
 import consumers/modern_relay
 import consumers/object_codec
 import consumers/offline_pipeline
-import consumers/package_observations
 import consumers/provider_structured
 import consumers/queue_configuration
 import consumers/relay_exchanges
@@ -32,12 +28,9 @@ import consumers/scheduled_jobs
 import consumers/schema_admission
 import consumers/schema_documents
 import consumers/schema_generation
-import consumers/scoped_lifetime
-import consumers/scoped_observation
 import consumers/session_custody
 import consumers/shared_graph
 import consumers/shared_registry
-import consumers/span_events
 import consumers/standalone_jobs
 import consumers/stream_ownership
 import consumers/stream_progress
@@ -62,20 +55,16 @@ pub fn main() -> Nil {
   claim_ownership.probe()
   enum_codec.probe()
   execution_ownership.probe()
-  foreign_observation.probe()
   derived_catalog.probe()
   conditional_graph.probe()
   config_codec.probe()
   collection_codec.probe()
   local_execution.probe()
-  injected_observation.probe()
-  json_numbers.probe()
   login_consumption.probe()
   login_transactions.probe()
   offline_pipeline.probe()
   modern_relay.probe()
   object_codec.probe()
-  package_observations.probe()
   provider_structured.probe()
   queue_configuration.probe()
   relay_exchanges.probe()
@@ -85,13 +74,10 @@ pub fn main() -> Nil {
   schema_documents.probe()
   schema_generation.probe()
   scheduled_jobs.probe()
-  scoped_lifetime.probe()
-  scoped_observation.probe()
   session_custody.probe()
   shared_graph.probe()
   shared_registry.probe()
   standalone_jobs.probe()
-  span_events.probe()
   stream_progress.probe()
   stream_ownership.probe()
   tagged_codec.probe()
