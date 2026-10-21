@@ -33,17 +33,28 @@ nix develop --command bash scripts/test-applications.sh financial_recovery
 - `reconciliation`: attributed settlement of a finished unresolved operation and recoverable queue confirmation.
 - `test/support`, `test/scripted_provider` and `test/financial_fixture.erl`: startup, migrations, shared pool, and independent provider evidence with transport-failure controls.
 
-Ordinary use constructs a payment and admits it through a transaction:
+The application test constructs a payment, admits it through a transaction and verifies its posting against a local scripted provider:
 
+<!-- prettier-ignore-start -->
+
+<!-- snips: test/financial_recovery_test.gleam#ordinary-payment -->
 ```gleam
-let payment = Payment(OperationId("invoice-204"), "payer", "receiver", 250)
-let worker = coordinator.definition(deps)
-case coordinator.admit(jobs, worker, payment) {
-  Ok(coordinator.Queued(handle)) -> inspect_delivery(handle)
-  Ok(coordinator.Completed(reference)) -> return_retained_result(reference)
-  Error(error) -> handle_admission_error(error)
+pub fn ordinary_coordinator_posts_a_payment_test() {
+  use f <- support.with_runtime("finance_ordinary", scripted_provider.Reply)
+  let assert Ok(Nil) = payments.account(f.deps.connection, "alice", 1000)
+  let assert Ok(Nil) = payments.account(f.deps.connection, "bob", 0)
+  let payment = Payment(OperationId("ordinary"), "alice", "bob", 250)
+  let assert Ok(coordinator.Queued(handle)) =
+    coordinator.admit(f.jobs, coordinator.definition(f.deps), payment)
+  assert grind.await(f.jobs, handle, within: duration.seconds(10))
+    == Ok(grind.Succeeded("provider-ordinary"))
+  assert payments.balance(f.deps.connection, "alice") == Ok(#(750, 0))
+  assert scripted_provider.counts(f.peer.pid) == #(1, 0)
 }
+
 ```
+
+<!-- prettier-ignore-end -->
 
 An operator authorizes redelivery of an uncertain job and settles a finished unresolved
 operation through `admin.resolve_uncertain` and `reconciliation.reconcile`, each with a

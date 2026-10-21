@@ -38,7 +38,7 @@ nix develop --command bash scripts/test-experiments.sh")
       [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their positive and negative compilation tests are their acceptance boundary.],
       [Applications have no stable library-performance benchmark. Test durations are operational diagnostics, not throughput or latency claims; package benchmarks belong to the package that owns the workload.],
     )
-    #points([Required checks are standard formatting, compilation, behavioral unit and integration tests, and the imported shared design validator. Local documentation equality, architecture conventions, source inventories, runner self-tests and evidence receipts are not validation obligations. Shared checker improvements belong upstream.])
+    #points([Required checks are standard formatting, compilation, behavioral unit and integration tests, and the imported shared design validator. README code excerpts use the shared pinned Snips package for source synchronization. Local documentation equality checkers, architecture conventions, source inventories, runner self-tests and evidence receipts are not validation obligations. Shared checker improvements belong upstream.])
     #adr(28)
   ])
 

@@ -80,6 +80,7 @@ pub fn authoritative_evidence_posts_once_and_conflicts_fail_closed_test() {
     == Ok(domain.Operation(payment, domain.Posted("provider-1")))
 }
 
+// snips-start: ordinary-payment
 pub fn ordinary_coordinator_posts_a_payment_test() {
   use f <- support.with_runtime("finance_ordinary", scripted_provider.Reply)
   let assert Ok(Nil) = payments.account(f.deps.connection, "alice", 1000)
@@ -92,6 +93,8 @@ pub fn ordinary_coordinator_posts_a_payment_test() {
   assert payments.balance(f.deps.connection, "alice") == Ok(#(750, 0))
   assert scripted_provider.counts(f.peer.pid) == #(1, 0)
 }
+
+// snips-end: ordinary-payment
 
 fn seed(f: support.Fixture, key: String) -> Payment {
   let assert Ok(Nil) = payments.account(f.deps.connection, "alice", 1000)
