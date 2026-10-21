@@ -16,7 +16,7 @@
 - `nix develop` supplies Gleam, Erlang/OTP 29, rebar3, Elixir, Python with jsonschema, PostgreSQL 16 and lefthook. Run each experiment from its documented directory in this shell.
 - `apps/scripts/with-postgres.sh` creates and removes a disposable PostgreSQL cluster. No existing database or live provider is needed.
 - Use repository-scoped Git, respect each sibling repository's instructions, and never read or copy credential files such as `.env.local`.
-- Unpublished sibling libraries are Git dependencies with `ref = "main"`, and each project's `manifest.toml` is the lock. Move one by hand with `gleam update <package>`; no job does it. Oracle inputs are fetched into `.artifacts/oracle-inputs/` at run time and never committed.
+- Unpublished sibling libraries are Git dependencies with `ref = "main"`, and each project's `manifest.toml` is the lock. Move one by hand with `gleam update <package>`; no job does it. Oracle comparisons fetch hash-pinned inputs lazily into the Nix store, never on shell entry.
 - `nix fmt -- PATH...` formats named files through treefmt. Avoid whole-repository formatting during a scoped change. The pre-commit hook formats staged files, and `nix flake check` validates formatting.
 
 ## Validation commands

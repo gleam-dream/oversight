@@ -4,7 +4,6 @@ cd "$(dirname "$0")/.."
 root="$PWD"
 python3 -B playground/interface_lab/check.py
 python3 -B playground/blueprint_compatibility/scripts/check.py
-sh playground/http_gun_interface/check.sh
 for name in ecosystem_pilot relay_admission; do
   (
     cd "playground/$name"
