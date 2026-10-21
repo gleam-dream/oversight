@@ -23,4 +23,4 @@ results do not qualify the locked sources.
 Relay owns the contract in its design. The [evidence design](../../docs/design/evidence/design.typ#admission-deadline-and-capacity)
 states the behavior and [ADR 0022](../../docs/adr/0022-retain-relay-admission-evidence-against-its-baseline.md)
 records the baseline and findings. The [oracle reference](../../docs/ORACLE.md) lists the baseline among the
-pinned references, and `scripts/ci.py experiments` runs this consumer against the recorded revisions.
+pinned references, and `bash scripts/test-experiments.sh` runs this consumer against the recorded revisions.

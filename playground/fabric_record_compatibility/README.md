@@ -26,4 +26,4 @@ Temporary sources, manifests and records are removed on exit.
 The experiment establishes reader refusal, not mixed-version execution, PostgreSQL behavior or live-provider
 compatibility. The [evidence design](../../docs/design/evidence/design.typ#experiments-and-acceptance-evidence)
 states the limits, and the [oracle reference](../../docs/ORACLE.md) lists the pinned reader. This is the one
-retained experiment outside `scripts/ci.py experiments`, because it needs Git history that CI checkouts lack.
+retained experiment outside `bash scripts/test-experiments.sh`, because it needs Git history that CI checkouts lack.

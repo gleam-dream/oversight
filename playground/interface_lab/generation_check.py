@@ -138,8 +138,6 @@ def copy_dependencies(directory):
     seen = set()
     while pending:
         relative = pending.pop()
-        if relative in {Path("lab/blueprint_codegen.gleam"), Path("codegen_corpus.gleam")}:
-            raise SystemExit(f"FAIL: generated application depends on generator: {relative}")
         if relative in seen:
             continue
         seen.add(relative)

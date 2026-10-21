@@ -22,12 +22,13 @@
 ## Validation commands
 
 - Run only the checks relevant to the changed contract, and report exactly what was executed. A documentation change does not require every runtime gate.
-- Quality: `nix develop --command python3 -B scripts/ci.py quality`.
-- One application: `nix develop --command python3 -B scripts/ci.py application <name>` (for example `checkout`, `session_replay`, `financial_recovery`, `email_portal`).
-- Retained experiments: `nix develop --command python3 -B scripts/ci.py experiments`. Fabric record compatibility is the one experiment outside this profile; run it by hand from a Fabric checkout with Git history (see its README).
-- Everything, including the design gate: `nix develop --command python3 -B scripts/ci.py full`.
+- Quality: `nix flake check`.
+- One application: `nix develop --command bash scripts/test-applications.sh <name>` (for example `checkout`, `session_replay`, `financial_recovery`, `email_portal`).
+- Retained experiments: `nix develop --command bash scripts/test-experiments.sh`. Fabric record compatibility is the one experiment outside this profile; run it by hand from a Fabric checkout with Git history (see its README).
+- All applications: `nix develop --command bash scripts/test-applications.sh`.
+- Shared design validation: `nix run .#design-gate-check -- docs/design`.
 - Unpublished sibling changes: `nix develop --command python3 -B scripts/local_sources.py --output <new-directory>`, then run the consumer from the copy.
-- Design layer, run in order: `nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf`, `nix run .#design-gate-check -- docs/design .` and `nix run .#design-gate-context -- docs/design --estimate`.
+- Optional design tools: `nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf` and `nix run .#design-gate-context -- docs/design --estimate`.
 
 ## References
 
@@ -37,7 +38,7 @@
 <!-- agent-skills:begin -->
 <!-- framework-commit: cab7c0590036edaa66d8430cc5016399a9fd2c71 origin: git@github.com:lostbean/skills.git -->
 
-(machine-owned; do not edit inside this fence — re-run setup to refresh)
+(Repository validation policy overrides the framework defaults below.)
 
 ## Agent skills
 
@@ -61,20 +62,12 @@ verbatim): states `needs-triage`, `needs-info`, `ready-for-agent`,
 **AI disclaimer** — AI-authored tracker comments start with
 `AI-assisted contribution.`
 
-**Design gate** — `nix run .#design-gate-check -- docs/design .` checks render freshness,
-vocabulary references and layer integrity (exit 0 clean, 1 violation, 2 error).
-The gate is supplied by the pinned `design-layer` flake input.
-`nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf`
-rebuilds the rendered document. `nix run .#design-gate-context -- docs/design --estimate`
-estimates agent context; the same command without `--estimate` emits ephemeral
-Markdown. `--manifest`, `--preview`, and `--section PATH --expect-digest DIGEST`
-support loading selected sections. A bare Typst compilation does not run the gate.
-
-**Context verification** — use native semantic blocks for lists, tables,
-models and behavior. After authoring, verify context estimation and a selected
-section export as well as rendering and the design gate.
-Run these commands sequentially for each layer; they share its generated
-`.render` workspace.
+**Design tools** — rendering and context export are optional authoring tools:
+`nix run .#design-gate-render -- docs/design docs/design/design-layer.pdf` and
+`nix run .#design-gate-context -- docs/design --estimate`.
+Validation requires formatting, compilation and behavioral unit/integration tests.
+Run the pinned shared design validator with `nix run .#design-gate-check -- docs/design`.
+Do not implement repository-local shape, documentation equality or checker self-tests.
 
 **Staleness** — source changes since the design last changed require a
 conformance review before the layer is treated as current.

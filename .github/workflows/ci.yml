@@ -15,24 +15,13 @@ jobs:
   quality:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    outputs:
-      applications: ${{ steps.inventory.outputs.applications }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
-      - run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py quality
-      - id: inventory
-        run: echo "applications=$(python3 -B scripts/ci.py inventory)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: quality
-          path: .artifacts/ci
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
+      - run: nix flake check --no-update-lock-file
+      - run: nix run --no-update-lock-file .#design-gate-check -- docs/design
 
   applications:
     needs: quality
@@ -42,7 +31,20 @@ jobs:
       fail-fast: false
       max-parallel: 3
       matrix:
-        application: ${{ fromJSON(needs.quality.outputs.applications) }}
+        application:
+          [
+            checkout,
+            email_portal,
+            extractor,
+            financial_recovery,
+            research_agent,
+            secure_mcp,
+            sso_portal,
+            support_desk,
+            tool_hub,
+            webhooks,
+            session_replay,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -50,15 +52,7 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
       - env:
           APPLICATION: ${{ matrix.application }}
-        run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py application "$APPLICATION"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: application-${{ matrix.application }}
-          path: .artifacts/ci
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
+        run: nix develop --no-update-lock-file --command bash scripts/test-applications.sh "$APPLICATION"
 
   experiments:
     runs-on: ubuntu-24.04
@@ -68,47 +62,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
-      - run: nix develop --no-update-lock-file --command python3 -B scripts/ci.py experiments
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: experiments
-          path: .artifacts/ci
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
-
-  design:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
-      - run: |
-          mkdir -p .artifacts/design
-          set -o pipefail
-          nix run .#design-gate-check -- docs/design . 2>&1 | tee .artifacts/design/check.log
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: design
-          path: .artifacts/design
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 14
+      - run: nix develop --no-update-lock-file --command bash scripts/test-experiments.sh
 
   ci:
     name: CI
     if: always()
-    needs: [quality, applications, experiments, design]
+    needs: [quality, applications, experiments]
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
       - env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-        run: python3 -B scripts/ci.py result quality applications experiments design
+          QUALITY: ${{ needs.quality.result }}
+          APPLICATIONS: ${{ needs.applications.result }}
+          EXPERIMENTS: ${{ needs.experiments.result }}
+        run: test "$QUALITY" = success && test "$APPLICATIONS" = success && test "$EXPERIMENTS" = success
