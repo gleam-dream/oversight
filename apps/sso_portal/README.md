@@ -18,6 +18,6 @@ From this directory, inside the Oversight shell:
 ../scripts/with-postgres.sh gleam run
 ```
 
-The [composition contract](../../docs/design/applications/design.typ#sso-portal) describes
+The [composition contract](../../docs/design/design-layer.pdf) describes
 custody, refresh and listener ownership. [ADR 0018](../../docs/adr/0018-isolate-sso-listener-startup-and-shutdown.md)
 records the listener decision.

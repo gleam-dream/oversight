@@ -20,5 +20,5 @@ cluster. Tests fail when `DATABASE_URL` is absent. `provenance.sh` prints a fres
 output. The accepted verification receipt, requester regression record and provenance receipt are in repository history
 at commit `26422a6`.
 
-The [evidence design](../../docs/design/evidence/design.typ#authorization-and-approval) states the behavior and
+The [evidence design](../../docs/design/design-layer.pdf) states the behavior and
 [ADR 0021](../../docs/adr/0021-bind-release-approval-to-requester-and-revision.md) records the findings.

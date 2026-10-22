@@ -18,7 +18,7 @@ independently, and requires each of two compiler negatives to fail with one inte
 A source-copy script imports the current laboratory modules; generated copies and fetched
 dependency output are not version controlled.
 
-The [evidence design](../../docs/design/evidence/design.typ#experiments-and-acceptance-evidence)
+The [evidence design](../../docs/design/design-layer.pdf)
 states the limits. [ADR 0025](../../docs/adr/0025-treat-legacy-decoders-and-their-schemas-separately.md)
 records the findings, and the JSON Blueprint repository owns the compatibility contract and migration guidance.
 The [oracle reference](../../docs/ORACLE.md) lists the pinned release checksums and the independent Draft 7 validation.

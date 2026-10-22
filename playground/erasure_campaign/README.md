@@ -18,5 +18,5 @@ test with seven named behavioral checks against the disposable PostgreSQL helper
 success or failure and writes ignored `.artifacts/latest.log` and `.artifacts/provenance.txt`, which record the run and
 the revisions and toolchain it used. The accepted run's log and provenance are in repository history at commit `26422a6`.
 
-The [evidence design](../../docs/design/evidence/design.typ#irreversible-effects-and-replay) states the behavior and
+The [evidence design](../../docs/design/design-layer.pdf) states the behavior and
 [ADR 0020](../../docs/adr/0020-record-evidence-before-irreversible-effects.md) records the expectations, findings and limits.

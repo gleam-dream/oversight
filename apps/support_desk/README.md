@@ -21,6 +21,6 @@ Order ids select the scripted behavior: `A-100` succeeds, `A-200` is rejected, `
 notification and compensates, `A-400` stalls the payment API past the client deadline (unknown
 outcome), `A-500` makes the model send an invalid amount, and `A-600` was already refunded.
 
-The [composition contract](../../docs/design/applications/design.typ#support-desk) describes
+The [composition contract](../../docs/design/design-layer.pdf) describes
 approval, evidence and compensation. `src/support_desk/approvers.gleam` holds the
 application-owned authorization recipe.

@@ -16,5 +16,5 @@ nix develop --command sh -c 'cd playground/ecosystem_pilot && gleam test'
 
 The example prints `A-100 has 7 Ada Lovelace notebooks.`
 
-The [evidence design](../../docs/design/evidence/design.typ#experiments-and-acceptance-evidence)
+The [evidence design](../../docs/design/design-layer.pdf)
 states the evidence boundary. Package designs own the full protocol and resource guarantees.

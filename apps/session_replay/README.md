@@ -30,5 +30,5 @@ cart transition, records its message and replays it with the same reducer; the
 event, an incompatible contract and a refused reducer step.
 
 Retrace's repository holds the browser and Tauri examples that cover the frontend
-and server layers. The [composition contract](../../docs/design/applications/design.typ#session-replay)
+and server layers. The [composition contract](../../docs/design/design-layer.pdf)
 states what this consumer does and does not establish.

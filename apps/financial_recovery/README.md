@@ -60,7 +60,7 @@ An operator authorizes redelivery of an uncertain job and settles a finished unr
 operation through `admin.resolve_uncertain` and `reconciliation.reconcile`, each with a
 stable decision identity and attribution.
 
-The [composition contract](../../docs/design/applications/design.typ#financial-recovery)
+The [composition contract](../../docs/design/design-layer.pdf)
 states the invariants, recovery behavior and evidence limits. [ADR 0010](../../docs/adr/0010-demonstrate-financial-recovery-through-public-contracts.md),
 [ADR 0011](../../docs/adr/0011-settle-finished-uncertainty-in-the-application.md) and
 [ADR 0012](../../docs/adr/0012-commit-queue-resolution-with-application-acknowledgment.md)

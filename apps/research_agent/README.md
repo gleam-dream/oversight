@@ -24,7 +24,7 @@ command. The crash tests start a second BEAM VM with OTP's `peer` module and kil
 with `SIGKILL` mid-model call, mid-tool, or after a publisher mutation before its reply.
 A node in the test VM then reruns the job after its lease expires.
 
-The [composition contract](../../docs/design/applications/design.typ#durable-research-and-publication)
+The [composition contract](../../docs/design/design-layer.pdf)
 describes the integrations and evidence. [ADR 0013](../../docs/adr/0013-demonstrate-history-invocation-with-existing-delivery.md)
 and [ADR 0024](../../docs/adr/0024-fail-closed-on-earlier-publication-checkpoints.md)
 record the decisions.
