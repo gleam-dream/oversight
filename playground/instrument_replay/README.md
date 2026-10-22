@@ -20,5 +20,5 @@ then starts the fixture, captures, stops the fixture, probes the closed port and
 Each run writes its receipt and provenance to ignored `.artifacts/`. The accepted capture and replay logs, cassette,
 receipt and provenance are in repository history at commit `26422a6`.
 
-The [evidence design](../../docs/design/evidence/design.typ#irreversible-effects-and-replay) states the behavior and
+The [evidence design](../../docs/design/design-layer.pdf) states the behavior and
 [ADR 0023](../../docs/adr/0023-separate-transport-failure-from-contract-failure-in-replay.md) records the findings.

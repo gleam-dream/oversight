@@ -22,5 +22,5 @@ From this directory, inside the Oversight shell:
 lost payment answer, a payment that never answers, and a durable order) and prints
 stock, receipts and the cross-package telemetry trace for two orders.
 
-The [composition contract](../../docs/design/applications/design.typ#checkout)
+The [composition contract](../../docs/design/design-layer.pdf)
 describes the checkout's authorities, invariants and recovery behavior.

@@ -19,5 +19,5 @@ From this directory, inside the Oversight shell:
 paths (no token, another user's job, wrong audience, forged token, a revoked token that
 local validation still accepts) and prints every Sinal event it collected.
 
-The [composition contract](../../docs/design/applications/design.typ#protected-mcp-service)
+The [composition contract](../../docs/design/design-layer.pdf)
 describes token validation, permission and report ownership.

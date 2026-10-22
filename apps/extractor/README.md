@@ -19,5 +19,5 @@ once, an unknown currency, a total that contradicts its lines, a PDF and an
 oversized stream) and prints each job's outcome and the telemetry for the rate
 limited job.
 
-The [composition contract](../../docs/design/applications/design.typ#document-extraction)
+The [composition contract](../../docs/design/design-layer.pdf)
 describes the bounds, codec reuse and outcome mapping.

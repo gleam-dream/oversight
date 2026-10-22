@@ -18,5 +18,5 @@ The executable owns a bounded memory store and capture, prints one result line
 without authentication secrets, and needs no database, credentials, HTTP listener or
 live mail provider.
 
-The [composition contract](../../docs/design/applications/design.typ#email-portal)
+The [composition contract](../../docs/design/design-layer.pdf)
 describes the flow, policy and limits.

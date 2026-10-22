@@ -19,5 +19,5 @@ From this directory, inside the Oversight shell:
 delivery and prints each outcome, the receiver's signature checks and one delivery's telemetry trace.
 
 The tests are in [`test/webhooks/`](test/webhooks/): core mapping, delivery and cassette replay.
-The [composition contract](../../docs/design/applications/design.typ#webhook-delivery) describes
+The [composition contract](../../docs/design/design-layer.pdf) describes
 signing, destination policy and outcome mapping.

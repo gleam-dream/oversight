@@ -16,5 +16,5 @@ gleam test
 
 The app owns four compiled recipes: `relay_tools`, `relay_discovery`, `relay_serve` and
 `relay_run`. The [protocol pilot](../../playground/ecosystem_pilot/README.md) covers Relay
-and LLM Wire without an agent. The [composition contract](../../docs/design/applications/design.typ#tool-hub)
+and LLM Wire without an agent. The [composition contract](../../docs/design/design-layer.pdf)
 describes discovery, invocation identity and cancellation.

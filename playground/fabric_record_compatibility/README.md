@@ -24,6 +24,6 @@ from local Git, and shares only a disposable directory store between separate pr
 Temporary sources, manifests and records are removed on exit.
 
 The experiment establishes reader refusal, not mixed-version execution, PostgreSQL behavior or live-provider
-compatibility. The [evidence design](../../docs/design/evidence/design.typ#experiments-and-acceptance-evidence)
+compatibility. The [evidence design](../../docs/design/design-layer.pdf)
 states the limits, and the [oracle reference](../../docs/ORACLE.md) lists the pinned reader. This is the one
 retained experiment outside `bash scripts/test-experiments.sh`, because it needs Git history that CI checkouts lack.
