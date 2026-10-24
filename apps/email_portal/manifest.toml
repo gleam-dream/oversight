@@ -7,8 +7,8 @@
 # You should check this file into your source control repository.
 
 packages = [
-  { name = "correio", version = "0.1.0", build_tools = ["gleam"], requirements = ["gen_smtp", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "cf78d72c7114e7266498a36999f81f92257ffac2" },
-  { name = "correio_mailbox", version = "0.1.0", build_tools = ["gleam"], requirements = ["correio", "gleam_http", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "cf78d72c7114e7266498a36999f81f92257ffac2", path = "adapters/correio_mailbox" },
+  { name = "correio", version = "0.1.0", build_tools = ["gleam"], requirements = ["gen_smtp", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "6304ebfe0a71d41de30e3e02fded6c4b07e8d295" },
+  { name = "correio_mailbox", version = "0.1.0", build_tools = ["gleam"], requirements = ["correio", "gleam_http", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "6304ebfe0a71d41de30e3e02fded6c4b07e8d295", path = "adapters/correio_mailbox" },
   { name = "gen_smtp", version = "1.3.0", build_tools = ["rebar3"], requirements = ["ranch"], otp_app = "gen_smtp", source = "hex", outer_checksum = "0B73FBF069864ECBCE02FE653B16D3F35FD889D0FDD4E14527675565C39D84E6" },
   { name = "gleam_erlang", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "1124AD3AA21143E5AF0FC5CF3D9529F6DB8CA03E43A55711B60B6B7B3874375C" },
   { name = "gleam_http", version = "4.4.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "F065CE9941A7756ABBAEAE7F9F32A96CAD29DA3311A381DB2D926EA8E8C156DC" },
