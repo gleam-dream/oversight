@@ -1,0 +1,46 @@
+Observed 2026-09-20. Commands run inside the repository development environment.
+[repository] denotes the oversight checkout. These are direct host probes, not complete Gleam integration tests.
+
+$ node --version
+v22.21.1
+
+exit=0
+$ erl -noshell -eval 'io:format("OTP ~s; ERTS ~s~n", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().'
+OTP 28; ERTS 16.2
+
+exit=0
+$ node -e 'for (const s of ["1.0","9007199254740993","1e400","1e-400"]) {const v=JSON.parse(s); console.log(s, String(v), Number.isInteger(v), Number.isFinite(v), JSON.stringify(v));} console.log("nonfinite", JSON.stringify(NaN),JSON.stringify(Infinity));'
+1.0 1 true true 1
+9007199254740993 9007199254740992 true true 9007199254740992
+1e400 Infinity false false null
+1e-400 0 true true 0
+nonfinite null null
+
+exit=0
+$ erl -noshell -eval 'lists:foreach(fun(S) -> io:format("~s => ~p~n", [S, catch json:decode(list_to_binary(S))]) end, ["1.0","9007199254740993","1e400","1e-400"]), halt().'
+1.0 => 1.0
+9007199254740993 => 9007199254740993
+1e400 => {'EXIT',{{unexpected_sequence,<<"1.0e400">>},
+                  [{json,unexpected_sequence,2,
+                         [{file,"json.erl"},
+                          {line,1477},
+                          {error_info,#{cause => #{position => 0},
+                                        module => erl_stdlib_errors}}]},
+                   {erl_eval,do_apply,7,[{file,"erl_eval.erl"},{line,920}]},
+                   {erl_eval,expr,6,[{file,"erl_eval.erl"},{line,656}]},
+                   {erl_eval,expr,6,[{file,"erl_eval.erl"},{line,441}]},
+                   {erl_eval,expr,6,[{file,"erl_eval.erl"},{line,442}]},
+                   {erl_eval,expr_list,7,[{file,"erl_eval.erl"},{line,1504}]},
+                   {erl_eval,expr,6,[{file,"erl_eval.erl"},{line,630}]},
+                   {lists,foreach_1,2,[{file,"lists.erl"},{line,2641}]}]}}
+1e-400 => 0.0
+
+exit=0
+[repository]/playground/blueprint_compatibility/build/packages/gleam_json/src/gleam_json_ffi.mjs
+sha256 14fa64bb2f903dfa21f8b185de696232964d1e5c365fc154e4e1a93a412e5186
+[repository]/playground/blueprint_compatibility/build/packages/gleam_json/src/gleam/json.gleam
+sha256 88719337ae85db11ceddda61942d5ca6fdb5a5a87eb889eb51db55e54b15fa49
+[repository]/playground/blueprint_compatibility/build/packages/gleam_stdlib/src/gleam_stdlib.mjs
+sha256 9063e10234ff37b7852ba600ec1e6f2d4a92e5ac372e7dd184f3bb884b6544f3
+[repository]/playground/blueprint_compatibility/build/packages/gleam_stdlib/src/gleam_stdlib.erl
+sha256 898c1d0be32aeb8068b3617dc99b185d115c5356b861598f0727ed1dd20bf2fc

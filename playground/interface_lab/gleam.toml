@@ -1,0 +1,7 @@
+# THROWAWAY: Can one typed workflow model compose agents, approval, and restore?
+name = "interface_lab"
+version = "0.0.0"
+target = "erlang"
+gleam = ">= 1.18.0"
+
+[dependencies]

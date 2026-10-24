@@ -1,0 +1,23 @@
+name = "extractor"
+version = "0.1.0"
+target = "erlang"
+description = "Composition app: batch invoice extraction built from grind, http_gun, llm_wire, json_blueprint and sinal on pog and mist."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_time = ">= 1.11.0 and < 2.0.0"
+pog = ">= 4.1.0 and < 5.0.0"
+mist = ">= 6.0.2 and < 7.0.0"
+envoy = ">= 1.0.0 and < 2.0.0"
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "main" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

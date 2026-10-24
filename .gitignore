@@ -1,0 +1,8 @@
+.direnv
+build/
+erl_crash.dump
+.render/
+**/.render/
+.artifacts/
+.ruff_cache/
+__pycache__/

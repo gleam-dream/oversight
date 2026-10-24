@@ -1,0 +1,21 @@
+name = "ecosystem_pilot"
+version = "0.1.0"
+target = "erlang"
+gleam = ">= 1.18.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 1.0.0"
+gleam_json = ">= 3.0.0 and < 4.0.0"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+glisten = ">= 9.0.0 and < 10.0.0"
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "main" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+gleam_time = ">= 1.0.0 and < 2.0.0"
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

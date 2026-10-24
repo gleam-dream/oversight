@@ -1,0 +1,26 @@
+name = "secure_mcp"
+version = "0.1.0"
+target = "erlang"
+description = "Composition app: an OAuth-protected MCP report server (relay + warden + grind)."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_time = ">= 1.0.0 and < 2.0.0"
+wisp = ">= 2.0.0 and < 3.0.0"
+mist = ">= 5.0.0 and < 7.0.0"
+pog = ">= 4.0.0 and < 5.0.0"
+gleam_httpc = ">= 5.0.0 and < 6.0.0"
+envoy = ">= 1.0.0 and < 2.0.0"
+gleam_crypto = ">= 1.6.0 and < 2.0.0"
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "main" }
+warden = { git = "https://github.com/gleam-dream/warden.git", ref = "main" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
