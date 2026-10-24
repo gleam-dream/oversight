@@ -13,7 +13,7 @@ import tomllib
 
 
 PROJECT = Path(__file__).resolve().parent
-READER_REVISION = "c92e97ca3357c15dd26a2fcb59a77bedcffda539"
+READER_REVISION = "b16e98a6aea0b2f6cf9e80ac58ff2d65ac1f0bda"
 
 
 def git(repository: Path, *arguments: str) -> str:
