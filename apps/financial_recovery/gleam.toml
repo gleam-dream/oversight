@@ -1,0 +1,22 @@
+name = "financial_recovery"
+version = "0.1.0"
+target = "erlang"
+description = "Executable financial recovery recipe with Saga, Grind and PostgreSQL."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_time = ">= 1.11.0 and < 2.0.0"
+pog = ">= 4.1.0 and < 4.2.0"
+envoy = ">= 1.0.0 and < 2.0.0"
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "main" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "main", path = "integrations/saga_postgres" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

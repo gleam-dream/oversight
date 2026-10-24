@@ -1,0 +1,12 @@
+name = "session_replay"
+version = "0.1.0"
+target = "erlang"
+gleam = ">= 1.16.0"
+description = "Public Retrace consumer: typed cart recording, reconstruction and recovery."
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "main" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
