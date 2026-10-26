@@ -16,4 +16,4 @@ packages = [
 [requirements]
 gleam_stdlib = { version = ">= 1.0.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
-retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "main" }
+retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "7a696fc7783fc254c2a86ea7bfe49d78118f951f" }

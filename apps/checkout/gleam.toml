@@ -15,11 +15,11 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "main" }
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "main", path = "integrations/saga_postgres" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "fed752110dccb4ee5978c0f42d2fd10d77cb0a15" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "fed752110dccb4ee5978c0f42d2fd10d77cb0a15", path = "integrations/saga_postgres" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "353c8ffe282d6cf61ff4e90820fb3f7357ddb1bd" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "b2fe1d7cd0ea121e679cdf2c4af5b078330c33e7" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "95f2dbce4459942e16e819e3527eb00d9c503c9d" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -115,10 +115,8 @@ fn runtime_policy(policy: Policy) -> RuntimePolicy {
 }
 
 fn limits() -> value.Limits {
-  value.default_limits()
-  |> value.with_max_bytes(512)
-  |> value.with_max_depth(8)
-  |> value.with_max_elements(64)
+  // Byte admission bounds parsing; the page codec validates the accepted shape.
+  value.default_limits() |> value.with_max_bytes(512)
 }
 
 fn admitted_event() -> sinal.Event(Int, RunObservation) {

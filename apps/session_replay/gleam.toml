@@ -6,7 +6,7 @@ description = "Public Retrace consumer: typed cart recording, reconstruction and
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
-retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "main" }
+retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "7a696fc7783fc254c2a86ea7bfe49d78118f951f" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

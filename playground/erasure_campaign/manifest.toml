@@ -21,14 +21,14 @@ packages = [
   { name = "gleam_stdlib", version = "1.0.5", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "CEE5B6C076A85B45F60C585F4316C63EC8B7127C119D5738C3958A9C4D50404E" },
   { name = "gleam_time", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_time", source = "hex", outer_checksum = "3AB789C3ED4EB9DDA7283F46C3CF83A5487C9CFB790DC3FF8F8ACB5BF7B7A6C1" },
   { name = "gleeunit", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "EC31ABA74256AEA531EDF8169931D775BBB384FED0A8A1BDC4DD9354E3E21826" },
-  { name = "grind", version = "0.1.0", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo", "pog", "sinal"], source = "git", repo = "https://github.com/gleam-dream/grind.git", commit = "0d2bb9b9024f625687010d24d90b57a6620a2eb6" },
+  { name = "grind", version = "0.1.0", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo", "pog", "sinal"], source = "git", repo = "https://github.com/gleam-dream/grind.git", commit = "353c8ffe282d6cf61ff4e90820fb3f7357ddb1bd" },
   { name = "gun", version = "2.6.0", build_tools = ["make", "rebar3"], requirements = ["cowlib"], otp_app = "gun", source = "hex", outer_checksum = "69BB957F4BD6C475B5714460FD65C26FC7EB85760AA64B74754DE36CE5CCED7D" },
-  { name = "http_gun", version = "0.1.0", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], source = "git", repo = "https://github.com/gleam-dream/http_gun.git", commit = "08e2c283e834e7e106c29abf95c501b40cb2df22" },
+  { name = "http_gun", version = "0.1.0", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], source = "git", repo = "https://github.com/gleam-dream/http_gun.git", commit = "b2fe1d7cd0ea121e679cdf2c4af5b078330c33e7" },
   { name = "opentelemetry_api", version = "1.5.0", build_tools = ["rebar3", "mix"], requirements = [], otp_app = "opentelemetry_api", source = "hex", outer_checksum = "F53EC8A1337AE4A487D43AC89DA4BD3A3C99DDF576655D071DEED8B56A2D5DDA" },
   { name = "pg_types", version = "0.6.0", build_tools = ["rebar3"], requirements = [], otp_app = "pg_types", source = "hex", outer_checksum = "9949A4849DD13408FA249AB7B745E0D2DFDB9532AEE2B9722326E33CD082A778" },
   { name = "pgo", version = "0.20.0", build_tools = ["rebar3"], requirements = ["backoff", "opentelemetry_api", "pg_types"], otp_app = "pgo", source = "hex", outer_checksum = "2F11E6649CEB38E569EF56B16BE1D04874AE5B11A02867080A2817CE423C683B" },
   { name = "pog", version = "4.1.0", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo"], otp_app = "pog", source = "hex", outer_checksum = "E4AFBA39A5FAA2E77291836C9683ADE882E65A06AB28CA7D61AE7A3AD61EBBD5" },
-  { name = "saga", version = "0.1.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "sinal"], source = "git", repo = "https://github.com/gleam-dream/saga.git", commit = "500895cd0a55de6b256715d45ac6acc55d5b21eb" },
+  { name = "saga", version = "0.1.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "sinal"], source = "git", repo = "https://github.com/gleam-dream/saga.git", commit = "fed752110dccb4ee5978c0f42d2fd10d77cb0a15" },
   { name = "simplifile", version = "2.7.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "A2727627B063E87351934C7F7F008F2D1FDB16F6DE0B8C79F9E46459CFC9C164" },
   { name = "sinal", version = "0.1.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "telemetry"], source = "git", repo = "https://github.com/gleam-dream/sinal.git", commit = "95f2dbce4459942e16e819e3527eb00d9c503c9d" },
   { name = "telemetry", version = "1.4.2", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "928F6495066506077862C0D1646609EED891A4326BEE3126BA54B60AF61FEBB1" },
@@ -44,7 +44,7 @@ gleam_json = { version = ">= 3.1.0 and < 4.0.0" }
 gleam_stdlib = { version = ">= 0.70.0 and < 2.0.0" }
 gleam_time = { version = ">= 1.11.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "main" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "353c8ffe282d6cf61ff4e90820fb3f7357ddb1bd" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "b2fe1d7cd0ea121e679cdf2c4af5b078330c33e7" }
 pog = { version = ">= 4.1.0 and < 4.2.0" }
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "main" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "fed752110dccb4ee5978c0f42d2fd10d77cb0a15" }

@@ -8,11 +8,11 @@ gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
 gleam_json = ">= 3.0.0 and < 4.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "main" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "main", path = "integrations/fabric_postgres" }
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "main" }
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "main" }
-json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "main" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "4daccd5d0114bc21841c08c1230fe9f000eaabc1" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "4daccd5d0114bc21841c08c1230fe9f000eaabc1", path = "integrations/fabric_postgres" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f3ac56d665218c3ce0f2b12e6ff11fd9e54bec6" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "0f81df9e163f5f7a29ee8a724ea29dee0647117f" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "8bc8ab4e7d04b23d209680f849e976074bf7c90f" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "95f2dbce4459942e16e819e3527eb00d9c503c9d" }
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

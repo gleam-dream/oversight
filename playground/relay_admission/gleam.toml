@@ -10,9 +10,9 @@ gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "main" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "main" }
-json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "main" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "0f81df9e163f5f7a29ee8a724ea29dee0647117f" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "b2fe1d7cd0ea121e679cdf2c4af5b078330c33e7" }
+json_blueprint = { git = "https://github.com/lostbean/json_blueprint.git", ref = "8bc8ab4e7d04b23d209680f849e976074bf7c90f" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
