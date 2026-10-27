@@ -3,7 +3,7 @@
 An oracle is a pinned external implementation, specification or recorded baseline that judges a stated subset of observable behavior. Its authority stops at that subset. This page lists every reference the retained experiments compare against, what each comparison covers, and where the claim ends.
 
 - The design states the rule in [Experiments and acceptance evidence](design/evidence/design.typ#experiments-and-acceptance-evidence) and defines the term in the [evidence vocabulary](design/evidence/CONTEXT.typ).
-- [ADR 0009](adr/0009-retain-executable-evidence-with-scoped-claims.md) records why executable evidence and its provenance are retained. [ADR 0015](adr/0015-resolve-composition-consumers-from-locked-git-sources.md) records how recorded sources resolve, and [ADR 0027](adr/0027-keep-oracle-references-in-a-linked-document.md) records why this page exists.
+- [ADR 0009](adr/0009-retain-executable-evidence-with-scoped-claims.md) records why executable evidence and its provenance are retained. [ADR 0031](adr/0031-consume-published-ecosystem-packages-from-hex.md) records how package sources resolve while historical inputs stay frozen, and [ADR 0027](adr/0027-keep-oracle-references-in-a-linked-document.md) records why this page exists.
 - Oversight owns no benchmark workload ([ADR 0019](adr/0019-qualify-composition-through-validation-profiles.md)), so it has no `BENCHMARKS.md`. Benchmarks and upstream comparisons for a library belong to that library's repository; start from the [library table](../README.md#libraries).
 
 ## References

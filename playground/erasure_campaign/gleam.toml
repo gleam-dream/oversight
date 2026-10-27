@@ -13,9 +13,9 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 exception = ">= 2.1.1 and < 3.0.0"
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "353c8ffe282d6cf61ff4e90820fb3f7357ddb1bd" }
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "fed752110dccb4ee5978c0f42d2fd10d77cb0a15" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "b2fe1d7cd0ea121e679cdf2c4af5b078330c33e7" }
+grind = ">= 0.1.0 and < 0.2.0"
+saga = ">= 0.1.0 and < 0.2.0"
+http_gun = ">= 0.1.0 and < 0.2.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

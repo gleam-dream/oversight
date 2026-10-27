@@ -22,8 +22,7 @@ trap cleanup EXIT
   revision="$(git -C ../.. rev-parse HEAD)"
   changes="$(git -C ../.. status --porcelain --untracked-files=no | wc -l | tr -d ' ')"
   printf 'oversight %s tracked-change-lines=%s\n' "$revision" "$changes"
-  grep -oE 'name = "[a-z_]+"[^}]*source = "git", repo = "[^"]+", commit = "[0-9a-f]{40}"' manifest.toml |
-    sed -E 's/name = "([a-z_]+)".*repo = "([^"]+)", commit = "([0-9a-f]{40})"/locked \1 \2 \3/'
+  cat manifest.toml
   sha256sum gleam.toml manifest.toml ../../flake.lock
 } > .artifacts/provenance.txt
 gleam format --check src test

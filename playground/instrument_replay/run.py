@@ -149,9 +149,10 @@ def main():
             "oracle": "authored synthetic fixtures; no external oracle",
         }
         (EVIDENCE / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+        locked_packages = tomllib.loads((ROOT / "manifest.toml").read_text())["packages"]
         locked = {
             package["name"]: package["commit"]
-            for package in tomllib.loads((ROOT / "manifest.toml").read_text())["packages"]
+            for package in locked_packages
             if package.get("source") == "git"
         }
         revisions = {
@@ -188,6 +189,7 @@ def main():
         )
         provenance = {
             "revisions": revisions,
+            "packages": locked_packages,
             "tracked_dirty": tracked_dirty,
             "gleam": subprocess.check_output(["gleam", "--version"], text=True).strip(),
             "erlang": runtime.strip(),

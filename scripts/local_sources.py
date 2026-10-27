@@ -80,18 +80,22 @@ def snapshot(root: Path, target: Path, names: tuple[str, ...]) -> None:
         config = tomllib.loads(contents)
         for section in ("dependencies", "dev-dependencies"):
             for name, dependency in config.get(section, {}).items():
-                # Exact Hex versions and unrelated Git sources remain frozen.
-                if name not in packages or not isinstance(dependency, dict):
+                # Historical exact Hex versions and unrelated sources stay frozen.
+                if name not in packages:
                     continue
+                if isinstance(dependency, str):
+                    if dependency.lstrip().startswith("=="):
+                        continue
+                    dependency = {}
                 repository = dependency.get("git", "")
                 owner = "lostbean" if repositories[name] == "json_blueprint" else "gleam-dream"
                 expected = f"https://github.com/{owner}/{repositories[name]}.git"
                 if repository and repository != expected:
                     continue
-                if not repository and "path" not in dependency:
+                if dependency and not repository and "path" not in dependency:
                     continue
                 contents = re.sub(
-                    rf"(?m)^{re.escape(name)}\s*=\s*\{{[^\n]*\}}",
+                    rf'(?m)^{re.escape(name)}\s*=\s*(?:\{{[^\n]*\}}|"[^"\n]*")',
                     lambda _: f'{name} = {{ path = "{packages[name]}" }}',
                     contents,
                 )
