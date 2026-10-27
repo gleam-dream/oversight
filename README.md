@@ -4,8 +4,8 @@
 [![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
 
 Independent Gleam libraries for services on Erlang/OTP, plus portable session
-recording and replay. Oversight is the ecosystem catalogue and a collection of
-applications that exercise the libraries together.
+recording and replay. Oversight catalogues the ecosystem and exercises the
+libraries together through runnable applications.
 
 ## Libraries
 
