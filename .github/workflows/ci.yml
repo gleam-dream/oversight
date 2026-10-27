@@ -20,6 +20,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+      - name: Local-source capture behavior
+        run: nix develop --no-update-lock-file --command python3 -B -m unittest discover -s scripts -p 'test_*.py'
       - run: nix flake check --no-update-lock-file
       - run: nix run --no-update-lock-file .#design-gate-check -- docs/design
       - name: README snippets

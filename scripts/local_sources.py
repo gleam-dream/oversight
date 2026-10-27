@@ -62,16 +62,19 @@ def snapshot(root: Path, target: Path, names: tuple[str, ...]) -> None:
         }
     packages = {name: target / name for name in names if name != "oversight"}
     repositories = {name: name for name in packages}
-    for owner, folder, name in (
-        ("saga", "integrations", "saga_postgres"),
-        ("fabric", "integrations", "fabric_postgres"),
-        ("hellhound", "integrations", "hellhound_postgres"),
-        ("correio", "adapters", "correio_mailbox"),
-        ("correio", "adapters", "correio_postmark"),
-        ("correio", "adapters", "correio_postgres"),
+    for owner, relative, name in (
+        ("saga", "integrations/saga_postgres", "saga_postgres"),
+        ("fabric", "integrations/fabric_postgres", "fabric_postgres"),
+        ("hellhound", "integrations/hellhound_postgres", "hellhound_postgres"),
+        ("correio", "adapters/correio_mailbox", "correio_mailbox"),
+        ("correio", "adapters/correio_postmark", "correio_postmark"),
+        ("correio", "adapters/correio_postgres", "correio_postgres"),
+        ("retrace", "packages/retrace_frontend", "retrace_frontend"),
+        ("retrace", "packages/retrace_server", "retrace_server"),
+        ("retrace", "support/collector", "retrace_collector"),
     ):
-        if owner in names and (target / owner / folder / name / "gleam.toml").is_file():
-            packages[name] = target / owner / folder / name
+        if owner in names and (target / owner / relative / "gleam.toml").is_file():
+            packages[name] = target / owner / relative
             repositories[name] = owner
     changed = []
     for manifest in target.rglob("gleam.toml"):
