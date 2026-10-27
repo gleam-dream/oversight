@@ -2,6 +2,9 @@
 
 # Ecosystem interface playground
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A laboratory of candidate typed APIs. Its `lab/` modules are sketches, not the production
 packages, and must not be published. The main experiment combines an agent call, approval
 suspension, a compensating child workflow and a restorable continuation in one typed workflow;

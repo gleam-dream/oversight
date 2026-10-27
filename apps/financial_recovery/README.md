@@ -1,5 +1,8 @@
 # Financial recovery
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 An executable consumer that retains financial evidence across Saga execution and
 Grind delivery. The application owns payment intent, account reservations, provider
 evidence and postings; Saga owns workflow checkpoints; Grind owns delivery and

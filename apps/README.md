@@ -1,5 +1,8 @@
 # Example applications
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Each application combines public library APIs with its own types, policy and
 resource cleanup. External services are scripted locally.
 

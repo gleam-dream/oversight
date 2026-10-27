@@ -1,5 +1,8 @@
 # checkout
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 An order API built on Saga, Grind, HTTP Gun and Sinal, with Wisp routes and
 PostgreSQL storage. Payment and shipping providers are scripted servers on
 loopback.

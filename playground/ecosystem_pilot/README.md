@@ -1,5 +1,8 @@
 # MCP and model-provider example
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A consumer that composes JSON Blueprint, Relay, LLM Wire, HTTP Gun and Sinal through their public
 APIs. It looks up a synthetic inventory record over MCP and continues a model turn against a
 scripted local provider. All transports use loopback, and no provider account is needed.

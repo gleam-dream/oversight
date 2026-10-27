@@ -1,5 +1,8 @@
 # research_agent
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A research agent that resumes after a crash and publishes through a compensating
 workflow. `start_research(topic)` records the request and enqueues a Grind job in one
 transaction. The job runs a Fabric agent with `search` and `read` tools against scripted

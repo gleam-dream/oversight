@@ -1,5 +1,8 @@
 # webhooks
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A multi-tenant outbound webhook service. Tenants register endpoint URLs, an application event
 fans out to one Grind job per active subscription, and a worker signs each delivery and sends it
 through HTTP Gun. The delivery id is the receiver's idempotency key, and the HTTP result maps back

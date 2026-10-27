@@ -1,5 +1,8 @@
 # Instrument replay experiment
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Tests whether an application can capture bounded HTTP acquisition once, replay it with the instrument unavailable,
 and evaluate two schema policies with native observations while keeping transport and contract failures distinct.
 HTTP Gun owns transport, cassettes and redaction, JSON Blueprint owns parsing and validation, Sinal owns observations,

@@ -1,5 +1,8 @@
 # tool_hub
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 MCP in both directions, built from public package APIs only. An `inventory` Relay server
 exposes three typed tools, a Fabric agent mounts them through the Relay client and answers
 with a scripted LLM provider, and a second Relay server exposes that agent as the MCP tool

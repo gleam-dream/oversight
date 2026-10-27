@@ -1,5 +1,8 @@
 # extractor
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Batch invoice extraction. A batch of document URLs becomes Grind jobs. Each job
 fetches its document with a bounded HTTP Gun stream, asks an LLM for a typed
 `Invoice` through LLM Wire structured output with a Blueprint codec, and stores the

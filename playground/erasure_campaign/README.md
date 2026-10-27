@@ -1,5 +1,8 @@
 # Synthetic data erasure campaign
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Tests whether Saga, Grind and HTTP Gun can express reversible preparation followed by irreversible effects while
 preserving uncertainty, resumability and cancellation truth. Saga owns the freeze and plan preparation, Grind owns
 per-target delivery, cancellation intent and attributed resolution, HTTP Gun owns transport, and the application owns

@@ -1,5 +1,8 @@
 # Relay request deadline consumer
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A separate consumer that checks Relay's admitted request deadline through public APIs. The deadline
 covers context creation, token verification, execution and finite response waits. The consumer exercises
 buffered mounting and a real loopback listener, and its Erlang fixture uses process monitors and TCP sockets

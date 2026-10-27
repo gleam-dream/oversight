@@ -1,5 +1,8 @@
 # Embargoed archive release
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Tests whether authentication, protocol admission and durable approval can bind a release to an exact
 document revision, its original requester and current permission. It composes Hellhound's local HTTPS fixture
 issuer, Relay's public authorization admission, Fabric's typed tool and approval, and `fabric_postgres` over

@@ -1,5 +1,8 @@
 # sso_portal
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A web portal that signs users in with OpenID Connect, stores sessions in PostgreSQL and
 calls a billing API with their access tokens. Hellhound refreshes tokens near expiry, and the
 application retries a billing request once after a refusal. Hellhound's sessions and pending

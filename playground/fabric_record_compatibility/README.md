@@ -1,5 +1,8 @@
 # Fabric record reader compatibility
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Checks that a previous public Fabric reader refuses a history-aware version 8 record before executing
 its model. A writer completes a run through `fabric.start_with_input`, and a separate reader package
 pinned to Fabric revision [`c92e97c`](https://github.com/gleam-dream/fabric/tree/c92e97ca3357c15dd26a2fcb59a77bedcffda539)

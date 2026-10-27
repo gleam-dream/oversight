@@ -1,5 +1,8 @@
 # Session replay
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A small, portable consumer of [Retrace](https://github.com/gleam-dream/retrace).
 The cart owns its `Cart`, `Message` and `CartError` types and a pure reducer.
 Retrace records accepted messages and reconstructs the same state from them.

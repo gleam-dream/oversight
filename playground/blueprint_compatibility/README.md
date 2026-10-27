@@ -1,5 +1,8 @@
 # Blueprint compatibility playground
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 Tests whether an existing JSON Blueprint decoder can participate in the laboratory codec boundary
 while preserving its wire format and exposing the limits of its schema. It uses published upstream
 code in a separate Gleam project: JSON Blueprint 1.7.1 (with JSON 3.1.0 and stdlib 1.0.5) and a

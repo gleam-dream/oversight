@@ -1,5 +1,8 @@
 # support_desk
 
+[![CI](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/gleam-dream/oversight/actions/workflows/ci.yml)
+[![Gleam](https://img.shields.io/badge/Gleam-FFAFF3?logo=gleam&logoColor=000000)](https://gleam.run/)
+
 A customer-support agent with typed tools. The agent looks an order up, checks refund
 eligibility and issues refunds. A refund waits for a human approver through Fabric's policy
 gate, then runs as a Saga that refunds through the payment API, writes a ledger entry and
