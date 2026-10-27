@@ -38,8 +38,9 @@ and removes its own local database:
 ../scripts/with-postgres.sh gleam run
 ```
 
-No existing database or provider account is needed, and no sibling checkout is
-required: Gleam resolves library dependencies from immutable Git revisions.
+No existing database, provider account or sibling checkout is needed. Published
+libraries resolve from Hex; unpublished adapters use Git+path pins. Each
+`manifest.toml` locks the resolved versions.
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.

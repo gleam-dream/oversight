@@ -26,8 +26,8 @@ Replayed cart: 2
 Gap refused: expected event 1, received 2
 ```
 
-No database, frontend toolchain or service is needed, and the manifest pins Retrace
-at an immutable Git revision. The [application](src/session_replay.gleam) accepts a
+No database, frontend toolchain or service is needed. Retrace resolves from Hex;
+`manifest.toml` locks its version. The [application](src/session_replay.gleam) accepts a
 cart transition, records its message and replays it with the same reducer; the
 [tests](test/session_replay_test.gleam) cover checkpoint continuation, a missing
 event, an incompatible contract and a refused reducer step.
