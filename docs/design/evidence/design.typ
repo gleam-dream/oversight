@@ -50,6 +50,8 @@ nix develop --command bash scripts/test-experiments.sh")
       [Updating a library is a deliberate act: moving a lockfile reruns the affected consumers, and no scheduled job moves one. Inconsistent source requirements between libraries fail dependency resolution.],
       [A #term("term-local-source-capture") copies tracked and new authored sources into a fresh directory, refuses an existing directory, excludes credentials, local settings, caches and symlinks, and normalizes sibling dependencies throughout the copied graph. External sources and exact Hex oracle versions stay unchanged, and historical readers keep their explicit revision selection. The capture records revisions, dirty flags, original file hashes and overridden manifests. Its results do not qualify the locked sources.],
       [The Nix lock supplies the Gleam, Erlang/OTP, Elixir and PostgreSQL versions; only its lock input changes during a toolchain refresh. Rebar3 and Elixir use the shell's OTP package. After the first dependency build, repeated builds of an unchanged local-source consumer reuse its dependency resolution.],
+      [Gleam Nix exposes each application as a compiled Nix package. It derives dependency edges from the application's existing manifest, builds each Gleam dependency separately, and adapts Rebar3 packages through the same OTP package set. Git adapters use their manifest commits and explicitly registered source hashes. Application code and unrelated manifests stay outside shared dependency inputs.],
+      [Nix quality checks load each compiled application and assert reuse of identical locked dependencies across consumers. These checks establish compilation, OTP startup and cache identity; existing application launchers retain strict compiler diagnostics and behavioral tests. Nix store reuse does not imply that a binary cache has been published or configured.],
       [Qualifying a coordinated library change updates consumer declarations and lockfiles together, then reruns the affected consumers. Oversight publishes no library artifact; release qualification combines these results with each library's own validation, and no workflow publishes packages or changes repository settings.],
     )
     #behavior(title: "Consumers execute their locked sources", area: "Source qualification", level: "boundary")[
@@ -59,6 +61,7 @@ nix develop --command bash scripts/test-experiments.sh")
       #then[The uncommitted sibling edits do not change its runtime code.]
     ]
     #adr(31)
+    #adr(32)
   ])
 
   #section(title: "Experiments and acceptance evidence", lead: "Retained experiments answer narrow questions and stay separate from production libraries. Evidence is reproducible only when its inputs, oracle and execution boundary are explicit.", body: [

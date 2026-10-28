@@ -25,6 +25,10 @@
 
 - Run only the checks relevant to the changed contract, and report exactly what was executed. A documentation change does not require every runtime gate.
 - Quality: `nix flake check`.
+- Compiled application: `nix build .#<name>`. Gleam Nix builds each locked package
+  separately; the quality checks verify shared dependency identity and load every
+  compiled OTP application. Existing application scripts retain strict compiler
+  checks and behavioral tests.
 - One application: `nix develop --command bash scripts/test-applications.sh <name>` (for example `checkout`, `session_replay`, `financial_recovery`, `email_portal`).
 - Retained experiments: `nix develop --command bash scripts/test-experiments.sh`. Fabric record compatibility is the one experiment outside this profile; run it by hand from a Fabric checkout with Git history (see its README).
 - All applications: `nix develop --command bash scripts/test-applications.sh`.

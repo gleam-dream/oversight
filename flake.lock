@@ -57,6 +57,26 @@
         "type": "github"
       }
     },
+    "gleam-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1793149709,
+        "narHash": "sha256-dT9XCHGD+eEvHDK4W6sX+y73BhfHKEvleOFgVM46waE=",
+        "owner": "gleam-dream",
+        "repo": "gleam-nix",
+        "rev": "f2574fcc4b055d36f0ee84669b63ffd0246a849f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "gleam-dream",
+        "repo": "gleam-nix",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1779467186,
@@ -93,6 +113,7 @@
       "inputs": {
         "design-layer": "design-layer",
         "flake-utils": "flake-utils_2",
+        "gleam-nix": "gleam-nix",
         "nixpkgs": "nixpkgs_2",
         "treefmt-nix": "treefmt-nix_2"
       }

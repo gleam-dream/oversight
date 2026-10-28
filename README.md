@@ -50,10 +50,16 @@ its boundaries. These are examples to read and adapt, rather than a shared frame
 From the Oversight checkout:
 
 ```sh
+nix build .#financial_recovery
 nix develop --command bash scripts/test-applications.sh financial_recovery
 ```
 
-The command builds and tests the application using disposable PostgreSQL and a
+The Nix build uses [Gleam Nix](https://github.com/gleam-dream/gleam-nix) to compile
+each locked dependency separately. Every application has a named package output;
+applications with identical dependency inputs reuse the same compiled outputs.
+These outputs are OTP libraries, ready for runtime or release assembly.
+
+The test command builds and tests the application using disposable PostgreSQL and a
 local scripted payment provider. It needs no provider credentials or existing database.
 The test below submits a payment and checks its durable outcome and account balance:
 
