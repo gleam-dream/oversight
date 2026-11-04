@@ -7,7 +7,7 @@ import fabric/policy
 import fabric/tool
 import gleam/http
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -98,12 +98,63 @@ pub fn gate(endpoints: Endpoints) -> policy.Policy(Context) {
     use page <- result.try(tool.input(read_definition(), action))
     case page {
       Some(page) ->
-        case string.starts_with(page.url, endpoints.pages) {
+        case in_library(endpoints, page.url) {
           True -> Ok(policy.Allow)
           False -> Ok(policy.Deny("only the research library may be read"))
         }
       _ -> Ok(policy.Allow)
     }
+  }
+}
+
+/// Whether `url` names a page under the library. A string prefix is not
+/// enough: the server resolves `..` and may decode `%2e` or `%2f`, so
+/// `/pages/../drafts/x` starts with the library's text and reads a draft.
+/// Both URLs are parsed; scheme, host and port must be equal, the URL may
+/// carry no user info, query or fragment, and its path must be the
+/// library's segments followed by at least one plain segment. A segment is
+/// plain when it is not empty and, once percent-decoded, is not `.` or `..`
+/// and holds no `/` or `\`.
+pub fn in_library(endpoints: Endpoints, url: String) -> Bool {
+  case uri.parse(endpoints.pages), uri.parse(url) {
+    Ok(library), Ok(page) ->
+      library.scheme == page.scheme
+      && library.host == page.host
+      && library.port == page.port
+      && page.userinfo == None
+      && page.query == None
+      && page.fragment == None
+      && under(segments(library.path), segments(page.path))
+    _, _ -> False
+  }
+}
+
+fn segments(path: String) -> List(String) {
+  case string.split(path, "/") {
+    ["", ..rest] -> rest
+    other -> other
+  }
+}
+
+fn under(library: List(String), page: List(String)) -> Bool {
+  let library = list.filter(library, fn(segment) { segment != "" })
+  case list.length(page) > list.length(library) {
+    False -> False
+    True ->
+      list.take(page, list.length(library)) == library
+      && list.all(list.drop(page, list.length(library)), plain)
+  }
+}
+
+fn plain(segment: String) -> Bool {
+  case uri.percent_decode(segment) {
+    Error(Nil) -> False
+    Ok(decoded) ->
+      decoded != ""
+      && decoded != "."
+      && decoded != ".."
+      && !string.contains(decoded, "/")
+      && !string.contains(decoded, "\\")
   }
 }
 

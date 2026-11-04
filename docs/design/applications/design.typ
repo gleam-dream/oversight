@@ -241,7 +241,7 @@
         responsibility: [Resume research across restarts and publish its result through a compensating workflow.],
         interface: [A Grind worker starts or resumes a Fabric agent with search/read tools, then drives a durable Saga publication workflow.],
         interactions: [Fabric persists conversation and tool results; Grind schedules delivery; Saga owns publication effects; their PostgreSQL adapters share application resources.],
-        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. Publication keys and provider readback settle external effects.],
+        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. The read policy compares the parsed URL's scheme, host and port with the library's and its path segment by segment; a dot segment, an empty segment or a percent-encoded separator is denied. Publication keys and provider readback settle external effects.],
         failure: [Transient driver/store conflicts snooze; domain failures follow application retry policy; unresolved publication becomes Uncertain. Unexpected approvals fail explicitly. Cancellation reaches the agent/model and publication workflow without proving that every external effect was undone.],
       )
       #points(

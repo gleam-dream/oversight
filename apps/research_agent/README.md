@@ -7,7 +7,9 @@ A research agent that resumes after a crash and publishes through a compensating
 workflow. `start_research(topic)` records the request and enqueues a Grind job in one
 transaction. The job runs a Fabric agent with `search` and `read` tools against scripted
 HTTP APIs, Fabric checkpoints each turn in PostgreSQL, and a durable Saga then publishes
-the article. A second recipe exercises Fabric history-aware invocation with
+the article. The model chooses the URLs it reads, so the policy parses each one and admits
+only the library's scheme, host and port with a path of plain segments under `/pages/`;
+dot segments, encoded separators and look-alike prefixes are denied. A second recipe exercises Fabric history-aware invocation with
 transactional turn admission and idempotent outcome incorporation.
 
 Every external service runs on one loopback mist server in `src/research_agent/services.gleam`:
