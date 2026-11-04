@@ -1,7 +1,8 @@
 //// Reads a request body under a byte limit. `mist.read_body` checks only a
 //// declared Content-Length and reads a chunked body whole, so a framed body
-//// or a missing length is refused before any of it is read, and the body
-//// is streamed so that a wrong declared length still stops at the limit.
+//// or a missing or negative length is refused before any of it is read, and
+//// the body is streamed so that a wrong declared length still stops at the
+//// limit.
 
 import gleam/bit_array
 import gleam/bytes_tree
@@ -14,6 +15,8 @@ import mist
 pub type BodyError {
   /// Transfer-Encoding is present, or Content-Length is absent (411).
   LengthRequired
+  /// Content-Length is negative (400).
+  InvalidLength
   /// The declared or streamed length exceeds the limit (413).
   TooLarge
   /// The connection failed while reading (400).
@@ -29,6 +32,7 @@ pub fn read(
     request.get_header(req, "content-length") |> result.try(int.parse)
   case framed, declared {
     True, _ | False, Error(Nil) -> Error(LengthRequired)
+    False, Ok(length) if length < 0 -> Error(InvalidLength)
     False, Ok(length) if length > limit -> Error(TooLarge)
     False, Ok(_) ->
       case mist.stream(req) {
@@ -60,6 +64,7 @@ fn read_chunks(
 pub fn refusal(error: BodyError) -> Response(mist.ResponseData) {
   let #(status, text) = case error {
     LengthRequired -> #(411, "a body needs a Content-Length")
+    InvalidLength -> #(400, "the Content-Length is invalid")
     TooLarge -> #(413, "the body exceeds the limit")
     Unreadable -> #(400, "the body could not be read")
   }
