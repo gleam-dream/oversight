@@ -205,6 +205,7 @@
       #points(
         [The login asks for the resource of the MCP endpoint, and the provider issues access tokens whose audience is that endpoint. Local validation checks signature, type, issuer, audience and expiry; introspection is an alternative mode that also reaches the provider. A revoked token that local validation accepts is an explicit limit of local mode.],
         [A job owned by another user answers exactly like a missing job.],
+        [The browser receives its access token only from a POST that carries the signed same-site session cookie, answered `no-store`; a GET is refused so the token stays out of history and logs. The scripted browser verifies the provider's certificate against the provider's own root, and the client secret comes from configuration or from random bytes generated at boot, never from source.],
       )
       Source owners: `apps/secure_mcp/src/secure_mcp/auth.gleam`, `tools.gleam`, `reports.gleam`, and `web.gleam`.
     ]
