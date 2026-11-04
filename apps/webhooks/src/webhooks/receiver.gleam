@@ -69,13 +69,16 @@ pub type Settings {
     /// How far `webhook-timestamp` may be from the receiver's clock, either
     /// way. Standard Webhooks suggests five minutes.
     tolerance_seconds: Int,
-    /// How long a processed `webhook-id` is remembered. It is never less
+    /// How long a processed `webhook-id` is remembered. It is always more
     /// than twice the tolerance, the longest a captured request stays
-    /// fresh; covering the sender's retry horizon as well makes every retry
-    /// of a processed delivery a duplicate.
+    /// fresh, so the id outlives the last second its timestamp verifies.
+    /// Covering the sender's retry horizon as well makes every retry of a
+    /// processed delivery a duplicate.
     retention_seconds: Int,
     /// The largest request body the receiver reads, in bytes.
     max_body_bytes: Int,
+    /// The receiver's clock in Unix seconds.
+    clock: fn() -> Int,
   )
 }
 
@@ -84,6 +87,7 @@ pub fn default_settings() -> Settings {
     tolerance_seconds: 300,
     retention_seconds: 86_400,
     max_body_bytes: 1_048_576,
+    clock: unix_now,
   )
 }
 
@@ -130,7 +134,7 @@ pub fn start_with(settings: Settings) -> Receiver {
       ..settings,
       retention_seconds: int.max(
         settings.retention_seconds,
-        2 * settings.tolerance_seconds,
+        2 * settings.tolerance_seconds + 1,
       ),
     )
   let assert Ok(log) =
@@ -139,7 +143,9 @@ pub fn start_with(settings: Settings) -> Receiver {
     |> actor.start
   let ports = process.new_subject()
   let assert Ok(_) =
-    mist.new(fn(req) { serve(log.data, settings.max_body_bytes, req) })
+    mist.new(fn(req) {
+      serve(log.data, settings.max_body_bytes, settings.clock, req)
+    })
     |> mist.bind("127.0.0.1")
     |> mist.port(0)
     |> mist.after_start(fn(port, _, _) { process.send(ports, port) })
@@ -270,18 +276,13 @@ fn verify(
 fn serve(
   log: Subject(Message),
   max_body_bytes: Int,
+  clock: fn() -> Int,
   req: Request(mist.Connection),
 ) -> Response(mist.ResponseData) {
   case read_bounded_body(req, max_body_bytes) {
     Ok(body) -> {
       let answer =
-        process.call(log, 1000, Check(
-          req.path,
-          req.headers,
-          body,
-          unix_now(),
-          _,
-        ))
+        process.call(log, 1000, Check(req.path, req.headers, body, clock(), _))
       reply(answer.status, answer.headers, answer.body)
     }
     Error(refusal) -> {

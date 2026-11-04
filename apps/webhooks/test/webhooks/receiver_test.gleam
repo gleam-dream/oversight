@@ -73,6 +73,41 @@ pub fn same_id_at_another_endpoint_is_processed_test() {
     ]
 }
 
+@external(erlang, "webhooks_test_ffi", "set_clock")
+fn set_clock(seconds: Int) -> Nil
+
+@external(erlang, "webhooks_test_ffi", "clock")
+fn clock() -> Int
+
+/// At the shortest retention, a delivery dated as far ahead as the
+/// tolerance allows is still remembered at the last second its timestamp is
+/// fresh, so a replay at that boundary is a duplicate, and after it is
+/// stale.
+pub fn replay_at_the_retention_boundary_is_a_duplicate_test() {
+  let tolerance = 10
+  let rx =
+    receiver.start_with(
+      receiver.Settings(
+        ..receiver.default_settings(),
+        tolerance_seconds: tolerance,
+        retention_seconds: 0,
+        clock: clock,
+      ),
+    )
+  receiver.trust(rx, "/ok", secret)
+  let start = 1_700_000_000
+  let timestamp = start + tolerance
+  set_clock(start)
+  assert deliver(rx, "/ok", "evt_edge:sub_1", timestamp) == 204
+  // The last second the timestamp is fresh: 2 * tolerance after processing.
+  set_clock(timestamp + tolerance)
+  assert deliver(rx, "/ok", "evt_edge:sub_1", timestamp) == 204
+  set_clock(timestamp + tolerance + 1)
+  assert deliver(rx, "/ok", "evt_edge:sub_1", timestamp) == 401
+  assert verdicts(rx)
+    == [Processed(204), Duplicate, Rejected("stale timestamp")]
+}
+
 pub fn timestamp_outside_the_tolerance_is_rejected_test() {
   let rx = receiver.start()
   receiver.trust(rx, "/ok", secret)

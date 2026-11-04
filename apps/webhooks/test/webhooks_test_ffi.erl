@@ -1,5 +1,10 @@
 -module(webhooks_test_ffi).
--export([raw_status/2]).
+-export([raw_status/2, set_clock/1, clock/0]).
+
+%% A settable clock in Unix seconds, shared by every process, for a
+%% receiver whose freshness and retention a test drives by hand.
+set_clock(Seconds) -> persistent_term:put({?MODULE, clock}, Seconds), nil.
+clock() -> persistent_term:get({?MODULE, clock}).
 
 %% Sends raw bytes to a loopback HTTP server and returns the response
 %% status, or 0 when none arrives. For framing an HTTP client will not send.
