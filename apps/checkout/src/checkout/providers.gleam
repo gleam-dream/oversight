@@ -108,13 +108,13 @@ pub fn shipment_for(p: Providers, key: String) -> Option(ShipmentRecord) {
   |> option.from_result
 }
 
-/// Every shipment request that arrives is reported here by idempotency key.
 /// The vault's token for a card, minted without HTTP, for tests that drive
 /// the saga directly. A customer uses `POST /tokens` instead.
 pub fn tokenise(p: Providers, card: String) -> String {
   actor.call(p.state, 1000, Tokenise(card, _))
 }
 
+/// Every shipment request that arrives is reported here by idempotency key.
 pub fn watch_shipments(p: Providers, to: Subject(String)) -> Nil {
   actor.send(p.state, Watch(to))
 }

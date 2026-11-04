@@ -26,6 +26,18 @@ quantity answers 409. Order ids are scoped to the customer: another customer pla
 under the same id creates a separate order of their own and never touches or learns
 about the first.
 
+`POST /orders` without `?mode=durable` answers only after the saga's outcome is
+recorded. A saga that cannot start is recorded as rejected. A saga still running after
+the request's budget (60 seconds) is cancelled, and the outcome it settles on is
+recorded before the reply, so the order never stays pending behind a local placement.
+
+At boot the app creates its tables and checks the shape of tables that already exist.
+A database holding tables from an earlier version, without the catalog price or the
+customer-scoped keys, is refused with a message naming each outdated table and is
+left unchanged. There is no upgrade path, because the old orders have no customer or
+price to backfill. Drop the `stock`, `reservations`, `orders` and `receipts_sent`
+tables, or use a fresh database.
+
 `CHECKOUT_SECRET_KEY_BASE` sets Wisp's signing secret (at least 64 characters). When
 it is unset, the app generates a random secret at boot, so signed values do not
 survive a restart.

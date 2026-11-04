@@ -1134,3 +1134,138 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
   assert eventually(fn() { db.receipt_sent(pool, "bob", "shared-1") }, 100)
   assert db.receipt_sent(pool, "alice", "shared-1")
 }
+
+/// A local checkout whose saga cannot start records the rejection it
+/// reports, so a retry of the order reads the same answer instead of an
+/// order left pending.
+pub fn local_checkout_that_cannot_start_is_recorded_rejected_test() {
+  use application <- with_app(fn(c) { c })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "nostart-sku", 2)
+  let broken =
+    orders.Services(
+      ..services,
+      saga_config: execution.config()
+        |> execution.with_max_concurrency(0),
+    )
+  let placed =
+    order(application, "nostart-1", "nostart-sku", providers.card_ok, "1 St")
+  let assert Ok(orders.Started(report)) = orders.place_local(broken, placed)
+  assert report.status == domain.Rejected
+  assert db.order_status(services.pool, "alice", "nostart-1")
+    == Some(#(domain.Rejected, report.detail))
+  let assert Ok(orders.Existing(existing)) =
+    orders.place_local(services, placed)
+  assert existing.status == domain.Rejected
+  assert providers.snapshot(application.providers).charge_requests == 0
+  assert stock(application, "nostart-sku") == 2
+}
+
+/// A local checkout that outlasts the request's budget is cancelled and
+/// settled before the request answers: its rolled-back outcome is recorded,
+/// nothing keeps running unobserved, and a retry neither re-reserves nor
+/// re-charges.
+pub fn local_checkout_over_budget_is_settled_and_recorded_test() {
+  use application <- with_app(fn(c) {
+    app.Config(..c, shipping_deadline: duration.seconds(5))
+  })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "budget-sku", 2)
+  let hurried =
+    orders.Services(..services, local_budget: duration.milliseconds(500))
+  let placed =
+    order(
+      application,
+      "budget-1",
+      "budget-sku",
+      providers.card_ok,
+      providers.address_hold,
+    )
+  let assert Ok(orders.Started(report)) = orders.place_local(hurried, placed)
+  assert report.status != domain.Pending
+  let assert Some(#(status, _)) =
+    db.order_status(services.pool, "alice", "budget-1")
+  assert status == report.status
+  assert status == domain.Rejected
+  // Every effect was reversed before the answer.
+  let assert Some(charge) =
+    providers.charge_for(application.providers, "pay-" <> key("budget-1"))
+  assert charge.status == providers.Voided
+  assert stock(application, "budget-sku") == 2
+  assert db.reservation(services.pool, placed) == Ok(db.Released)
+
+  // A retry returns the recorded order and runs nothing again.
+  let before = providers.snapshot(application.providers)
+  let assert Ok(orders.Existing(existing)) =
+    orders.place_local(services, placed)
+  assert existing.status == domain.Rejected
+  let after = providers.snapshot(application.providers)
+  assert after.charge_requests == before.charge_requests
+  assert after.shipment_requests == before.shipment_requests
+  assert stock(application, "budget-sku") == 2
+}
+
+/// The schema this app created before orders, reservations and receipts
+/// were keyed by customer and stock carried a price.
+const legacy_schema = [
+  "CREATE TABLE stock (
+     sku text PRIMARY KEY,
+     available integer NOT NULL CHECK (available >= 0))",
+  "CREATE TABLE reservations (
+     order_id text PRIMARY KEY,
+     sku text NOT NULL,
+     quantity integer NOT NULL,
+     released boolean NOT NULL DEFAULT false)",
+  "CREATE TABLE orders (
+     order_id text PRIMARY KEY,
+     status text NOT NULL,
+     detail text NOT NULL DEFAULT '',
+     updated_at timestamptz NOT NULL DEFAULT now())",
+  "CREATE TABLE receipts_sent (
+     order_id text PRIMARY KEY,
+     message_id text NOT NULL)",
+]
+
+fn connect(url: String) -> pog.Connection {
+  let name = process.new_name("checkout_test_pool")
+  let assert Ok(config) = pog.url_config(name, url)
+  let assert Ok(started) = pog.start(pog.pool_size(config, 1))
+  started.data
+}
+
+/// A database holding the earlier schema is refused at boot with a message
+/// naming what is out of date, instead of starting on tables whose keys and
+/// columns the app's queries do not match. It is left unchanged.
+pub fn an_outdated_schema_is_refused_at_boot_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+    as "set DATABASE_URL: ../scripts/with-postgres.sh gleam test"
+  let database = "checkout_legacy_" <> int.to_string(int.random(1_000_000_000))
+  let assert Ok(_) =
+    pog.query("CREATE DATABASE " <> database) |> pog.execute(connect(url))
+  // The disposable cluster's database is the URL's last segment.
+  let assert True = string.ends_with(url, "/app")
+  let legacy_url = string.drop_end(url, 3) <> database
+  let legacy = connect(legacy_url)
+  list.each(legacy_schema, fn(sql) {
+    let assert Ok(_) = pog.query(sql) |> pog.execute(legacy)
+    Nil
+  })
+
+  let assert Error(error) = db.migrate(legacy)
+  let message = db.describe_migrate_error(error)
+  assert string.contains(message, "stock")
+  assert string.contains(message, "unit_price_cents")
+  assert string.contains(message, "orders")
+  assert string.contains(message, "customer_id")
+  let assert Error(boot) = app.start(app.default_config(legacy_url))
+  assert string.contains(boot, "customer_id")
+  // Nothing was added to the old tables.
+  let assert Ok(columns) =
+    pog.query(
+      "SELECT count(*) FROM information_schema.columns
+       WHERE table_name = 'orders' AND column_name = 'customer_id'",
+    )
+    |> pog.returning(decode.at([0], decode.int))
+    |> pog.execute(legacy)
+  assert columns.rows == [0]
+}

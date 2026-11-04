@@ -145,6 +145,7 @@ pub fn start(config: Config) -> Result(App, String) {
       workflow: checkout,
       persistence: workflow.persistence(checkout, saga_config),
       saga_config:,
+      local_budget: duration.seconds(60),
       receipt_worker: orders.receipt_worker(),
     )
   let checkout_worker =
@@ -181,20 +182,31 @@ pub fn start(config: Config) -> Result(App, String) {
     grind.start(grind_config, jobs_name)
     |> result.map_error(grind.describe_start_error),
   )
-  use _ <- result.try(db.migrate(pool) |> result.map_error(string.inspect))
-  use _ <- result.try(
+  let app =
+    App(
+      services:,
+      providers:,
+      checkout_worker:,
+      observability_pid: observability.pid,
+      http:,
+      customers: config.customers,
+    )
+  let migrated = {
+    use _ <- result.try(
+      db.migrate(pool) |> result.map_error(db.describe_migrate_error),
+    )
     saga_postgres.migrate(storage)
-    |> result.map_error(saga_postgres.describe_migrate_error),
-  )
-
-  Ok(App(
-    services:,
-    providers:,
-    checkout_worker:,
-    observability_pid: observability.pid,
-    http:,
-    customers: config.customers,
-  ))
+    |> result.map_error(saga_postgres.describe_migrate_error)
+  }
+  case migrated {
+    Ok(_) -> Ok(app)
+    // A refused schema stops what already started, so a failed boot leaves
+    // no workers polling the database.
+    Error(error) -> {
+      stop(app)
+      Error(error)
+    }
+  }
 }
 
 /// Stops everything `start` started. Grind drains its queues first and

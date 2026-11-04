@@ -46,9 +46,119 @@ const schema = [
      PRIMARY KEY (customer_id, order_id))",
 ]
 
-pub fn migrate(conn: pog.Connection) -> Result(Nil, pog.QueryError) {
-  list.try_each(schema, fn(sql) {
-    pog.query(sql) |> pog.execute(conn) |> result.replace(Nil)
+/// The columns and primary key each table must have. `CREATE TABLE IF NOT
+/// EXISTS` leaves an existing table as it is, so `migrate` checks this shape
+/// afterwards.
+const expected_shape = [
+  #("stock", ["sku", "unit_price_cents", "available"], ["sku"]),
+  #("reservations", ["customer_id", "order_id", "sku", "quantity", "released"], [
+    "customer_id",
+    "order_id",
+  ]),
+  #(
+    "orders",
+    [
+      "customer_id", "order_id", "sku", "quantity", "amount_cents", "status",
+      "detail", "updated_at",
+    ],
+    ["customer_id", "order_id"],
+  ),
+  #("receipts_sent", ["customer_id", "order_id", "message_id"], [
+    "customer_id",
+    "order_id",
+  ]),
+]
+
+pub type MigrateError {
+  MigrateQueryFailed(pog.QueryError)
+  /// The database holds tables from an earlier version of this app: a
+  /// table lacks columns or is keyed differently. Each entry names the
+  /// table and what is wrong with it.
+  OutdatedSchema(problems: List(#(String, String)))
+}
+
+pub fn describe_migrate_error(error: MigrateError) -> String {
+  case error {
+    MigrateQueryFailed(error) ->
+      "checkout schema migration failed: " <> string.inspect(error)
+    OutdatedSchema(problems) ->
+      "the checkout tables predate this version ("
+      <> string.join(list.map(problems, fn(p) { p.0 <> ": " <> p.1 }), "; ")
+      <> "). The demo has no upgrade path: stored orders lack the customer and"
+      <> " catalog price the app needs. Drop the tables stock, reservations,"
+      <> " orders and receipts_sent, or use a fresh database, and start again."
+  }
+}
+
+/// Creates the app's tables, then refuses a database whose existing tables
+/// have an earlier shape. Such a database is left unchanged: old orders
+/// carry no customer or price to backfill, so rewriting their keys could
+/// only invent owners and amounts.
+pub fn migrate(conn: pog.Connection) -> Result(Nil, MigrateError) {
+  use _ <- result.try(
+    list.try_each(schema, fn(sql) {
+      pog.query(sql) |> pog.execute(conn) |> result.replace(Nil)
+    })
+    |> result.map_error(MigrateQueryFailed),
+  )
+  use problems <- result.try(
+    list.try_map(expected_shape, fn(table) {
+      let #(name, columns, key) = table
+      table_problem(conn, name, columns, key)
+    })
+    |> result.map_error(MigrateQueryFailed),
+  )
+  case option.values(problems) {
+    [] -> Ok(Nil)
+    problems -> Error(OutdatedSchema(problems))
+  }
+}
+
+fn table_problem(
+  conn: pog.Connection,
+  table: String,
+  columns: List(String),
+  key: List(String),
+) -> Result(Option(#(String, String)), pog.QueryError) {
+  use present <- result.try(
+    pog.query(
+      "SELECT column_name::text FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = $1",
+    )
+    |> pog.parameter(pog.text(table))
+    |> pog.returning(decode.at([0], decode.string))
+    |> pog.execute(conn),
+  )
+  use primary <- result.try(
+    pog.query(
+      "SELECT a.attname::text FROM pg_index i
+       JOIN pg_attribute a
+         ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey::int2[])
+       WHERE i.indrelid = to_regclass($1) AND i.indisprimary
+       ORDER BY array_position(i.indkey::int2[], a.attnum)",
+    )
+    |> pog.parameter(pog.text(table))
+    |> pog.returning(decode.at([0], decode.string))
+    |> pog.execute(conn),
+  )
+  let missing = list.filter(columns, fn(c) { !list.contains(present.rows, c) })
+  let missing = case missing {
+    [] -> []
+    _ -> ["missing columns " <> string.join(missing, ", ")]
+  }
+  let keyed = case primary.rows == key {
+    True -> []
+    False -> [
+      "primary key ("
+      <> string.join(primary.rows, ", ")
+      <> "), expected ("
+      <> string.join(key, ", ")
+      <> ")",
+    ]
+  }
+  Ok(case list.append(missing, keyed) {
+    [] -> option.None
+    problems -> option.Some(#(table, string.join(problems, ", ")))
   })
 }
 

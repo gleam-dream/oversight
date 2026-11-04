@@ -53,6 +53,8 @@ pub type Services {
     workflow: Checkout,
     persistence: Persistence,
     saga_config: execution.Config,
+    /// How long `POST /orders` waits for the local saga before cancelling it.
+    local_budget: duration.Duration,
     receipt_worker: Worker(ReceiptRequest, String, Nil),
   )
 }
@@ -147,6 +149,16 @@ pub fn place_local(
   }
 }
 
+/// Runs the saga and records its outcome before the request answers, so the
+/// order never stays `pending` behind a local placement. A saga that
+/// cannot start is recorded `rejected`. One that outlasts `local_budget` is
+/// cancelled and awaited until it settles, and that settled outcome is
+/// recorded: the run never keeps reserving or charging after the request
+/// returns, which would otherwise happen unobserved (the request process
+/// owns the run, so its exit cancels the run with nobody to record it).
+/// Re-running the saga on a retry instead would not be safe: a released
+/// reservation and a voided charge under the same order key read as
+/// already done.
 fn run_local(s: Services, order: Order) -> Report {
   let config =
     execution.with_correlation(
@@ -156,17 +168,35 @@ fn run_local(s: Services, order: Order) -> Report {
   case execution.start(s.workflow, order, config) {
     Error(error) -> {
       log_internal(order.order_id, "saga start failed", error)
-      Report(domain.Rejected, "checkout could not start", Error(Nil), [], 0)
+      let detail = "checkout could not start"
+      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
+      Report(domain.Rejected, detail, Error(Nil), [], 0)
     }
     Ok(run) ->
-      case execution.await(run, duration.seconds(60)) {
+      case execution.await(run, s.local_budget) {
         Ok(outcome) -> finalize(s, order, outcome)
         Error(error) -> {
           log_internal(order.order_id, "saga await ended", error)
-          Report(domain.Pending, "checkout still running", Error(Nil), [], 0)
+          execution.cancel(run)
+          case execution.await(run, settle_budget()) {
+            Ok(outcome) -> finalize(s, order, outcome)
+            Error(error) -> {
+              log_internal(order.order_id, "saga did not settle", error)
+              let detail = "checkout outcome unknown"
+              let _ =
+                db.set_status(s.pool, order, domain.NeedsReconciliation, detail)
+              Report(domain.NeedsReconciliation, detail, Error(Nil), [], 0)
+            }
+          }
         }
       }
   }
+}
+
+/// How long a cancelled local run may take to settle: its settle window,
+/// then undo and compensation, each under its own timeout.
+fn settle_budget() -> duration.Duration {
+  duration.seconds(60)
 }
 
 /// Records the pending order and enqueues its durable checkout job in one
