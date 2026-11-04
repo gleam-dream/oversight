@@ -393,12 +393,19 @@ fn describe_outcome(
 }
 
 fn start_api(context: web.Context) -> Int {
+  let secret_key_base = case web.secret_key_base() {
+    web.FromEnvironment(value) -> value
+    web.Generated(value) -> {
+      io.println(
+        web.secret_key_base_variable
+        <> " is not set; generated a secret key base for this run",
+      )
+      value
+    }
+  }
   let ports = process.new_subject()
   let assert Ok(_) =
-    wisp_mist.handler(
-      web.handle(_, context),
-      "development-secret-key-base-0123456789",
-    )
+    wisp_mist.handler(web.handle(_, context), secret_key_base)
     |> mist.new
     |> mist.bind("127.0.0.1")
     |> mist.port(0)

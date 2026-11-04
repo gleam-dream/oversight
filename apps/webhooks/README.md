@@ -31,6 +31,7 @@ From this directory, inside the Oversight shell:
 
 Each tenant's key comes from `WEBHOOKS_API_KEY_ACME`, `WEBHOOKS_API_KEY_GLOBEX` or
 `WEBHOOKS_API_KEY_OPS`; an unset variable gets a random key for the run, which is not printed.
+Wisp's secret key base comes from `WEBHOOKS_SECRET_KEY_BASE`, or is random for the run.
 
 `gleam run` starts the API and a scripted receiver on loopback, registers endpoints over HTTP
 (including rejected SSRF attempts and a DNS-rebinding host), publishes two events, waits for

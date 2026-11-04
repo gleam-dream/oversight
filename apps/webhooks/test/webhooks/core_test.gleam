@@ -1,5 +1,6 @@
 //// Pure tests: no database, no network.
 
+import envoy
 import gleam/bit_array
 import gleam/erlang/process
 import gleam/list
@@ -22,6 +23,7 @@ import webhooks/subscription.{
   PublicTier, UnsupportedScheme,
 }
 import webhooks/telemetry
+import webhooks/web
 
 fn reply(status: Int, retry_after) {
   Ok(Reply(status, retry_after, BodyRead(0)))
@@ -249,4 +251,18 @@ pub fn every_outcome_is_listed_test() {
       let assert Ok(Nil) = fields.check(metadata, sample)
     },
   )
+}
+
+/// The API's wisp secret comes from the environment or is random per run;
+/// the source holds no literal.
+pub fn secret_key_base_is_never_a_literal_test() {
+  let configured = string.repeat("k", 64)
+  envoy.set(web.secret_key_base_variable, configured)
+  assert web.secret_key_base() == web.FromEnvironment(configured)
+  envoy.set(web.secret_key_base_variable, "")
+  let assert web.Generated(first) = web.secret_key_base()
+  envoy.unset(web.secret_key_base_variable)
+  let assert web.Generated(second) = web.secret_key_base()
+  assert string.length(first) == 64
+  assert first != second
 }

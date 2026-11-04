@@ -3,6 +3,7 @@
 //// Every route authenticates the caller with `Authorization: Bearer <key>`
 //// and acts for the tenant that key belongs to; see `webhooks/tenant`.
 
+import envoy
 import gleam/bit_array
 import gleam/crypto
 import gleam/dynamic/decode
@@ -145,6 +146,23 @@ fn show_subscription(ctx: Context, tenant: Tenant, id: String) -> Response {
       ])
       |> json.to_string
       |> wisp.json_response(200)
+  }
+}
+
+/// Wisp's `secret_key_base`, which signs cookies and other signed messages.
+pub type SecretKeyBase {
+  FromEnvironment(String)
+  /// The variable was unset or empty; random for this run.
+  Generated(String)
+}
+
+pub const secret_key_base_variable = "WEBHOOKS_SECRET_KEY_BASE"
+
+/// `WEBHOOKS_SECRET_KEY_BASE`, or 64 random characters when it is unset.
+pub fn secret_key_base() -> SecretKeyBase {
+  case envoy.get(secret_key_base_variable) {
+    Ok(value) if value != "" -> FromEnvironment(value)
+    _ -> Generated(wisp.random_string(64))
   }
 }
 
