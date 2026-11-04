@@ -152,17 +152,19 @@
     #subsection(title: "Webhook delivery")[
       #answers(title: "Webhook delivery policy",
         responsibility: [Fan application events out to active tenant subscriptions as signed durable deliveries.],
-        interface: [Subscription/event operations and a contextual Grind worker with a stable delivery identity.],
+        interface: [Subscription/event operations authenticated by a per-tenant API key, and a contextual Grind worker with a stable delivery identity.],
         interactions: [Application rows and enqueue share a transaction. HTTP Gun applies per-tenant destination views; Grind executes explicit retry/snooze/discard policy.],
-        invariants: [The same delivery id signs and identifies every retry. Registration and delivery use destination policy; delivery re-reads subscription configuration so disablement and key rotation are effective.],
+        invariants: [The caller's API key, never the request, names the tenant; registration, publishing and reads act for that tenant only. The same delivery id signs and identifies every retry and is the receiver's idempotency key. Registration and delivery use destination policy; delivery re-reads subscription configuration so disablement and key rotation are effective.],
         failure: [Successful status can settle delivery despite an oversized unused body. Rate limits snooze within the cap; gone/unsafe destinations disable subscriptions; retryable transport/server failures consume bounded attempts.],
       )
       #points(
         [Destination policy is per tenant tier on one HTTP client. A public tenant reaches public addresses only and every DNS answer is checked; the internal tier reaches allowlisted loopback host entries. Registration applies the same policy value, so a refused address is rejected before any delivery.],
         [A response body beyond the read limit keeps its success status, so delivery settles once. A rate-limit response snoozes for the advised interval up to a configured cap and then consumes an attempt.],
         [Worker tests replay recorded refusals and body-limit failures from cassettes without a receiver, and a request that skips the tenant's client view is refused before sending.],
+        [The scripted receiver refuses a signature whose timestamp is outside a tolerance window and acknowledges an already processed delivery id without running the endpoint again, so a retry or a captured copy is processed once. It bounds every request body before reading, whatever its framing.],
+        [Event ids follow a fixed grammar and event bodies have a size limit, both enforced before anything is stored.],
       )
-      Source owners: `apps/webhooks/src/webhooks/attempt.gleam`, `delivery.gleam`, `subscription.gleam`, `egress.gleam`, and `web.gleam`.
+      Source owners: `apps/webhooks/src/webhooks/attempt.gleam`, `delivery.gleam`, `subscription.gleam`, `egress.gleam`, `tenant.gleam`, `receiver.gleam`, and `web.gleam`.
     ]
       #subsection(title: "Document extraction")[
       #answers(title: "Typed document extraction",
