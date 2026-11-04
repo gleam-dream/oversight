@@ -7,8 +7,12 @@ import correio/delivery
 import correio/message
 import correio/passwordless
 import correio/passwordless/memory
+import correio/passwordless/store
 import correio/testing
 import correio_mailbox
+import envoy
+import gleam/bit_array
+import gleam/crypto
 import gleam/dict.{type Dict}
 import gleam/http/request
 import gleam/io
@@ -70,6 +74,83 @@ pub type ConfirmationError {
 pub type Confirmation {
   Retry(pending: Pending, reason: ConfirmationError)
   SignedIn(Session)
+}
+
+/// Names the environment variable that holds the challenge key: 32 bytes,
+/// hex or base64 encoded. Instances that share a challenge store must share
+/// this key, or none of them can verify the others' challenges.
+pub const challenge_key_variable = "EMAIL_PORTAL_CHALLENGE_KEY"
+
+/// The HMAC key Correio uses to derive stored verifiers. A store reader who
+/// also knows the key can test every short code offline, so it is secret,
+/// random and never a literal in source. Build one with `challenge_key`.
+pub opaque type ChallengeKey {
+  ChallengeKey(bytes: BitArray, source: KeySource)
+}
+
+pub type KeySource {
+  /// Read from `challenge_key_variable`.
+  Configured
+  /// Generated at boot: challenges issued before a restart do not verify.
+  Generated
+}
+
+pub type KeyError {
+  KeyNotEncoded
+  KeyWrongLength(bytes: Int)
+  KeyAllZero
+}
+
+const key_bytes = 32
+
+/// The configured key, or 32 fresh random bytes when none is configured.
+/// Pass `envoy.get(challenge_key_variable)`. A configured value must decode
+/// to exactly 32 bytes and is refused when every byte is zero.
+pub fn challenge_key(
+  configured: Result(String, Nil),
+) -> Result(ChallengeKey, KeyError) {
+  case configured {
+    Ok(text) -> {
+      use bytes <- result.try(decode_key(string.trim(text)))
+      use bytes <- result.try(check_key(bytes))
+      Ok(ChallengeKey(bytes, Configured))
+    }
+    Error(Nil) -> {
+      use bytes <- result.try(check_key(crypto.strong_random_bytes(key_bytes)))
+      Ok(ChallengeKey(bytes, Generated))
+    }
+  }
+}
+
+/// Hex first: a 64-character hex key is also valid base64 of another length,
+/// while padded base64 of 32 bytes is never valid hex.
+fn decode_key(text: String) -> Result(BitArray, KeyError) {
+  bit_array.base16_decode(text)
+  |> result.lazy_or(fn() { bit_array.base64_decode(text) })
+  |> result.replace_error(KeyNotEncoded)
+}
+
+fn check_key(bytes: BitArray) -> Result(BitArray, KeyError) {
+  case bit_array.byte_size(bytes) {
+    size if size != key_bytes -> Error(KeyWrongLength(size))
+    _ ->
+      case bytes == <<0:size(key_bytes)-unit(8)>> {
+        True -> Error(KeyAllZero)
+        False -> Ok(bytes)
+      }
+  }
+}
+
+pub fn key_source(key: ChallengeKey) -> KeySource {
+  key.source
+}
+
+/// The passwordless service for this portal's sign-in challenges.
+pub fn service(
+  store: store.Store(AccountId),
+  key: ChallengeKey,
+) -> Result(passwordless.Service(AccountId), passwordless.ConfigError) {
+  passwordless.new(store, "portal", "login", key.bytes)
 }
 
 /// The caller threads this state sequentially. A real application supplies a
@@ -219,13 +300,22 @@ pub fn session_count(portal: Portal) -> Int {
   dict.size(portal.sessions)
 }
 
-/// Local executable evidence. The fixed key and domain are test fixtures only.
-/// No answers, messages, evidence, account data, or session IDs are printed.
+/// Local executable evidence. The domain is a test fixture. No key, answers,
+/// messages, evidence, account data, or session IDs are printed.
 pub fn main() {
+  let assert Ok(key) = challenge_key(envoy.get(challenge_key_variable))
+  case key_source(key) {
+    Configured -> Nil
+    Generated ->
+      io.println_error(
+        challenge_key_variable
+        <> " is unset: using a random challenge key generated at boot. "
+        <> "Challenges issued before a restart, or by another instance, will not verify.",
+      )
+  }
   let assert Ok(runtime) = memory.start(10)
   let assert Ok(capture) = capture.start(10)
-  let assert Ok(service) =
-    passwordless.new(memory.store(runtime), "portal", "login", <<0:256>>)
+  let assert Ok(service) = service(memory.store(runtime), key)
   let assert Ok(from) = address.parse("login@example.com")
   let assert Ok(email) = address.parse("alice@example.com")
   let account = Account(AccountId(42), email, True)
