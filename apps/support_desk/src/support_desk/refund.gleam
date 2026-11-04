@@ -120,11 +120,14 @@ pub fn check(
 ) -> Result(RefundRequest, RefundError) {
   let RefundOrder(customer:, request:) = order
   let id = request.order_id
+  // Another customer's order is refused in the words used for a missing
+  // one, so the refusal the model reads does not reveal that it exists.
+  let no_such_order = "there is no order " <> id
   use found <- result.try(
     shop.get_order(shop, id)
     |> result.map_error(fn(error) {
       case error {
-        NoSuchOrder(_) -> RefundRefused("there is no order " <> id)
+        NoSuchOrder(_) -> RefundRefused(no_such_order)
         OrdersUnavailable(detail) ->
           RefundRefused("the order could not be checked: " <> detail)
       }
@@ -135,7 +138,7 @@ pub fn check(
   let amount = request.amount_cents
   let refused = fn(reason) { Error(RefundRefused(reason)) }
   case found.customer == customer, found.status {
-    False, _ -> refused("order " <> id <> " is not this customer's")
+    False, _ -> refused(no_such_order)
     True, status if status != "delivered" ->
       refused("order " <> id <> " is " <> status)
     True, _ ->

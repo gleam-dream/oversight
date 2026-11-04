@@ -503,7 +503,9 @@ pub fn an_injected_refund_of_another_customers_order_is_refused_test() {
   let resolved = finish(handle)
   assert resolved.outcome == domain.RefundFailed
   assert resolved.refunded_cents == 0
-  assert string.contains(refund_failure(handle), "is not this customer's")
+  // Another customer's order reads exactly like a missing one.
+  assert string.contains(refund_failure(handle), "there is no order A-200")
+  assert !string.contains(refund_failure(handle), "customer")
   assert services.calls_matching(app.services, "POST") == []
   assert ledger.entries(app.ledger) == []
   let assert Ok(Nil) = app.stop(app)
@@ -549,7 +551,12 @@ pub fn the_refund_workflow_checks_order_owner_state_and_remaining_amount_test() 
     assert string.contains(string.inspect(cause), reason)
   }
   let grace = "grace@example.com"
-  refused(refund_of("ada@example.com", "A-200", 1000), "is not this customer's")
+  // Another customer's order is refused exactly as a missing one is, so
+  // the refusal does not reveal that the order exists.
+  refused(
+    refund_of("ada@example.com", "A-200", 1000),
+    "there is no order A-200",
+  )
   refused(
     refund_of("donald@example.com", "A-600", 900),
     "order A-600 is refunded",
