@@ -4,6 +4,7 @@
 //// `Failure` inside the provider errors.
 
 import gleam/int
+import gleam/string
 import http_gun/error
 
 /// What a customer sends to `POST /orders`: what to buy, where to ship it,
@@ -40,6 +41,24 @@ pub type Order {
   )
 }
 
+/// The key that names one customer's order inside the app and towards its
+/// providers: saga executions, grind jobs, provider idempotency keys and
+/// telemetry. Order ids are scoped to the customer, so two customers may
+/// use the same id; the length prefix keeps the pair unambiguous whatever
+/// either part contains.
+pub fn order_key(customer_id: String, order_id: String) -> String {
+  int.to_string(string.byte_size(customer_id))
+  <> ":"
+  <> customer_id
+  <> ":"
+  <> order_id
+}
+
+/// The order's `order_key`.
+pub fn key(order: Order) -> String {
+  order_key(order.customer_id, order.order_id)
+}
+
 /// Prices a customer's request at the catalog's unit price.
 pub fn price(
   request: CheckoutRequest,
@@ -58,7 +77,7 @@ pub fn price(
   )
 }
 
-/// Stock is held under the order id.
+/// Stock is held under the customer's order.
 pub type Reserved {
   Reserved(order: Order)
 }

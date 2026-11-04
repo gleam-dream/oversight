@@ -128,9 +128,10 @@ fn demo(url: String) -> Nil {
   show(customer, shopper, base, "ord-durable")
   process.sleep(300)
 
-  // The order id is the shopper's idempotency key: repeating the placement
-  // returns the order without charging again, and another customer can
-  // neither read the order nor take its id.
+  // The order id is the shopper's own idempotency key: repeating the
+  // placement returns the order without charging again. Another customer
+  // using the same id places a separate order of their own, so the answer
+  // says nothing about the shopper's order, which they cannot read.
   let _ =
     narrate(
       customer,
@@ -156,17 +157,20 @@ fn demo(url: String) -> Nil {
       "receipt for "
       <> id
       <> " sent: "
-      <> string.inspect(db.receipt_sent(pool, id)),
+      <> string.inspect(db.receipt_sent(pool, "shopper", id)),
     )
   })
 
   io.println("\nTelemetry for ord-happy (saga + http_gun + grind):")
-  telemetry.trace(application.services.collector, telemetry.order("ord-happy"))
+  telemetry.trace(
+    application.services.collector,
+    telemetry.order(domain.order_key("shopper", "ord-happy")),
+  )
   |> list.each(fn(e) { io.println("  " <> telemetry.render(e)) })
   io.println("\nTelemetry for ord-durable:")
   telemetry.trace(
     application.services.collector,
-    telemetry.order("ord-durable"),
+    telemetry.order(domain.order_key("shopper", "ord-durable")),
   )
   |> list.each(fn(e) { io.println("  " <> telemetry.render(e)) })
   let stray = telemetry.unattributed(application.services.collector)

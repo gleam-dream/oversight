@@ -38,7 +38,7 @@ fn attempt_budget() -> Duration {
 }
 
 pub fn execution_id(order: Order) -> String {
-  "checkout:" <> order.order_id
+  "checkout:" <> domain.key(order)
 }
 
 /// `redelivery` is the snooze after a lost runner or a storage failure;
@@ -83,7 +83,7 @@ fn drive(
     Error(error) -> Error(error)
     Ok(run) ->
       run
-      |> durable.with_correlation(telemetry.order(order.order_id))
+      |> durable.with_correlation(telemetry.order(domain.key(order)))
       |> drive_until_cancelled(context, budget(context))
   }
   case driven {

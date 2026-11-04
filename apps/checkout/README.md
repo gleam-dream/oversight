@@ -20,9 +20,11 @@ stable `error` code; internal detail goes to the log.
 Every route needs `Authorization: Bearer <token>` for a customer in the app's
 configured token table, and answers 401 otherwise. An order belongs to the customer
 who placed it, and another customer's order reads as 404. The `order_id` is the
-customer's idempotency key. Repeating a placement returns the existing order with
-200 and does not run the saga again. Reusing the id for a different SKU or quantity,
-or as another customer, answers 409.
+customer's own idempotency key. Repeating a placement returns the existing order
+with 200 and does not run the saga again. Reusing the id for a different SKU or
+quantity answers 409. Order ids are scoped to the customer: another customer placing
+under the same id creates a separate order of their own and never touches or learns
+about the first.
 
 `CHECKOUT_SECRET_KEY_BASE` sets Wisp's signing secret (at least 64 characters). When
 it is unset, the app generates a random secret at boot, so signed values do not

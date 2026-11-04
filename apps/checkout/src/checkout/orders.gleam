@@ -33,7 +33,12 @@ pub const receipts_queue = "receipts"
 pub const checkouts_queue = "checkouts"
 
 pub type ReceiptRequest {
-  ReceiptRequest(order_id: String, email: String, amount_cents: Int)
+  ReceiptRequest(
+    customer_id: String,
+    order_id: String,
+    email: String,
+    amount_cents: Int,
+  )
 }
 
 pub type Services {
@@ -71,8 +76,9 @@ pub type Report {
 pub type PlaceError {
   /// The SKU is not in the catalog, so it has no price.
   UnknownSku(sku: String)
-  /// The order id is already used, by another customer or by this customer
-  /// for a different SKU or quantity. The existing order is untouched.
+  /// This customer already used the order id for a different SKU or
+  /// quantity. The existing order is untouched. Another customer's orders
+  /// never conflict: order ids are scoped to the customer.
   OrderIdConflict
   /// The catalog or order store could not be read or written; the detail is
   /// in the log.
@@ -106,10 +112,11 @@ pub fn price(
   }
 }
 
-/// Claims the order id for this order. The id is the customer's
-/// idempotency key: the first placement creates the order, the same
-/// customer repeating the same SKU and quantity gets the existing order,
-/// and anything else is a conflict. Only `Started` may run the saga.
+/// Claims the customer's order id for this order. The id is the customer's
+/// own idempotency key: the first placement creates the order, repeating
+/// the same SKU and quantity gets the existing order, and a different SKU
+/// or quantity is a conflict. Another customer's use of the same id is a
+/// separate order and is never consulted. Only `Started` may run the saga.
 fn claim(
   conn: pog.Connection,
   order: Order,
@@ -117,9 +124,7 @@ fn claim(
   case db.insert_order(conn, order) {
     Ok(db.Inserted) -> Ok(Started(Nil))
     Ok(db.AlreadyExists(existing))
-      if existing.customer_id == order.customer_id
-      && existing.sku == order.sku
-      && existing.quantity == order.quantity
+      if existing.sku == order.sku && existing.quantity == order.quantity
     -> Ok(Existing(existing))
     Ok(db.AlreadyExists(_)) | Ok(db.Contended) -> Error(OrderIdConflict)
     Error(error) -> {
@@ -144,7 +149,10 @@ pub fn place_local(
 
 fn run_local(s: Services, order: Order) -> Report {
   let config =
-    execution.with_correlation(s.saga_config, telemetry.order(order.order_id))
+    execution.with_correlation(
+      s.saga_config,
+      telemetry.order(domain.key(order)),
+    )
   case execution.start(s.workflow, order, config) {
     Error(error) -> {
       log_internal(order.order_id, "saga start failed", error)
@@ -172,8 +180,8 @@ pub fn place_durable(
 ) -> Result(Placement(Int), PlaceError) {
   let checkout =
     job.new(checkout_worker, order)
-    |> job.with_id("checkout:" <> order.order_id)
-    |> job.with_correlation(telemetry.order(order.order_id))
+    |> job.with_id("checkout:" <> domain.key(order))
+    |> job.with_correlation(telemetry.order(domain.key(order)))
   pog.transaction(s.pool, fn(tx) {
     use claimed <- result.try(claim(tx, order))
     case claimed {
@@ -235,7 +243,7 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
     execution.Failed(cause, settlement) -> {
       let #(detail, error) = describe_cause(cause)
       log_cause(order.order_id, error)
-      let _ = db.set_status(s.pool, order.order_id, domain.Rejected, detail)
+      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
       Report(
         domain.Rejected,
         detail,
@@ -250,13 +258,7 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
         saga.address_to_string(step)
         <> " held: "
         <> domain.describe_error(evidence)
-      let _ =
-        db.set_status(
-          s.pool,
-          order.order_id,
-          domain.NeedsReconciliation,
-          detail,
-        )
+      let _ = db.set_status(s.pool, order, domain.NeedsReconciliation, detail)
       Report(
         domain.NeedsReconciliation,
         detail,
@@ -270,7 +272,7 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
         execution.CancelRequested -> "cancelled: requested"
         execution.OwnerExited -> "cancelled: owner exited"
       }
-      let _ = db.set_status(s.pool, order.order_id, domain.Rejected, detail)
+      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
       Report(
         domain.Rejected,
         detail,
@@ -321,7 +323,7 @@ pub fn confirm_with_receipt(
 ) -> Result(Int, String) {
   pog.transaction(s.pool, fn(tx) {
     use _ <- result.try(
-      db.set_status(tx, order.order_id, domain.Confirmed, detail)
+      db.set_status(tx, order, domain.Confirmed, detail)
       |> result.map_error(string.inspect),
     )
     grind.submit_in(s.jobs, tx, receipt_job(s, order))
@@ -338,33 +340,40 @@ pub fn receipt_job(
 ) -> job.Job(ReceiptRequest, String, Nil) {
   job.new(
     s.receipt_worker,
-    ReceiptRequest(order.order_id, order.email, order.amount_cents),
+    ReceiptRequest(
+      order.customer_id,
+      order.order_id,
+      order.email,
+      order.amount_cents,
+    ),
   )
-  |> job.with_id("receipt:" <> order.order_id)
-  |> job.with_correlation(telemetry.order(order.order_id))
+  |> job.with_id("receipt:" <> domain.key(order))
+  |> job.with_correlation(telemetry.order(domain.key(order)))
 }
 
 pub fn receipt_codec() -> codecs.JsonCodec(ReceiptRequest) {
   codecs.JsonCodec(
-    "receipt-1",
+    "receipt-2",
     fn(r: ReceiptRequest) {
       json.object([
+        #("customer_id", json.string(r.customer_id)),
         #("order_id", json.string(r.order_id)),
         #("email", json.string(r.email)),
         #("amount_cents", json.int(r.amount_cents)),
       ])
     },
     {
+      use customer_id <- decode.field("customer_id", decode.string)
       use order_id <- decode.field("order_id", decode.string)
       use email <- decode.field("email", decode.string)
       use amount <- decode.field("amount_cents", decode.int)
-      decode.success(ReceiptRequest(order_id, email, amount))
+      decode.success(ReceiptRequest(customer_id, order_id, email, amount))
     },
   )
 }
 
 /// "Sends" a receipt by recording it in the app's own table, deduplicated
-/// by order id.
+/// by the customer's order.
 pub fn receipt_worker() -> Worker(ReceiptRequest, String, Nil) {
   let string_codec = codecs.JsonCodec("text-1", json.string, decode.string)
   worker.responding(
@@ -373,9 +382,13 @@ pub fn receipt_worker() -> Worker(ReceiptRequest, String, Nil) {
     output: codecs.to_grind(string_codec),
     handle: fn(context, receipt: ReceiptRequest) {
       let message_id =
-        "msg-" <> receipt.order_id <> "-" <> int.to_string(receipt.amount_cents)
+        "msg-"
+        <> domain.order_key(receipt.customer_id, receipt.order_id)
+        <> "-"
+        <> int.to_string(receipt.amount_cents)
       db.record_receipt(
         worker.connection(context),
+        receipt.customer_id,
         receipt.order_id,
         message_id,
       )

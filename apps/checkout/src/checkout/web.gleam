@@ -10,10 +10,11 @@
 ////   order is a 404.
 ////
 //// Every route needs `Authorization: Bearer <token>` for a configured
-//// customer (401 otherwise). The `order_id` is the customer's idempotency
-//// key: repeating a placement returns the existing order (200) without
-//// running the saga again, and reusing the id for a different SKU or
-//// quantity, or as another customer, is a 409.
+//// customer (401 otherwise). The `order_id` is the customer's own
+//// idempotency key: repeating a placement returns the existing order (200)
+//// without running the saga again, and reusing the id for a different SKU
+//// or quantity is a 409. Order ids are scoped to the customer, so another
+//// customer placing under the same id creates their own order.
 
 import checkout/app.{type App}
 import checkout/codecs

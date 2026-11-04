@@ -41,9 +41,9 @@ type Message {
   Trace(order: Option(Correlation), reply: Subject(List(Entry)))
 }
 
-/// The correlation of an order.
-pub fn order(order_id: String) -> Correlation {
-  correlation.from_key(order_id)
+/// The correlation of an order, from its `domain.order_key`.
+pub fn order(key: String) -> Correlation {
+  correlation.from_key(key)
 }
 
 /// Starts the collector and attaches one handler per event descriptor.
