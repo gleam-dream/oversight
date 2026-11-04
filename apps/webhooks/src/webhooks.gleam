@@ -175,6 +175,14 @@ fn run(url: String) -> Nil {
       }
     })
     |> dict.from_list
+  // The receiver verifies each endpoint's deliveries with that endpoint's
+  // secret, as a tenant's own receiver would.
+  list.each(ops_subs, fn(entry) {
+    case entry.1 {
+      Ok(#(_, secret)) -> receiver.trust(rx, entry.0, secret)
+      Error(Nil) -> Nil
+    }
+  })
 
   io.println("\n-- publishing events")
   let ops_jobs =
@@ -242,13 +250,20 @@ fn run(url: String) -> Nil {
 
   io.println("\n-- what the receiver saw")
   let seen = receiver.received(rx)
-  let verified = list.count(seen, fn(r) { verify(r, secrets) })
+  let count = fn(seen, keep) {
+    list.count(seen, fn(r: receiver.Received) { keep(r.verdict) })
+    |> int.to_string
+  }
   io.println(
     "  "
     <> int.to_string(list.length(seen))
-    <> " requests, "
-    <> int.to_string(verified)
-    <> " with a valid signature; idempotency keys: "
+    <> " requests: "
+    <> count(seen, is_processed)
+    <> " verified and processed, "
+    <> count(seen, fn(v) { v == receiver.Duplicate })
+    <> " duplicate, "
+    <> count(seen, fn(v) { v != receiver.Duplicate && !is_processed(v) })
+    <> " rejected; idempotency keys: "
     <> {
       seen
       |> list.filter_map(fn(r) { list.key_find(r.headers, signing.id_header) })
@@ -258,6 +273,24 @@ fn run(url: String) -> Nil {
     }
     <> " distinct",
   )
+  // Replaying a captured delivery byte for byte: the receiver acknowledges
+  // it as a duplicate and does not run the endpoint again.
+  case list.find(seen, fn(r) { r.path == "/ok" }) {
+    Ok(captured) -> {
+      let status = replay(rx, captured)
+      let verdict = case list.last(receiver.received(rx)) {
+        Ok(r) -> string.inspect(r.verdict)
+        Error(Nil) -> "?"
+      }
+      io.println(
+        "  replayed the /ok delivery: "
+        <> int.to_string(status)
+        <> ", "
+        <> verdict,
+      )
+    }
+    Error(Nil) -> Nil
+  }
 
   io.println("\n-- telemetry trace for the /flaky delivery")
   process.sleep(100)
@@ -293,25 +326,47 @@ fn label_is(delivery_id: String, secrets, path: String) -> Bool {
   }
 }
 
-fn verify(r: receiver.Received, secrets) -> Bool {
-  let header = fn(name) { list.key_find(r.headers, name) }
-  case
-    header(signing.id_header),
-    header(signing.timestamp_header),
-    header(signing.signature_header)
-  {
-    Ok(id), Ok(ts), Ok(signature) ->
-      case string.split(id, ":"), int.parse(ts) {
-        [_, sub], Ok(ts) ->
-          case dict.get(secrets, sub) {
-            Ok(#(_, secret)) ->
-              signing.verify(secret, id, ts, r.body, signature)
-            Error(Nil) -> False
-          }
-        _, _ -> False
-      }
-    _, _, _ -> False
+fn is_processed(verdict: receiver.Verdict) -> Bool {
+  case verdict {
+    receiver.Processed(_) -> True
+    _ -> False
   }
+}
+
+/// Sends a recorded request to the receiver again, unchanged.
+fn replay(rx: receiver.Receiver, captured: receiver.Received) -> Int {
+  let port = receiver.port(rx)
+  let assert Ok(client) =
+    config.default()
+    |> config.with_destination(
+      destination.loopback_only()
+      |> destination.only_hosts(["127.0.0.1:" <> int.to_string(port)]),
+    )
+    |> config.without_observations
+    |> http_gun.start
+  let req =
+    list.fold(
+      captured.headers,
+      request.new()
+        |> request.set_scheme(http.Http)
+        |> request.set_host("127.0.0.1")
+        |> request.set_port(port)
+        |> request.set_method(http.Post)
+        |> request.set_path(captured.path)
+        |> request.set_body(captured.body),
+      fn(req, header) {
+        case header.0 {
+          "host" | "content-length" | "connection" -> req
+          name -> request.set_header(req, name, header.1)
+        }
+      },
+    )
+  let status = case http_gun.send(client, req) {
+    Ok(buffered) -> buffered.response.status
+    Error(_) -> 0
+  }
+  http_gun.stop(client)
+  status
 }
 
 fn describe_outcome(

@@ -2,13 +2,17 @@ import envoy
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
+import gleam/http/request
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import grind
 import grind/testing
+import http_gun
+import http_gun/config
 import http_gun/destination
 import pog
 import webhooks/attempt
@@ -180,6 +184,44 @@ pub fn deliveries(body: String) -> List(#(String, Int)) {
       ),
     )
   deliveries
+}
+
+/// POSTs `body` to a loopback server on `port` and returns the status.
+pub fn post(
+  port: Int,
+  path: String,
+  headers: List(#(String, String)),
+  body: BitArray,
+) -> Int {
+  let assert Ok(client) =
+    config.default()
+    |> config.with_destination(
+      destination.loopback_only()
+      |> destination.only_hosts(["127.0.0.1:" <> int.to_string(port)]),
+    )
+    |> config.without_observations
+    |> http_gun.start
+  let req =
+    list.fold(
+      headers,
+      request.new()
+        |> request.set_method(http.Post)
+        |> request.set_scheme(http.Http)
+        |> request.set_host("127.0.0.1")
+        |> request.set_port(port)
+        |> request.set_path(path)
+        |> request.set_body(body),
+      // A recorded request's framing headers are the client's to set.
+      fn(req, header) {
+        case header.0 {
+          "host" | "content-length" | "connection" -> req
+          name -> request.set_header(req, name, header.1)
+        }
+      },
+    )
+  let assert Ok(sent) = http_gun.send(client, req)
+  http_gun.stop(client)
+  sent.response.status
 }
 
 /// grind's observations go through its forwarder and need a moment to land.

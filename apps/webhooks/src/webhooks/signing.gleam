@@ -1,6 +1,8 @@
 //// Standard-Webhooks-style signing: HMAC-SHA256 over `id.timestamp.body`.
 //// The `webhook-id` header doubles as the receiver's idempotency key: it is
-//// the delivery id, stable across every retry of one delivery.
+//// the delivery id, stable across every retry of one delivery. A receiver
+//// checks a delivery with `verify_within` and then deduplicates on
+//// `webhook-id`; `webhooks/receiver` does both.
 
 import gleam/bit_array
 import gleam/crypto
@@ -58,4 +60,34 @@ pub fn verify(
   |> list.any(fn(candidate) {
     crypto.secure_compare(bit_array.from_string(candidate), expected)
   })
+}
+
+pub type Rejection {
+  /// `webhook-timestamp` is further than the tolerance from now.
+  StaleTimestamp
+  InvalidSignature
+}
+
+/// The check a receiver makes: `verify`, and `timestamp` within
+/// `tolerance` seconds of `now` (Unix seconds) either way. The MAC alone
+/// does not bound replay; the tolerance does, and a receiver that also
+/// remembers processed `webhook-id`s for longer than twice the tolerance
+/// refuses every replay of a captured delivery.
+pub fn verify_within(
+  secret: String,
+  id: String,
+  timestamp: Int,
+  body: BitArray,
+  header: String,
+  now now: Int,
+  tolerance tolerance: Int,
+) -> Result(Nil, Rejection) {
+  case int.absolute_value(now - timestamp) > tolerance {
+    True -> Error(StaleTimestamp)
+    False ->
+      case verify(secret, id, timestamp, body, header) {
+        True -> Ok(Nil)
+        False -> Error(InvalidSignature)
+      }
+  }
 }
