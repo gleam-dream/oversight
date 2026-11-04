@@ -25,9 +25,10 @@ pub fn common_path_signed_delivery_test() {
   let rx = receiver.start()
   let assert Ok(#(sub_id, secret)) =
     support.subscribe(svc, "ops", receiver.url(rx, "/ok"))
+  receiver.trust(rx, "/ok", secret)
   let raw =
-    "{\"tenant\":\"ops\",\"type\":\"order.created\",\"id\":\"evt_1\",\"data\":{\"order\":42}}"
-  let assert [#(delivery_id, job_id)] = support.publish(svc, raw)
+    "{\"type\":\"order.created\",\"id\":\"evt_1\",\"data\":{\"order\":42}}"
+  let assert [#(delivery_id, job_id)] = support.publish(svc, "ops", raw)
   assert delivery_id == "evt_1:" <> sub_id
 
   assert support.drain(svc) == Ok(1)
@@ -44,9 +45,18 @@ pub fn common_path_signed_delivery_test() {
   assert id == delivery_id
   assert request.body == <<raw:utf8>>
   assert signing.verify(secret, id, ts, request.body, signature)
+  assert request.verdict == receiver.Processed(204)
+
+  // The delivery id is the receiver's idempotency key: a captured copy of
+  // the delivery, replayed byte for byte, is acknowledged without running
+  // the endpoint again.
+  assert support.post(receiver.port(rx), "/ok", request.headers, request.body)
+    == 204
+  let assert [_, replayed] = receiver.received(rx)
+  assert replayed.verdict == receiver.Duplicate
 
   // Publishing the same event id again converges on the same job.
-  assert support.publish(svc, raw) == [#(delivery_id, job_id)]
+  assert support.publish(svc, "ops", raw) == [#(delivery_id, job_id)]
   assert support.drain(svc) == Ok(0)
 
   // The worker itself, error codec included, re-binds its own
@@ -81,7 +91,8 @@ pub fn receiver_down_retries_then_exhausts_test() {
   let assert [#(delivery_id, job_id)] =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_down\",\"data\":null}",
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_down\",\"data\":null}",
     )
   assert support.drain(svc) == Ok(3)
   // The typed http_gun failure survives the job's error codec.
@@ -108,12 +119,14 @@ pub fn always_throttled_receiver_stops_test() {
     )
   use svc <- support.with_service(service.Options(..options, plan:))
   let rx = receiver.start()
-  let assert Ok(_) =
+  let assert Ok(#(_, secret)) =
     support.subscribe(svc, "ops", receiver.url(rx, "/throttled"))
+  receiver.trust(rx, "/throttled", secret)
   let assert [#(delivery_id, job_id)] =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_429\",\"data\":null}",
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_429\",\"data\":null}",
     )
   // 2 snoozes, then 3 attempts.
   assert support.drain(svc) == Ok(5)
@@ -123,7 +136,9 @@ pub fn always_throttled_receiver_stops_test() {
       Some(job.BudgetExhausted),
       "worker returned an application error",
     ))
-  assert list.length(receiver.received(rx)) == 5
+  // Every attempt was verified and ran the endpoint; none was a duplicate.
+  assert list.map(receiver.received(rx), fn(r) { r.verdict })
+    == list.repeat(receiver.Processed(429), 5)
   let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
   assert row.attempts == 5
 }
@@ -161,17 +176,21 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
       ),
     )
   // The same loopback URL is fine for the internal tenant.
-  let assert Ok(_) = support.subscribe(svc, "ops", receiver.url(rx, "/ok"))
+  let assert Ok(#(_, secret)) =
+    support.subscribe(svc, "ops", receiver.url(rx, "/ok"))
+  receiver.trust(rx, "/ok", secret)
 
   let acme =
     support.publish(
       svc,
-      "{\"tenant\":\"acme\",\"type\":\"invoice.paid\",\"id\":\"evt_a\",\"data\":{}}",
+      "acme",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_a\",\"data\":{}}",
     )
   let ops =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"invoice.paid\",\"id\":\"evt_o\",\"data\":{}}",
+      "ops",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_o\",\"data\":{}}",
     )
   assert list.length(acme) == 2
   assert support.drain(svc) == Ok(3)
@@ -195,7 +214,8 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
   )) = store.get_subscription(svc.db, rebind_id)
   assert support.publish(
       svc,
-      "{\"tenant\":\"acme\",\"type\":\"invoice.paid\",\"id\":\"evt_b\",\"data\":{}}",
+      "acme",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_b\",\"data\":{}}",
     )
     == []
 }

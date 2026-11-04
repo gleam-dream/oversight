@@ -160,6 +160,8 @@ pub fn record_attempt(
 pub type DeliveryRow {
   DeliveryRow(
     id: String,
+    /// The tenant of the delivery's subscription.
+    tenant: String,
     job_id: Int,
     attempts: Int,
     last_status: Option(Int),
@@ -172,17 +174,19 @@ pub fn get_delivery(
   id: String,
 ) -> Result(DeliveryRow, StoreError) {
   pog.query(
-    "SELECT id, job_id, attempts, last_status, last_note FROM webhook_deliveries WHERE id = $1",
+    "SELECT d.id, s.tenant, d.job_id, d.attempts, d.last_status, d.last_note FROM webhook_deliveries d JOIN webhook_subscriptions s ON s.id = d.subscription_id WHERE d.id = $1",
   )
   |> pog.parameter(pog.text(id))
   |> pog.returning({
     use id <- decode.field(0, decode.string)
-    use job_id <- decode.field(1, decode.int)
-    use attempts <- decode.field(2, decode.int)
-    use last_status <- decode.field(3, decode.optional(decode.int))
-    use last_note <- decode.field(4, decode.optional(decode.string))
+    use tenant <- decode.field(1, decode.string)
+    use job_id <- decode.field(2, decode.int)
+    use attempts <- decode.field(3, decode.int)
+    use last_status <- decode.field(4, decode.optional(decode.int))
+    use last_note <- decode.field(5, decode.optional(decode.string))
     decode.success(DeliveryRow(
       id:,
+      tenant:,
       job_id:,
       attempts:,
       last_status:,
