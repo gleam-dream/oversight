@@ -441,6 +441,8 @@ const max_body_bytes = 65_536
 type BodyError {
   /// Chunked framing, or no `content-length`: 411.
   LengthRequired
+  /// A negative `content-length`: 400.
+  InvalidLength
   /// A declared or actual length over `max_body_bytes`: 413.
   TooLarge
   /// The socket failed or the bytes are not the expected JSON: 400.
@@ -456,8 +458,8 @@ fn read_json(
 }
 
 /// `mist.read_body` checks only `content-length` and buffers a chunked body
-/// whole, so the limit is enforced here: framed or undeclared bodies are
-/// refused before any of them is read, and the stream stops one byte past
+/// whole, so the limit is enforced here: framed, undeclared or negative
+/// lengths are refused before any of the body is read, and the stream stops one byte past
 /// the limit if the declared length is wrong.
 fn read_bounded_body(
   req: Request(mist.Connection),
@@ -468,6 +470,7 @@ fn read_bounded_body(
     request.get_header(req, "content-length") |> result.try(int.parse)
   case framed, declared {
     True, _ | False, Error(Nil) -> Error(LengthRequired)
+    False, Ok(length) if length < 0 -> Error(InvalidLength)
     False, Ok(length) if length > limit -> Error(TooLarge)
     False, Ok(_) ->
       case mist.stream(req) {
@@ -498,7 +501,7 @@ fn refuse_body(error: BodyError) -> Response(mist.ResponseData) {
   case error {
     LengthRequired -> reply(411, json.object([]))
     TooLarge -> reply(413, json.object([]))
-    Unreadable -> reply(400, json.object([]))
+    InvalidLength | Unreadable -> reply(400, json.object([]))
   }
   |> response.set_header("connection", "close")
 }

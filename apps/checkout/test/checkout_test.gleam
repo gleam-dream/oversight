@@ -677,6 +677,28 @@ pub fn provider_refuses_unbounded_request_bodies_test() {
   assert providers.snapshot(application.providers).charge_requests == 0
 }
 
+/// A negative `content-length` is malformed framing: the scripted payments
+/// server refuses it with 400 before reading any body, even when a valid
+/// charge follows the header.
+pub fn provider_refuses_a_negative_content_length_test() {
+  use application <- with_app(fn(c) { c })
+  let port = provider_port(providers.payments_url(application.providers))
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  let charge =
+    json.to_string(
+      json.object([
+        #("payment_token", json.string(token)),
+        #("amount_cents", json.int(100)),
+      ]),
+    )
+  let negative =
+    "POST /charges HTTP/1.1\r\nhost: 127.0.0.1\r\nidempotency-key: neg-1\r\n"
+    <> "content-type: application/json\r\ncontent-length: -1\r\n\r\n"
+    <> charge
+  assert raw_http(port, bit_array.from_string(negative), 5000) == Ok(400)
+  assert providers.snapshot(application.providers).charge_requests == 0
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
