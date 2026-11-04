@@ -19,11 +19,16 @@
 ////   /flaky 503 twice, then 204
 ////   /big   200 with a 64 KiB body
 ////
+//// Before any of that, the body is read with a hard bound whatever its
+//// framing: 411 for a chunked body or one without a Content-Length, 413
+//// for a declared length over `max_body_bytes`.
+////
 //// One actor checks, runs and marks each request, so two copies of a
 //// delivery arriving together still run the endpoint once. A receiver with
 //// durable effects records the processed id in the same transaction as the
 //// effect.
 
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
@@ -66,11 +71,17 @@ pub type Settings {
     /// fresh; covering the sender's retry horizon as well makes every retry
     /// of a processed delivery a duplicate.
     retention_seconds: Int,
+    /// The largest request body the receiver reads, in bytes.
+    max_body_bytes: Int,
   )
 }
 
 pub fn default_settings() -> Settings {
-  Settings(tolerance_seconds: 300, retention_seconds: 86_400)
+  Settings(
+    tolerance_seconds: 300,
+    retention_seconds: 86_400,
+    max_body_bytes: 1_048_576,
+  )
 }
 
 pub opaque type Receiver {
@@ -87,6 +98,7 @@ pub opaque type Message {
   )
   All(reply: Subject(List(Received)))
   Trust(path: String, secret: String)
+  Log(Received)
 }
 
 type Answer {
@@ -123,7 +135,7 @@ pub fn start_with(settings: Settings) -> Receiver {
     |> actor.start
   let ports = process.new_subject()
   let assert Ok(_) =
-    mist.new(fn(req) { serve(log.data, req) })
+    mist.new(fn(req) { serve(log.data, settings.max_body_bytes, req) })
     |> mist.bind("127.0.0.1")
     |> mist.port(0)
     |> mist.after_start(fn(port, _, _) { process.send(ports, port) })
@@ -163,6 +175,8 @@ fn handle_message(
       process.send(reply, list.reverse(state.seen))
       actor.continue(state)
     }
+    Log(received) ->
+      actor.continue(State(..state, seen: [received, ..state.seen]))
     Check(path, headers, body, now, reply) -> {
       let state =
         State(
@@ -251,15 +265,82 @@ fn verify(
 
 fn serve(
   log: Subject(Message),
+  max_body_bytes: Int,
   req: Request(mist.Connection),
 ) -> Response(mist.ResponseData) {
-  let body = case mist.read_body(req, 1_048_576) {
-    Ok(read) -> read.body
-    Error(_) -> <<>>
+  case read_bounded_body(req, max_body_bytes) {
+    Ok(body) -> {
+      let answer =
+        process.call(log, 1000, Check(
+          req.path,
+          req.headers,
+          body,
+          unix_now(),
+          _,
+        ))
+      reply(answer.status, answer.headers, answer.body)
+    }
+    Error(refusal) -> {
+      let #(status, reason) = case refusal {
+        LengthRequired -> #(411, "length required")
+        TooLarge -> #(413, "body too large")
+        Unreadable -> #(400, "body unreadable")
+      }
+      process.send(
+        log,
+        Log(Received(req.path, req.headers, <<>>, Rejected(reason))),
+      )
+      // The unread body is still on the connection; do not reuse it.
+      reply(status, [#("connection", "close")], <<>>)
+    }
   }
-  let answer =
-    process.call(log, 1000, Check(req.path, req.headers, body, unix_now(), _))
-  reply(answer.status, answer.headers, answer.body)
+}
+
+type BodyRefusal {
+  LengthRequired
+  TooLarge
+  Unreadable
+}
+
+/// The request body, at most `limit` bytes. `mist.read_body` checks only a
+/// declared Content-Length, so a chunked body (no length) would be read
+/// whole. This refuses any `transfer-encoding` and a missing length (411)
+/// and a declared length over the limit (413) before reading anything, then
+/// streams at most `limit` bytes. The bytes returned are exactly those
+/// received, which is what the signature covers.
+fn read_bounded_body(
+  req: Request(mist.Connection),
+  limit: Int,
+) -> Result(BitArray, BodyRefusal) {
+  let framed = result.is_ok(request.get_header(req, "transfer-encoding"))
+  let declared =
+    request.get_header(req, "content-length") |> result.try(int.parse)
+  case framed, declared {
+    True, _ | False, Error(Nil) -> Error(LengthRequired)
+    False, Ok(length) if length > limit || length < 0 -> Error(TooLarge)
+    False, Ok(_) ->
+      case mist.stream(req) {
+        Error(_) -> Error(Unreadable)
+        Ok(consume) -> read_chunks(consume, limit, <<>>)
+      }
+  }
+}
+
+fn read_chunks(
+  consume: fn(Int) -> Result(mist.Chunk, mist.ReadError),
+  limit: Int,
+  body: BitArray,
+) -> Result(BitArray, BodyRefusal) {
+  let remaining = limit - bit_array.byte_size(body)
+  case consume(int.min(65_536, remaining + 1)) {
+    Error(_) -> Error(Unreadable)
+    Ok(mist.Done) -> Ok(body)
+    Ok(mist.Chunk(chunk, next)) ->
+      case bit_array.byte_size(chunk) > remaining {
+        True -> Error(TooLarge)
+        False -> read_chunks(next, limit, bit_array.append(body, chunk))
+      }
+  }
 }
 
 fn script(path: String, n: Int) -> Answer {

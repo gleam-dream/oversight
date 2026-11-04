@@ -3,6 +3,7 @@
 //// `webhook-id` as its idempotency key. No database.
 
 import gleam/list
+import gleam/string
 import webhooks/delivery
 import webhooks/receiver.{Duplicate, Processed, Rejected}
 import webhooks/signing
@@ -99,4 +100,75 @@ pub fn unsigned_or_unknown_requests_are_rejected_test() {
       Rejected("missing signature headers"),
       Rejected("unknown endpoint"),
     ]
+}
+
+@external(erlang, "webhooks_test_ffi", "raw_status")
+fn raw_status(port: Int, request: BitArray) -> Int
+
+fn head(path: String, headers: List(String)) -> String {
+  "POST "
+  <> path
+  <> " HTTP/1.1\r\nhost: 127.0.0.1\r\n"
+  <> string.join(list.map(headers, fn(h) { h <> "\r\n" }), "")
+  <> "\r\n"
+}
+
+/// The body limit holds however the body is framed: a chunked body, or one
+/// without a length, is refused before any of it is read, and a declared
+/// length over the limit is refused without reading the body.
+pub fn body_limit_holds_for_every_framing_test() {
+  let rx =
+    receiver.start_with(
+      receiver.Settings(..receiver.default_settings(), max_body_bytes: 1024),
+    )
+  receiver.trust(rx, "/ok", secret)
+  let port = receiver.port(rx)
+  // Chunked, 4 KiB in one chunk: over the limit with no Content-Length.
+  let chunk = string.repeat("x", 4096)
+  assert raw_status(port, <<
+      head("/ok", ["transfer-encoding: chunked"]):utf8,
+      "1000\r\n":utf8,
+      chunk:utf8,
+      "\r\n0\r\n\r\n":utf8,
+    >>)
+    == 411
+  // Chunked, even when small.
+  assert raw_status(port, <<
+      head("/ok", ["transfer-encoding: chunked"]):utf8,
+      "2\r\n{}\r\n0\r\n\r\n":utf8,
+    >>)
+    == 411
+  // No framing at all.
+  assert raw_status(port, <<head("/ok", []):utf8>>) == 411
+  // A declared length over the limit; the body is never sent.
+  assert raw_status(port, <<head("/ok", ["content-length: 1025"]):utf8>>) == 413
+  assert verdicts(rx)
+    == [
+      Rejected("length required"),
+      Rejected("length required"),
+      Rejected("length required"),
+      Rejected("body too large"),
+    ]
+}
+
+/// A body read in several chunks is verified over exactly the bytes sent.
+pub fn large_body_is_verified_over_its_raw_bytes_test() {
+  let rx = receiver.start()
+  receiver.trust(rx, "/ok", secret)
+  let body = <<
+    "{\"data\":\"":utf8,
+    string.repeat("é", 100_000):utf8,
+    "\"}":utf8,
+  >>
+  let now = delivery.unix_seconds()
+  assert support.post(
+      receiver.port(rx),
+      "/ok",
+      signing.headers(secret, "evt_big:sub_1", now, body),
+      body,
+    )
+    == 204
+  let assert [received] = receiver.received(rx)
+  assert received.body == body
+  assert received.verdict == Processed(204)
 }
