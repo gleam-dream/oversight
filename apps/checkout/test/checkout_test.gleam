@@ -525,3 +525,41 @@ pub fn receipt_job_commits_with_the_order_test() {
   assert message_id == "msg-receipt-1-2500"
   assert db.receipt_sent(pool, "receipt-1")
 }
+
+// --- scripted provider request bodies ------------------------------------------
+
+@external(erlang, "checkout_test_ffi", "raw_http")
+fn raw_http(port: Int, request: BitArray, timeout_ms: Int) -> Result(Int, Nil)
+
+fn provider_port(url: String) -> Int {
+  let assert [_, port] = string.split(gateway.authority(url), ":")
+  let assert Ok(port) = int.parse(port)
+  port
+}
+
+/// The scripted payments server reads at most 64 KiB of a request body. A
+/// chunked body is refused before any of it is read (mist would otherwise
+/// buffer it whole), as is a missing or over-limit `content-length`.
+pub fn provider_refuses_unbounded_request_bodies_test() {
+  use application <- with_app(fn(c) { c })
+  let port = provider_port(providers.payments_url(application.providers))
+  let head = "POST /charges HTTP/1.1\r\nhost: 127.0.0.1\r\n"
+  let big = string.repeat("x", 70_000)
+  let chunked =
+    head
+    <> "content-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n"
+    <> int.to_base16(string.length(big))
+    <> "\r\n"
+    <> big
+    <> "\r\n0\r\n\r\n"
+  assert raw_http(port, bit_array.from_string(chunked), 5000) == Ok(411)
+  let unframed = head <> "content-type: application/json\r\n\r\n"
+  assert raw_http(port, bit_array.from_string(unframed), 5000) == Ok(411)
+  let oversized =
+    head
+    <> "content-type: application/json\r\ncontent-length: 70000\r\n\r\n"
+    <> big
+  assert raw_http(port, bit_array.from_string(oversized), 5000) == Ok(413)
+  // Nothing reached the provider's state.
+  assert providers.snapshot(application.providers).charge_requests == 0
+}

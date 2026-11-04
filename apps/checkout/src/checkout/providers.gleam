@@ -8,6 +8,7 @@
 //// Shipping (`POST /shipments`, `POST /shipments/by-key/:key/cancel`,
 //// `GET /shipments/by-key/:key`) dedupes the same way.
 
+import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
@@ -330,7 +331,7 @@ fn payments(
         decode.success(#(card, amount))
       }
       case read_json(req, decoder) {
-        Error(Nil) -> reply(400, json.object([]))
+        Error(error) -> refuse_body(error)
         Ok(#(card, amount)) ->
           case actor.call(state, 1000, RequestCharge(key, card, amount, _)) {
             Decline(reason) ->
@@ -369,7 +370,7 @@ fn shipping(
     Post, ["shipments"] -> {
       let decoder = decode.field("address", decode.string, decode.success)
       case read_json(req, decoder) {
-        Error(Nil) -> reply(400, json.object([]))
+        Error(error) -> refuse_body(error)
         Ok(address) -> {
           let record = actor.call(state, 1000, RequestShipment(key, address, _))
           case address {
@@ -395,14 +396,72 @@ fn shipping(
   }
 }
 
+/// The most a scripted provider reads of one request body.
+const max_body_bytes = 65_536
+
+type BodyError {
+  /// Chunked framing, or no `content-length`: 411.
+  LengthRequired
+  /// A declared or actual length over `max_body_bytes`: 413.
+  TooLarge
+  /// The socket failed or the bytes are not the expected JSON: 400.
+  Unreadable
+}
+
 fn read_json(
   req: Request(mist.Connection),
   decoder: decode.Decoder(a),
-) -> Result(a, Nil) {
-  use req <- result.try(
-    mist.read_body(req, 65_536) |> result.replace_error(Nil),
-  )
-  json.parse_bits(req.body, decoder) |> result.replace_error(Nil)
+) -> Result(a, BodyError) {
+  use body <- result.try(read_bounded_body(req, max_body_bytes))
+  json.parse_bits(body, decoder) |> result.replace_error(Unreadable)
+}
+
+/// `mist.read_body` checks only `content-length` and buffers a chunked body
+/// whole, so the limit is enforced here: framed or undeclared bodies are
+/// refused before any of them is read, and the stream stops one byte past
+/// the limit if the declared length is wrong.
+fn read_bounded_body(
+  req: Request(mist.Connection),
+  limit: Int,
+) -> Result(BitArray, BodyError) {
+  let framed = result.is_ok(request.get_header(req, "transfer-encoding"))
+  let declared =
+    request.get_header(req, "content-length") |> result.try(int.parse)
+  case framed, declared {
+    True, _ | False, Error(Nil) -> Error(LengthRequired)
+    False, Ok(length) if length > limit -> Error(TooLarge)
+    False, Ok(_) ->
+      case mist.stream(req) {
+        Error(_) -> Error(Unreadable)
+        Ok(consume) -> read_chunks(consume, limit, <<>>)
+      }
+  }
+}
+
+fn read_chunks(
+  consume: fn(Int) -> Result(mist.Chunk, mist.ReadError),
+  limit: Int,
+  body: BitArray,
+) -> Result(BitArray, BodyError) {
+  let remaining = limit - bit_array.byte_size(body)
+  case consume(int.min(65_536, remaining + 1)) {
+    Error(_) -> Error(Unreadable)
+    Ok(mist.Done) -> Ok(body)
+    Ok(mist.Chunk(chunk, next)) ->
+      case bit_array.byte_size(chunk) > remaining {
+        True -> Error(TooLarge)
+        False -> read_chunks(next, limit, bit_array.append(body, chunk))
+      }
+  }
+}
+
+fn refuse_body(error: BodyError) -> Response(mist.ResponseData) {
+  case error {
+    LengthRequired -> reply(411, json.object([]))
+    TooLarge -> reply(413, json.object([]))
+    Unreadable -> reply(400, json.object([]))
+  }
+  |> response.set_header("connection", "close")
 }
 
 fn reply(status: Int, body: json.Json) -> Response(mist.ResponseData) {
