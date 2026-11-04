@@ -45,6 +45,10 @@ pub type Session {
     /// `open_ticket` starts the ticket's run with it, so fabric, the model
     /// calls, the tools' HTTP calls and the refund saga join it too.
     ticket: Correlation,
+    /// The customer the ticket was opened for, as the application
+    /// authenticated them; never read from the conversation. The tools
+    /// answer and refund only this customer's orders.
+    customer: String,
     /// Refunds of at least this many cents need a human approver; 0 means
     /// every refund does.
     approval_from_cents: Int,
@@ -144,7 +148,9 @@ fn build(
       domain.issue_refund(),
       refund.workflow(settings.shop, settings.ledger),
       refund.config(),
-      input: fn(_, _, request) { request },
+      input: fn(session: Session, _, request) {
+        refund.RefundOrder(customer: session.customer, request:)
+      },
       explain: refund.explain,
       rollback_within: duration.seconds(5),
       executions:,
@@ -152,11 +158,8 @@ fn build(
   let tools = [
     tool.bind(
       domain.lookup_order(),
-      fn(_, call, query: OrderQuery) {
-        shop.get_order(
-          shop.correlated(settings.shop, call.correlation),
-          query.order_id,
-        )
+      fn(session, call, query: OrderQuery) {
+        customer_order(settings.shop, session, call, query.order_id)
       },
       explain_lookup,
     )
@@ -164,12 +167,11 @@ fn build(
       |> tool.with_replay(3),
     tool.bind(
       domain.check_refund_eligibility(),
-      fn(_, call, query: OrderQuery) {
-        shop.get_order(
-          shop.correlated(settings.shop, call.correlation),
-          query.order_id,
-        )
-        |> result.map(eligibility)
+      fn(session, call, query: OrderQuery) {
+        customer_order(settings.shop, session, call, query.order_id)
+        |> result.map(fn(order) {
+          eligibility(order, ledger.refunded(settings.ledger, order.order_id))
+        })
       },
       explain_lookup,
     )
@@ -188,8 +190,12 @@ fn build(
 }
 
 /// A new ticket's session.
-pub fn session(ticket: Correlation, approval_from_cents: Int) -> Session {
-  Session(ticket, approval_from_cents)
+pub fn session(
+  ticket: Correlation,
+  customer customer: String,
+  approval_from_cents approval_from_cents: Int,
+) -> Session {
+  Session(ticket:, customer:, approval_from_cents:)
 }
 
 /// What `open_ticket` did with the message.
@@ -327,7 +333,10 @@ fn check(
   })
 }
 
-/// Refunds at or above the session's threshold wait for an approver.
+/// Refunds at or above the session's threshold wait for an approver. The
+/// approval is a person's judgement, not the bound on the amount:
+/// `refund.check` refuses an order or amount the ticket may not refund,
+/// approved or not.
 pub fn refund_policy(
   session: Session,
   action: policy.Action,
@@ -340,11 +349,34 @@ pub fn refund_policy(
   }
 }
 
-fn eligibility(order: domain.Order) -> Eligibility {
-  case order.status {
-    "delivered" ->
-      Eligibility(order.order_id, True, order.total_cents, "delivered")
-    status -> Eligibility(order.order_id, False, 0, "order is " <> status)
+/// The session customer's order. Another customer's order answers as a
+/// missing one, so the conversation learns nothing about it.
+fn customer_order(
+  shop: Shop,
+  session: Session,
+  call: tool.Call,
+  order_id: String,
+) -> Result(domain.Order, LookupError) {
+  use order <- result.try(shop.get_order(
+    shop.correlated(shop, call.correlation),
+    order_id,
+  ))
+  case order.customer == session.customer {
+    True -> Ok(order)
+    False -> Error(NoSuchOrder(order_id))
+  }
+}
+
+/// What remains refundable: the total less the order's earlier refunds.
+/// `refund.check` enforces the same bound when the refund runs.
+fn eligibility(order: domain.Order, earlier: List(Int)) -> Eligibility {
+  let remaining = order.total_cents - int.sum(earlier)
+  case order.status, remaining > 0 {
+    "delivered", True ->
+      Eligibility(order.order_id, True, remaining, "delivered")
+    "delivered", False ->
+      Eligibility(order.order_id, False, 0, "order is fully refunded")
+    status, _ -> Eligibility(order.order_id, False, 0, "order is " <> status)
   }
 }
 

@@ -1,4 +1,5 @@
-//// The refund saga: refund through the payment provider, write a ledger
+//// The refund saga: check the request against the order and the ledger,
+//// refund through the payment provider, write a ledger
 //// entry, notify the customer. A failure after the payment rolls back
 //// the ledger entry and voids the refund. A payment whose outcome is
 //// unknown is marked with `saga.unknown_when`: saga names it in
@@ -6,6 +7,8 @@
 //// of a clean failure for a refund that may exist.
 
 import gleam/int
+import gleam/list
+import gleam/result
 import saga
 import saga/execution
 import support_desk/domain.{
@@ -13,19 +16,38 @@ import support_desk/domain.{
 }
 import support_desk/ledger.{type Ledger}
 import support_desk/shop.{
-  type RefundError, type Shop, type UndoError, LedgerEntryMissing,
-  NotificationFailed, PaymentDeclined, PaymentOutcomeUnknown, PaymentUnavailable,
+  type RefundError, type Shop, type UndoError, LedgerEntryMissing, NoSuchOrder,
+  NotificationFailed, OrdersUnavailable, PaymentDeclined, PaymentOutcomeUnknown,
+  PaymentUnavailable, RefundRefused,
 }
 
 pub type Workflow =
-  saga.Workflow(RefundRequest, RefundReceipt, RefundError, UndoError)
+  saga.Workflow(RefundOrder, RefundReceipt, RefundError, UndoError)
+
+/// The model's refund request with the ticket's customer, which the
+/// application supplies from the session.
+pub type RefundOrder {
+  RefundOrder(customer: String, request: RefundRequest)
+}
 
 /// The workflow takes the tool's own input. Each step reads the run's
 /// correlation from its `EffectKey` and tags the shop's HTTP calls with it
 /// (`shop.correlated`), so the refund, notify and void requests join the
 /// ticket without a per-ticket shop in the input.
 pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
-  saga.define("refund", fn(input) {
+  saga.define("refund", fn(order) {
+    // The model chose the order and the amount, so the first step checks
+    // them against the order and the ledger before anything is paid.
+    let input =
+      order
+      |> saga.perform(
+        saga.effect("check_refund", fn(order: RefundOrder, key) {
+          check(correlated(shop, key), ledger, order)
+        })
+        // A read changes nothing, so a later rollback has nothing to undo
+        // here; without an undo saga would report it as a retained effect.
+        |> saga.undo(fn(_) { Ok(Nil) }),
+      )
     let payment =
       input
       |> saga.perform(
@@ -86,6 +108,55 @@ pub fn workflow(shop: Shop, ledger: Ledger) -> Workflow {
   })
 }
 
+/// The desk's own decision on a refund the model asked for: the order must
+/// be the ticket customer's and delivered, the same amount must not have
+/// been refunded on it already (the provider would answer that idempotency
+/// key with the earlier refund), and the amount must fit within the order's
+/// total less its earlier refunds. A refusal is definite: nothing was sent.
+pub fn check(
+  shop: Shop,
+  ledger: Ledger,
+  order: RefundOrder,
+) -> Result(RefundRequest, RefundError) {
+  let RefundOrder(customer:, request:) = order
+  let id = request.order_id
+  use found <- result.try(
+    shop.get_order(shop, id)
+    |> result.map_error(fn(error) {
+      case error {
+        NoSuchOrder(_) -> RefundRefused("there is no order " <> id)
+        OrdersUnavailable(detail) ->
+          RefundRefused("the order could not be checked: " <> detail)
+      }
+    }),
+  )
+  let earlier = ledger.refunded(ledger, id)
+  let remaining = found.total_cents - int.sum(earlier)
+  let amount = request.amount_cents
+  let refused = fn(reason) { Error(RefundRefused(reason)) }
+  case found.customer == customer, found.status {
+    False, _ -> refused("order " <> id <> " is not this customer's")
+    True, status if status != "delivered" ->
+      refused("order " <> id <> " is " <> status)
+    True, _ ->
+      case list.contains(earlier, amount), amount > remaining {
+        True, _ ->
+          refused(
+            int.to_string(amount)
+            <> " cents was already refunded on order "
+            <> id,
+          )
+        False, True ->
+          refused(
+            int.to_string(remaining)
+            <> " cents remain refundable on order "
+            <> id,
+          )
+        False, False -> Ok(request)
+      }
+  }
+}
+
 fn correlated(shop: Shop, key: saga.EffectKey) -> Shop {
   shop.correlated(shop, saga.correlation_of(key))
 }
@@ -110,6 +181,7 @@ pub fn explain(error: RefundError) -> String {
       <> "); nothing was refunded"
     PaymentOutcomeUnknown(detail) ->
       "the payment outcome is unknown (" <> detail <> ")"
+    RefundRefused(reason) -> reason <> "; nothing was refunded"
     NotificationFailed(detail) ->
       "the customer could not be notified ("
       <> detail

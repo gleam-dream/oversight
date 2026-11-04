@@ -30,6 +30,7 @@ import gleam/string
 import llm_wire/message
 import llm_wire/testing
 import mist
+import research_agent/bounded_body
 
 pub type Step {
   CallSearch(query: String)
@@ -51,6 +52,9 @@ pub type Notice {
   PageStalled(id: String)
   MutationApplied(operation: Operation)
 }
+
+/// The largest model request body the provider reads.
+pub const max_body_bytes = 4_194_304
 
 pub type Services {
   Services(port: Int, world: Subject(Message))
@@ -665,10 +669,18 @@ fn llm(
   world: Subject(Message),
   req: Request(mist.Connection),
 ) -> Response(mist.ResponseData) {
-  let body = case mist.read_body(req, 4_194_304) {
-    Ok(req) -> bit_array.to_string(req.body) |> result.unwrap("")
-    Error(_) -> ""
+  case bounded_body.read(req, max_body_bytes) {
+    Error(error) -> bounded_body.refusal(error)
+    Ok(body) ->
+      answer_turn(world, req, bit_array.to_string(body) |> result.unwrap(""))
   }
+}
+
+fn answer_turn(
+  world: Subject(Message),
+  req: Request(mist.Connection),
+  body: String,
+) -> Response(mist.ResponseData) {
   let topic = marker(body)
   let step = count(body, "function_call_output")
   process.send(world, LlmBody(topic, body))

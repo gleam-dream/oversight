@@ -3,6 +3,7 @@
 //// GenerateContent SSE wire formats. Each document names how the "LLM"
 //// answers for it, so a batch can mix success, rate limits and bad output.
 
+import extractor/bounded_body
 import gleam/bit_array
 import gleam/bytes_tree
 import gleam/dict.{type Dict}
@@ -46,6 +47,9 @@ pub type Body {
 pub type Document {
   Document(id: String, content_type: String, body: Body, behavior: Behavior)
 }
+
+/// The largest provider request body the scripted provider reads.
+pub const max_body_bytes = 1_048_576
 
 pub type Services {
   Services(
@@ -163,18 +167,25 @@ fn providers_handler(
     http.Post, ["google", "v1beta", "models", _] -> Ok(message.Google)
     _, _ -> Error(Nil)
   }
-  case wire, mist.read_body(req, 1_048_576) {
-    Ok(wire), Ok(req) -> {
-      let text = bit_array.to_string(req.body) |> result.unwrap("")
-      let document_id = marker(text)
-      let attempt = process.call(calls, 1000, Record(document_id, _))
-      case dict.get(table, document_id) {
-        Error(Nil) ->
-          serve_reply(wire, testing.http_status(wire, 400, "unknown document"))
-        Ok(document) -> answer(wire, document.behavior, attempt)
+  case wire {
+    Error(Nil) -> text_response(404, "not found")
+    Ok(wire) ->
+      case bounded_body.read(req, max_body_bytes) {
+        Error(error) -> bounded_body.refusal(error)
+        Ok(body) -> {
+          let text = bit_array.to_string(body) |> result.unwrap("")
+          let document_id = marker(text)
+          let attempt = process.call(calls, 1000, Record(document_id, _))
+          case dict.get(table, document_id) {
+            Error(Nil) ->
+              serve_reply(
+                wire,
+                testing.http_status(wire, 400, "unknown document"),
+              )
+            Ok(document) -> answer(wire, document.behavior, attempt)
+          }
+        }
       }
-    }
-    _, _ -> text_response(404, "not found")
   }
 }
 

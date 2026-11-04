@@ -181,7 +181,7 @@
         responsibility: [Run a support agent whose refunds require an authorized approval and a compensating workflow.],
         interface: [Ticket/run operations, typed tools, typed Resolution, and approve/reject commands carrying checked proof.],
         interactions: [Fabric owns agent state and approval; Hellhound checks approver identity; Saga performs refund/ledger/notification; the consumer recipe retains full reports before mapping them.],
-        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run.],
+        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run. The session names the authenticated customer; tools read only that customer's orders, and the workflow's first step refuses a refund of another customer's or undelivered order, of an amount beyond the total less earlier refunds, or of an amount already refunded on that order. The payment idempotency key names order and amount.],
         failure: [Unauthenticated, unauthorized and unavailable-verifier outcomes are separate. Unknown payment effects require reconciliation; failed notification triggers the workflow's compensation policy.],
       )
       Source owners: `apps/support_desk/src/support_desk/desk.gleam`, `approvers.gleam`, `refund.gleam`, `domain.gleam`, and the local Saga recipe.
@@ -191,10 +191,10 @@
         responsibility: [Let an agent call discovered MCP tools and expose agent execution as an MCP tool.],
         interface: [Relay declarations/calls, admitted dynamic contracts, Fabric invocation, and application recipes.],
         interactions: [The application starts the inventory peer it discovers. Relay carries idempotency/correlation metadata; Fabric owns durable keyed invocation.],
-        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers.],
+        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers. The agent's policy runs only tools declared read-only; a reservation or any undeclared tool waits for an operator approval, and no MCP route carries the operator credential.],
         failure: [Keyed disconnect can leave durable work inspectable; unkeyed cancellation stops its owned invocation. Tool failure and uncertain delivery remain separate from a completed protocol exchange.],
       )
-      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
+      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `assistant.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
     ]
     #subsection(title: "Protected MCP service")[
       #answers(title: "Authenticated tools and durable reports",
@@ -244,7 +244,7 @@
         responsibility: [Resume research across restarts and publish its result through a compensating workflow.],
         interface: [A Grind worker starts or resumes a Fabric agent with search/read tools, then drives a durable Saga publication workflow.],
         interactions: [Fabric persists conversation and tool results; Grind schedules delivery; Saga owns publication effects; their PostgreSQL adapters share application resources.],
-        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. Publication keys and provider readback settle external effects.],
+        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. The read policy compares the parsed URL's scheme, host and port with the library's and its path segment by segment; a dot segment, an empty segment or a percent-encoded separator is denied. Publication keys and provider readback settle external effects.],
         failure: [Transient driver/store conflicts snooze; domain failures follow application retry policy; unresolved publication becomes Uncertain. Unexpected approvals fail explicitly. Cancellation reaches the agent/model and publication workflow without proving that every external effect was undone.],
       )
       #points(

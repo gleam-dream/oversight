@@ -18,12 +18,16 @@ import gleam/result
 import gleam/string
 import json/blueprint/codec
 import mist
+import support_desk/bounded_body
 import support_desk/domain.{type Order, Order}
 import support_desk/listener.{type Listener}
 
 /// How long the payments API stalls for an order whose refund outcome
 /// must stay unknown to the caller.
 pub const payment_stall_ms = 1500
+
+/// The largest request body the listener reads.
+pub const max_body_bytes = 65_536
 
 pub type Services {
   Services(base_url: String, calls: Subject(Recorded), listener: Listener)
@@ -79,10 +83,22 @@ fn handle(
   calls: Subject(Recorded),
   req: Request(mist.Connection),
 ) -> Response(mist.ResponseData) {
-  let body =
-    mist.read_body(req, 65_536)
-    |> result.map(fn(req) { bit_array.to_string(req.body) |> result.unwrap("") })
-    |> result.unwrap("")
+  case req.method {
+    http.Post ->
+      case bounded_body.read(req, max_body_bytes) {
+        Error(error) -> bounded_body.refusal(error)
+        Ok(body) ->
+          route(calls, req, bit_array.to_string(body) |> result.unwrap(""))
+      }
+    _ -> route(calls, req, "")
+  }
+}
+
+fn route(
+  calls: Subject(Recorded),
+  req: Request(mist.Connection),
+  body: String,
+) -> Response(mist.ResponseData) {
   let order_id =
     json.parse(body, decode.at(["order_id"], decode.string))
     |> result.unwrap("")
@@ -99,14 +115,17 @@ fn handle(
     }
     http.Post, ["payments", "refunds"] -> {
       record(calls, "POST /payments/refunds " <> order_id)
+      let key =
+        json.parse(body, decode.at(["idempotency_key"], decode.string))
+        |> result.unwrap("")
       case order_id {
         "A-400" -> {
           // The provider does take the refund, but answers too late.
           process.sleep(payment_stall_ms)
-          reply(201, refund_body(order_id))
+          reply(201, refund_body(refund_id(calls, order_id, key)))
         }
         "A-700" -> reply(402, "{\"error\":\"card_declined\"}")
-        _ -> reply(201, refund_body(order_id))
+        _ -> reply(201, refund_body(refund_id(calls, order_id, key)))
       }
     }
     http.Post, ["payments", "refunds", refund_id, "void"] -> {
@@ -124,9 +143,25 @@ fn handle(
   }
 }
 
-fn refund_body(order_id: String) -> String {
-  json.object([#("refund_id", json.string("rf_" <> order_id))])
+fn refund_body(refund_id: String) -> String {
+  json.object([#("refund_id", json.string(refund_id))])
   |> json.to_string
+}
+
+/// The payments API honours idempotency keys as a real provider does: a
+/// repeated key answers the refund it created, and another key creates
+/// another refund. An order's first refund is `rf_<order>`.
+fn refund_id(
+  calls: Subject(Recorded),
+  order_id: String,
+  key: String,
+) -> String {
+  process.call(calls, 1000, Refund(order_id, key, _))
+}
+
+/// Refunds the payments API has created, as `#(key, refund id)`.
+pub fn refunds(services: Services) -> List(#(String, String)) {
+  process.call(services.calls, 1000, Refunds)
 }
 
 fn reply(status: Int, text: String) -> Response(mist.ResponseData) {
@@ -140,7 +175,13 @@ fn reply(status: Int, text: String) -> Response(mist.ResponseData) {
 pub opaque type Recorded {
   Record(String)
   Calls(reply: Subject(List(String)))
+  Refund(order_id: String, key: String, reply: Subject(String))
+  Refunds(reply: Subject(List(#(String, String))))
   Stop
+}
+
+type Seen {
+  Seen(calls: List(String), refunds: List(#(String, String)))
 }
 
 fn record(calls: Subject(Recorded), call: String) -> Nil {
@@ -148,15 +189,38 @@ fn record(calls: Subject(Recorded), call: String) -> Nil {
 }
 
 fn start_recorder() -> Result(Subject(Recorded), String) {
-  actor.new([])
-  |> actor.on_message(fn(seen: List(String), message) {
+  actor.new(Seen([], []))
+  |> actor.on_message(fn(seen: Seen, message) {
     case message {
       Stop -> actor.stop()
-      Record(call) -> actor.continue([call, ..seen])
+      Record(call) -> actor.continue(Seen(..seen, calls: [call, ..seen.calls]))
       Calls(reply) -> {
-        process.send(reply, list.reverse(seen))
+        process.send(reply, list.reverse(seen.calls))
         actor.continue(seen)
       }
+      Refunds(reply) -> {
+        process.send(reply, list.reverse(seen.refunds))
+        actor.continue(seen)
+      }
+      Refund(order_id, key, reply) ->
+        case list.key_find(seen.refunds, key) {
+          Ok(id) -> {
+            process.send(reply, id)
+            actor.continue(seen)
+          }
+          Error(Nil) -> {
+            let earlier =
+              list.count(seen.refunds, fn(refund) {
+                string.starts_with(refund.1, "rf_" <> order_id)
+              })
+            let id = case earlier {
+              0 -> "rf_" <> order_id
+              n -> "rf_" <> order_id <> "_" <> int.to_string(n + 1)
+            }
+            process.send(reply, id)
+            actor.continue(Seen(..seen, refunds: [#(key, id), ..seen.refunds]))
+          }
+        }
     }
   })
   |> actor.start

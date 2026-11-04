@@ -8,6 +8,14 @@ exposes three typed tools, a Fabric agent mounts them through the Relay client a
 with a scripted LLM provider, and a second Relay server exposes that agent as the MCP tool
 `ask_assistant`. Everything runs on loopback, and no provider key is used.
 
+A question is untrusted model input, so the agent's policy runs only the tools the
+inventory declares read-only. `reserve_stock` waits for the operator: `ask_assistant`
+answers `awaiting_approval` with the run id, the operator reads the exact arguments with
+`tool_hub.pending` and answers with `tool_hub.approve` or `tool_hub.reject`, and the
+caller repeats its keyed call to read the answer. The operator credential is generated at
+boot and no MCP route carries it; a deployment verifies an access token's scope instead,
+as `support_desk` does.
+
 ## Run
 
 From this directory, inside the Oversight shell:
