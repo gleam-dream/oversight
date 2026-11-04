@@ -6,21 +6,61 @@
 import gleam/int
 import http_gun/error
 
-pub type OrderRequest {
-  OrderRequest(
+/// What a customer sends to `POST /orders`: what to buy, where to ship it,
+/// and the opaque token the payment provider issued for their card. It
+/// carries no price and no card number.
+pub type CheckoutRequest {
+  CheckoutRequest(
     order_id: String,
     sku: String,
     quantity: Int,
-    card: String,
-    amount_cents: Int,
+    payment_token: String,
     address: String,
     email: String,
   )
 }
 
+/// The most units of one SKU a single order may ask for.
+pub const max_quantity = 100
+
+/// An order the server has priced for an authenticated customer: the
+/// saga's input and the durable job's payload. `customer_id` comes from the
+/// caller's credential and `amount_cents` from the catalog, never from the
+/// body, and the only payment credential is the provider's token.
+pub type Order {
+  Order(
+    order_id: String,
+    customer_id: String,
+    sku: String,
+    quantity: Int,
+    amount_cents: Int,
+    payment_token: String,
+    address: String,
+    email: String,
+  )
+}
+
+/// Prices a customer's request at the catalog's unit price.
+pub fn price(
+  request: CheckoutRequest,
+  customer_id customer_id: String,
+  unit_price_cents unit_price_cents: Int,
+) -> Order {
+  Order(
+    order_id: request.order_id,
+    customer_id:,
+    sku: request.sku,
+    quantity: request.quantity,
+    amount_cents: unit_price_cents * request.quantity,
+    payment_token: request.payment_token,
+    address: request.address,
+    email: request.email,
+  )
+}
+
 /// Stock is held under the order id.
 pub type Reserved {
-  Reserved(order: OrderRequest)
+  Reserved(order: Order)
 }
 
 pub type Charged {
@@ -98,16 +138,48 @@ pub fn provider_name(provider: Provider) -> String {
   }
 }
 
+/// A stable, client-facing message for an error. It names only order facts
+/// (SKU, quantity, provider, step); driver and transport detail stays in
+/// the error value and goes to the log through `log_detail`.
 pub fn describe_error(error: CheckoutError) -> String {
   case error {
     OutOfStock(sku, requested) ->
       "out of stock: " <> sku <> " x" <> int.to_string(requested)
-    StockStoreFailed(detail) -> "stock store failed: " <> detail
+    StockStoreFailed(_) -> "stock store unavailable"
     Declined(reason) -> "card declined: " <> reason
     ProviderRejected(provider, status) ->
       provider_name(provider) <> " answered HTTP " <> int.to_string(status)
     ProviderUnreachable(provider, failure) ->
-      provider_name(provider) <> ": " <> error.describe(failure)
+      case error.kind(failure) {
+        error.TimedOut -> provider_name(provider) <> " timed out"
+        _ -> provider_name(provider) <> " unreachable"
+      }
     Interrupted(step) -> step <> " was interrupted"
+  }
+}
+
+/// A stable machine-readable code for an error, for API bodies.
+pub fn error_code(error: CheckoutError) -> String {
+  case error {
+    OutOfStock(..) -> "out_of_stock"
+    StockStoreFailed(_) -> "store_unavailable"
+    Declined(_) -> "payment_declined"
+    ProviderRejected(..) -> "provider_rejected"
+    ProviderUnreachable(failure:, ..) ->
+      case error.kind(failure) {
+        error.TimedOut -> "provider_timeout"
+        _ -> "provider_unreachable"
+      }
+    Interrupted(_) -> "interrupted"
+  }
+}
+
+/// The operator-facing detail of an error, for the log only.
+pub fn log_detail(error: CheckoutError) -> String {
+  case error {
+    StockStoreFailed(detail) -> "stock store failed: " <> detail
+    ProviderUnreachable(provider, failure) ->
+      provider_name(provider) <> ": " <> error.describe(failure)
+    _ -> describe_error(error)
   }
 }

@@ -4,8 +4,9 @@
 //// with a Sinal forwarder; the scripted providers; and the wisp/mist order
 //// API.
 
+import checkout/customers.{type Customers}
 import checkout/db
-import checkout/domain.{type OrderRequest}
+import checkout/domain.{type Order}
 import checkout/gateway
 import checkout/jobs
 import checkout/orders.{type Services, Services}
@@ -44,6 +45,8 @@ pub type Config {
     grind_lease: Duration,
     poll_interval_ms: Int,
     redelivery_ms: Int,
+    /// Who may call the order API: bearer token to customer id.
+    customers: Customers,
   )
 }
 
@@ -60,6 +63,7 @@ pub fn default_config(database_url: String) -> Config {
     grind_lease: duration.seconds(6),
     poll_interval_ms: 50,
     redelivery_ms: 100,
+    customers: customers.from_list([]),
   )
 }
 
@@ -67,9 +71,10 @@ pub type App {
   App(
     services: Services,
     providers: Providers,
-    checkout_worker: Worker(OrderRequest, String, Nil),
+    checkout_worker: Worker(Order, String, Nil),
     observability_pid: Pid,
     http: http_gun.Client,
+    customers: Customers,
   )
 }
 
@@ -188,6 +193,7 @@ pub fn start(config: Config) -> Result(App, String) {
     checkout_worker:,
     observability_pid: observability.pid,
     http:,
+    customers: config.customers,
   ))
 }
 
