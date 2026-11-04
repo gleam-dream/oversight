@@ -1,12 +1,16 @@
 import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/http
+import gleam/http/request
+import gleam/http/response
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
+import gleam/uri
 import gleeunit
 import hellhound
 import hellhound/store
@@ -19,7 +23,9 @@ import sso_portal/hellhound_records
 import sso_portal/server
 import sso_portal/session_store
 import sso_portal/telemetry
+import sso_portal/web
 import wisp
+import wisp/simulate
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -89,6 +95,77 @@ pub fn login_dashboard_logout_test() {
 
   let assert Ok(#(_, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.location == Some(portal.portal_url <> "/login")
+}
+
+/// The post-logout redirect comes from the portal's configured origin, never
+/// from the request: a forged `Host` cannot send the user elsewhere.
+pub fn logout_redirect_ignores_a_forged_host_test() {
+  use portal, b <- with_app(options())
+  let _ = sign_in(portal, b)
+  let forged =
+    simulate.request(http.Post, "/logout")
+    |> simulate.header("host", "attacker.example")
+    |> simulate.cookie("portal_session", portal_session_id(portal), wisp.Signed)
+  let response =
+    web.handle(
+      request.Request(..forged, host: "attacker.example"),
+      app.context(portal),
+    )
+  let assert Ok(location) = response.get_header(response, "location")
+  assert string.starts_with(
+    location,
+    testing.issuer(portal.provider) <> "/logout",
+  )
+  let assert Ok(provider_logout) = uri.parse(location)
+  let assert Some(query) = provider_logout.query
+  let assert Ok(parameters) = uri.parse_query(query)
+  assert list.key_find(parameters, "post_logout_redirect_uri")
+    == Ok(portal.portal_url <> "/signed-out")
+  assert !string.contains(location, "attacker.example")
+}
+
+/// The session row carries the cookie's lifetime and the server enforces it:
+/// a captured cookie stops working when the row expires, and expired rows
+/// are swept.
+pub fn a_session_past_its_lifetime_is_refused_test() {
+  use portal, b <- with_app(options())
+  let b = sign_in(portal, b)
+  let assert Ok(pog.Returned(rows: [lifetime], ..)) =
+    pog.query(
+      "select extract(epoch from expires_at - created_at)::int
+       from portal_sessions where subject = $1",
+    )
+    |> pog.parameter(pog.text(portal.options.subject))
+    |> pog.returning(decode.at([0], decode.int))
+    |> pog.execute(portal.db)
+  assert lifetime == 3600
+  let assert Ok(_) =
+    pog.query(
+      "update portal_sessions set expires_at = now() - interval '1 second'
+       where subject = $1",
+    )
+    |> pog.parameter(pog.text(portal.options.subject))
+    |> pog.execute(portal.db)
+
+  // Another sign-in sweeps the expired row.
+  let other = browser.new(testing.trust_anchor_der(portal.provider))
+  let _ = sign_in(portal, other)
+  browser.close(other)
+  assert rows(portal) == 1
+
+  // The expired cookie is anonymous again, and its row is not revived.
+  let assert Ok(#(_, page)) = browser.get(b, portal.portal_url <> "/dashboard")
+  assert page.location == Some(portal.portal_url <> "/login")
+  assert rows(portal) == 1
+}
+
+fn portal_session_id(portal: App) -> String {
+  let assert Ok(pog.Returned(rows: [id], ..)) =
+    pog.query("select id from portal_sessions where subject = $1")
+    |> pog.parameter(pog.text(portal.options.subject))
+    |> pog.returning(decode.at([0], decode.string))
+    |> pog.execute(portal.db)
+  id
 }
 
 // --- Refresh -----------------------------------------------------------------

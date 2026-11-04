@@ -12,6 +12,11 @@ Everything external runs on loopback: `hellhound/testing` provides the OpenID pr
 TLS, `src/sso_portal/billing_api.gleam` validates bearer tokens locally, and
 `src/sso_portal/browser.gleam` is an HTTP Gun browser with a cookie jar.
 
+A browser session lasts one hour on the server as well as in the cookie: each row in
+`portal_sessions` stores `expires_at`, and an expired row is refused and deleted. The
+post-logout redirect is built from the portal's configured origin, the one its OpenID
+`redirect_uri` uses, never from the request's `Host` header.
+
 ## Run
 
 From this directory, inside the Oversight shell:
