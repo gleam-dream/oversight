@@ -5,8 +5,8 @@
 import checkout/codecs
 import checkout/db
 import checkout/domain.{
-  type Booked, type CheckoutError, type OrderRequest, type OrderStatus,
-  type UndoError,
+  type Booked, type CheckoutError, type CheckoutRequest, type Order,
+  type OrderStatus, type UndoError,
 }
 import checkout/gateway.{type Gateway}
 import checkout/telemetry.{type Collector}
@@ -15,6 +15,7 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -66,8 +67,33 @@ pub type Report {
   )
 }
 
+/// Why a request did not become an order.
+pub type PlaceError {
+  /// The SKU is not in the catalog, so it has no price.
+  UnknownSku(sku: String)
+  /// The catalog or order store could not be read or written; the detail is
+  /// in the log.
+  StoreUnavailable
+}
+
+/// Prices a request from the catalog: the amount is the SKU's unit price
+/// times the quantity. This is the only place an order's amount is set.
+pub fn price(
+  s: Services,
+  request: CheckoutRequest,
+) -> Result(Order, PlaceError) {
+  case db.unit_price(s.pool, request.sku) {
+    Ok(Some(unit_price_cents)) -> Ok(domain.price(request, unit_price_cents))
+    Ok(None) -> Error(UnknownSku(request.sku))
+    Error(error) -> {
+      log_internal(request.order_id, "catalog lookup failed", error)
+      Error(StoreUnavailable)
+    }
+  }
+}
+
 /// Runs the checkout saga inside the caller (the HTTP request).
-pub fn place_local(s: Services, order: OrderRequest) -> Report {
+pub fn place_local(s: Services, order: Order) -> Report {
   let _ = db.insert_order(s.pool, order.order_id)
   let config =
     execution.with_correlation(s.saga_config, telemetry.order(order.order_id))
@@ -93,8 +119,8 @@ pub fn place_local(s: Services, order: OrderRequest) -> Report {
 /// only learns that admission did not commit.
 pub fn place_durable(
   s: Services,
-  checkout_worker: Worker(OrderRequest, String, Nil),
-  order: OrderRequest,
+  checkout_worker: Worker(Order, String, Nil),
+  order: Order,
 ) -> Result(Int, Nil) {
   let checkout =
     job.new(checkout_worker, order)
@@ -134,7 +160,7 @@ fn describe_transaction_error(error: pog.TransactionError(String)) -> String {
 
 /// Records the saga outcome on the order. A confirmed order and its receipt
 /// job commit in one transaction.
-pub fn finalize(s: Services, order: OrderRequest, outcome: Outcome) -> Report {
+pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
   let unknown = list.length(execution.unknown_effects(outcome))
   case outcome {
     execution.Completed(booked)
@@ -231,7 +257,7 @@ fn describe_cause(
 /// both commit, or neither does. Returns the receipt job's id.
 pub fn confirm_with_receipt(
   s: Services,
-  order: OrderRequest,
+  order: Order,
   detail: String,
 ) -> Result(Int, String) {
   pog.transaction(s.pool, fn(tx) {
@@ -249,7 +275,7 @@ pub fn confirm_with_receipt(
 /// The receipt job for an order, under an order-derived id.
 pub fn receipt_job(
   s: Services,
-  order: OrderRequest,
+  order: Order,
 ) -> job.Job(ReceiptRequest, String, Nil) {
   job.new(
     s.receipt_worker,

@@ -3,8 +3,12 @@
 //// keys. Behaviour is chosen by magic card numbers and addresses so one
 //// running server can script every scenario.
 ////
-//// Payments (`POST /charges`, `POST /charges/:id/void`,
-//// `GET /charges/by-key/:key`) dedupe by the `idempotency-key` header.
+//// Payments tokenises a card (`POST /tokens` answers `{"token": "tok_…"}`)
+//// for the customer, as a hosted payment field would, so the checkout app
+//// only ever handles the opaque token. Charges (`POST /charges`,
+//// `POST /charges/:id/void`, `GET /charges/by-key/:key`) take that token
+//// and dedupe by the `idempotency-key` header; an unknown token is
+//// declined.
 //// Shipping (`POST /shipments`, `POST /shipments/by-key/:key/cancel`,
 //// `GET /shipments/by-key/:key`) dedupes the same way.
 
@@ -105,6 +109,12 @@ pub fn shipment_for(p: Providers, key: String) -> Option(ShipmentRecord) {
 }
 
 /// Every shipment request that arrives is reported here by idempotency key.
+/// The vault's token for a card, minted without HTTP, for tests that drive
+/// the saga directly. A customer uses `POST /tokens` instead.
+pub fn tokenise(p: Providers, card: String) -> String {
+  actor.call(p.state, 1000, Tokenise(card, _))
+}
+
 pub fn watch_shipments(p: Providers, to: Subject(String)) -> Nil {
   actor.send(p.state, Watch(to))
 }
@@ -161,6 +171,8 @@ fn serve(
 type State {
   State(
     charges: Dict(String, ChargeRecord),
+    /// Payment token to card number: the provider's vault.
+    tokens: Dict(String, String),
     shipments: Dict(String, ShipmentRecord),
     charge_requests: Int,
     shipment_requests: Int,
@@ -170,7 +182,7 @@ type State {
 }
 
 fn empty() -> State {
-  State(dict.new(), dict.new(), 0, 0, [], 1)
+  State(dict.new(), dict.new(), dict.new(), 0, 0, [], 1)
 }
 
 type ChargeDecision {
@@ -179,9 +191,10 @@ type ChargeDecision {
 }
 
 type Message {
+  Tokenise(card: String, reply: Subject(String))
   RequestCharge(
     key: String,
-    card: String,
+    token: String,
     amount: Int,
     reply: Subject(ChargeDecision),
   )
@@ -196,18 +209,34 @@ type Message {
 
 fn handle(state: State, message: Message) -> actor.Next(State, Message) {
   case message {
-    RequestCharge(key, card, amount, reply) -> {
+    Tokenise(card, reply) -> {
+      let token = "tok_" <> int.to_string(state.next)
+      process.send(reply, token)
+      actor.continue(
+        State(
+          ..state,
+          tokens: dict.insert(state.tokens, token, card),
+          next: state.next + 1,
+        ),
+      )
+    }
+    RequestCharge(key, token, amount, reply) -> {
       let state = State(..state, charge_requests: state.charge_requests + 1)
+      let card = dict.get(state.tokens, token)
       case dict.get(state.charges, key), card {
         Ok(existing), _ -> {
-          process.send(reply, Charge(existing, card == card_black_hole))
+          process.send(reply, Charge(existing, card == Ok(card_black_hole)))
           actor.continue(state)
         }
-        Error(Nil), c if c == card_declined -> {
+        Error(Nil), Error(Nil) -> {
+          process.send(reply, Decline("invalid_payment_token"))
+          actor.continue(state)
+        }
+        Error(Nil), Ok(c) if c == card_declined -> {
           process.send(reply, Decline("insufficient_funds"))
           actor.continue(state)
         }
-        Error(Nil), _ -> {
+        Error(Nil), Ok(card) -> {
           let record =
             ChargeRecord(
               "ch_" <> int.to_string(state.next),
@@ -324,16 +353,26 @@ fn payments(
 ) -> Response(mist.ResponseData) {
   let key = request.get_header(req, "idempotency-key") |> result.unwrap("")
   case req.method, request.path_segments(req) {
+    Post, ["tokens"] -> {
+      let decoder = decode.field("card", decode.string, decode.success)
+      case read_json(req, decoder) {
+        Error(error) -> refuse_body(error)
+        Ok(card) -> {
+          let token = actor.call(state, 1000, Tokenise(card, _))
+          reply(201, json.object([#("token", json.string(token))]))
+        }
+      }
+    }
     Post, ["charges"] -> {
       let decoder = {
-        use card <- decode.field("card", decode.string)
+        use token <- decode.field("payment_token", decode.string)
         use amount <- decode.field("amount_cents", decode.int)
-        decode.success(#(card, amount))
+        decode.success(#(token, amount))
       }
       case read_json(req, decoder) {
         Error(error) -> refuse_body(error)
-        Ok(#(card, amount)) ->
-          case actor.call(state, 1000, RequestCharge(key, card, amount, _)) {
+        Ok(#(token, amount)) ->
+          case actor.call(state, 1000, RequestCharge(key, token, amount, _)) {
             Decline(reason) ->
               reply(402, json.object([#("reason", json.string(reason))]))
             Charge(record, delay) -> {

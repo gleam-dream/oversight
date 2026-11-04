@@ -3,8 +3,7 @@
 //// and grind keep their own tables on the same pool.
 
 import checkout/domain.{
-  type CheckoutError, type OrderRequest, type OrderStatus, OutOfStock,
-  StockStoreFailed,
+  type CheckoutError, type Order, type OrderStatus, OutOfStock, StockStoreFailed,
 }
 import gleam/dynamic/decode
 import gleam/list
@@ -14,8 +13,11 @@ import gleam/string
 import pog
 
 const schema = [
+  // The catalog: each SKU's price and the units on hand. Orders are priced
+  // from here; the request carries no amount.
   "CREATE TABLE IF NOT EXISTS stock (
      sku text PRIMARY KEY,
+     unit_price_cents integer NOT NULL CHECK (unit_price_cents > 0),
      available integer NOT NULL CHECK (available >= 0))",
   "CREATE TABLE IF NOT EXISTS reservations (
      order_id text PRIMARY KEY,
@@ -38,19 +40,36 @@ pub fn migrate(conn: pog.Connection) -> Result(Nil, pog.QueryError) {
   })
 }
 
-pub fn set_stock(
+/// Lists a SKU in the catalog at a price with a stock level, or updates both.
+pub fn set_product(
   conn: pog.Connection,
   sku: String,
-  available: Int,
+  unit_price_cents unit_price_cents: Int,
+  available available: Int,
 ) -> Result(Nil, pog.QueryError) {
   pog.query(
-    "INSERT INTO stock (sku, available) VALUES ($1, $2)
-     ON CONFLICT (sku) DO UPDATE SET available = EXCLUDED.available",
+    "INSERT INTO stock (sku, unit_price_cents, available) VALUES ($1, $2, $3)
+     ON CONFLICT (sku) DO UPDATE
+       SET unit_price_cents = EXCLUDED.unit_price_cents,
+           available = EXCLUDED.available",
   )
   |> pog.parameter(pog.text(sku))
+  |> pog.parameter(pog.int(unit_price_cents))
   |> pog.parameter(pog.int(available))
   |> pog.execute(conn)
   |> result.replace(Nil)
+}
+
+/// The catalog price of a SKU; `None` when the SKU is not sold.
+pub fn unit_price(
+  conn: pog.Connection,
+  sku: String,
+) -> Result(Option(Int), pog.QueryError) {
+  pog.query("SELECT unit_price_cents FROM stock WHERE sku = $1")
+  |> pog.parameter(pog.text(sku))
+  |> pog.returning(decode.at([0], decode.int))
+  |> pog.execute(conn)
+  |> result.map(fn(r) { list.first(r.rows) |> option.from_result })
 }
 
 pub fn stock_level(conn: pog.Connection, sku: String) -> Result(Int, Nil) {
@@ -66,7 +85,7 @@ pub fn stock_level(conn: pog.Connection, sku: String) -> Result(Int, Nil) {
 /// order is a no-op.
 pub fn reserve(
   conn: pog.Connection,
-  order: OrderRequest,
+  order: Order,
 ) -> Result(Nil, CheckoutError) {
   pog.transaction(conn, fn(tx) {
     use inserted <- result.try(

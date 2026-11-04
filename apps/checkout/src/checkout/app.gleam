@@ -5,7 +5,7 @@
 //// API.
 
 import checkout/db
-import checkout/domain.{type OrderRequest}
+import checkout/domain.{type Order}
 import checkout/gateway
 import checkout/jobs
 import checkout/orders.{type Services, Services}
@@ -67,7 +67,7 @@ pub type App {
   App(
     services: Services,
     providers: Providers,
-    checkout_worker: Worker(OrderRequest, String, Nil),
+    checkout_worker: Worker(Order, String, Nil),
     observability_pid: Pid,
     http: http_gun.Client,
   )

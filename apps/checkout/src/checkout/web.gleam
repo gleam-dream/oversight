@@ -1,7 +1,10 @@
 //// The order API on wisp + mist.
 ////
-//// - `POST /orders` runs the checkout saga in the request and answers with
-////   the final status (201 confirmed, 402/409/502/504 rejected, 202 held).
+//// - `POST /orders` takes `{order_id, sku, quantity, payment_token, address,
+////   email}`. The server prices it from the catalog; a body with any other
+////   field (an amount, a card number) is refused with 422. The checkout
+////   saga runs in the request and answers with the final status (201
+////   confirmed, 402/409/502/504 rejected, 202 held).
 //// - `POST /orders?mode=durable` enqueues the durable checkout job (202).
 //// - `GET /orders/:id` reads the order row.
 
@@ -78,29 +81,39 @@ pub fn handle(req: wisp.Request, app: App) -> wisp.Response {
 
 fn place(req: wisp.Request, app: App) -> wisp.Response {
   use body <- wisp.require_json(req)
-  case decode_order(body) {
-    Error(Nil) -> wisp.unprocessable_content()
-    Ok(order) ->
-      case list.key_find(wisp.get_query(req), "mode") {
-        Ok("durable") ->
-          case orders.place_durable(app.services, app.checkout_worker, order) {
-            Ok(job_id) ->
-              json.object([
-                #("order_id", json.string(order.order_id)),
-                #("status", json.string("pending")),
-                #("job_id", json.int(job_id)),
-              ])
+  case decode.run(body, codecs.checkout_request_decoder()) {
+    Error(_) -> error_response(422, "invalid_order")
+    Ok(request) ->
+      case orders.price(app.services, request) {
+        Error(orders.UnknownSku(_)) -> error_response(422, "unknown_sku")
+        Error(orders.StoreUnavailable) ->
+          error_response(503, "store_unavailable")
+        Ok(order) ->
+          case list.key_find(wisp.get_query(req), "mode") {
+            Ok("durable") -> place_durable(app, order)
+            _ -> {
+              let report = orders.place_local(app.services, order)
+              report_json(order.order_id, report)
               |> json.to_string
-              |> wisp.json_response(202)
-            Error(Nil) -> error_response(503, "store_unavailable")
+              |> wisp.json_response(status_code(report))
+            }
           }
-        _ -> {
-          let report = orders.place_local(app.services, order)
-          report_json(order.order_id, report)
-          |> json.to_string
-          |> wisp.json_response(status_code(report))
-        }
       }
+  }
+}
+
+fn place_durable(app: App, order: domain.Order) -> wisp.Response {
+  case orders.place_durable(app.services, app.checkout_worker, order) {
+    Ok(job_id) ->
+      json.object([
+        #("order_id", json.string(order.order_id)),
+        #("status", json.string("pending")),
+        #("amount_cents", json.int(order.amount_cents)),
+        #("job_id", json.int(job_id)),
+      ])
+      |> json.to_string
+      |> wisp.json_response(202)
+    Error(Nil) -> error_response(503, "store_unavailable")
   }
 }
 
@@ -116,10 +129,6 @@ fn show(app: App, order_id: String) -> wisp.Response {
       |> json.to_string
       |> wisp.json_response(200)
   }
-}
-
-fn decode_order(body: decode.Dynamic) -> Result(domain.OrderRequest, Nil) {
-  decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil)
 }
 
 /// Bodies carry the order's status, a stable error code when there is one,

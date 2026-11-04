@@ -5,7 +5,7 @@
 import checkout/app
 import checkout/codecs
 import checkout/db
-import checkout/domain.{type OrderRequest, OrderRequest}
+import checkout/domain.{type CheckoutRequest, CheckoutRequest}
 import checkout/gateway
 import checkout/providers
 import checkout/telemetry
@@ -45,12 +45,19 @@ fn demo(url: String) -> Nil {
   // The demo's own customer client, separate from the app's provider client.
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
   let pool = application.services.pool
-  let assert Ok(Nil) = db.set_stock(pool, "kettle", 5)
+  let assert Ok(Nil) =
+    db.set_product(pool, "kettle", unit_price_cents: 4999, available: 5)
   let base = "http://127.0.0.1:" <> int.to_string(port)
-  io.println("Order API listening on " <> base <> "; kettle stock = 5")
+  io.println(
+    "Order API listening on " <> base <> "; kettle at 4999 cents, stock = 5",
+  )
 
+  // The customer tokenises each card with the payment provider; the order
+  // carries only the token and no price.
+  let payments_url = providers.payments_url(application.providers)
   let order = fn(id, card, address) {
-    OrderRequest(id, "kettle", 1, card, 4999, address, id <> "@example.test")
+    let assert Ok(token) = tokenise(customer, payments_url, card)
+    CheckoutRequest(id, "kettle", 1, token, address, id <> "@example.test")
   }
   let _ =
     narrate(
@@ -132,7 +139,7 @@ fn demo(url: String) -> Nil {
 fn narrate(
   customer: http_gun.Client,
   base: String,
-  order: OrderRequest,
+  order: CheckoutRequest,
   query: String,
 ) -> String {
   let body =
@@ -176,6 +183,35 @@ fn show(customer: http_gun.Client, base: String, id: String) -> Nil {
   }
 }
 
-pub fn orders_body(order: OrderRequest) -> String {
-  json.to_string(codecs.encode_order(order))
+pub fn orders_body(order: CheckoutRequest) -> String {
+  json.to_string(codecs.encode_checkout_request(order))
+}
+
+/// Exchanges a card number for an opaque payment token at the payment
+/// provider, as the customer's browser would. The order API accepts only
+/// the token, so the card number never reaches it.
+pub fn tokenise(
+  customer: http_gun.Client,
+  payments_url: String,
+  card: String,
+) -> Result(String, Nil) {
+  let assert Ok(req) = request.to(payments_url <> "/tokens")
+  let req =
+    req
+    |> request.set_method(http.Post)
+    |> request.set_header("content-type", "application/json")
+    |> request.set_body(
+      json.object([#("card", json.string(card))])
+      |> json.to_string
+      |> bit_array.from_string,
+    )
+  case http_gun.send(customer, req) {
+    Ok(buffered) if buffered.response.status == 201 ->
+      json.parse_bits(
+        buffered.response.body,
+        decode.at(["token"], decode.string),
+      )
+      |> result.replace_error(Nil)
+    _ -> Error(Nil)
+  }
 }

@@ -49,9 +49,9 @@
     #subsection(title: "Checkout")[
       #answers(title: "Checkout authority and recovery",
         responsibility: [Accept orders, reserve stock, charge payment, book shipment and enqueue receipts.],
-        interface: [Order placement and lookup; local execution and a durable-job mode with native order/receipt/error codecs.],
+        interface: [Order placement and lookup; local execution and a durable-job mode with native order/receipt/error codecs. A placement carries a SKU, quantity, address and a payment token that the payment provider issued to the customer; it carries no amount and no card number, and a body with any other field is refused.],
         interactions: [Saga orders effects and undo; HTTP Gun calls scripted payment/shipping peers; Grind delivers durable runs and receipts; saga_postgres and application rows use the shared pool.],
-        invariants: [Order insertion and durable-job admission share one application transaction. Confirmation and receipt admission share a transaction. Stable destination keys and explicit unknown_when policy preserve payment uncertainty.],
+        invariants: [The server prices every order from its catalog (unit price times quantity) before the saga starts; the charged amount never comes from the client. Grind job rows, Saga checkpoints and application rows hold the payment token, never a card number. Order insertion and durable-job admission share one application transaction. Confirmation and receipt admission share a transaction. Stable destination keys and explicit unknown_when policy preserve payment uncertainty.],
         failure: [Known failures compensate in reverse completion order. Lost driver ownership permits checkpoint resumption; requested job cancellation is translated into durable Saga cancellation and rollback.],
       )
       #points([The application owns payment/shipment reconciliation and release policy. A job retry alone cannot decide whether stock or money should be restored.], [Source owners: `apps/checkout/src/checkout/workflow.gleam`, `orders.gleam`, `jobs.gleam`, `gateway.gleam`, and `db.gleam`.])

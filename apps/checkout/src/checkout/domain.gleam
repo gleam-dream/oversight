@@ -6,21 +6,54 @@
 import gleam/int
 import http_gun/error
 
-pub type OrderRequest {
-  OrderRequest(
+/// What a customer sends to `POST /orders`: what to buy, where to ship it,
+/// and the opaque token the payment provider issued for their card. It
+/// carries no price and no card number.
+pub type CheckoutRequest {
+  CheckoutRequest(
     order_id: String,
     sku: String,
     quantity: Int,
-    card: String,
-    amount_cents: Int,
+    payment_token: String,
     address: String,
     email: String,
   )
 }
 
+/// The most units of one SKU a single order may ask for.
+pub const max_quantity = 100
+
+/// An order the server has priced: the saga's input and the durable job's
+/// payload. `amount_cents` comes from the catalog, never from the client,
+/// and the only payment credential is the provider's token.
+pub type Order {
+  Order(
+    order_id: String,
+    sku: String,
+    quantity: Int,
+    amount_cents: Int,
+    payment_token: String,
+    address: String,
+    email: String,
+  )
+}
+
+/// Prices a request at the catalog's unit price.
+pub fn price(request: CheckoutRequest, unit_price_cents: Int) -> Order {
+  Order(
+    order_id: request.order_id,
+    sku: request.sku,
+    quantity: request.quantity,
+    amount_cents: unit_price_cents * request.quantity,
+    payment_token: request.payment_token,
+    address: request.address,
+    email: request.email,
+  )
+}
+
 /// Stock is held under the order id.
 pub type Reserved {
-  Reserved(order: OrderRequest)
+  Reserved(order: Order)
 }
 
 pub type Charged {

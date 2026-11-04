@@ -19,9 +19,8 @@
 import checkout/codecs
 import checkout/db
 import checkout/domain.{
-  type Booked, type Charged, type CheckoutError, type OrderRequest,
-  type Reserved, type UndoError, Booked, Charged, Interrupted, Reserved,
-  UndoError,
+  type Booked, type Charged, type CheckoutError, type Order, type Reserved,
+  type UndoError, Booked, Charged, Interrupted, Reserved, UndoError,
 }
 import checkout/gateway.{type Gateway}
 import gleam/option.{None, Some}
@@ -42,16 +41,16 @@ pub type Deps {
 }
 
 pub type Checkout =
-  Workflow(OrderRequest, Booked, CheckoutError, UndoError)
+  Workflow(Order, Booked, CheckoutError, UndoError)
 
 pub type Persistence =
-  durable.Persistence(OrderRequest, Booked, CheckoutError, UndoError)
+  durable.Persistence(Order, Booked, CheckoutError, UndoError)
 
-pub fn payment_key(order: OrderRequest) -> String {
+pub fn payment_key(order: Order) -> String {
   "pay-" <> order.order_id
 }
 
-pub fn shipment_key(order: OrderRequest) -> String {
+pub fn shipment_key(order: Order) -> String {
   "ship-" <> order.order_id
 }
 
@@ -85,8 +84,8 @@ pub fn persistence(
 
 fn reserve_stock(
   deps: Deps,
-) -> Step(OrderRequest, Reserved, CheckoutError, UndoError) {
-  saga.step("reserve_stock", fn(order: OrderRequest) {
+) -> Step(Order, Reserved, CheckoutError, UndoError) {
+  saga.step("reserve_stock", fn(order: Order) {
     db.reserve(deps.pool, order) |> result.replace(Reserved(order))
   })
   |> saga.undo(fn(undo) {

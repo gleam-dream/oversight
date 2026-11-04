@@ -5,13 +5,16 @@
 //// through `error.to_json` and `error.decoder`.
 
 import checkout/domain.{
-  type Booked, type Charged, type CheckoutError, type OrderRequest,
-  type Provider, type Reserved, type UndoError, Booked, Charged, Declined,
-  Interrupted, OrderRequest, OutOfStock, Payments, ProviderRejected,
-  ProviderUnreachable, Reserved, Shipping, StockStoreFailed, UndoError,
+  type Booked, type Charged, type CheckoutError, type CheckoutRequest,
+  type Order, type Provider, type Reserved, type UndoError, Booked, Charged,
+  CheckoutRequest, Declined, Interrupted, Order, OutOfStock, Payments,
+  ProviderRejected, ProviderUnreachable, Reserved, Shipping, StockStoreFailed,
+  UndoError,
 }
+import gleam/dict
 import gleam/dynamic/decode.{type Decoder}
 import gleam/json.{type Json}
+import gleam/list
 import grind/worker
 import http_gun/error
 import saga/codec
@@ -32,45 +35,105 @@ pub fn to_saga(c: JsonCodec(a)) -> codec.Codec(a) {
   codec.json(c.version, fn(value) { Ok(c.encode(value)) }, c.decoder)
 }
 
-// --- domain values --------------------------------------------------------
+// --- the request body -------------------------------------------------------
 
-pub fn order() -> JsonCodec(OrderRequest) {
-  JsonCodec("order-1", encode_order, order_decoder())
+const request_fields = [
+  "order_id", "sku", "quantity", "payment_token", "address", "email",
+]
+
+/// The `POST /orders` body. Strict: a field outside the request shape, such
+/// as a client-chosen `amount_cents` or a raw `card`, fails the decode
+/// instead of being ignored, so a client cannot believe it set a price.
+pub fn checkout_request_decoder() -> Decoder(CheckoutRequest) {
+  use fields <- decode.then(decode.dict(decode.string, decode.dynamic))
+  case
+    list.filter(dict.keys(fields), fn(f) { !list.contains(request_fields, f) })
+  {
+    [] -> {
+      use order_id <- decode.field("order_id", decode.string)
+      use sku <- decode.field("sku", decode.string)
+      use quantity <- decode.field("quantity", quantity_decoder())
+      use payment_token <- decode.field("payment_token", decode.string)
+      use address <- decode.field("address", decode.string)
+      use email <- decode.field("email", decode.string)
+      decode.success(CheckoutRequest(
+        order_id:,
+        sku:,
+        quantity:,
+        payment_token:,
+        address:,
+        email:,
+      ))
+    }
+    _unknown -> decode.failure(placeholder_request(), "CheckoutRequest")
+  }
 }
 
-pub fn encode_order(o: OrderRequest) -> Json {
+fn quantity_decoder() -> Decoder(Int) {
+  use quantity <- decode.then(decode.int)
+  case quantity >= 1 && quantity <= domain.max_quantity {
+    True -> decode.success(quantity)
+    False -> decode.failure(0, "quantity from 1 to max_quantity")
+  }
+}
+
+fn placeholder_request() -> CheckoutRequest {
+  CheckoutRequest("", "", 0, "", "", "")
+}
+
+/// The body a client sends; the demo and the tests use it.
+pub fn encode_checkout_request(r: CheckoutRequest) -> Json {
+  json.object([
+    #("order_id", json.string(r.order_id)),
+    #("sku", json.string(r.sku)),
+    #("quantity", json.int(r.quantity)),
+    #("payment_token", json.string(r.payment_token)),
+    #("address", json.string(r.address)),
+    #("email", json.string(r.email)),
+  ])
+}
+
+// --- domain values --------------------------------------------------------
+
+/// The priced order as grind's job input and saga's durable input. It holds
+/// the payment token, never a card number.
+pub fn order() -> JsonCodec(Order) {
+  JsonCodec("order-2", encode_order, order_decoder())
+}
+
+pub fn encode_order(o: Order) -> Json {
   json.object([
     #("order_id", json.string(o.order_id)),
     #("sku", json.string(o.sku)),
     #("quantity", json.int(o.quantity)),
-    #("card", json.string(o.card)),
     #("amount_cents", json.int(o.amount_cents)),
+    #("payment_token", json.string(o.payment_token)),
     #("address", json.string(o.address)),
     #("email", json.string(o.email)),
   ])
 }
 
-pub fn order_decoder() -> Decoder(OrderRequest) {
+pub fn order_decoder() -> Decoder(Order) {
   use order_id <- decode.field("order_id", decode.string)
   use sku <- decode.field("sku", decode.string)
   use quantity <- decode.field("quantity", decode.int)
-  use card <- decode.field("card", decode.string)
   use amount_cents <- decode.field("amount_cents", decode.int)
+  use payment_token <- decode.field("payment_token", decode.string)
   use address <- decode.field("address", decode.string)
   use email <- decode.field("email", decode.string)
-  decode.success(OrderRequest(
+  decode.success(Order(
     order_id:,
     sku:,
     quantity:,
-    card:,
     amount_cents:,
+    payment_token:,
     address:,
     email:,
   ))
 }
 
 pub fn reserved() -> JsonCodec(Reserved) {
-  JsonCodec("reserved-1", encode_reserved, reserved_decoder())
+  JsonCodec("reserved-2", encode_reserved, reserved_decoder())
 }
 
 fn encode_reserved(r: Reserved) -> Json {
@@ -83,7 +146,7 @@ fn reserved_decoder() -> Decoder(Reserved) {
 }
 
 pub fn charged() -> JsonCodec(Charged) {
-  JsonCodec("charged-1", encode_charged, charged_decoder())
+  JsonCodec("charged-2", encode_charged, charged_decoder())
 }
 
 fn encode_charged(c: Charged) -> Json {
@@ -100,7 +163,7 @@ fn charged_decoder() -> Decoder(Charged) {
 }
 
 pub fn booked() -> JsonCodec(Booked) {
-  JsonCodec("booked-1", encode_booked, booked_decoder())
+  JsonCodec("booked-2", encode_booked, booked_decoder())
 }
 
 fn encode_booked(b: Booked) -> Json {
