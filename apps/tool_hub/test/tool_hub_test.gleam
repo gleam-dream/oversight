@@ -951,3 +951,15 @@ pub fn scripted_provider_bounds_request_bodies_test() {
   let assert [] = scripted_llm.requests(scripted_llm.drain(notices))
   scripted_llm.stop(provider)
 }
+
+/// A negative declared length is malformed framing: the scripted provider
+/// refuses it with 400 before reading any body or advancing the script.
+pub fn scripted_provider_refuses_a_negative_length_test() {
+  let notices = process.new_subject()
+  let assert Ok(provider) = scripted_llm.start([], notices)
+  let port = scripted_llm.port(provider)
+  let head = "POST / HTTP/1.1\r\nhost: 127.0.0.1\r\n"
+  let assert Ok(400) = raw_status(port, head <> "content-length: -1\r\n\r\n{}")
+  let assert [] = scripted_llm.requests(scripted_llm.drain(notices))
+  scripted_llm.stop(provider)
+}
