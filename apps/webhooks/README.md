@@ -17,8 +17,8 @@ is refused with 413 before it is stored.
 The delivery id travels as `webhook-id` on every retry of a delivery and is the receiver's
 idempotency key. The scripted receiver checks deliveries as a tenant's receiver should: it refuses
 a bad signature or a `webhook-timestamp` more than five minutes (configurable) from its clock, and
-answers a `webhook-id` it processed within the last day (configurable) with 204 without running
-the endpoint again, so neither a retry nor a captured copy of a delivery is processed twice. It
+answers a `webhook-id` that endpoint processed within the last day (configurable) with 204 without
+running the endpoint again, so neither a retry nor a captured copy of a delivery is processed twice. It
 reads at most 1 MiB of body whatever the framing, refusing a chunked or unframed body with 411 and
 a larger declared length with 413.
 

@@ -5,9 +5,11 @@
 //// 1. 401 unless the signature verifies and `webhook-timestamp` is within
 ////    the tolerance of the receiver's clock (`signing.verify_within`).
 //// 2. 204 without running the endpoint when the `webhook-id` was already
-////    processed: the delivery id is the idempotency key.
+////    processed at this endpoint: the path and the delivery id together
+////    are the idempotency key, so one id delivered to two endpoints is new
+////    work at each.
 //// 3. Otherwise the endpoint's script runs, and a 2xx answer marks the
-////    `webhook-id` processed. A failed attempt is not remembered, so the
+////    `webhook-id` processed at this endpoint. A failed attempt is not remembered, so the
 ////    sender's retry runs the endpoint again.
 ////
 //// The scripts, by path:
@@ -54,7 +56,8 @@ pub type Received {
 pub type Verdict {
   /// Verified and new: the endpoint's script ran and answered `status`.
   Processed(status: Int)
-  /// Verified, but its `webhook-id` was already processed: acknowledged
+  /// Verified, but its `webhook-id` was already processed at this
+  /// endpoint: acknowledged
   /// without running the script again.
   Duplicate
   /// Refused with 401 before the script ran.
@@ -111,8 +114,9 @@ type State {
     secrets: Dict(String, String),
     seen: List(Received),
     counts: Dict(String, Int),
-    /// Processed `webhook-id` -> the Unix second it may be forgotten.
-    processed: Dict(String, Int),
+    /// Processed `#(path, webhook-id)` -> the Unix second it may be
+    /// forgotten.
+    processed: Dict(#(String, String), Int),
   )
 }
 
@@ -188,7 +192,7 @@ fn handle_message(
       {
         Error(reason) -> #(Rejected(reason), Answer(401, [], <<>>), state)
         Ok(id) ->
-          case dict.has_key(state.processed, id) {
+          case dict.has_key(state.processed, #(path, id)) {
             True -> #(Duplicate, Answer(204, [], <<>>), state)
             False -> {
               let n = result.unwrap(dict.get(state.counts, path), 0) + 1
@@ -197,7 +201,7 @@ fn handle_message(
                 True ->
                   dict.insert(
                     state.processed,
-                    id,
+                    #(path, id),
                     now + state.settings.retention_seconds,
                   )
                 False -> state.processed

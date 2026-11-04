@@ -51,6 +51,28 @@ pub fn replayed_delivery_is_acknowledged_once_test() {
     ]
 }
 
+/// The idempotency key is the endpoint and the `webhook-id` together: one
+/// id delivered to two endpoints is new work at each.
+pub fn same_id_at_another_endpoint_is_processed_test() {
+  let rx = receiver.start()
+  receiver.trust(rx, "/ok", secret)
+  receiver.trust(rx, "/busy", secret)
+  let now = delivery.unix_seconds()
+  assert deliver(rx, "/ok", "evt_1:sub_1", now) == 204
+  assert deliver(rx, "/busy", "evt_1:sub_1", now) == 429
+  assert deliver(rx, "/busy", "evt_1:sub_1", now) == 204
+  assert deliver(rx, "/busy", "evt_1:sub_1", now) == 204
+  assert deliver(rx, "/ok", "evt_1:sub_1", now) == 204
+  assert verdicts(rx)
+    == [
+      Processed(204),
+      Processed(429),
+      Processed(204),
+      Duplicate,
+      Duplicate,
+    ]
+}
+
 pub fn timestamp_outside_the_tolerance_is_rejected_test() {
   let rx = receiver.start()
   receiver.trust(rx, "/ok", secret)
