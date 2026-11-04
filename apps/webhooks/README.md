@@ -11,7 +11,8 @@ under a per-tenant destination policy.
 Every API call carries the tenant's key as `Authorization: Bearer <key>`; the key, never the
 request body, decides which tenant registers, publishes or reads, and a body that names a `tenant`
 is refused. A publisher-chosen event id is 1 to 64 characters of `A-Z`, `a-z`, `0-9`, `_` and `-`;
-without one the API generates an id and returns it.
+without one the API generates an id and returns it. An event body is at most 64 KiB; a larger one
+is refused with 413 before it is stored.
 
 The delivery id travels as `webhook-id` on every retry of a delivery and is the receiver's
 idempotency key. The scripted receiver checks deliveries as a tenant's receiver should: it refuses

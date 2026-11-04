@@ -247,8 +247,16 @@ pub fn event_id_to_string(id: EventId) -> String {
   id
 }
 
+/// The largest event body `POST /events` accepts, in bytes. The body is
+/// stored in each delivery's job row and sent as is, so a larger one is
+/// refused with 413 before anything is stored.
+pub const max_event_bytes = 65_536
+
 fn publish_event(req: Request, ctx: Context, tenant: Tenant) -> Response {
-  use raw <- wisp.require_bit_array_body(req)
+  use raw <- wisp.require_bit_array_body(wisp.set_max_body_size(
+    req,
+    max_event_bytes,
+  ))
   let decoder = {
     use names_tenant <- decode.then(names_tenant())
     use event_type <- decode.field("type", decode.string)

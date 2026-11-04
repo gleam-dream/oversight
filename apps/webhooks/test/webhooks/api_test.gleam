@@ -180,3 +180,27 @@ pub fn event_id_must_match_the_grammar_test() {
     json.parse(body, decode.at(["event_id"], decode.string))
   assert string.starts_with(generated, "evt_")
 }
+
+/// An event body is stored in its job row and sent as is, so its size is
+/// bounded before anything is stored.
+pub fn event_body_is_bounded_test() {
+  use svc <- support.with_service(support.options())
+  let assert Ok(_) =
+    support.subscribe(svc, "acme", "https://hooks.acme.example/hook")
+  // `{"type":"ping","data":"…"}` padded to exactly `size` bytes.
+  let event = fn(size) {
+    let frame = "{\"type\":\"ping\",\"data\":\"\"}"
+    "{\"type\":\"ping\",\"data\":\""
+    <> string.repeat("x", size - string.length(frame))
+    <> "\"}"
+  }
+  let publish = fn(body) {
+    support.call(svc, http.Post, "/events", support.bearer("acme"), body).0
+  }
+  assert publish(event(65_537)) == 413
+  assert publish(event(1_048_576)) == 413
+  assert support.drain(svc) == Ok(0)
+  assert publish(event(65_536)) == 202
+  // The accepted event was stored and fanned out to its one subscription.
+  assert support.drain(svc) != Ok(0)
+}
