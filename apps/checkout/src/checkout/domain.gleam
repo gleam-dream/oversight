@@ -23,12 +23,14 @@ pub type CheckoutRequest {
 /// The most units of one SKU a single order may ask for.
 pub const max_quantity = 100
 
-/// An order the server has priced: the saga's input and the durable job's
-/// payload. `amount_cents` comes from the catalog, never from the client,
-/// and the only payment credential is the provider's token.
+/// An order the server has priced for an authenticated customer: the
+/// saga's input and the durable job's payload. `customer_id` comes from the
+/// caller's credential and `amount_cents` from the catalog, never from the
+/// body, and the only payment credential is the provider's token.
 pub type Order {
   Order(
     order_id: String,
+    customer_id: String,
     sku: String,
     quantity: Int,
     amount_cents: Int,
@@ -38,10 +40,15 @@ pub type Order {
   )
 }
 
-/// Prices a request at the catalog's unit price.
-pub fn price(request: CheckoutRequest, unit_price_cents: Int) -> Order {
+/// Prices a customer's request at the catalog's unit price.
+pub fn price(
+  request: CheckoutRequest,
+  customer_id customer_id: String,
+  unit_price_cents unit_price_cents: Int,
+) -> Order {
   Order(
     order_id: request.order_id,
+    customer_id:,
     sku: request.sku,
     quantity: request.quantity,
     amount_cents: unit_price_cents * request.quantity,

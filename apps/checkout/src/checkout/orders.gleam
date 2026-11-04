@@ -71,19 +71,33 @@ pub type Report {
 pub type PlaceError {
   /// The SKU is not in the catalog, so it has no price.
   UnknownSku(sku: String)
+  /// The order id is already used, by another customer or by this customer
+  /// for a different SKU or quantity. The existing order is untouched.
+  OrderIdConflict
   /// The catalog or order store could not be read or written; the detail is
   /// in the log.
   StoreUnavailable
 }
 
-/// Prices a request from the catalog: the amount is the SKU's unit price
-/// times the quantity. This is the only place an order's amount is set.
+/// What a placement did.
+pub type Placement(a) {
+  /// This placement created the order and started its checkout.
+  Started(a)
+  /// The customer already placed this order; nothing ran again.
+  Existing(db.OrderRecord)
+}
+
+/// Prices a customer's request from the catalog: the amount is the SKU's
+/// unit price times the quantity. This is the only place an order's amount
+/// is set, and the customer id comes from the caller's credential.
 pub fn price(
   s: Services,
+  customer_id: String,
   request: CheckoutRequest,
 ) -> Result(Order, PlaceError) {
   case db.unit_price(s.pool, request.sku) {
-    Ok(Some(unit_price_cents)) -> Ok(domain.price(request, unit_price_cents))
+    Ok(Some(unit_price_cents)) ->
+      Ok(domain.price(request, customer_id:, unit_price_cents:))
     Ok(None) -> Error(UnknownSku(request.sku))
     Error(error) -> {
       log_internal(request.order_id, "catalog lookup failed", error)
@@ -92,9 +106,43 @@ pub fn price(
   }
 }
 
-/// Runs the checkout saga inside the caller (the HTTP request).
-pub fn place_local(s: Services, order: Order) -> Report {
-  let _ = db.insert_order(s.pool, order.order_id)
+/// Claims the order id for this order. The id is the customer's
+/// idempotency key: the first placement creates the order, the same
+/// customer repeating the same SKU and quantity gets the existing order,
+/// and anything else is a conflict. Only `Started` may run the saga.
+fn claim(
+  conn: pog.Connection,
+  order: Order,
+) -> Result(Placement(Nil), PlaceError) {
+  case db.insert_order(conn, order) {
+    Ok(db.Inserted) -> Ok(Started(Nil))
+    Ok(db.AlreadyExists(existing))
+      if existing.customer_id == order.customer_id
+      && existing.sku == order.sku
+      && existing.quantity == order.quantity
+    -> Ok(Existing(existing))
+    Ok(db.AlreadyExists(_)) | Ok(db.Contended) -> Error(OrderIdConflict)
+    Error(error) -> {
+      log_internal(order.order_id, "order insert failed", error)
+      Error(StoreUnavailable)
+    }
+  }
+}
+
+/// Runs the checkout saga inside the caller (the HTTP request), once per
+/// order id.
+pub fn place_local(
+  s: Services,
+  order: Order,
+) -> Result(Placement(Report), PlaceError) {
+  use claimed <- result.map(claim(s.pool, order))
+  case claimed {
+    Existing(existing) -> Existing(existing)
+    Started(Nil) -> Started(run_local(s, order))
+  }
+}
+
+fn run_local(s: Services, order: Order) -> Report {
   let config =
     execution.with_correlation(s.saga_config, telemetry.order(order.order_id))
   case execution.start(s.workflow, order, config) {
@@ -114,32 +162,43 @@ pub fn place_local(s: Services, order: Order) -> Report {
 }
 
 /// Records the pending order and enqueues its durable checkout job in one
-/// transaction. The job id is derived from the order, so a repeated
-/// placement converges on the first job. A failure is logged; the caller
-/// only learns that admission did not commit.
+/// transaction, once per order id. The job id is derived from the order as
+/// well, so even a lost commit reply converges on the first job. A store
+/// failure is logged; the caller learns only that admission did not commit.
 pub fn place_durable(
   s: Services,
   checkout_worker: Worker(Order, String, Nil),
   order: Order,
-) -> Result(Int, Nil) {
+) -> Result(Placement(Int), PlaceError) {
   let checkout =
     job.new(checkout_worker, order)
     |> job.with_id("checkout:" <> order.order_id)
     |> job.with_correlation(telemetry.order(order.order_id))
   pog.transaction(s.pool, fn(tx) {
-    use _ <- result.try(
-      db.insert_order(tx, order.order_id) |> result.map_error(string.inspect),
-    )
-    grind.submit_in(s.jobs, tx, checkout)
-    |> result.map_error(grind.describe_submit_error)
+    use claimed <- result.try(claim(tx, order))
+    case claimed {
+      Existing(existing) -> Ok(Existing(existing))
+      Started(Nil) ->
+        grind.submit_in(s.jobs, tx, checkout)
+        |> result.map(fn(admission) { Started(job.id(grind.handle(admission))) })
+        |> result.map_error(fn(error) {
+          log_internal(
+            order.order_id,
+            "durable admission failed",
+            grind.describe_submit_error(error),
+          )
+          StoreUnavailable
+        })
+    }
   })
-  |> result.map(fn(admission) { job.id(grind.handle(admission)) })
   |> result.map_error(fn(error) {
-    log_internal(
-      order.order_id,
-      "durable admission failed",
-      describe_transaction_error(error),
-    )
+    case error {
+      pog.TransactionRolledBack(error) -> error
+      pog.TransactionQueryError(error) -> {
+        log_internal(order.order_id, "durable admission failed", error)
+        StoreUnavailable
+      }
+    }
   })
 }
 

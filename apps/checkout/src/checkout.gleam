@@ -4,6 +4,7 @@
 
 import checkout/app
 import checkout/codecs
+import checkout/customers
 import checkout/db
 import checkout/domain.{type CheckoutRequest, CheckoutRequest}
 import checkout/gateway
@@ -40,7 +41,18 @@ pub fn main() -> Nil {
 
 fn demo(url: String) -> Nil {
   wisp.set_logger_level(wisp.ErrorLevel)
-  let assert Ok(application) = app.start(app.default_config(url))
+  // Two demo customers, each with a bearer token minted for this run.
+  let shopper = wisp.random_string(32)
+  let someone_else = wisp.random_string(32)
+  let config =
+    app.Config(
+      ..app.default_config(url),
+      customers: customers.from_list([
+        #(shopper, "shopper"),
+        #(someone_else, "someone-else"),
+      ]),
+    )
+  let assert Ok(application) = app.start(config)
   let assert Ok(#(_, port)) = web.start(application)
   // The demo's own customer client, separate from the app's provider client.
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
@@ -62,6 +74,7 @@ fn demo(url: String) -> Nil {
   let _ =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-happy", providers.card_ok, "10 Main St"),
       "",
@@ -69,6 +82,7 @@ fn demo(url: String) -> Nil {
   let _ =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-declined", providers.card_declined, "10 Main St"),
       "",
@@ -76,6 +90,7 @@ fn demo(url: String) -> Nil {
   let _ =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-slow-ship", providers.card_ok, providers.address_slow),
       "",
@@ -83,6 +98,7 @@ fn demo(url: String) -> Nil {
   let _ =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-lost-answer", providers.card_first_answer_lost, "10 Main St"),
       "",
@@ -90,6 +106,7 @@ fn demo(url: String) -> Nil {
   let _ =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-black-hole", providers.card_black_hole, "10 Main St"),
       "",
@@ -97,6 +114,7 @@ fn demo(url: String) -> Nil {
   let placed =
     narrate(
       customer,
+      shopper,
       base,
       order("ord-durable", providers.card_ok, "10 Main St"),
       "?mode=durable",
@@ -107,8 +125,29 @@ fn demo(url: String) -> Nil {
   let assert Ok(grind.Succeeded(summary)) =
     grind.await(jobs, handle, within: duration.seconds(10))
   io.println("  job " <> int.to_string(job_id) <> " -> " <> summary)
-  show(customer, base, "ord-durable")
+  show(customer, shopper, base, "ord-durable")
   process.sleep(300)
+
+  // The order id is the shopper's idempotency key: repeating the placement
+  // returns the order without charging again, and another customer can
+  // neither read the order nor take its id.
+  let _ =
+    narrate(
+      customer,
+      shopper,
+      base,
+      order("ord-happy", providers.card_ok, "10 Main St"),
+      "",
+    )
+  let _ =
+    narrate(
+      customer,
+      someone_else,
+      base,
+      order("ord-happy", providers.card_ok, "10 Main St"),
+      "",
+    )
+  show(customer, someone_else, base, "ord-happy")
 
   let assert Ok(stock) = db.stock_level(pool, "kettle")
   io.println("\nkettle stock now " <> int.to_string(stock))
@@ -138,6 +177,7 @@ fn demo(url: String) -> Nil {
 
 fn narrate(
   customer: http_gun.Client,
+  bearer: String,
   base: String,
   order: CheckoutRequest,
   query: String,
@@ -150,6 +190,7 @@ fn narrate(
     req
     |> request.set_method(http.Post)
     |> request.set_header("content-type", "application/json")
+    |> request.set_header("authorization", "Bearer " <> bearer)
     |> request.set_body(body)
   io.println("\nPOST /orders" <> query <> "  " <> order.order_id)
   case http_gun.send(customer, req) {
@@ -168,15 +209,25 @@ fn narrate(
   }
 }
 
-fn show(customer: http_gun.Client, base: String, id: String) -> Nil {
+fn show(
+  customer: http_gun.Client,
+  bearer: String,
+  base: String,
+  id: String,
+) -> Nil {
   let assert Ok(req) = request.to(base <> "/orders/" <> id)
-  let req = request.set_body(req, <<>>)
+  let req =
+    req
+    |> request.set_header("authorization", "Bearer " <> bearer)
+    |> request.set_body(<<>>)
   case http_gun.send(customer, req) {
     Ok(buffered) ->
       io.println(
         "GET /orders/"
         <> id
         <> " -> "
+        <> int.to_string(buffered.response.status)
+        <> " "
         <> bit_array.to_string(buffered.response.body) |> result.unwrap(""),
       )
     Error(failure) -> io.println(error.describe(failure))

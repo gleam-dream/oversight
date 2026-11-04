@@ -17,6 +17,13 @@ records the order and enqueues a Grind job in one transaction, and the job drive
 the same saga durably. `GET /orders/:id` reads the order row. Error bodies carry a
 stable `error` code; internal detail goes to the log.
 
+Every route needs `Authorization: Bearer <token>` for a customer in the app's
+configured token table, and answers 401 otherwise. An order belongs to the customer
+who placed it, and another customer's order reads as 404. The `order_id` is the
+customer's idempotency key. Repeating a placement returns the existing order with
+200 and does not run the saga again. Reusing the id for a different SKU or quantity,
+or as another customer, answers 409.
+
 `CHECKOUT_SECRET_KEY_BASE` sets Wisp's signing secret (at least 64 characters). When
 it is unset, the app generates a random secret at boot, so signed values do not
 survive a restart.
@@ -31,8 +38,9 @@ From this directory, inside the Oversight shell:
 ```
 
 `gleam run` places six orders (happy path, a declined card, a shipping timeout, a
-lost payment answer, a payment that never answers, and a durable order) and prints
-stock, receipts and the cross-package telemetry trace for two orders.
+lost payment answer, a payment that never answers, and a durable order). It then
+repeats one placement as its owner and as a second customer, and prints stock,
+receipts and the cross-package telemetry trace for two orders.
 
 The [composition contract](../../docs/design/design-layer.pdf)
 describes the checkout's authorities, invariants and recovery behavior.

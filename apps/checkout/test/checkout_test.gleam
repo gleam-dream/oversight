@@ -4,6 +4,7 @@
 import checkout
 import checkout/app.{type App}
 import checkout/codecs
+import checkout/customers
 import checkout/db
 import checkout/domain.{ProviderUnreachable}
 import checkout/gateway
@@ -43,10 +44,23 @@ pub fn main() -> Nil {
   gleeunit.main()
 }
 
+/// The demo identities: each bearer token resolves to one customer.
+const alice_token = "alice-test-token-6b1f0e2c"
+
+const bob_token = "bob-test-token-93d4a7e1"
+
 fn with_app(config: fn(app.Config) -> app.Config, run: fn(App) -> a) -> a {
   let assert Ok(url) = envoy.get("DATABASE_URL")
     as "set DATABASE_URL: ../scripts/with-postgres.sh gleam test"
-  let assert Ok(application) = app.start(config(app.default_config(url)))
+  let base =
+    app.Config(
+      ..app.default_config(url),
+      customers: customers.from_list([
+        #(alice_token, "alice"),
+        #(bob_token, "bob"),
+      ]),
+    )
+  let assert Ok(application) = app.start(config(base))
   let result = run(application)
   app.stop(application)
   result
@@ -62,7 +76,7 @@ fn order(
   address: String,
 ) -> domain.Order {
   let token = providers.tokenise(application.providers, card)
-  domain.Order(id, sku, 1, 2500, token, address, id <> "@example.test")
+  domain.Order(id, "alice", sku, 1, 2500, token, address, id <> "@example.test")
 }
 
 /// Lists `sku` at 2500 cents with `available` units.
@@ -120,6 +134,7 @@ pub fn order_api_confirms_and_sends_receipt_test() {
     req
     |> request.set_method(http.Post)
     |> request.set_header("content-type", "application/json")
+    |> request.set_header("authorization", "Bearer " <> alice_token)
     |> request.set_body(bit_array.from_string(checkout.orders_body(request)))
   let assert Ok(reply) = http_gun.send(customer, req)
   http_gun.stop(customer)
@@ -151,7 +166,7 @@ pub fn order_api_confirms_and_sends_receipt_test() {
 pub fn payment_declined_releases_stock_test() {
   use application <- with_app(fn(c) { c })
   let assert Ok(Nil) = set_stock(application.services.pool, "decline-sku", 3)
-  let report =
+  let assert Ok(orders.Started(report)) =
     orders.place_local(
       application.services,
       order(
@@ -173,7 +188,7 @@ pub fn payment_declined_releases_stock_test() {
 pub fn shipment_timeout_after_charge_voids_the_charge_test() {
   use application <- with_app(fn(c) { c })
   let assert Ok(Nil) = set_stock(application.services.pool, "slow-sku", 3)
-  let report =
+  let assert Ok(orders.Started(report)) =
     orders.place_local(
       application.services,
       order(
@@ -389,7 +404,7 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
     watch_runner(jobs.execution_id(placed), "book_shipment")
   let arrivals = process.new_subject()
   providers.watch_shipments(application.providers, arrivals)
-  let assert Ok(job_id) =
+  let assert Ok(orders.Started(job_id)) =
     orders.place_durable(services, application.checkout_worker, placed)
 
   // The shipment request reached the provider (which books it, then holds
@@ -456,7 +471,7 @@ pub fn durable_checkout_after_job_crash_replays_without_an_operator_test() {
     watch_runner(jobs.execution_id(placed), "book_shipment")
   let arrivals = process.new_subject()
   providers.watch_shipments(application.providers, arrivals)
-  let assert Ok(job_id) =
+  let assert Ok(orders.Started(job_id)) =
     orders.place_durable(services, application.checkout_worker, placed)
   let assert Ok(runner) = process.receive(runners, 10_000)
   let assert Ok("ship-crash-1") = process.receive(arrivals, 10_000)
@@ -522,7 +537,7 @@ pub fn durable_checkout_cancelled_through_grind_rolls_back_test() {
       providers.card_ok,
       providers.address_hold,
     )
-  let assert Ok(job_id) =
+  let assert Ok(orders.Started(job_id)) =
     orders.place_durable(services, application.checkout_worker, placed)
   let assert Ok("ship-cancel-1") = process.receive(arrivals, 10_000)
   let jobs = services.jobs
@@ -573,7 +588,7 @@ pub fn receipt_job_commits_with_the_order_test() {
   let pool = services.pool
   let placed =
     order(application, "receipt-1", "receipt-sku", providers.card_ok, "1 St")
-  let assert Ok(Nil) = db.insert_order(pool, "receipt-1")
+  let assert Ok(db.Inserted) = db.insert_order(pool, placed)
 
   // Rolled back: neither the status nor the job exists afterwards.
   let assert Error(pog.TransactionRolledBack(handle)) =
@@ -642,14 +657,29 @@ pub fn provider_refuses_unbounded_request_bodies_test() {
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
+  call_api(port, http.Post, "/orders" <> query, Some(alice_token), body)
+}
+
+/// One API call as the customer `token` authenticates, or anonymously.
+fn call_api(
+  port: Int,
+  method: http.Method,
+  path: String,
+  token: option.Option(String),
+  body: String,
+) -> #(Int, String) {
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
   let assert Ok(req) =
-    request.to("http://127.0.0.1:" <> int.to_string(port) <> "/orders" <> query)
+    request.to("http://127.0.0.1:" <> int.to_string(port) <> path)
   let req =
     req
-    |> request.set_method(http.Post)
+    |> request.set_method(method)
     |> request.set_header("content-type", "application/json")
     |> request.set_body(bit_array.from_string(body))
+  let req = case token {
+    Some(token) -> request.set_header(req, "authorization", "Bearer " <> token)
+    None -> req
+  }
   let assert Ok(reply) = http_gun.send(customer, req)
   http_gun.stop(customer)
   let assert Ok(text) = bit_array.to_string(reply.response.body)
@@ -872,4 +902,106 @@ pub fn card_digits_never_reach_stored_rows_test() {
 
   assert database_contains(pool, "token-2")
   assert !database_contains(pool, providers.card_ok)
+}
+
+// --- caller identity and order ownership -----------------------------------------------
+
+/// Every route needs a bearer token that resolves to a configured customer.
+pub fn requests_without_a_customer_identity_are_refused_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = set_stock(pool, "anon-sku", 3)
+  let assert Ok(#(_, port)) = web.start(application)
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  let placement = body(order_fields("anon-1", "anon-sku", 1, token))
+
+  let #(status, _) = call_api(port, http.Post, "/orders", None, placement)
+  assert status == 401
+  let #(status, _) =
+    call_api(port, http.Post, "/orders", Some("not-a-customer"), placement)
+  assert status == 401
+  let #(status, _) = call_api(port, http.Get, "/orders/anon-1", None, "")
+  assert status == 401
+  assert providers.snapshot(application.providers).charge_requests == 0
+  assert stock(application, "anon-sku") == 3
+}
+
+/// An order belongs to the customer who placed it: another customer reads
+/// it as absent.
+pub fn another_customers_order_reads_as_not_found_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = set_stock(pool, "owned-sku", 3)
+  let assert Ok(#(_, port)) = web.start(application)
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  let placement = body(order_fields("owned-1", "owned-sku", 1, token))
+  let #(status, _) =
+    call_api(port, http.Post, "/orders", Some(alice_token), placement)
+  assert status == 201
+
+  let #(status, text) =
+    call_api(port, http.Get, "/orders/owned-1", Some(alice_token), "")
+  assert status == 200
+  let assert Ok("confirmed") =
+    json.parse(text, decode.at(["status"], decode.string))
+  let #(status, text) =
+    call_api(port, http.Get, "/orders/owned-1", Some(bob_token), "")
+  assert status == 404
+  assert !string.contains(text, "charge")
+}
+
+/// The client's `order_id` is an idempotency key owned by the customer who
+/// first used it. The same customer repeating the placement gets the
+/// existing order back; a changed placement or another customer gets 409.
+/// None of them runs the saga again or changes the order.
+pub fn repeated_order_id_never_reruns_the_saga_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = set_stock(pool, "repeat-sku", 5)
+  let assert Ok(#(_, port)) = web.start(application)
+  let alice_card = providers.tokenise(application.providers, providers.card_ok)
+  let bob_card = providers.tokenise(application.providers, providers.card_ok)
+  let placement = body(order_fields("repeat-1", "repeat-sku", 1, alice_card))
+  let #(status, _) =
+    call_api(port, http.Post, "/orders", Some(alice_token), placement)
+  assert status == 201
+  let before = providers.snapshot(application.providers)
+  let assert Some(#(domain.Confirmed, detail)) =
+    db.order_status(pool, "repeat-1")
+
+  // The same customer, the same placement: the existing order.
+  let #(status, text) =
+    call_api(port, http.Post, "/orders", Some(alice_token), placement)
+  assert status == 200
+  let assert Ok("confirmed") =
+    json.parse(text, decode.at(["status"], decode.string))
+  let #(status, _) =
+    call_api(
+      port,
+      http.Post,
+      "/orders?mode=durable",
+      Some(alice_token),
+      placement,
+    )
+  assert status == 200
+
+  // The same customer with a different placement, and another customer.
+  let changed = body(order_fields("repeat-1", "repeat-sku", 2, alice_card))
+  let #(status, text) =
+    call_api(port, http.Post, "/orders", Some(alice_token), changed)
+  assert status == 409
+  assert error_code(text) == Ok("order_id_conflict")
+  let hijack = body(order_fields("repeat-1", "repeat-sku", 1, bob_card))
+  let #(status, _) =
+    call_api(port, http.Post, "/orders", Some(bob_token), hijack)
+  assert status == 409
+  let #(status, _) =
+    call_api(port, http.Post, "/orders?mode=durable", Some(bob_token), hijack)
+  assert status == 409
+
+  let after = providers.snapshot(application.providers)
+  assert after.charge_requests == before.charge_requests
+  assert after.shipment_requests == before.shipment_requests
+  assert stock(application, "repeat-sku") == 4
+  assert db.order_status(pool, "repeat-1") == Some(#(domain.Confirmed, detail))
 }

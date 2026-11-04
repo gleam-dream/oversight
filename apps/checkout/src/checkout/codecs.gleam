@@ -104,6 +104,7 @@ pub fn order() -> JsonCodec(Order) {
 pub fn encode_order(o: Order) -> Json {
   json.object([
     #("order_id", json.string(o.order_id)),
+    #("customer_id", json.string(o.customer_id)),
     #("sku", json.string(o.sku)),
     #("quantity", json.int(o.quantity)),
     #("amount_cents", json.int(o.amount_cents)),
@@ -115,6 +116,7 @@ pub fn encode_order(o: Order) -> Json {
 
 pub fn order_decoder() -> Decoder(Order) {
   use order_id <- decode.field("order_id", decode.string)
+  use customer_id <- decode.field("customer_id", decode.string)
   use sku <- decode.field("sku", decode.string)
   use quantity <- decode.field("quantity", decode.int)
   use amount_cents <- decode.field("amount_cents", decode.int)
@@ -123,6 +125,7 @@ pub fn order_decoder() -> Decoder(Order) {
   use email <- decode.field("email", decode.string)
   decode.success(Order(
     order_id:,
+    customer_id:,
     sku:,
     quantity:,
     amount_cents:,
