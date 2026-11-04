@@ -1,10 +1,11 @@
 //// The two external actors, scripted: a browser that signs in through the
 //// app, and an MCP client (Relay's own) that presents a bearer token.
 
+import gleam/bit_array
 import gleam/dynamic/decode
+import gleam/http
 import gleam/http/request
 import gleam/http/response.{type Response}
-import gleam/httpc
 import gleam/int
 import gleam/json
 import gleam/list
@@ -12,6 +13,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
+import http_gun
+import http_gun/config as gun_config
+import http_gun/destination
+import http_gun/error as gun_error
 import relay/client as mcp
 import relay/content
 
@@ -21,20 +26,20 @@ pub type SignedIn {
   SignedIn(subject: String, access_token: String, mcp_url: String)
 }
 
-/// Follows `/login` -> the provider's `/authorize` -> `/auth/callback` ->
-/// `/me/token` like a browser: every redirect is followed, and each host
-/// gets only the cookies it set. The scripted provider signs in as the
-/// `login_hint` the app forwards from `?as=`.
-pub fn sign_in(base_url: String, user: String) -> Result(SignedIn, String) {
-  use login <- result.try(get(base_url <> "/login?as=" <> user, []))
-  let cookies = set_cookies(login)
-  use authorize_url <- result.try(location(login))
-  use authorize <- result.try(get(authorize_url, []))
-  use callback_url <- result.try(location(authorize))
-  use callback <- result.try(get(callback_url, cookies))
-  use _ <- result.try(location(callback))
-  let cookies = list.append(cookies, set_cookies(callback))
-  use me <- result.try(get(base_url <> "/me/token", cookies))
+/// A browser signed in to the app: the provider root it trusts and the
+/// app's cookies.
+pub type Browser {
+  Browser(base_url: String, trust: BitArray, cookies: List(#(String, String)))
+}
+
+/// Signs in and POSTs for the access token at `/me/token`.
+pub fn sign_in(
+  base_url: String,
+  trust: BitArray,
+  user: String,
+) -> Result(SignedIn, String) {
+  use browser <- result.try(log_in(base_url, trust, user))
+  use me <- result.try(send(browser, http.Post, "/me/token"))
   let decoder = {
     use subject <- decode.field("subject", decode.string)
     use access_token <- decode.field("access_token", decode.string)
@@ -45,13 +50,63 @@ pub fn sign_in(base_url: String, user: String) -> Result(SignedIn, String) {
   |> result.map_error(fn(_) { "unexpected /me/token body: " <> me.body })
 }
 
+/// Follows `/login` -> the provider's `/authorize` -> `/auth/callback` like
+/// a browser: every redirect is followed, and each host gets only the
+/// cookies it set. The scripted provider signs in as the `login_hint` the
+/// app forwards from `?as=`. `trust` is the provider's root certificate
+/// (DER).
+pub fn log_in(
+  base_url: String,
+  trust: BitArray,
+  user: String,
+) -> Result(Browser, String) {
+  use login <- result.try(get(trust, base_url <> "/login?as=" <> user, []))
+  let cookies = set_cookies(login)
+  use authorize_url <- result.try(location(login))
+  use authorize <- result.try(get(trust, authorize_url, []))
+  use callback_url <- result.try(location(authorize))
+  use callback <- result.try(get(trust, callback_url, cookies))
+  use _ <- result.try(location(callback))
+  Ok(Browser(
+    base_url:,
+    trust:,
+    cookies: list.append(cookies, set_cookies(callback)),
+  ))
+}
+
+/// One request to the app with the browser's cookies.
+pub fn send(
+  browser: Browser,
+  method: http.Method,
+  path: String,
+) -> Result(Response(String), String) {
+  request(browser.trust, method, browser.base_url <> path, browser.cookies)
+}
+
 fn get(
+  trust: BitArray,
+  url: String,
+  cookies: List(#(String, String)),
+) -> Result(Response(String), String) {
+  request(trust, http.Get, url, cookies)
+}
+
+/// The browser verifies TLS. It trusts only the scripted provider's
+/// throwaway root (`hellhound/testing` publishes it as DER), and may reach
+/// loopback, like a developer's browser would.
+fn request(
+  trust: BitArray,
+  method: http.Method,
   url: String,
   cookies: List(#(String, String)),
 ) -> Result(Response(String), String) {
   use req <- result.try(
     request.to(url) |> result.replace_error("bad url " <> url),
   )
+  let req =
+    req
+    |> request.set_method(method)
+    |> request.set_body(<<>>)
   let req = case cookies {
     [] -> req
     _ ->
@@ -63,16 +118,31 @@ fn get(
           |> string.join("; "),
       )
   }
-  send(req)
-  |> result.map_error(fn(e) { "GET " <> url <> ": " <> e })
-}
-
-fn send(req: request.Request(String)) -> Result(Response(String), String) {
-  // The scripted provider's certificate comes from its own throwaway root.
-  httpc.configure()
-  |> httpc.verify_tls(False)
-  |> httpc.dispatch(req)
-  |> result.map_error(string.inspect)
+  let failed = fn(reason) {
+    http.method_to_string(method) |> string.uppercase
+    <> " "
+    <> url
+    <> ": "
+    <> reason
+  }
+  use browser <- result.try(
+    gun_config.default()
+    |> gun_config.with_trust(gun_config.Anchors([trust]))
+    |> gun_config.with_request_timeout(gun_config.After(duration.seconds(10)))
+    |> gun_config.with_destination(destination.loopback_only())
+    |> http_gun.start
+    |> result.map_error(fn(e) { failed(http_gun.describe_start_error(e)) }),
+  )
+  let sent = http_gun.send(browser, req)
+  http_gun.stop(browser)
+  use buffered <- result.try(
+    sent |> result.map_error(fn(e) { failed(gun_error.describe(e)) }),
+  )
+  Ok(
+    response.map(buffered.response, fn(body) {
+      bit_array.to_string(body) |> result.unwrap("")
+    }),
+  )
 }
 
 fn location(resp: Response(String)) -> Result(String, String) {

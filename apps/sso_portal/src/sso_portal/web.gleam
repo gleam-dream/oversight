@@ -6,7 +6,7 @@ import gleam/http
 import gleam/http/request
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
 import gleam/result
 import gleam/string
 import hellhound
@@ -25,12 +25,17 @@ pub type Context {
     billing: http_gun.Client,
     billing_url: String,
     telemetry: Telemetry,
+    /// The portal's public origin, configured once (the same one Hellhound's
+    /// `redirect_uri` is built from). Redirects back to the portal use it,
+    /// never the request's `Host`, which a proxy may pass through unchecked.
+    public_origin: String,
   )
 }
 
 const session_cookie = "portal_session"
 
-const session_max_age = 3600
+/// Seconds. The cookie's `Max-Age` and the session row's server-side expiry.
+const session_lifetime = 3600
 
 pub fn handle(request: Request, context: Context) -> Response {
   use <- wisp.rescue_crashes
@@ -106,7 +111,15 @@ fn callback(request: Request, context: Context) -> Response {
           subject: hellhound.subject(identity),
           email: hellhound.email(identity),
         )
-      case session_store.insert(context.db, stored) {
+      // Sign-in is when rows are created, so it is also when expired ones go.
+      let _ = session_store.delete_expired(context.db)
+      case
+        session_store.insert(
+          context.db,
+          stored,
+          lifetime_seconds: session_lifetime,
+        )
+      {
         Ok(Nil) ->
           wisp.redirect("/dashboard")
           |> wisp.set_cookie(
@@ -114,7 +127,7 @@ fn callback(request: Request, context: Context) -> Response {
             session_cookie,
             stored.id,
             wisp.Signed,
-            session_max_age,
+            session_lifetime,
           )
         Error(_) -> {
           let _ =
@@ -310,7 +323,7 @@ fn logout(request: Request, context: Context) -> Response {
       let options =
         hellhound.LogoutOptions(
           ..hellhound.default_logout(),
-          post_logout_redirect_uri: Some(origin(request) <> "/signed-out"),
+          post_logout_redirect_uri: Some(context.public_origin <> "/signed-out"),
           state: Some(wisp.random_string(16)),
         )
       let response = case
@@ -332,15 +345,6 @@ fn logout(request: Request, context: Context) -> Response {
 
 fn clear_session(response: Response, request: Request) -> Response {
   wisp.set_cookie(response, request, session_cookie, "", wisp.Signed, 0)
-}
-
-/// This app's origin as the browser sees it, for the post-logout redirect.
-fn origin(request: Request) -> String {
-  let port = case request.port {
-    Some(port) -> ":" <> int.to_string(port)
-    None -> ""
-  }
-  http.scheme_to_string(request.scheme) <> "://" <> request.host <> port
 }
 
 fn page(status: Int, title: String, body: String) -> Response {

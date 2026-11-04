@@ -21,6 +21,7 @@ hellhound = ">= 0.1.0 and < 0.2.0"
 grind = ">= 0.1.0 and < 0.2.0"
 json_blueprint = ">= 2.0.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
+http_gun = ">= 0.1.0 and < 0.2.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

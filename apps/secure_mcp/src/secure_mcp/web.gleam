@@ -29,7 +29,12 @@ pub fn handle(req: Request, context: Context) -> Response {
       wisp.ok() |> wisp.string_body("secure_mcp: sign in at /login?as=<user>")
     http.Get, ["login"] -> login(req, context)
     http.Get, ["auth", "callback"] -> callback(req, context)
-    http.Get, ["me", "token"] -> my_token(req, context)
+    http.Get, ["me"] -> me(req, context)
+    // The token is answered only to a POST: a GET response with a bearer
+    // token lands where URLs and their responses go (history, proxy and
+    // access logs, prefetches).
+    http.Post, ["me", "token"] -> my_token(req, context)
+    _, ["me", "token"] -> wisp.method_not_allowed([http.Post])
     _, _ -> wisp.not_found()
   }
 }
@@ -73,7 +78,7 @@ fn callback(req: Request, context: Context) -> Response {
   }
   case completed {
     Ok(session) ->
-      wisp.redirect("/me/token")
+      wisp.redirect("/me")
       |> wisp.set_cookie(
         req,
         session_cookie,
@@ -89,18 +94,35 @@ fn callback(req: Request, context: Context) -> Response {
   }
 }
 
+/// The signed-in user's page: a button that POSTs for the token.
+fn me(req: Request, context: Context) -> Response {
+  case current_session(req, context) {
+    Error(Nil) -> wisp.redirect("/login")
+    Ok(session) ->
+      wisp.html_response(
+        "<!doctype html><title>secure_mcp</title><p>Signed in as "
+          <> wisp.escape_html(
+          hellhound.subject(hellhound.session_identity(session)),
+        )
+          <> ".</p><form method=\"post\" action=\"/me/token\">"
+          <> "<button>Show my MCP access token</button></form>",
+        200,
+      )
+  }
+}
+
 /// Hands the signed-in user the access token to paste into an MCP client.
 /// Hellhound supplies the relying-party login. MCP clients use the issued token;
 /// this application does not run its own authorization server.
+///
+/// Only a POST that carries the signed session cookie gets the token. The
+/// cookie is `SameSite=Lax`, so a cross-site form POST arrives without it
+/// and is refused, and `no-store` keeps the answer out of caches.
 fn my_token(req: Request, context: Context) -> Response {
-  let session =
-    wisp.get_cookie(req, session_cookie, wisp.Signed)
-    |> result.try(fn(reference) {
-      hellhound.restore_session(context.hellhound, reference)
-      |> result.replace_error(Nil)
-    })
-  case session {
-    Error(Nil) -> wisp.redirect("/login")
+  case current_session(req, context) {
+    Error(Nil) ->
+      wisp.response(401)
+      |> wisp.string_body("sign in at /login first")
     Ok(session) ->
       case hellhound.access_token(context.hellhound, session) {
         Error(error) ->
@@ -135,4 +157,15 @@ fn my_token(req: Request, context: Context) -> Response {
           |> wisp.set_header("cache-control", "no-store")
       }
   }
+}
+
+fn current_session(
+  req: Request,
+  context: Context,
+) -> Result(hellhound.Session, Nil) {
+  wisp.get_cookie(req, session_cookie, wisp.Signed)
+  |> result.try(fn(reference) {
+    hellhound.restore_session(context.hellhound, reference)
+    |> result.replace_error(Nil)
+  })
 }

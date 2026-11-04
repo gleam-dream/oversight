@@ -23,3 +23,18 @@ live mail provider.
 
 The [composition contract](../../docs/design/design-layer.pdf)
 describes the flow, policy and limits.
+
+## Challenge key
+
+Correio derives each stored challenge verifier with an HMAC key. Anyone who reads the
+challenge store and knows the key can test every short code offline, so the key is
+secret and random and never appears in source.
+
+| Variable                     | Value                                                                               |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `EMAIL_PORTAL_CHALLENGE_KEY` | 32 random bytes, hex or base64 (`openssl rand -hex 32`). All-zero keys are refused. |
+
+When the variable is unset, the executable generates 32 bytes with
+`crypto.strong_random_bytes` at boot and says so on standard error: challenges issued
+before a restart, or by another instance, then fail verification. Instances that share a
+challenge store must share one configured key.

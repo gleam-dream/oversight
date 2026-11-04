@@ -38,7 +38,12 @@ fn narrate(running: app.Running, collector: telemetry.Collector) -> Nil {
   io.println("secure_mcp listening at " <> running.base_url)
   io.println("  MCP endpoint: " <> running.mcp_url)
 
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let assert Ok(alice) =
+    client.sign_in(
+      running.base_url,
+      testing.trust_anchor_der(running.provider),
+      "alice",
+    )
   io.println(
     "1. alice signed in through Hellhound (OIDC code + PKCE); token audience "
     <> alice.mcp_url,
@@ -73,7 +78,12 @@ fn narrate(running: app.Running, collector: telemetry.Collector) -> Nil {
   }
   io.println("4. report_status as alice -> " <> summary)
 
-  let assert Ok(bob) = client.sign_in(running.base_url, "bob")
+  let assert Ok(bob) =
+    client.sign_in(
+      running.base_url,
+      testing.trust_anchor_der(running.provider),
+      "bob",
+    )
   let assert Ok(bob_peer) =
     client.connect(running.mcp_url, Some(bob.access_token), [])
   let assert Ok(mcp.ToolFailed(content, _)) =
