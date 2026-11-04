@@ -26,8 +26,8 @@ pub fn common_path_signed_delivery_test() {
   let assert Ok(#(sub_id, secret)) =
     support.subscribe(svc, "ops", receiver.url(rx, "/ok"))
   let raw =
-    "{\"tenant\":\"ops\",\"type\":\"order.created\",\"id\":\"evt_1\",\"data\":{\"order\":42}}"
-  let assert [#(delivery_id, job_id)] = support.publish(svc, raw)
+    "{\"type\":\"order.created\",\"id\":\"evt_1\",\"data\":{\"order\":42}}"
+  let assert [#(delivery_id, job_id)] = support.publish(svc, "ops", raw)
   assert delivery_id == "evt_1:" <> sub_id
 
   assert support.drain(svc) == Ok(1)
@@ -46,7 +46,7 @@ pub fn common_path_signed_delivery_test() {
   assert signing.verify(secret, id, ts, request.body, signature)
 
   // Publishing the same event id again converges on the same job.
-  assert support.publish(svc, raw) == [#(delivery_id, job_id)]
+  assert support.publish(svc, "ops", raw) == [#(delivery_id, job_id)]
   assert support.drain(svc) == Ok(0)
 
   // The worker itself, error codec included, re-binds its own
@@ -81,7 +81,8 @@ pub fn receiver_down_retries_then_exhausts_test() {
   let assert [#(delivery_id, job_id)] =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_down\",\"data\":null}",
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_down\",\"data\":null}",
     )
   assert support.drain(svc) == Ok(3)
   // The typed http_gun failure survives the job's error codec.
@@ -113,7 +114,8 @@ pub fn always_throttled_receiver_stops_test() {
   let assert [#(delivery_id, job_id)] =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"ping\",\"id\":\"evt_429\",\"data\":null}",
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_429\",\"data\":null}",
     )
   // 2 snoozes, then 3 attempts.
   assert support.drain(svc) == Ok(5)
@@ -166,12 +168,14 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
   let acme =
     support.publish(
       svc,
-      "{\"tenant\":\"acme\",\"type\":\"invoice.paid\",\"id\":\"evt_a\",\"data\":{}}",
+      "acme",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_a\",\"data\":{}}",
     )
   let ops =
     support.publish(
       svc,
-      "{\"tenant\":\"ops\",\"type\":\"invoice.paid\",\"id\":\"evt_o\",\"data\":{}}",
+      "ops",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_o\",\"data\":{}}",
     )
   assert list.length(acme) == 2
   assert support.drain(svc) == Ok(3)
@@ -195,7 +199,8 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
   )) = store.get_subscription(svc.db, rebind_id)
   assert support.publish(
       svc,
-      "{\"tenant\":\"acme\",\"type\":\"invoice.paid\",\"id\":\"evt_b\",\"data\":{}}",
+      "acme",
+      "{\"type\":\"invoice.paid\",\"id\":\"evt_b\",\"data\":{}}",
     )
     == []
 }

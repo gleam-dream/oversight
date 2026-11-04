@@ -30,6 +30,7 @@ import webhooks/receiver
 import webhooks/service
 import webhooks/signing
 import webhooks/telemetry
+import webhooks/tenant
 import webhooks/web
 import wisp
 import wisp/wisp_mist
@@ -58,12 +59,29 @@ pub fn simulated_dns(
   }
 }
 
+/// Each demo tenant with its key from `WEBHOOKS_API_KEY_<NAME>`, or a key
+/// generated for this run. A generated key is never printed.
+fn tenants() -> List(tenant.Tenant) {
+  list.map(service.default_tenants(), fn(entry) {
+    let #(found, source) = tenant.from_environment(entry.0, entry.1)
+    case source {
+      tenant.FromEnvironment -> Nil
+      tenant.Generated ->
+        io.println(
+          tenant.key_variable(found.name)
+          <> " is not set; generated a key for this run",
+        )
+    }
+    found
+  })
+}
+
 fn run(url: String) -> Nil {
   wisp.set_logger_level(wisp.ErrorLevel)
   let rx = receiver.start()
   let options =
     service.Options(
-      ..service.options(url),
+      ..service.options(url, tenants()),
       plan: delivery.Plan(
         max_attempts: 3,
         backoff: attempt.Backoff(200, 2000),
@@ -82,6 +100,11 @@ fn run(url: String) -> Nil {
     )
   let assert Ok(svc) = service.start(options)
   let api = start_api(svc.context)
+  // Each tenant's key, as the tenant's own application would hold it.
+  let key = fn(name) {
+    let assert Ok(found) = list.find(options.tenants, fn(t) { t.name == name })
+    found.api_key
+  }
   // The operator's own client for calling the API: loopback, this port only.
   let assert Ok(admin) =
     config.default()
@@ -103,21 +126,46 @@ fn run(url: String) -> Nil {
   let ops_paths = ["/ok", "/flaky", "/busy", "/throttled", "/gone", "/big"]
   let ops_subs =
     list.map(ops_paths, fn(path) {
-      #(path, register(admin, api, "ops", receiver.url(rx, path)))
+      #(path, register(admin, api, key, "ops", receiver.url(rx, path)))
     })
-  let down = register(admin, api, "ops", "http://127.0.0.1:1/down")
-  let _ = register(admin, api, "ops", "http://127.0.0.1:5432/hook")
-  let _ =
-    register(admin, api, "acme", "https://169.254.169.254/latest/meta-data")
-  let _ = register(admin, api, "acme", "http://hooks.acme.example/hook")
+  let down = register(admin, api, key, "ops", "http://127.0.0.1:1/down")
+  let _ = register(admin, api, key, "ops", "http://127.0.0.1:5432/hook")
   let _ =
     register(
       admin,
       api,
+      key,
+      "acme",
+      "https://169.254.169.254/latest/meta-data",
+    )
+  let _ = register(admin, api, key, "acme", "http://hooks.acme.example/hook")
+  let _ =
+    register(
+      admin,
+      api,
+      key,
       "acme",
       "https://127.0.0.1:" <> int.to_string(receiver.port(rx)) <> "/ok",
     )
-  let rebind = register(admin, api, "acme", "https://rebind.acme.test/hook")
+  let rebind =
+    register(admin, api, key, "acme", "https://rebind.acme.test/hook")
+  // No route trusts a tenant named by the caller: without a tenant's key the
+  // API answers 401.
+  case
+    call(
+      admin,
+      api,
+      "not-a-tenant-key",
+      http.Post,
+      "/subscriptions",
+      json.object([#("url", json.string("https://hooks.acme.example/hook"))])
+        |> json.to_string,
+    )
+  {
+    Ok(#(status, _)) ->
+      io.println("  " <> int.to_string(status) <> " without a tenant key")
+    Error(reason) -> io.println("  !! " <> reason)
+  }
   let secrets =
     [#("/down", down), #("rebind", rebind), ..ops_subs]
     |> list.filter_map(fn(entry) {
@@ -129,21 +177,28 @@ fn run(url: String) -> Nil {
     |> dict.from_list
 
   io.println("\n-- publishing events")
-  let ops_jobs = publish(admin, api, "ops", "order.created", "{\"order\":42}")
-  let acme_jobs = publish(admin, api, "acme", "invoice.paid", "{\"invoice\":7}")
-  let published = list.append(ops_jobs, acme_jobs)
+  let ops_jobs =
+    publish(admin, api, key, "ops", "order.created", "{\"order\":42}")
+  let acme_jobs =
+    publish(admin, api, key, "acme", "invoice.paid", "{\"invoice\":7}")
+  let published =
+    list.append(
+      list.map(ops_jobs, fn(job) { #("ops", job) }),
+      list.map(acme_jobs, fn(job) { #("acme", job) }),
+    )
 
   let outcomes =
     list.map(published, fn(entry) {
-      let assert Ok(handle) = grind.bind(svc.jobs, svc.worker, entry.1)
+      let #(tenant, #(delivery_id, job_id)) = entry
+      let assert Ok(handle) = grind.bind(svc.jobs, svc.worker, job_id)
       let assert Ok(outcome) =
         grind.await(svc.jobs, handle, within: duration.seconds(15))
-      #(entry.0, outcome)
+      #(delivery_id, tenant, outcome)
     })
 
   io.println("\n-- outcomes")
   list.each(outcomes, fn(entry) {
-    let #(delivery_id, outcome) = entry
+    let #(delivery_id, tenant, outcome) = entry
     let sub_id = case string.split(delivery_id, ":") {
       [_, sub] -> sub
       _ -> delivery_id
@@ -153,7 +208,7 @@ fn run(url: String) -> Nil {
       Error(Nil) -> sub_id
     }
     let attempts = case
-      get_json(admin, api, "/deliveries/" <> delivery_id, {
+      get_json(admin, api, key(tenant), "/deliveries/" <> delivery_id, {
         use attempts <- decode.field("attempts", decode.int)
         use note <- decode.field("last_note", decode.optional(decode.string))
         decode.success(#(attempts, option.unwrap(note, "")))
@@ -176,6 +231,7 @@ fn run(url: String) -> Nil {
       get_json(
         admin,
         api,
+        key("acme"),
         "/subscriptions/" <> id,
         decode.at(["status"], decode.string),
       )
@@ -206,7 +262,7 @@ fn run(url: String) -> Nil {
   io.println("\n-- telemetry trace for the /flaky delivery")
   process.sleep(100)
   case list.find(outcomes, fn(e) { label_is(e.0, secrets, "/flaky") }) {
-    Ok(#(delivery_id, _)) ->
+    Ok(#(delivery_id, _, _)) ->
       telemetry.trace(svc.collector, delivery_id)
       |> list.filter(fn(l) { l.name != "grind.diag.renewal" })
       |> list.each(fn(l) { io.println("  " <> telemetry.format(l)) })
@@ -300,6 +356,7 @@ fn start_api(context: web.Context) -> Int {
 fn call(
   admin: http_gun.Client,
   port: Int,
+  api_key: String,
   method: http.Method,
   path: String,
   body: String,
@@ -312,6 +369,7 @@ fn call(
     |> request.set_method(method)
     |> request.set_path(path)
     |> request.set_header("content-type", "application/json")
+    |> request.set_header("authorization", "Bearer " <> api_key)
     |> request.set_body(bit_array.from_string(body))
   case http_gun.send(admin, req) {
     Ok(buffered) ->
@@ -323,18 +381,16 @@ fn call(
   }
 }
 
-fn get_json(admin, port, path, decoder) {
-  case call(admin, port, http.Get, path, "") {
+fn get_json(admin, port, api_key, path, decoder) {
+  case call(admin, port, api_key, http.Get, path, "") {
     Ok(#(200, text)) -> json.parse(text, decoder) |> result.replace_error(Nil)
     _ -> Error(Nil)
   }
 }
 
-fn register(admin, port, tenant: String, url: String) {
-  let body =
-    json.object([#("tenant", json.string(tenant)), #("url", json.string(url))])
-    |> json.to_string
-  case call(admin, port, http.Post, "/subscriptions", body) {
+fn register(admin, port, key, tenant: String, url: String) {
+  let body = json.object([#("url", json.string(url))]) |> json.to_string
+  case call(admin, port, key(tenant), http.Post, "/subscriptions", body) {
     Ok(#(201, text)) -> {
       let assert Ok(pair) =
         json.parse(text, {
@@ -365,16 +421,9 @@ fn register(admin, port, tenant: String, url: String) {
   }
 }
 
-fn publish(admin, port, tenant: String, event_type: String, data: String) {
-  let body =
-    "{\"tenant\":\""
-    <> tenant
-    <> "\",\"type\":\""
-    <> event_type
-    <> "\",\"data\":"
-    <> data
-    <> "}"
-  case call(admin, port, http.Post, "/events", body) {
+fn publish(admin, port, key, tenant: String, event_type: String, data: String) {
+  let body = "{\"type\":\"" <> event_type <> "\",\"data\":" <> data <> "}"
+  case call(admin, port, key(tenant), http.Post, "/events", body) {
     Ok(#(202, text)) -> {
       let assert Ok(deliveries) =
         json.parse(

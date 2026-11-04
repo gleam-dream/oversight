@@ -1,4 +1,5 @@
-//// Tenants, their egress tier, and registration-time endpoint checks.
+//// Subscriptions, the egress tier a tenant delivers through, and
+//// registration-time endpoint checks.
 ////
 //// Registration checks apply the tier's destination policy to the URL's
 //// host and port without resolving it. A host name can resolve to anything
@@ -18,10 +19,6 @@ pub type Tier {
   PublicTier
   /// Operator-owned tenants whose receivers run on allowlisted loopback hosts.
   InternalTier
-}
-
-pub type Tenant {
-  Tenant(name: String, tier: Tier)
 }
 
 pub type Status {

@@ -24,9 +24,7 @@ import webhooks/support
 const sub_id = "sub_tape"
 
 fn event(id: String) -> String {
-  "{\"tenant\":\"acme\",\"type\":\"invoice.paid\",\"id\":\""
-  <> id
-  <> "\",\"data\":{}}"
+  "{\"type\":\"invoice.paid\",\"id\":\"" <> id <> "\",\"data\":{}}"
 }
 
 /// The request the worker must send, written out independently of
@@ -95,9 +93,9 @@ pub fn cassette_drives_snooze_discard_and_body_limit_test() {
     cassette.parse(cassette.encode(testing.script(exchanges)), 1_048_576)
   use svc <- with_tape(unsigned(tape))
 
-  let assert [#(_, rate_limited)] = support.publish(svc, event("evt_1"))
-  let assert [#(_, big)] = support.publish(svc, event("evt_2"))
-  let assert [#(_, gone)] = support.publish(svc, event("evt_3"))
+  let assert [#(_, rate_limited)] = support.publish(svc, "acme", event("evt_1"))
+  let assert [#(_, big)] = support.publish(svc, "acme", event("evt_2"))
+  let assert [#(_, gone)] = support.publish(svc, "acme", event("evt_3"))
   // The 429 snoozes for Retry-After (120 s), so it is not due again.
   assert support.drain(svc) == Ok(3)
 
@@ -204,7 +202,8 @@ pub fn snooze_with_error_codec_runs_again_test() {
     ])
     |> unsigned
   use svc <- with_tape(tape)
-  let assert [#(delivery_id, job_id)] = support.publish(svc, event("evt_s"))
+  let assert [#(delivery_id, job_id)] =
+    support.publish(svc, "acme", event("evt_s"))
   assert support.drain_up_to(svc, 1) == Ok(1)
   assert support.outcome(svc, job_id) == Ok(grind.Pending(job.Scheduled))
   assert support.drain(svc) == Ok(1)

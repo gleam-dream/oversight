@@ -1,7 +1,6 @@
 //// Wiring: one pog pool shared by grind and the app, one egress client, the
 //// telemetry collector, and the grind runtime with the delivery worker.
 
-import gleam/dict.{type Dict}
 import gleam/erlang/process
 import gleam/result
 import gleam/string
@@ -17,6 +16,7 @@ import webhooks/egress.{type Egress}
 import webhooks/store
 import webhooks/subscription.{type Tier, InternalTier, PublicTier}
 import webhooks/telemetry.{type Collector}
+import webhooks/tenant.{type Tenant}
 import webhooks/web
 
 pub type Options {
@@ -25,7 +25,8 @@ pub type Options {
     /// Grind's schema; app tables stay in `public`.
     grind_schema: String,
     queue: String,
-    tenants: Dict(String, Tier),
+    /// Each tenant's tier and API key.
+    tenants: List(Tenant),
     egress: egress.Settings,
     plan: Plan,
     /// `False` for tests, which run due jobs with `grind/testing.drain`.
@@ -33,20 +34,18 @@ pub type Options {
   )
 }
 
-pub fn default_tenants() -> Dict(String, Tier) {
-  dict.from_list([
-    #("acme", PublicTier),
-    #("globex", PublicTier),
-    #("ops", InternalTier),
-  ])
+/// The demo's tenants and tiers. Their keys come from the environment; see
+/// `tenant.from_environment`.
+pub fn default_tenants() -> List(#(String, Tier)) {
+  [#("acme", PublicTier), #("globex", PublicTier), #("ops", InternalTier)]
 }
 
-pub fn options(database_url: String) -> Options {
+pub fn options(database_url: String, tenants: List(Tenant)) -> Options {
   Options(
     database_url:,
     grind_schema: "grind",
     queue: "webhooks",
-    tenants: default_tenants(),
+    tenants:,
     egress: egress.default_settings(),
     plan: delivery.default_plan(),
     consumers: True,
@@ -83,7 +82,11 @@ pub fn start(options: Options) -> Result(Service, String) {
     |> result.replace_error("invalid DATABASE_URL"),
   )
   let deps =
-    delivery.Deps(egress:, tenants: options.tenants, max_response_bytes: 4096)
+    delivery.Deps(
+      egress:,
+      tenants: tenant.tiers(options.tenants),
+      max_response_bytes: 4096,
+    )
   let worker = delivery.worker(deps, options.plan, options.queue)
   let config =
     grind.new(pool)
