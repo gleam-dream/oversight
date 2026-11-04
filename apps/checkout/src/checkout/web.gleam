@@ -63,10 +63,7 @@ fn place(req: wisp.Request, app: App) -> wisp.Response {
               ])
               |> json.to_string
               |> wisp.json_response(202)
-            Error(detail) ->
-              json.object([#("error", json.string(detail))])
-              |> json.to_string
-              |> wisp.json_response(503)
+            Error(Nil) -> error_response(503, "store_unavailable")
           }
         _ -> {
           let report = orders.place_local(app.services, order)
@@ -96,14 +93,33 @@ fn decode_order(body: decode.Dynamic) -> Result(domain.OrderRequest, Nil) {
   decode.run(body, codecs.order_decoder()) |> result.replace_error(Nil)
 }
 
+/// Bodies carry the order's status, a stable error code when there is one,
+/// and the report's client-facing detail. Internal terms are logged by
+/// `orders`, never rendered here.
 fn report_json(order_id: String, report: Report) -> json.Json {
-  json.object([
-    #("order_id", json.string(order_id)),
-    #("status", json.string(domain.status_to_string(report.status))),
-    #("detail", json.string(report.detail)),
-    #("undone", json.array(report.undone, json.string)),
-    #("unknown_effects", json.int(report.unknown_effects)),
-  ])
+  let code = case report.status, report.error {
+    _, Ok(error) -> [#("error", json.string(domain.error_code(error)))]
+    domain.Rejected, Error(Nil) -> [#("error", json.string("checkout_failed"))]
+    _, Error(Nil) -> []
+  }
+  json.object(
+    [
+      #("order_id", json.string(order_id)),
+      #("status", json.string(domain.status_to_string(report.status))),
+      ..code
+    ]
+    |> list.append([
+      #("detail", json.string(report.detail)),
+      #("undone", json.array(report.undone, json.string)),
+      #("unknown_effects", json.int(report.unknown_effects)),
+    ]),
+  )
+}
+
+fn error_response(status: Int, code: String) -> wisp.Response {
+  json.object([#("error", json.string(code))])
+  |> json.to_string
+  |> wisp.json_response(status)
 }
 
 /// The HTTP status follows the typed error, including http_gun's failure

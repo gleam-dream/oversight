@@ -14,6 +14,7 @@ import checkout/telemetry
 import checkout/web
 import envoy
 import gleam/bit_array
+import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
 import gleam/http/request
@@ -456,7 +457,7 @@ pub fn durable_checkout_cancelled_through_grind_rolls_back_test() {
   let assert Ok(grind.CancellationRequested) = grind.cancel(jobs, handle)
 
   let assert grind.Cancelled(_) = await_job(application, job_id)
-  let assert Some(#(domain.Rejected, "cancelled: CancelRequested")) =
+  let assert Some(#(domain.Rejected, "cancelled: requested")) =
     db.order_status(services.pool, "cancel-1")
   // Every effect is reversed, including the shipment the provider booked
   // while the cancellation was pending.
@@ -562,4 +563,51 @@ pub fn provider_refuses_unbounded_request_bodies_test() {
   assert raw_http(port, bit_array.from_string(oversized), 5000) == Ok(413)
   // Nothing reached the provider's state.
   assert providers.snapshot(application.providers).charge_requests == 0
+}
+
+// --- error bodies ----------------------------------------------------------------
+
+fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
+  let assert Ok(customer) = http_gun.start(gateway.customer_config())
+  let assert Ok(req) =
+    request.to("http://127.0.0.1:" <> int.to_string(port) <> "/orders" <> query)
+  let req =
+    req
+    |> request.set_method(http.Post)
+    |> request.set_header("content-type", "application/json")
+    |> request.set_body(bit_array.from_string(body))
+  let assert Ok(reply) = http_gun.send(customer, req)
+  http_gun.stop(customer)
+  let assert Ok(text) = bit_array.to_string(reply.response.body)
+  #(reply.response.status, text)
+}
+
+/// An internal failure answers with a stable error code and message; the
+/// driver's error term goes to the log, not to the client.
+pub fn internal_errors_stay_out_of_response_bodies_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = db.set_stock(pool, "broken-sku", 3)
+  let assert Ok(#(_, port)) = web.start(application)
+  let rename = fn(from, to) {
+    let assert Ok(_) =
+      pog.query("ALTER TABLE " <> from <> " RENAME TO " <> to)
+      |> pog.execute(pool)
+    Nil
+  }
+  rename("reservations", "reservations_hidden")
+  let placed = order("broken-1", "broken-sku", providers.card_ok, "1 St")
+  let #(status, body) = post_order(port, checkout.orders_body(placed), "")
+  rename("reservations_hidden", "reservations")
+
+  assert status == 503
+  list.each(["Postgresql", "QueryError", "reservations", "42P01"], fn(term) {
+    assert !string.contains(body, term)
+  })
+  let assert Ok("store_unavailable") =
+    json.parse(body, decode.at(["error"], decode.string))
+  // The stored order detail is the same stable text.
+  let assert Some(#(domain.Rejected, detail)) =
+    db.order_status(pool, "broken-1")
+  assert !string.contains(detail, "Postgresql")
 }

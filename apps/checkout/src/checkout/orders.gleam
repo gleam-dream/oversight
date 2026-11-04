@@ -25,6 +25,7 @@ import pog
 import saga
 import saga/execution
 import saga/storage.{type Storage}
+import wisp
 
 pub const receipts_queue = "receipts"
 
@@ -71,25 +72,30 @@ pub fn place_local(s: Services, order: OrderRequest) -> Report {
   let config =
     execution.with_correlation(s.saga_config, telemetry.order(order.order_id))
   case execution.start(s.workflow, order, config) {
-    Error(error) ->
-      Report(domain.Rejected, string.inspect(error), Error(Nil), [], 0)
+    Error(error) -> {
+      log_internal(order.order_id, "saga start failed", error)
+      Report(domain.Rejected, "checkout could not start", Error(Nil), [], 0)
+    }
     Ok(run) ->
       case execution.await(run, duration.seconds(60)) {
         Ok(outcome) -> finalize(s, order, outcome)
-        Error(error) ->
-          Report(domain.Pending, string.inspect(error), Error(Nil), [], 0)
+        Error(error) -> {
+          log_internal(order.order_id, "saga await ended", error)
+          Report(domain.Pending, "checkout still running", Error(Nil), [], 0)
+        }
       }
   }
 }
 
 /// Records the pending order and enqueues its durable checkout job in one
 /// transaction. The job id is derived from the order, so a repeated
-/// placement converges on the first job.
+/// placement converges on the first job. A failure is logged; the caller
+/// only learns that admission did not commit.
 pub fn place_durable(
   s: Services,
   checkout_worker: Worker(OrderRequest, String, Nil),
   order: OrderRequest,
-) -> Result(Int, String) {
+) -> Result(Int, Nil) {
   let checkout =
     job.new(checkout_worker, order)
     |> job.with_id("checkout:" <> order.order_id)
@@ -102,7 +108,21 @@ pub fn place_durable(
     |> result.map_error(grind.describe_submit_error)
   })
   |> result.map(fn(admission) { job.id(grind.handle(admission)) })
-  |> result.map_error(describe_transaction_error)
+  |> result.map_error(fn(error) {
+    log_internal(
+      order.order_id,
+      "durable admission failed",
+      describe_transaction_error(error),
+    )
+  })
+}
+
+/// Internal detail for operators: the full term goes to the log, keyed by
+/// order, and never into an API body or an order row.
+fn log_internal(order_id: String, context: String, detail: a) -> Nil {
+  wisp.log_warning(
+    "order " <> order_id <> ": " <> context <> ": " <> string.inspect(detail),
+  )
 }
 
 fn describe_transaction_error(error: pog.TransactionError(String)) -> String {
@@ -129,6 +149,7 @@ pub fn finalize(s: Services, order: OrderRequest, outcome: Outcome) -> Report {
     }
     execution.Failed(cause, settlement) -> {
       let #(detail, error) = describe_cause(cause)
+      log_cause(order.order_id, error)
       let _ = db.set_status(s.pool, order.order_id, domain.Rejected, detail)
       Report(
         domain.Rejected,
@@ -139,6 +160,7 @@ pub fn finalize(s: Services, order: OrderRequest, outcome: Outcome) -> Report {
       )
     }
     execution.Unresolved(step, evidence, settlement) -> {
+      log_cause(order.order_id, Ok(evidence))
       let detail =
         saga.address_to_string(step)
         <> " held: "
@@ -159,7 +181,10 @@ pub fn finalize(s: Services, order: OrderRequest, outcome: Outcome) -> Report {
       )
     }
     execution.Cancelled(reason, settlement) -> {
-      let detail = "cancelled: " <> string.inspect(reason)
+      let detail = case reason {
+        execution.CancelRequested -> "cancelled: requested"
+        execution.OwnerExited -> "cancelled: owner exited"
+      }
       let _ = db.set_status(s.pool, order.order_id, domain.Rejected, detail)
       Report(
         domain.Rejected,
@@ -169,6 +194,14 @@ pub fn finalize(s: Services, order: OrderRequest, outcome: Outcome) -> Report {
         unknown,
       )
     }
+  }
+}
+
+fn log_cause(order_id: String, error: Result(CheckoutError, Nil)) -> Nil {
+  case error {
+    Ok(error) ->
+      wisp.log_warning("order " <> order_id <> ": " <> domain.log_detail(error))
+    Error(Nil) -> Nil
   }
 }
 
