@@ -18,6 +18,7 @@ import llm_wire
 import llm_wire/message
 import llm_wire/testing
 import mist
+import tool_hub/bounded_body
 
 pub type Step {
   /// Answer with this scripted reply.
@@ -93,6 +94,11 @@ pub fn stop(provider: Provider) -> Nil {
 @external(erlang, "tool_hub_ffi", "stop_process")
 fn stop_process(pid: process.Pid) -> Nil
 
+/// The loopback port the provider listens on.
+pub fn port(provider: Provider) -> Int {
+  provider.port
+}
+
 /// llm_wire settings for this provider: the scripted adapter pointed at the
 /// loopback endpoint. llm_wire limits plain `http://` to loopback addresses
 /// through the HTTP Gun view of each call.
@@ -120,10 +126,24 @@ fn handle(
   script: Subject(ScriptMessage),
   notices: Subject(Notice),
 ) -> response.Response(mist.ResponseData) {
-  let body = case mist.read_body(req, 1_048_576) {
-    Ok(read) -> bit_array.to_string(read.body) |> result.unwrap("")
-    Error(_) -> ""
+  case bounded_body.read(req, max_body_bytes) {
+    Error(error) -> bounded_body.refusal(error)
+    Ok(body) -> {
+      let body = bit_array.to_string(body) |> result.unwrap("")
+      take_step(req, body, script, notices)
+    }
   }
+}
+
+/// The largest model request body the provider reads.
+pub const max_body_bytes = 1_048_576
+
+fn take_step(
+  req: Request(mist.Connection),
+  body: String,
+  script: Subject(ScriptMessage),
+  notices: Subject(Notice),
+) -> response.Response(mist.ResponseData) {
   process.send(notices, Received(body))
   case process.call(script, 1000, Next) {
     None ->

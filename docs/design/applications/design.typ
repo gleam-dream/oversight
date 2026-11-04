@@ -189,10 +189,10 @@
         responsibility: [Let an agent call discovered MCP tools and expose agent execution as an MCP tool.],
         interface: [Relay declarations/calls, admitted dynamic contracts, Fabric invocation, and application recipes.],
         interactions: [The application starts the inventory peer it discovers. Relay carries idempotency/correlation metadata; Fabric owns durable keyed invocation.],
-        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers.],
+        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers. The agent's policy runs only tools declared read-only; a reservation or any undeclared tool waits for an operator approval, and no MCP route carries the operator credential.],
         failure: [Keyed disconnect can leave durable work inspectable; unkeyed cancellation stops its owned invocation. Tool failure and uncertain delivery remain separate from a completed protocol exchange.],
       )
-      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
+      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `assistant.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
     ]
     #subsection(title: "Protected MCP service")[
       #answers(title: "Authenticated tools and durable reports",
