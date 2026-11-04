@@ -34,6 +34,10 @@ pub type LookupError {
 
 /// Why a refund step failed, as the saga's typed step error.
 pub type RefundError {
+  /// The desk refused the request before any payment call: the order is
+  /// not the ticket customer's, is not refundable, or the amount exceeds
+  /// what remains refundable.
+  RefundRefused(reason: String)
   /// The provider answered and refused: nothing happened.
   PaymentDeclined(status: Int)
   /// The request never left: nothing happened.
@@ -67,7 +71,9 @@ pub fn get_order(shop: Shop, order_id: String) -> Result(Order, LookupError) {
   }
 }
 
-/// Refunds through the payment provider; the idempotency key is the order.
+/// Refunds through the payment provider. The idempotency key names the
+/// order and the amount: a resubmitted request converges on one refund, and
+/// another amount is another refund rather than a duplicate of the first.
 pub fn refund(
   shop: Shop,
   request: RefundRequest,
@@ -76,7 +82,15 @@ pub fn refund(
     json.object([
       #("order_id", json.string(request.order_id)),
       #("amount_cents", json.int(request.amount_cents)),
-      #("idempotency_key", json.string("refund-" <> request.order_id)),
+      #(
+        "idempotency_key",
+        json.string(
+          "refund-"
+          <> request.order_id
+          <> "-"
+          <> int.to_string(request.amount_cents),
+        ),
+      ),
     ])
   case call(shop, http.Post, "/payments/refunds", json.to_string(body)) {
     Error(failure) ->

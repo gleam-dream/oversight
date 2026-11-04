@@ -179,7 +179,7 @@
         responsibility: [Run a support agent whose refunds require an authorized approval and a compensating workflow.],
         interface: [Ticket/run operations, typed tools, typed Resolution, and approve/reject commands carrying checked proof.],
         interactions: [Fabric owns agent state and approval; Hellhound checks approver identity; Saga performs refund/ledger/notification; the consumer recipe retains full reports before mapping them.],
-        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run.],
+        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run. The session names the authenticated customer; tools read only that customer's orders, and the workflow's first step refuses a refund of another customer's or undelivered order, of an amount beyond the total less earlier refunds, or of an amount already refunded on that order. The payment idempotency key names order and amount.],
         failure: [Unauthenticated, unauthorized and unavailable-verifier outcomes are separate. Unknown payment effects require reconciliation; failed notification triggers the workflow's compensation policy.],
       )
       Source owners: `apps/support_desk/src/support_desk/desk.gleam`, `approvers.gleam`, `refund.gleam`, `domain.gleam`, and the local Saga recipe.
