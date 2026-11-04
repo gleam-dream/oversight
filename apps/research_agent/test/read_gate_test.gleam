@@ -100,3 +100,13 @@ pub fn the_scripted_provider_bounds_request_bodies_test() {
     raw_status(world.port, head <> "connection: close\r\n\r\n")
   assert services.llm_requests(world, "") == []
 }
+
+/// A negative declared length is malformed framing: the scripted provider
+/// refuses it with 400 before the request is recorded.
+pub fn the_scripted_provider_refuses_a_negative_length_test() {
+  let assert Ok(world) = services.start()
+  let head = "POST /openai/v1/responses HTTP/1.1\r\nhost: 127.0.0.1\r\n"
+  let assert Ok(400) =
+    raw_status(world.port, head <> "content-length: -1\r\n\r\n{}")
+  assert services.llm_requests(world, "") == []
+}
