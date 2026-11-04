@@ -8,6 +8,7 @@ import correio/passwordless/store
 import correio/testing
 import correio_mailbox
 import email_portal as portal
+import gleam/bit_array
 import gleam/erlang/process
 import gleam/http/request
 import gleam/list
@@ -27,8 +28,8 @@ fn account() {
 fn setup(capacity) {
   let assert Ok(runtime) = memory.start(20)
   let assert Ok(capture) = capture.start(capacity)
-  let assert Ok(service) =
-    passwordless.new(memory.store(runtime), "portal", "login", <<0:256>>)
+  let assert Ok(key) = portal.challenge_key(Error(Nil))
+  let assert Ok(service) = portal.service(memory.store(runtime), key)
   let assert Ok(from) = address.parse("login@example.com")
   #(
     runtime,
@@ -215,8 +216,8 @@ pub fn uncertain_consumption_survives_unavailable_recovery_test() {
         _ -> panic as "Unexpected additional verification"
       }
     })
-  let assert Ok(service) =
-    passwordless.new(uncertain, "portal", "login", <<0:256>>)
+  let assert Ok(key) = portal.challenge_key(Error(Nil))
+  let assert Ok(service) = portal.service(uncertain, key)
   let assert Ok(from) = address.parse("login@example.com")
   let app = portal.new(service, from, capture.sender(capture))
   let #(pending, answer) = delivered(app, capture, passwordless.MagicLink)
@@ -273,4 +274,43 @@ pub fn committed_publication_with_lost_reply_recovers_same_session_test() {
   process.receive(committed, 0) |> should.equal(Error(Nil))
   portal.session_count(app) |> should.equal(1)
   finish(runtime, capture)
+}
+
+// --- Challenge key ---------------------------------------------------------
+
+/// A key anyone can read lets a store reader brute-force short codes offline,
+/// so a zero key is refused whichever encoding carries it.
+pub fn zero_challenge_key_is_refused_test() {
+  let zero = <<0:256>>
+  portal.challenge_key(Ok(bit_array.base16_encode(zero)))
+  |> should.equal(Error(portal.KeyAllZero))
+  portal.challenge_key(Ok(bit_array.base64_encode(zero, True)))
+  |> should.equal(Error(portal.KeyAllZero))
+}
+
+pub fn configured_challenge_key_accepts_hex_and_base64_test() {
+  let bytes = <<"0123456789abcdef":utf8, "fedcba9876543210":utf8>>
+  let assert Ok(hex) = portal.challenge_key(Ok(bit_array.base16_encode(bytes)))
+  let assert Ok(base64) =
+    portal.challenge_key(Ok(bit_array.base64_encode(bytes, True)))
+  hex |> should.equal(base64)
+  // `openssl rand -hex 32` prints lowercase.
+  portal.challenge_key(Ok(string.lowercase(bit_array.base16_encode(bytes))))
+  |> should.equal(Ok(hex))
+  portal.key_source(hex) |> should.equal(portal.Configured)
+}
+
+pub fn configured_challenge_key_must_be_32_bytes_test() {
+  portal.challenge_key(Ok(bit_array.base16_encode(<<7:248>>)))
+  |> should.equal(Error(portal.KeyWrongLength(31)))
+  portal.challenge_key(Ok("not a key"))
+  |> should.equal(Error(portal.KeyNotEncoded))
+}
+
+/// Without configuration the key is fresh random bytes, never a fixed value.
+pub fn unset_challenge_key_is_generated_at_boot_test() {
+  let assert Ok(first) = portal.challenge_key(Error(Nil))
+  let assert Ok(second) = portal.challenge_key(Error(Nil))
+  portal.key_source(first) |> should.equal(portal.Generated)
+  should.not_equal(first, second)
 }

@@ -2,19 +2,25 @@ import envoy
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
+import gleam/http/request
 import gleam/int
 import gleam/json
-import gleam/option.{Some}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import grind
 import grind/testing
+import http_gun
+import http_gun/config
 import http_gun/destination
 import pog
 import webhooks/attempt
 import webhooks/delivery
 import webhooks/egress
 import webhooks/service.{type Service}
+import webhooks/subscription
+import webhooks/tenant.{type Tenant, Tenant}
 import webhooks/web
 import wisp/simulate
 
@@ -31,6 +37,23 @@ pub fn test_dns(
   }
 }
 
+/// The test tenants; each one's key is `key(name)`.
+pub fn tenants() -> List(Tenant) {
+  [
+    Tenant("acme", subscription.PublicTier, key("acme")),
+    Tenant("globex", subscription.PublicTier, key("globex")),
+    Tenant("ops", subscription.InternalTier, key("ops")),
+  ]
+}
+
+pub fn key(tenant: String) -> String {
+  "whk_test_" <> tenant
+}
+
+pub fn bearer(tenant: String) -> Option(String) {
+  Some("Bearer " <> key(tenant))
+}
+
 pub fn options() -> service.Options {
   let url = case envoy.get("DATABASE_URL") {
     Ok(url) -> url
@@ -38,7 +61,7 @@ pub fn options() -> service.Options {
       panic as "DATABASE_URL is not set; run ../scripts/with-postgres.sh gleam test"
   }
   service.Options(
-    ..service.options(url),
+    ..service.options(url, tenants()),
     queue: "webhooks_" <> int.to_string(unique_int()),
     plan: delivery.Plan(
       ..delivery.default_plan(),
@@ -93,21 +116,36 @@ pub fn with_service(options: service.Options, run: fn(Service) -> a) -> a {
   result
 }
 
-/// POST /subscriptions through the wisp handler.
+/// One request through the wisp handler, with an optional `Authorization`
+/// header; returns the status and body.
+pub fn call(
+  svc: Service,
+  method: http.Method,
+  path: String,
+  authorization: Option(String),
+  body: String,
+) -> #(Int, String) {
+  let req =
+    simulate.request(method, path)
+    |> simulate.string_body(body)
+    |> simulate.header("content-type", "application/json")
+  let req = case authorization {
+    Some(value) -> simulate.header(req, "authorization", value)
+    None -> req
+  }
+  let response = web.handle(req, svc.context)
+  #(response.status, simulate.read_body(response))
+}
+
+/// POST /subscriptions as `tenant`, authenticated by its key.
 pub fn subscribe(
   svc: Service,
   tenant: String,
   url: String,
 ) -> Result(#(String, String), #(Int, String)) {
-  let response =
-    simulate.request(http.Post, "/subscriptions")
-    |> simulate.json_body(
-      json.object([#("tenant", json.string(tenant)), #("url", json.string(url))]),
-    )
-    |> web.handle(svc.context)
-  let body = simulate.read_body(response)
-  case response.status {
-    201 -> {
+  let body = json.object([#("url", json.string(url))]) |> json.to_string
+  case call(svc, http.Post, "/subscriptions", bearer(tenant), body) {
+    #(201, body) -> {
       let assert Ok(pair) =
         json.parse(body, {
           use id <- decode.field("id", decode.string)
@@ -116,21 +154,26 @@ pub fn subscribe(
         })
       Ok(pair)
     }
-    status -> Error(#(status, body))
+    other -> Error(other)
   }
 }
 
-/// POST /events through the wisp handler; returns (delivery id, job id).
-pub fn publish(svc: Service, raw: String) -> List(#(String, Int)) {
-  let response =
-    simulate.request(http.Post, "/events")
-    |> simulate.string_body(raw)
-    |> simulate.header("content-type", "application/json")
-    |> web.handle(svc.context)
-  assert response.status == 202
+/// POST /events as `tenant`; returns (delivery id, job id).
+pub fn publish(
+  svc: Service,
+  tenant: String,
+  raw: String,
+) -> List(#(String, Int)) {
+  let #(status, body) = call(svc, http.Post, "/events", bearer(tenant), raw)
+  assert status == 202
+  deliveries(body)
+}
+
+/// The (delivery id, job id) pairs of a 202 `/events` answer.
+pub fn deliveries(body: String) -> List(#(String, Int)) {
   let assert Ok(deliveries) =
     json.parse(
-      simulate.read_body(response),
+      body,
       decode.at(
         ["deliveries"],
         decode.list({
@@ -141,6 +184,44 @@ pub fn publish(svc: Service, raw: String) -> List(#(String, Int)) {
       ),
     )
   deliveries
+}
+
+/// POSTs `body` to a loopback server on `port` and returns the status.
+pub fn post(
+  port: Int,
+  path: String,
+  headers: List(#(String, String)),
+  body: BitArray,
+) -> Int {
+  let assert Ok(client) =
+    config.default()
+    |> config.with_destination(
+      destination.loopback_only()
+      |> destination.only_hosts(["127.0.0.1:" <> int.to_string(port)]),
+    )
+    |> config.without_observations
+    |> http_gun.start
+  let req =
+    list.fold(
+      headers,
+      request.new()
+        |> request.set_method(http.Post)
+        |> request.set_scheme(http.Http)
+        |> request.set_host("127.0.0.1")
+        |> request.set_port(port)
+        |> request.set_path(path)
+        |> request.set_body(body),
+      // A recorded request's framing headers are the client's to set.
+      fn(req, header) {
+        case header.0 {
+          "host" | "content-length" | "connection" -> req
+          name -> request.set_header(req, name, header.1)
+        }
+      },
+    )
+  let assert Ok(sent) = http_gun.send(client, req)
+  http_gun.stop(client)
+  sent.response.status
 }
 
 /// grind's observations go through its forwarder and need a moment to land.

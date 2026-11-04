@@ -15,7 +15,7 @@
 
 import checkout/codecs
 import checkout/domain.{
-  type Booked, type CheckoutError, type OrderRequest, type UndoError,
+  type Booked, type CheckoutError, type Order, type UndoError,
 }
 import checkout/orders.{type Services}
 import checkout/telemetry
@@ -37,8 +37,8 @@ fn attempt_budget() -> Duration {
   duration.seconds(60)
 }
 
-pub fn execution_id(order: OrderRequest) -> String {
-  "checkout:" <> order.order_id
+pub fn execution_id(order: Order) -> String {
+  "checkout:" <> domain.key(order)
 }
 
 /// `redelivery` is the snooze after a lost runner or a storage failure;
@@ -50,7 +50,7 @@ pub fn checkout_worker(
   s: Services,
   redelivery redelivery: Duration,
   busy busy: Duration,
-) -> Worker(OrderRequest, String, Nil) {
+) -> Worker(Order, String, Nil) {
   let summary = codecs.JsonCodec("summary-1", json.string, decode.string)
   worker.responding(
     "checkout.run",
@@ -68,7 +68,7 @@ pub fn checkout_worker(
 fn drive(
   s: Services,
   context: worker.Context,
-  order: OrderRequest,
+  order: Order,
   redelivery: Duration,
   busy: Duration,
 ) -> worker.Response(String, Nil) {
@@ -83,7 +83,7 @@ fn drive(
     Error(error) -> Error(error)
     Ok(run) ->
       run
-      |> durable.with_correlation(telemetry.order(order.order_id))
+      |> durable.with_correlation(telemetry.order(domain.key(order)))
       |> drive_until_cancelled(context, budget(context))
   }
   case driven {
@@ -126,7 +126,7 @@ type Driving {
 /// `durable.cancel`; the runner rolls back at its next checkpoint. The
 /// runner still stops when the handler dies, through the link.
 fn drive_until_cancelled(
-  run: durable.Run(OrderRequest, Booked, CheckoutError, UndoError),
+  run: durable.Run(Order, Booked, CheckoutError, UndoError),
   context: worker.Context,
   timeout: Duration,
 ) -> Result(execution.Outcome(Booked, CheckoutError, UndoError), durable.Error) {

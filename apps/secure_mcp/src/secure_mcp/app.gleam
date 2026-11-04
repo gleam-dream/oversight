@@ -2,9 +2,13 @@
 //// Grind runtime, Relay endpoint and the one mist listener that serves both
 //// the wisp routes and `/mcp`.
 
+import envoy
+import gleam/bit_array
+import gleam/crypto
 import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/int
+import gleam/io
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
@@ -29,8 +33,19 @@ import wisp/wisp_mist
 
 pub const client_id = "secure-mcp"
 
-/// The scripted provider's client secret.
-pub const client_secret = "dev-only-client-secret"
+/// Names the environment variable that holds the client secret registered
+/// with the scripted provider and presented by Hellhound.
+pub const client_secret_variable = "SECURE_MCP_CLIENT_SECRET"
+
+/// The configured client secret, or 32 random bytes (base64url) when none is
+/// configured. A secret never appears in source. The app starts the scripted
+/// provider itself, so a secret generated at boot is registered there too.
+pub fn client_secret(configured: Result(String, Nil)) -> String {
+  case configured {
+    Ok(secret) if secret != "" -> secret
+    _ -> bit_array.base64_url_encode(crypto.strong_random_bytes(32), False)
+  }
+}
 
 /// How `/mcp` verifies a bearer token.
 pub type Verification {
@@ -78,9 +93,18 @@ pub fn start(options: Options) -> Result(Running, String) {
   let port = free_port()
   let base_url = "http://127.0.0.1:" <> int.to_string(port)
   let mcp_url = base_url <> "/mcp"
+  let configured = envoy.get(client_secret_variable)
+  case configured {
+    Ok(secret) if secret != "" -> Nil
+    _ ->
+      io.println_error(
+        client_secret_variable
+        <> " is unset: using a random client secret generated at boot for the scripted provider.",
+      )
+  }
   use provider <- result.try(
     testing.provider_options()
-    |> testing.with_client(client_id:, secret: client_secret)
+    |> testing.with_client(client_id:, secret: client_secret(configured))
     |> testing.with_access_token_audiences([mcp_url])
     |> testing.start_provider
     |> result.map_error(fn(e) { "provider: " <> string.inspect(e) }),

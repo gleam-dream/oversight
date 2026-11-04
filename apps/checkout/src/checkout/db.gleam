@@ -3,8 +3,7 @@
 //// and grind keep their own tables on the same pool.
 
 import checkout/domain.{
-  type CheckoutError, type OrderRequest, type OrderStatus, OutOfStock,
-  StockStoreFailed,
+  type CheckoutError, type Order, type OrderStatus, OutOfStock, StockStoreFailed,
 }
 import gleam/dynamic/decode
 import gleam/list
@@ -14,43 +13,185 @@ import gleam/string
 import pog
 
 const schema = [
+  // The catalog: each SKU's price and the units on hand. Orders are priced
+  // from here; the request carries no amount.
   "CREATE TABLE IF NOT EXISTS stock (
      sku text PRIMARY KEY,
+     unit_price_cents integer NOT NULL CHECK (unit_price_cents > 0),
      available integer NOT NULL CHECK (available >= 0))",
   "CREATE TABLE IF NOT EXISTS reservations (
-     order_id text PRIMARY KEY,
+     customer_id text NOT NULL,
+     order_id text NOT NULL,
      sku text NOT NULL,
      quantity integer NOT NULL,
-     released boolean NOT NULL DEFAULT false)",
+     released boolean NOT NULL DEFAULT false,
+     PRIMARY KEY (customer_id, order_id))",
+  // An order belongs to the customer who placed it; its id is that
+  // customer's idempotency key for the placement. Ids are scoped to the
+  // customer: another customer's use of the same id is a different order.
   "CREATE TABLE IF NOT EXISTS orders (
-     order_id text PRIMARY KEY,
+     customer_id text NOT NULL,
+     order_id text NOT NULL,
+     sku text NOT NULL,
+     quantity integer NOT NULL,
+     amount_cents integer NOT NULL,
      status text NOT NULL,
      detail text NOT NULL DEFAULT '',
-     updated_at timestamptz NOT NULL DEFAULT now())",
+     updated_at timestamptz NOT NULL DEFAULT now(),
+     PRIMARY KEY (customer_id, order_id))",
   "CREATE TABLE IF NOT EXISTS receipts_sent (
-     order_id text PRIMARY KEY,
-     message_id text NOT NULL)",
+     customer_id text NOT NULL,
+     order_id text NOT NULL,
+     message_id text NOT NULL,
+     PRIMARY KEY (customer_id, order_id))",
 ]
 
-pub fn migrate(conn: pog.Connection) -> Result(Nil, pog.QueryError) {
-  list.try_each(schema, fn(sql) {
-    pog.query(sql) |> pog.execute(conn) |> result.replace(Nil)
+/// The columns and primary key each table must have. `CREATE TABLE IF NOT
+/// EXISTS` leaves an existing table as it is, so `migrate` checks this shape
+/// afterwards.
+const expected_shape = [
+  #("stock", ["sku", "unit_price_cents", "available"], ["sku"]),
+  #("reservations", ["customer_id", "order_id", "sku", "quantity", "released"], [
+    "customer_id",
+    "order_id",
+  ]),
+  #(
+    "orders",
+    [
+      "customer_id", "order_id", "sku", "quantity", "amount_cents", "status",
+      "detail", "updated_at",
+    ],
+    ["customer_id", "order_id"],
+  ),
+  #("receipts_sent", ["customer_id", "order_id", "message_id"], [
+    "customer_id",
+    "order_id",
+  ]),
+]
+
+pub type MigrateError {
+  MigrateQueryFailed(pog.QueryError)
+  /// The database holds tables from an earlier version of this app: a
+  /// table lacks columns or is keyed differently. Each entry names the
+  /// table and what is wrong with it.
+  OutdatedSchema(problems: List(#(String, String)))
+}
+
+pub fn describe_migrate_error(error: MigrateError) -> String {
+  case error {
+    MigrateQueryFailed(error) ->
+      "checkout schema migration failed: " <> string.inspect(error)
+    OutdatedSchema(problems) ->
+      "the checkout tables predate this version ("
+      <> string.join(list.map(problems, fn(p) { p.0 <> ": " <> p.1 }), "; ")
+      <> "). The demo has no upgrade path: stored orders lack the customer and"
+      <> " catalog price the app needs. Drop the tables stock, reservations,"
+      <> " orders and receipts_sent, or use a fresh database, and start again."
+  }
+}
+
+/// Creates the app's tables, then refuses a database whose existing tables
+/// have an earlier shape. Such a database is left unchanged: old orders
+/// carry no customer or price to backfill, so rewriting their keys could
+/// only invent owners and amounts.
+pub fn migrate(conn: pog.Connection) -> Result(Nil, MigrateError) {
+  use _ <- result.try(
+    list.try_each(schema, fn(sql) {
+      pog.query(sql) |> pog.execute(conn) |> result.replace(Nil)
+    })
+    |> result.map_error(MigrateQueryFailed),
+  )
+  use problems <- result.try(
+    list.try_map(expected_shape, fn(table) {
+      let #(name, columns, key) = table
+      table_problem(conn, name, columns, key)
+    })
+    |> result.map_error(MigrateQueryFailed),
+  )
+  case option.values(problems) {
+    [] -> Ok(Nil)
+    problems -> Error(OutdatedSchema(problems))
+  }
+}
+
+fn table_problem(
+  conn: pog.Connection,
+  table: String,
+  columns: List(String),
+  key: List(String),
+) -> Result(Option(#(String, String)), pog.QueryError) {
+  use present <- result.try(
+    pog.query(
+      "SELECT column_name::text FROM information_schema.columns
+       WHERE table_schema = current_schema() AND table_name = $1",
+    )
+    |> pog.parameter(pog.text(table))
+    |> pog.returning(decode.at([0], decode.string))
+    |> pog.execute(conn),
+  )
+  use primary <- result.try(
+    pog.query(
+      "SELECT a.attname::text FROM pg_index i
+       JOIN pg_attribute a
+         ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey::int2[])
+       WHERE i.indrelid = to_regclass($1) AND i.indisprimary
+       ORDER BY array_position(i.indkey::int2[], a.attnum)",
+    )
+    |> pog.parameter(pog.text(table))
+    |> pog.returning(decode.at([0], decode.string))
+    |> pog.execute(conn),
+  )
+  let missing = list.filter(columns, fn(c) { !list.contains(present.rows, c) })
+  let missing = case missing {
+    [] -> []
+    _ -> ["missing columns " <> string.join(missing, ", ")]
+  }
+  let keyed = case primary.rows == key {
+    True -> []
+    False -> [
+      "primary key ("
+      <> string.join(primary.rows, ", ")
+      <> "), expected ("
+      <> string.join(key, ", ")
+      <> ")",
+    ]
+  }
+  Ok(case list.append(missing, keyed) {
+    [] -> option.None
+    problems -> option.Some(#(table, string.join(problems, ", ")))
   })
 }
 
-pub fn set_stock(
+/// Lists a SKU in the catalog at a price with a stock level, or updates both.
+pub fn set_product(
   conn: pog.Connection,
   sku: String,
-  available: Int,
+  unit_price_cents unit_price_cents: Int,
+  available available: Int,
 ) -> Result(Nil, pog.QueryError) {
   pog.query(
-    "INSERT INTO stock (sku, available) VALUES ($1, $2)
-     ON CONFLICT (sku) DO UPDATE SET available = EXCLUDED.available",
+    "INSERT INTO stock (sku, unit_price_cents, available) VALUES ($1, $2, $3)
+     ON CONFLICT (sku) DO UPDATE
+       SET unit_price_cents = EXCLUDED.unit_price_cents,
+           available = EXCLUDED.available",
   )
   |> pog.parameter(pog.text(sku))
+  |> pog.parameter(pog.int(unit_price_cents))
   |> pog.parameter(pog.int(available))
   |> pog.execute(conn)
   |> result.replace(Nil)
+}
+
+/// The catalog price of a SKU; `None` when the SKU is not sold.
+pub fn unit_price(
+  conn: pog.Connection,
+  sku: String,
+) -> Result(Option(Int), pog.QueryError) {
+  pog.query("SELECT unit_price_cents FROM stock WHERE sku = $1")
+  |> pog.parameter(pog.text(sku))
+  |> pog.returning(decode.at([0], decode.int))
+  |> pog.execute(conn)
+  |> result.map(fn(r) { list.first(r.rows) |> option.from_result })
 }
 
 pub fn stock_level(conn: pog.Connection, sku: String) -> Result(Int, Nil) {
@@ -62,18 +203,20 @@ pub fn stock_level(conn: pog.Connection, sku: String) -> Result(Int, Nil) {
   |> result.try(fn(r) { list.first(r.rows) })
 }
 
-/// Holds stock under the order id. Idempotent: a second call for the same
+/// Holds stock under the customer's order. Idempotent: a second call for the same
 /// order is a no-op.
 pub fn reserve(
   conn: pog.Connection,
-  order: OrderRequest,
+  order: Order,
 ) -> Result(Nil, CheckoutError) {
   pog.transaction(conn, fn(tx) {
     use inserted <- result.try(
       pog.query(
-        "INSERT INTO reservations (order_id, sku, quantity) VALUES ($1, $2, $3)
-         ON CONFLICT (order_id) DO NOTHING",
+        "INSERT INTO reservations (customer_id, order_id, sku, quantity)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (customer_id, order_id) DO NOTHING",
       )
+      |> pog.parameter(pog.text(order.customer_id))
       |> pog.parameter(pog.text(order.order_id))
       |> pog.parameter(pog.text(order.sku))
       |> pog.parameter(pog.int(order.quantity))
@@ -106,16 +249,17 @@ pub fn reserve(
 /// Returns held stock. Idempotent.
 pub fn release(
   conn: pog.Connection,
-  order_id: String,
+  order: Order,
 ) -> Result(Nil, CheckoutError) {
   pog.transaction(conn, fn(tx) {
     use released <- result.try(
       pog.query(
         "UPDATE reservations SET released = true
-         WHERE order_id = $1 AND NOT released
+         WHERE customer_id = $1 AND order_id = $2 AND NOT released
          RETURNING sku, quantity",
       )
-      |> pog.parameter(pog.text(order_id))
+      |> pog.parameter(pog.text(order.customer_id))
+      |> pog.parameter(pog.text(order.order_id))
       |> pog.returning({
         use sku <- decode.field(0, decode.string)
         use quantity <- decode.field(1, decode.int)
@@ -146,10 +290,13 @@ pub type ReservationState {
 
 pub fn reservation(
   conn: pog.Connection,
-  order_id: String,
+  order: Order,
 ) -> Result(ReservationState, CheckoutError) {
-  pog.query("SELECT released FROM reservations WHERE order_id = $1")
-  |> pog.parameter(pog.text(order_id))
+  pog.query(
+    "SELECT released FROM reservations WHERE customer_id = $1 AND order_id = $2",
+  )
+  |> pog.parameter(pog.text(order.customer_id))
+  |> pog.parameter(pog.text(order.order_id))
   |> pog.returning(decode.at([0], decode.bool))
   |> pog.execute(conn)
   |> result.map_error(store_failed)
@@ -162,30 +309,80 @@ pub fn reservation(
   })
 }
 
+/// An order row as its owner reads it.
+pub type OrderRecord {
+  OrderRecord(
+    order_id: String,
+    customer_id: String,
+    sku: String,
+    quantity: Int,
+    amount_cents: Int,
+    status: OrderStatus,
+    detail: String,
+  )
+}
+
+pub type Insertion {
+  /// This call created the pending order.
+  Inserted
+  /// This customer already has an order with this id.
+  AlreadyExists(OrderRecord)
+  /// Another placement of the id won but its row could not be read back.
+  /// Nothing in the app deletes orders, so callers refuse it as a conflict.
+  Contended
+}
+
+/// Creates the pending order, or reports the customer's existing one. The
+/// primary key, the customer and the order id, decides between concurrent
+/// placements of one id by one customer: exactly one inserts. Another
+/// customer's order with the same id is never read or touched.
 pub fn insert_order(
   conn: pog.Connection,
-  order_id: String,
-) -> Result(Nil, pog.QueryError) {
-  pog.query(
-    "INSERT INTO orders (order_id, status) VALUES ($1, 'pending')
-     ON CONFLICT (order_id) DO NOTHING",
+  order: Order,
+) -> Result(Insertion, pog.QueryError) {
+  use inserted <- result.try(
+    pog.query(
+      "INSERT INTO orders
+         (order_id, customer_id, sku, quantity, amount_cents, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       ON CONFLICT (customer_id, order_id) DO NOTHING",
+    )
+    |> pog.parameter(pog.text(order.order_id))
+    |> pog.parameter(pog.text(order.customer_id))
+    |> pog.parameter(pog.text(order.sku))
+    |> pog.parameter(pog.int(order.quantity))
+    |> pog.parameter(pog.int(order.amount_cents))
+    |> pog.execute(conn),
   )
-  |> pog.parameter(pog.text(order_id))
-  |> pog.execute(conn)
-  |> result.replace(Nil)
+  case inserted.count {
+    1 -> Ok(Inserted)
+    _ ->
+      select_orders(
+        "WHERE customer_id = $1 AND order_id = $2",
+        [order.customer_id, order.order_id],
+        conn,
+      )
+      |> result.map(fn(rows) {
+        case rows {
+          [existing, ..] -> AlreadyExists(existing)
+          [] -> Contended
+        }
+      })
+  }
 }
 
 pub fn set_status(
   conn: pog.Connection,
-  order_id: String,
+  order: Order,
   status: OrderStatus,
   detail: String,
 ) -> Result(Nil, pog.QueryError) {
   pog.query(
-    "UPDATE orders SET status = $2, detail = $3, updated_at = now()
-     WHERE order_id = $1",
+    "UPDATE orders SET status = $3, detail = $4, updated_at = now()
+     WHERE customer_id = $1 AND order_id = $2",
   )
-  |> pog.parameter(pog.text(order_id))
+  |> pog.parameter(pog.text(order.customer_id))
+  |> pog.parameter(pog.text(order.order_id))
   |> pog.parameter(pog.text(domain.status_to_string(status)))
   |> pog.parameter(pog.text(detail))
   |> pog.execute(conn)
@@ -194,46 +391,104 @@ pub fn set_status(
 
 pub fn record_receipt(
   conn: pog.Connection,
+  customer_id: String,
   order_id: String,
   message_id: String,
 ) -> Result(Nil, pog.QueryError) {
   pog.query(
-    "INSERT INTO receipts_sent (order_id, message_id) VALUES ($1, $2)
-     ON CONFLICT (order_id) DO NOTHING",
+    "INSERT INTO receipts_sent (customer_id, order_id, message_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (customer_id, order_id) DO NOTHING",
   )
+  |> pog.parameter(pog.text(customer_id))
   |> pog.parameter(pog.text(order_id))
   |> pog.parameter(pog.text(message_id))
   |> pog.execute(conn)
   |> result.replace(Nil)
 }
 
-pub fn receipt_sent(conn: pog.Connection, order_id: String) -> Bool {
-  pog.query("SELECT 1 FROM receipts_sent WHERE order_id = $1")
+pub fn receipt_sent(
+  conn: pog.Connection,
+  customer_id: String,
+  order_id: String,
+) -> Bool {
+  pog.query(
+    "SELECT 1 FROM receipts_sent WHERE customer_id = $1 AND order_id = $2",
+  )
+  |> pog.parameter(pog.text(customer_id))
   |> pog.parameter(pog.text(order_id))
   |> pog.execute(conn)
   |> result.map(fn(r) { r.count == 1 })
   |> result.unwrap(False)
 }
 
+/// The order, if it exists and belongs to `customer_id`. Another
+/// customer's order reads as absent, so the API cannot tell them apart.
+pub fn order_for(
+  conn: pog.Connection,
+  customer_id: String,
+  order_id: String,
+) -> Result(Option(OrderRecord), pog.QueryError) {
+  select_orders(
+    "WHERE order_id = $1 AND customer_id = $2",
+    [order_id, customer_id],
+    conn,
+  )
+  |> result.map(fn(rows) { list.first(rows) |> option.from_result })
+}
+
+/// The status and detail of a customer's order. For tests and operators;
+/// the API reads through `order_for`.
 pub fn order_status(
   conn: pog.Connection,
+  customer_id: String,
   order_id: String,
 ) -> Option(#(OrderStatus, String)) {
-  pog.query("SELECT status, detail FROM orders WHERE order_id = $1")
-  |> pog.parameter(pog.text(order_id))
+  case order_for(conn, customer_id, order_id) {
+    Ok(order) -> option.map(order, fn(row) { #(row.status, row.detail) })
+    Error(_) -> option.None
+  }
+}
+
+fn select_orders(
+  filter: String,
+  parameters: List(String),
+  conn: pog.Connection,
+) -> Result(List(OrderRecord), pog.QueryError) {
+  let query =
+    pog.query(
+      "SELECT order_id, customer_id, sku, quantity, amount_cents, status, detail
+       FROM orders " <> filter,
+    )
+  list.fold(parameters, query, fn(q, p) { pog.parameter(q, pog.text(p)) })
   |> pog.returning({
-    use status <- decode.field(0, decode.string)
-    use detail <- decode.field(1, decode.string)
-    decode.success(#(status, detail))
+    use order_id <- decode.field(0, decode.string)
+    use customer_id <- decode.field(1, decode.string)
+    use sku <- decode.field(2, decode.string)
+    use quantity <- decode.field(3, decode.int)
+    use amount_cents <- decode.field(4, decode.int)
+    use status <- decode.field(5, status_decoder())
+    use detail <- decode.field(6, decode.string)
+    decode.success(OrderRecord(
+      order_id:,
+      customer_id:,
+      sku:,
+      quantity:,
+      amount_cents:,
+      status:,
+      detail:,
+    ))
   })
   |> pog.execute(conn)
   |> result.map(fn(r) { r.rows })
-  |> result.unwrap([])
-  |> list.first
-  |> result.try(fn(row) {
-    domain.status_from_string(row.0) |> result.map(fn(s) { #(s, row.1) })
-  })
-  |> option.from_result
+}
+
+fn status_decoder() -> decode.Decoder(OrderStatus) {
+  use text <- decode.then(decode.string)
+  case domain.status_from_string(text) {
+    Ok(status) -> decode.success(status)
+    Error(Nil) -> decode.failure(domain.Rejected, "OrderStatus")
+  }
 }
 
 fn store_failed(error: pog.QueryError) -> CheckoutError {

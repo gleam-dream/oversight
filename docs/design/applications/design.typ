@@ -49,12 +49,12 @@
     #subsection(title: "Checkout")[
       #answers(title: "Checkout authority and recovery",
         responsibility: [Accept orders, reserve stock, charge payment, book shipment and enqueue receipts.],
-        interface: [Order placement and lookup; local execution and a durable-job mode with native order/receipt/error codecs.],
+        interface: [Order placement and lookup for an authenticated customer; local execution and a durable-job mode with native order/receipt/error codecs. Every request carries a bearer token that the application's configured table resolves to one customer, or it is refused with 401. A placement carries a SKU, quantity, address and a payment token that the payment provider issued to the customer; it carries no amount and no card number, and a body with any other field is refused.],
         interactions: [Saga orders effects and undo; HTTP Gun calls scripted payment/shipping peers; Grind delivers durable runs and receipts; saga_postgres and application rows use the shared pool.],
-        invariants: [Order insertion and durable-job admission share one application transaction. Confirmation and receipt admission share a transaction. Stable destination keys and explicit unknown_when policy preserve payment uncertainty.],
-        failure: [Known failures compensate in reverse completion order. Lost driver ownership permits checkpoint resumption; requested job cancellation is translated into durable Saga cancellation and rollback.],
+        invariants: [The server prices every order from its catalog (unit price times quantity) before the saga starts; the charged amount never comes from the client. Grind job rows, Saga checkpoints and application rows hold the payment token, never a card number. An order belongs to the customer who placed it; another customer reads it as absent. The client's order id is that customer's own idempotency key, scoped to the customer: a repeated placement returns the existing order, and the same customer's reuse with a different SKU or quantity is refused as a conflict. Neither runs the saga again. Another customer's placement under the same id is a separate order with its own reservation, provider keys and jobs, so the answer never reveals whether the id is in use. Order insertion and durable-job admission share one application transaction. Confirmation and receipt admission share a transaction. Stable destination keys and explicit unknown_when policy preserve payment uncertainty.],
+        failure: [Known failures compensate in reverse completion order. Lost driver ownership permits checkpoint resumption; requested job cancellation is translated into durable Saga cancellation and rollback. Response bodies carry a stable error code and a message built from order facts; driver and transport detail goes to the log.],
       )
-      #points([The application owns payment/shipment reconciliation and release policy. A job retry alone cannot decide whether stock or money should be restored.], [Source owners: `apps/checkout/src/checkout/workflow.gleam`, `orders.gleam`, `jobs.gleam`, `gateway.gleam`, and `db.gleam`.])
+      #points([Checkout's bearer table, configured through `app.Config`, stands in for a verified credential; the Protected MCP service shows token verification. The order API relies only on one authenticated customer id per request, resolved before the body is read.], [The application owns payment/shipment reconciliation and release policy. A job retry alone cannot decide whether stock or money should be restored.], [Source owners: `apps/checkout/src/checkout/workflow.gleam`, `orders.gleam`, `jobs.gleam`, `gateway.gleam`, `db.gleam`, `customers.gleam` and `web.gleam`.])
     ]
     #subsection(title: "Financial recovery")[
       #answers(title: "Payment evidence across independent durable records",
@@ -152,17 +152,19 @@
     #subsection(title: "Webhook delivery")[
       #answers(title: "Webhook delivery policy",
         responsibility: [Fan application events out to active tenant subscriptions as signed durable deliveries.],
-        interface: [Subscription/event operations and a contextual Grind worker with a stable delivery identity.],
+        interface: [Subscription/event operations authenticated by a per-tenant API key, and a contextual Grind worker with a stable delivery identity.],
         interactions: [Application rows and enqueue share a transaction. HTTP Gun applies per-tenant destination views; Grind executes explicit retry/snooze/discard policy.],
-        invariants: [The same delivery id signs and identifies every retry. Registration and delivery use destination policy; delivery re-reads subscription configuration so disablement and key rotation are effective.],
+        invariants: [The caller's API key, never the request, names the tenant; registration, publishing and reads act for that tenant only. The same delivery id signs and identifies every retry and is the receiver's idempotency key. Registration and delivery use destination policy; delivery re-reads subscription configuration so disablement and key rotation are effective.],
         failure: [Successful status can settle delivery despite an oversized unused body. Rate limits snooze within the cap; gone/unsafe destinations disable subscriptions; retryable transport/server failures consume bounded attempts.],
       )
       #points(
         [Destination policy is per tenant tier on one HTTP client. A public tenant reaches public addresses only and every DNS answer is checked; the internal tier reaches allowlisted loopback host entries. Registration applies the same policy value, so a refused address is rejected before any delivery.],
         [A response body beyond the read limit keeps its success status, so delivery settles once. A rate-limit response snoozes for the advised interval up to a configured cap and then consumes an attempt.],
         [Worker tests replay recorded refusals and body-limit failures from cassettes without a receiver, and a request that skips the tenant's client view is refused before sending.],
+        [The scripted receiver refuses a signature whose timestamp is outside a tolerance window and acknowledges an already processed delivery id without running the endpoint again, so a retry or a captured copy is processed once. It bounds every request body before reading, whatever its framing.],
+        [Event ids follow a fixed grammar and event bodies have a size limit, both enforced before anything is stored.],
       )
-      Source owners: `apps/webhooks/src/webhooks/attempt.gleam`, `delivery.gleam`, `subscription.gleam`, `egress.gleam`, and `web.gleam`.
+      Source owners: `apps/webhooks/src/webhooks/attempt.gleam`, `delivery.gleam`, `subscription.gleam`, `egress.gleam`, `tenant.gleam`, `receiver.gleam`, and `web.gleam`.
     ]
       #subsection(title: "Document extraction")[
       #answers(title: "Typed document extraction",
@@ -179,7 +181,7 @@
         responsibility: [Run a support agent whose refunds require an authorized approval and a compensating workflow.],
         interface: [Ticket/run operations, typed tools, typed Resolution, and approve/reject commands carrying checked proof.],
         interactions: [Fabric owns agent state and approval; Hellhound checks approver identity; Saga performs refund/ledger/notification; the consumer recipe retains full reports before mapping them.],
-        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run.],
+        invariants: [The proof comes from the configured verifier and required scope. Ticket correlation reaches model, tool, Saga and HTTP calls. Reopening a ticket converges on its run. The session names the authenticated customer; tools read only that customer's orders, and the workflow's first step refuses a refund of another customer's or undelivered order, of an amount beyond the total less earlier refunds, or of an amount already refunded on that order. The payment idempotency key names order and amount.],
         failure: [Unauthenticated, unauthorized and unavailable-verifier outcomes are separate. Unknown payment effects require reconciliation; failed notification triggers the workflow's compensation policy.],
       )
       Source owners: `apps/support_desk/src/support_desk/desk.gleam`, `approvers.gleam`, `refund.gleam`, `domain.gleam`, and the local Saga recipe.
@@ -189,10 +191,10 @@
         responsibility: [Let an agent call discovered MCP tools and expose agent execution as an MCP tool.],
         interface: [Relay declarations/calls, admitted dynamic contracts, Fabric invocation, and application recipes.],
         interactions: [The application starts the inventory peer it discovers. Relay carries idempotency/correlation metadata; Fabric owns durable keyed invocation.],
-        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers.],
+        invariants: [Dynamic schema rejection is explicit. The local peer's trusted read-only declaration is an application precondition, not a trust rule for arbitrary external peers. The agent's policy runs only tools declared read-only; a reservation or any undeclared tool waits for an operator approval, and no MCP route carries the operator credential.],
         failure: [Keyed disconnect can leave durable work inspectable; unkeyed cancellation stops its owned invocation. Tool failure and uncertain delivery remain separate from a completed protocol exchange.],
       )
-      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
+      Source owners: `apps/tool_hub/src/tool_hub.gleam`, `assistant.gleam`, `relay_discovery.gleam`, `relay_run.gleam` and `relay_serve.gleam`, and `relay_tools.gleam`.
     ]
     #subsection(title: "Protected MCP service")[
       #answers(title: "Authenticated tools and durable reports",
@@ -205,6 +207,7 @@
       #points(
         [The login asks for the resource of the MCP endpoint, and the provider issues access tokens whose audience is that endpoint. Local validation checks signature, type, issuer, audience and expiry; introspection is an alternative mode that also reaches the provider. A revoked token that local validation accepts is an explicit limit of local mode.],
         [A job owned by another user answers exactly like a missing job.],
+        [The browser receives its access token only from a POST that carries the signed same-site session cookie, answered `no-store`; a GET is refused so the token stays out of history and logs. The scripted browser verifies the provider's certificate against the provider's own root, and the client secret comes from configuration or from random bytes generated at boot, never from source.],
       )
       Source owners: `apps/secure_mcp/src/secure_mcp/auth.gleam`, `tools.gleam`, `reports.gleam`, and `web.gleam`.
     ]
@@ -213,7 +216,7 @@
         responsibility: [Retain a complete email sign-in recipe under apps/email_portal using public Correio contracts.],
         interface: [Application-native account and session types, explicit challenge request and confirmation operations, capture checkpoints and the standard Gleam HTTP mailbox handler.],
         interactions: [Correio's memory store owns atomic challenge state. Capture retains local mail. The application owns both runtimes, its account policy, pending verification evidence and idempotent #term("term-session-publication").],
-        invariants: [The mailbox route is explicitly configured for development. Pending values and confirmed evidence are not application sessions. A disabled or changed account cannot receive a session. Repeated publication of one verification identity returns the same session.],
+        invariants: [The mailbox route is explicitly configured for development. The challenge HMAC key comes from configuration or from strong random bytes generated at boot, never from source, and an all-zero key is refused. Pending values and confirmed evidence are not application sessions. A disabled or changed account cannot receive a session. Repeated publication of one verification identity returns the same session.],
         failure: [Delivery refusal, unknown delivery, invalid confirmation and failed publication remain distinct application outcomes. Publication recovery uses retained evidence and rechecks current account policy.],
       )
       #points([The ordinary flow takes a checkpoint, requests delivery, inspects the resulting message through the mailbox handler, explicitly confirms its secret and reads the application session. Advanced use configures a different mount path and challenge policy with email codes.], [Tests exercise separate consumer compilation, actual capture and memory runtimes, and in-process HTTP handler requests. They do not claim browser navigation, network transport, durable session storage or production authentication policy. Correio owns its separate browser, transport, database and upstream-oracle evidence.], [Detailed library design remains in the Correio repository. Oversight owns this composition and its scenario assertions. #adr(17)], [Session state in this application is local and sequential. A production publisher needs durable atomic idempotency and an application-owned session credential, and pending evidence belongs to this service context and is never accepted from untrusted clients or other application instances.])
@@ -225,7 +228,7 @@
         responsibility: [Maintain browser sessions and call a protected billing resource with recoverable token custody.],
         interface: [Login/callback/logout routes, application session cookie, and native principal/account views.],
         interactions: [Hellhound owns transactions and token custody; the application implements Hellhound's conditional sealed-record writes on PostgreSQL and separately manages its browser session. HTTP Gun performs resource calls.],
-        invariants: [The application does not implement a second refresh state machine. Custody records and browser session references have separate owners and lifetimes. Guarded consumption checks version and database wall time under row ownership after lock waiting; validity and storage retention remain separate.],
+        invariants: [The application does not implement a second refresh state machine. Custody records and browser session references have separate owners and lifetimes. A browser session row carries its own expiry, matching the cookie lifetime; lookup refuses and deletes an expired row and sign-in sweeps expired rows, so a copied cookie does not outlive it. Redirects back to the portal, including the post-logout redirect, use the configured public origin, never the request `Host`. Guarded consumption checks version and database wall time under row ownership after lock waiting; validity and storage retention remain separate.],
         failure: [The application may refresh once after a resource refusal and recover uncertain publication once, then maps Hellhound's typed action to user-visible decisions. Storage uncertainty is not treated as definite non-action. Listener startup refusal returns a recoverable error without terminating its caller. Listener shutdown and caller exit retire the owned Mist subtree.],
       )
       #points(
@@ -241,7 +244,7 @@
         responsibility: [Resume research across restarts and publish its result through a compensating workflow.],
         interface: [A Grind worker starts or resumes a Fabric agent with search/read tools, then drives a durable Saga publication workflow.],
         interactions: [Fabric persists conversation and tool results; Grind schedules delivery; Saga owns publication effects; their PostgreSQL adapters share application resources.],
-        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. Publication keys and provider readback settle external effects.],
+        invariants: [A fresh driver resumes durable state rather than replaying an arbitrary closure. Read-only tool replay is explicit. The read policy compares the parsed URL's scheme, host and port with the library's and its path segment by segment; a dot segment, an empty segment or a percent-encoded separator is denied. Publication keys and provider readback settle external effects.],
         failure: [Transient driver/store conflicts snooze; domain failures follow application retry policy; unresolved publication becomes Uncertain. Unexpected approvals fail explicitly. Cancellation reaches the agent/model and publication workflow without proving that every external effect was undone.],
       )
       #points(

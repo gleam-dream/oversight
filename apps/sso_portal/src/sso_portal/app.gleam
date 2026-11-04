@@ -155,15 +155,20 @@ pub fn restart_hellhound(app: App) -> Result(App, String) {
   serve_portal(App(..app, hellhound:))
 }
 
+/// What the portal's routes need from the running system.
+pub fn context(app: App) -> web.Context {
+  web.Context(
+    hellhound: app.hellhound,
+    db: app.db,
+    billing: app.billing_client,
+    billing_url: app.billing_api.base_url,
+    telemetry: app.telemetry,
+    public_origin: app.portal_url,
+  )
+}
+
 fn serve_portal(app: App) -> Result(App, String) {
-  let context =
-    web.Context(
-      hellhound: app.hellhound,
-      db: app.db,
-      billing: app.billing_client,
-      billing_url: app.billing_api.base_url,
-      telemetry: app.telemetry,
-    )
+  let context = context(app)
   // The OS may hold the port briefly after the old listener closes.
   use portal <- result.try(
     retry(10, fn() {

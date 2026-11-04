@@ -1,5 +1,6 @@
 //// Pure tests: no database, no network.
 
+import envoy
 import gleam/bit_array
 import gleam/erlang/process
 import gleam/list
@@ -22,6 +23,7 @@ import webhooks/subscription.{
   PublicTier, UnsupportedScheme,
 }
 import webhooks/telemetry
+import webhooks/web
 
 fn reply(status: Int, retry_after) {
   Ok(Reply(status, retry_after, BodyRead(0)))
@@ -122,6 +124,41 @@ pub fn signature_round_trip_test() {
   )
 }
 
+/// The receiver-side check bounds replay: a valid signature on a timestamp
+/// outside the tolerance is refused.
+pub fn verify_within_bounds_the_timestamp_test() {
+  let body = bit_array.from_string("{\"a\":1}")
+  let ts = 1_700_000_000
+  let header = signing.sign("whsec_x", "evt_1:sub_1", ts, body)
+  let check = fn(now, tolerance) {
+    signing.verify_within(
+      "whsec_x",
+      "evt_1:sub_1",
+      ts,
+      body,
+      header,
+      now:,
+      tolerance:,
+    )
+  }
+  assert check(ts, 300) == Ok(Nil)
+  assert check(ts + 300, 300) == Ok(Nil)
+  assert check(ts - 300, 300) == Ok(Nil)
+  assert check(ts + 301, 300) == Error(signing.StaleTimestamp)
+  assert check(ts - 301, 300) == Error(signing.StaleTimestamp)
+  assert check(ts + 20, 10) == Error(signing.StaleTimestamp)
+  assert signing.verify_within(
+      "whsec_y",
+      "evt_1:sub_1",
+      ts,
+      body,
+      header,
+      now: ts,
+      tolerance: 300,
+    )
+    == Error(signing.InvalidSignature)
+}
+
 pub fn registration_rejects_unsafe_endpoints_test() {
   let check = fn(url, tier) {
     subscription.validate_endpoint(url, tier, ["127.0.0.1", "localhost"])
@@ -214,4 +251,18 @@ pub fn every_outcome_is_listed_test() {
       let assert Ok(Nil) = fields.check(metadata, sample)
     },
   )
+}
+
+/// The API's wisp secret comes from the environment or is random per run;
+/// the source holds no literal.
+pub fn secret_key_base_is_never_a_literal_test() {
+  let configured = string.repeat("k", 64)
+  envoy.set(web.secret_key_base_variable, configured)
+  assert web.secret_key_base() == web.FromEnvironment(configured)
+  envoy.set(web.secret_key_base_variable, "")
+  let assert web.Generated(first) = web.secret_key_base()
+  envoy.unset(web.secret_key_base_variable)
+  let assert web.Generated(second) = web.secret_key_base()
+  assert string.length(first) == 64
+  assert first != second
 }

@@ -2,11 +2,12 @@
 //// book the shipment (shipping API). One definition serves both the local
 //// run behind `POST /orders` and the durable run driven by a grind job.
 ////
-//// Provider idempotency keys are derived from the order id, not from
+//// Provider idempotency keys are derived from the customer's order
+//// (`domain.order_key`), not from
 //// `saga.idempotency_key(key)`. Saga's key is stable across retries and across
 //// restarts of one durable execution, but a local run derives it from its
 //// run id, so a second `POST /orders` for the same order would charge again.
-//// The order id is the business key across runs.
+//// The customer's order is the business key across runs.
 ////
 //// Each step correlates its own provider calls from the run:
 //// `saga.correlation_of(key)` is the order's correlation, set on the local
@@ -19,9 +20,8 @@
 import checkout/codecs
 import checkout/db
 import checkout/domain.{
-  type Booked, type Charged, type CheckoutError, type OrderRequest,
-  type Reserved, type UndoError, Booked, Charged, Interrupted, Reserved,
-  UndoError,
+  type Booked, type Charged, type CheckoutError, type Order, type Reserved,
+  type UndoError, Booked, Charged, Interrupted, Reserved, UndoError,
 }
 import checkout/gateway.{type Gateway}
 import gleam/option.{None, Some}
@@ -42,17 +42,17 @@ pub type Deps {
 }
 
 pub type Checkout =
-  Workflow(OrderRequest, Booked, CheckoutError, UndoError)
+  Workflow(Order, Booked, CheckoutError, UndoError)
 
 pub type Persistence =
-  durable.Persistence(OrderRequest, Booked, CheckoutError, UndoError)
+  durable.Persistence(Order, Booked, CheckoutError, UndoError)
 
-pub fn payment_key(order: OrderRequest) -> String {
-  "pay-" <> order.order_id
+pub fn payment_key(order: Order) -> String {
+  "pay-" <> domain.key(order)
 }
 
-pub fn shipment_key(order: OrderRequest) -> String {
-  "ship-" <> order.order_id
+pub fn shipment_key(order: Order) -> String {
+  "ship-" <> domain.key(order)
 }
 
 /// The gateway's client, correlated like the run that calls it.
@@ -85,12 +85,12 @@ pub fn persistence(
 
 fn reserve_stock(
   deps: Deps,
-) -> Step(OrderRequest, Reserved, CheckoutError, UndoError) {
-  saga.step("reserve_stock", fn(order: OrderRequest) {
+) -> Step(Order, Reserved, CheckoutError, UndoError) {
+  saga.step("reserve_stock", fn(order: Order) {
     db.reserve(deps.pool, order) |> result.replace(Reserved(order))
   })
   |> saga.undo(fn(undo) {
-    db.release(deps.pool, undo.input.order_id)
+    db.release(deps.pool, undo.input)
     |> result.map_error(UndoError("reserve_stock", _))
   })
   |> durable.recoverable(
@@ -98,7 +98,7 @@ fn reserve_stock(
     input: codecs.to_saga(codecs.order()),
     output: codecs.to_saga(codecs.reserved()),
     resolve: fn(order, _key) {
-      case db.reservation(deps.pool, order.order_id) {
+      case db.reservation(deps.pool, order) {
         Ok(db.Absent) -> durable.NotSent
         Ok(_) -> durable.Completed(Reserved(order))
         Error(_) -> durable.MaybeSent

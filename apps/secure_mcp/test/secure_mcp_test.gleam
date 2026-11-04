@@ -1,7 +1,9 @@
 import envoy
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/http
 import gleam/http/request
+import gleam/http/response
 import gleam/httpc
 import gleam/json
 import gleam/list
@@ -40,6 +42,16 @@ fn with_app_options(
   let result = run(running)
   app.stop(running)
   result
+}
+
+fn sign_in(running: app.Running, user: String) -> client.SignedIn {
+  let assert Ok(signed_in) =
+    client.sign_in(running.base_url, trust(running), user)
+  signed_in
+}
+
+fn trust(running: app.Running) -> BitArray {
+  testing.trust_anchor_der(running.provider)
 }
 
 fn connect(running: app.Running, token: String) -> mcp.Client {
@@ -109,7 +121,7 @@ fn minted(running: app.Running) -> testing.TokenSpec {
 /// signed-in user, through Relay's own client with a bearer header.
 pub fn report_round_trip_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   assert alice.subject == "alice"
   assert alice.mcp_url == running.mcp_url
   let peer = connect(running, alice.access_token)
@@ -130,7 +142,7 @@ pub fn report_round_trip_test() {
 /// A business failure in the worker reaches the MCP client as a state.
 pub fn failed_report_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   let peer = connect(running, alice.access_token)
   let job_id = generate(peer, "never")
   // The typed outcome carries the worker's own error, and the retry policy
@@ -151,7 +163,7 @@ pub fn failed_report_test() {
 /// without a title at `submit`, and the caller reads why.
 pub fn invalid_report_is_refused_at_submit_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   let peer = connect(running, alice.access_token)
   let assert Ok(mcp.ToolFailed(content, _)) =
     mcp.call(
@@ -162,6 +174,67 @@ pub fn invalid_report_is_refused_at_submit_test() {
   mcp.close(peer)
   assert client.text(content)
     == "The report was refused: $[\"title\"]: must not be empty"
+}
+
+// --- Browser token hand-off -----------------------------------------------------
+
+/// A GET would put the bearer token where URLs and their responses end up:
+/// history, proxy and access logs. The token is only answered to a POST.
+pub fn token_hand_off_refuses_get_test() {
+  use running <- with_app
+  let assert Ok(browser) =
+    client.log_in(running.base_url, trust(running), "alice")
+  let assert Ok(me) = client.send(browser, http.Get, "/me")
+  assert me.status == 200
+  assert string.contains(me.body, "<form method=\"post\" action=\"/me/token\">")
+  let assert Ok(page) = client.send(browser, http.Get, "/me/token")
+  assert page.status == 405
+  assert response.get_header(page, "allow") == Ok("POST")
+  assert !string.contains(page.body, "access_token")
+}
+
+/// The POST needs the signed same-site session cookie, and its answer is
+/// never stored.
+pub fn token_hand_off_needs_the_session_test() {
+  use running <- with_app
+  let assert Ok(browser) =
+    client.log_in(running.base_url, trust(running), "alice")
+  let anonymous = client.Browser(..browser, cookies: [])
+  let assert Ok(refused) = client.send(anonymous, http.Post, "/me/token")
+  assert refused.status == 401
+  assert !string.contains(refused.body, "access_token")
+
+  let assert Ok(page) = client.send(browser, http.Post, "/me/token")
+  assert page.status == 200
+  assert response.get_header(page, "cache-control") == Ok("no-store")
+  let assert Ok(subject) =
+    json.parse(page.body, decode.at(["subject"], decode.string))
+  assert subject == "alice"
+}
+
+/// The scripted browser verifies TLS: a provider whose certificate does not
+/// chain to the root it trusts is refused before any sign-in.
+pub fn browser_refuses_an_untrusted_provider_test() {
+  use running <- with_app
+  let assert Ok(stranger) = testing.start_provider(testing.provider_options())
+  let foreign_root = testing.trust_anchor_der(stranger)
+  testing.stop_provider(stranger)
+  let assert Error(reason) =
+    client.log_in(running.base_url, foreign_root, "alice")
+  assert string.starts_with(
+    reason,
+    "GET " <> testing.issuer(running.provider) <> "/authorize",
+  )
+}
+
+/// The client secret registered with the scripted provider is configured or
+/// random per boot, never a literal in source.
+pub fn client_secret_is_configured_or_random_test() {
+  assert app.client_secret(Ok("configured-secret")) == "configured-secret"
+  let first = app.client_secret(Error(Nil))
+  let second = app.client_secret(Error(Nil))
+  assert first != second
+  assert string.length(first) >= 32
 }
 
 // --- Failure paths -------------------------------------------------------------
@@ -216,8 +289,8 @@ pub fn token_for_another_audience_test() {
 /// Users only see their own reports: another user's job id is "not found".
 pub fn other_users_job_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
-  let assert Ok(bob) = client.sign_in(running.base_url, "bob")
+  let alice = sign_in(running, "alice")
+  let bob = sign_in(running, "bob")
   let alice_peer = connect(running, alice.access_token)
   let bob_peer = connect(running, bob.access_token)
   let job_id = generate(alice_peer, "2026-Q2")
@@ -275,7 +348,7 @@ pub fn insufficient_scope_test() {
 /// introspection shows; `introspection_mode_test` covers refusal at once.
 pub fn revoked_token_still_valid_locally_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   testing.revoke_access_token(running.provider, alice.access_token)
   let peer = connect(running, alice.access_token)
   let assert Ok(_) = mcp.discover(peer)
@@ -292,7 +365,7 @@ pub fn introspection_mode_test() {
   use running <- with_app_options(fn(options) {
     app.Options(..options, verification: app.Introspection)
   })
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   let peer = connect(running, alice.access_token)
   let job_id = generate(peer, "2026-Q4")
   assert await_status(running, peer, job_id).state == "succeeded"
@@ -325,7 +398,7 @@ pub fn introspection_mode_test() {
 /// mount: the endpoint is Relay's own streaming handler.
 pub fn subscription_stream_through_protected_mount_test() {
   use running <- with_app
-  let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+  let alice = sign_in(running, "alice")
   let peer = connect(running, alice.access_token)
   let assert Ok(subscription) =
     mcp.listen(peer, [subscriptions.ToolsListChanged])
@@ -343,7 +416,7 @@ pub fn telemetry_correlation_test() {
   let assert Ok(collector) = telemetry.start()
   let #(job_id, lines) = {
     use running <- with_app
-    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let alice = sign_in(running, "alice")
     let peer = connect(running, alice.access_token)
     let job_id = generate(peer, "2026-Q1")
     let _ = await_status(running, peer, job_id)
@@ -435,7 +508,7 @@ pub fn request_id_header_correlation_test() {
   let assert Ok(collector) = telemetry.start()
   let lines = {
     use running <- with_app
-    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let alice = sign_in(running, "alice")
     let call = fn(request_id) {
       let assert Ok(peer) =
         client.connect(running.mcp_url, Some(alice.access_token), [
@@ -471,7 +544,7 @@ pub fn client_correlation_reaches_server_test() {
   let assert Ok(collector) = telemetry.start()
   let lines = {
     use running <- with_app
-    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let alice = sign_in(running, "alice")
     let assert Ok(trace) = correlation.from_string("client-trace-7")
     let peer = mcp.with_correlation(connect(running, alice.access_token), trace)
     let job_id = generate(peer, "2026-Q1")
@@ -511,7 +584,7 @@ pub fn introspection_joins_mcp_request_test() {
     use running <- with_app_options(fn(options) {
       app.Options(..options, verification: app.Introspection)
     })
-    let assert Ok(alice) = client.sign_in(running.base_url, "alice")
+    let alice = sign_in(running, "alice")
     let assert Ok(trace) = correlation.from_string("introspect-trace-1")
     let peer = mcp.with_correlation(connect(running, alice.access_token), trace)
     let assert Ok(_) = mcp.discover(peer)

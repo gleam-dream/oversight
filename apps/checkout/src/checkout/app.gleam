@@ -4,8 +4,9 @@
 //// with a Sinal forwarder; the scripted providers; and the wisp/mist order
 //// API.
 
+import checkout/customers.{type Customers}
 import checkout/db
-import checkout/domain.{type OrderRequest}
+import checkout/domain.{type Order}
 import checkout/gateway
 import checkout/jobs
 import checkout/orders.{type Services, Services}
@@ -44,6 +45,8 @@ pub type Config {
     grind_lease: Duration,
     poll_interval_ms: Int,
     redelivery_ms: Int,
+    /// Who may call the order API: bearer token to customer id.
+    customers: Customers,
   )
 }
 
@@ -60,6 +63,7 @@ pub fn default_config(database_url: String) -> Config {
     grind_lease: duration.seconds(6),
     poll_interval_ms: 50,
     redelivery_ms: 100,
+    customers: customers.from_list([]),
   )
 }
 
@@ -67,9 +71,10 @@ pub type App {
   App(
     services: Services,
     providers: Providers,
-    checkout_worker: Worker(OrderRequest, String, Nil),
+    checkout_worker: Worker(Order, String, Nil),
     observability_pid: Pid,
     http: http_gun.Client,
+    customers: Customers,
   )
 }
 
@@ -140,6 +145,7 @@ pub fn start(config: Config) -> Result(App, String) {
       workflow: checkout,
       persistence: workflow.persistence(checkout, saga_config),
       saga_config:,
+      local_budget: duration.seconds(60),
       receipt_worker: orders.receipt_worker(),
     )
   let checkout_worker =
@@ -176,19 +182,31 @@ pub fn start(config: Config) -> Result(App, String) {
     grind.start(grind_config, jobs_name)
     |> result.map_error(grind.describe_start_error),
   )
-  use _ <- result.try(db.migrate(pool) |> result.map_error(string.inspect))
-  use _ <- result.try(
+  let app =
+    App(
+      services:,
+      providers:,
+      checkout_worker:,
+      observability_pid: observability.pid,
+      http:,
+      customers: config.customers,
+    )
+  let migrated = {
+    use _ <- result.try(
+      db.migrate(pool) |> result.map_error(db.describe_migrate_error),
+    )
     saga_postgres.migrate(storage)
-    |> result.map_error(saga_postgres.describe_migrate_error),
-  )
-
-  Ok(App(
-    services:,
-    providers:,
-    checkout_worker:,
-    observability_pid: observability.pid,
-    http:,
-  ))
+    |> result.map_error(saga_postgres.describe_migrate_error)
+  }
+  case migrated {
+    Ok(_) -> Ok(app)
+    // A refused schema stops what already started, so a failed boot leaves
+    // no workers polling the database.
+    Error(error) -> {
+      stop(app)
+      Error(error)
+    }
+  }
 }
 
 /// Stops everything `start` started. Grind drains its queues first and

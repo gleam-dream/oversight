@@ -74,6 +74,13 @@ pub fn remove(ledger: Ledger, id: Int) -> Bool {
   process.call(ledger.subject, 1000, Remove(id, _))
 }
 
+/// The amounts already refunded on `order_id`, oldest first.
+pub fn refunded(ledger: Ledger, order_id: String) -> List(Int) {
+  entries(ledger)
+  |> list.filter(fn(entry) { entry.order_id == order_id })
+  |> list.map(fn(entry) { entry.amount_cents })
+}
+
 pub fn entries(ledger: Ledger) -> List(Entry) {
   process.call(ledger.subject, 1000, Entries)
 }

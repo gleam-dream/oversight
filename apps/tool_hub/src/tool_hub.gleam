@@ -5,21 +5,28 @@
 ////    questions with a scripted LLM provider (llm_wire over http_gun).
 //// 3. A second Relay server exposes that agent as the tool `ask_assistant`.
 
+import fabric
+import fabric/approvers
+import fabric/run
 import fabric/store
 import fabric/tool as fabric_tool
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/io
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration.{type Duration}
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
+import json/blueprint/value
 import llm_wire/testing
 import relay/client
+import relay/content
 import relay/http
+import relay/tool as relay_tool
 import relay_discovery
 import relay_tools
 import sinal/correlation
@@ -49,6 +56,9 @@ pub type Hub {
     telemetry: telemetry.Telemetry,
     assistant: Assistant,
     assistant_server: http.Handler(Nil),
+    /// The credential that answers the assistant's approval requests,
+    /// generated at boot. It never leaves this process.
+    operator_credential: String,
   )
 }
 
@@ -113,8 +123,8 @@ pub fn start(
   let runs = store.in_memory(process.new_name(settings.name <> "_runs"))
   use Nil <- try(store.start(runs) |> result_string)
   let inventory_peer = fn(context: assistant.Context) { context.inventory }
-  use tools <- try(case settings.mounting {
-    Typed -> Ok(typed_tools(inventory_peer))
+  use #(declarations, tools) <- try(case settings.mounting {
+    Typed -> Ok(#(typed_declarations(), typed_tools(inventory_peer)))
     Discovered -> {
       use declarations <- result.try(
         client.list_tools(peer) |> result.map_error(client.describe_error),
@@ -123,21 +133,27 @@ pub fn start(
         _,
         peer: inventory_peer,
       ))
+      |> result.map(fn(tools) { #(declarations, tools) })
       |> result.map_error(relay_discovery.describe_error)
     }
   })
+  let operator_credential = assistant.random_credential()
+  let approvers = assistant.operator_approvers(operator_credential)
   use agent <- try(
     assistant.build_agent(
       http,
       scripted_llm.settings(provider),
       "scripted-1",
       tools,
+      read_only: assistant.read_only(declarations),
+      approvers:,
     )
     |> result_string,
   )
   let assistant =
     assistant.Assistant(
       store: runs,
+      approvers:,
       agent:,
       context: assistant.Context(peer),
       budget: settings.budget,
@@ -157,7 +173,82 @@ pub fn start(
     telemetry:,
     assistant:,
     assistant_server:,
+    operator_credential:,
   ))
+}
+
+/// The declarations of the typed tools, which the policy reads.
+pub fn typed_declarations() -> List(relay_tool.Declaration) {
+  [
+    relay_tool.declaration(inventory.search_products()),
+    relay_tool.declaration(inventory.get_stock()),
+    relay_tool.declaration(inventory.reserve_stock()),
+  ]
+}
+
+/// The approval requests a run waits for, with the exact arguments the
+/// operator decides on.
+pub fn pending(
+  hub: Hub,
+  id: run.RunId,
+) -> Result(List(run.PendingApproval), fabric.Error) {
+  use handle <- result.try(open(hub, id))
+  fabric.pending(handle)
+}
+
+/// Approves one pending request as the holder of `credential`. The policy
+/// is checked again with the hub's current context before the action runs.
+pub fn approve(
+  hub: Hub,
+  pending: run.PendingApproval,
+  credential credential: String,
+) -> Result(run.Status(assistant.Answer), assistant.AnswerError) {
+  use proof <- result.try(check(hub, pending, credential))
+  use handle <- result.try(
+    open(hub, pending.reference.run) |> result.map_error(assistant.Refused),
+  )
+  fabric.approve(
+    handle,
+    pending.reference,
+    proof:,
+    context: hub.assistant.context,
+  )
+  |> result.map_error(assistant.Refused)
+}
+
+/// Rejects one pending request; the model sees `reason`.
+pub fn reject(
+  hub: Hub,
+  pending: run.PendingApproval,
+  credential credential: String,
+  reason reason: String,
+) -> Result(run.Status(assistant.Answer), assistant.AnswerError) {
+  use proof <- result.try(check(hub, pending, credential))
+  use handle <- result.try(
+    open(hub, pending.reference.run) |> result.map_error(assistant.Refused),
+  )
+  fabric.reject(handle, pending.reference, proof:, reason:)
+  |> result.map_error(assistant.Refused)
+}
+
+fn open(
+  hub: Hub,
+  id: run.RunId,
+) -> Result(fabric.Run(assistant.Context, assistant.Answer), fabric.Error) {
+  fabric.open(hub.store, hub.assistant.agent, hub.assistant.context, id)
+}
+
+fn check(
+  hub: Hub,
+  pending: run.PendingApproval,
+  credential: String,
+) -> Result(approvers.Proof, assistant.AnswerError) {
+  approvers.check(
+    hub.assistant.approvers,
+    credential,
+    pending.reference.requirement,
+  )
+  |> result.map_error(assistant.Denied)
 }
 
 pub fn typed_tools(
@@ -250,13 +341,25 @@ pub fn main() -> Nil {
     <> string.join(list.map(listed, fn(tool) { tool.name }), ", "),
   )
   io.println("- it asks: " <> demo_question)
-  case
+  // The key names the run, so the caller can come back for the answer
+  // once the operator has decided on the reservation.
+  let keyed = mcp |> client.with_idempotency_key("demo-question")
+  let ask = fn() {
     client.call(
-      mcp |> client.with_correlation(question),
+      keyed,
       assistant.ask_assistant(),
       assistant.Question(demo_question),
     )
-  {
+  }
+  let assert Ok(client.ToolFailed(blocks, _)) as first = ask()
+  io.println("- ask_assistant: " <> text_of(blocks))
+  let assert Some(id) = waiting_run(first)
+  let assert Ok([pending]) = pending(hub, id)
+  io.println(
+    "- the operator approves " <> pending.tool <> " " <> pending.arguments_json,
+  )
+  let assert Ok(_) = approve(hub, pending, credential: hub.operator_credential)
+  case ask() {
     Ok(client.Succeeded(answer, _)) -> {
       io.println("- answer: " <> answer.answer)
       io.println("- followed across packages by the caller's correlation:")
@@ -299,6 +402,30 @@ pub fn main() -> Nil {
   )
   client.close(mcp)
   stop(hub)
+}
+
+fn text_of(blocks: List(content.ContentBlock)) -> String {
+  list.map(blocks, fn(block) {
+    case block {
+      content.TextContent(text, ..) -> text
+      _ -> ""
+    }
+  })
+  |> string.concat
+}
+
+/// The run an `ask_assistant` tool error names, from its structured details.
+pub fn waiting_run(
+  result: Result(client.ToolResult(a), client.Error),
+) -> Option(run.RunId) {
+  case result {
+    Ok(client.ToolFailed(_, Some(value.Object(fields)))) ->
+      case list.key_find(fields, "run_id") {
+        Ok(value.String(id)) -> run.parse_id(id) |> option.from_result
+        _ -> None
+      }
+    _ -> None
+  }
 }
 
 fn try(

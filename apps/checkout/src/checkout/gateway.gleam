@@ -6,7 +6,7 @@
 //// keeps http_gun's `Failure`, including its `MaybeSent` evidence.
 
 import checkout/domain.{
-  type CheckoutError, type OrderRequest, type Provider, Declined, Payments,
+  type CheckoutError, type Order, type Provider, Declined, Payments,
   ProviderRejected, ProviderUnreachable, Shipping,
 }
 import gleam/bit_array
@@ -78,12 +78,12 @@ pub type ShipmentLookup {
 pub fn charge(
   gateway: Gateway,
   client: http_gun.Client,
-  order: OrderRequest,
+  order: Order,
   key: String,
 ) -> Result(String, CheckoutError) {
   let body =
     json.object([
-      #("card", json.string(order.card)),
+      #("payment_token", json.string(order.payment_token)),
       #("amount_cents", json.int(order.amount_cents)),
     ])
   use #(status, bytes) <- result.try(call(
@@ -153,7 +153,7 @@ pub fn find_charge(
 pub fn book(
   gateway: Gateway,
   client: http_gun.Client,
-  order: OrderRequest,
+  order: Order,
   key: String,
 ) -> Result(String, CheckoutError) {
   let body = json.object([#("address", json.string(order.address))])
