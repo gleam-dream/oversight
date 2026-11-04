@@ -626,6 +626,23 @@ pub fn scripted_listeners_bound_request_bodies_test() {
   let assert Ok(Nil) = app.stop(app)
 }
 
+/// A negative declared length is malformed framing: both scripted listeners
+/// refuse it with 400 before the request is recorded or acted on.
+pub fn scripted_listeners_refuse_a_negative_length_test() {
+  let assert Ok(app) = app.start()
+  let refusal = fn(port, path) {
+    let head = "POST " <> path <> " HTTP/1.1\r\nhost: 127.0.0.1\r\n"
+    let assert Ok(400) =
+      raw_status(port, head <> "content-length: -1\r\n\r\n{}")
+    Nil
+  }
+  refusal(app.services.listener.port, "/payments/refunds")
+  refusal(app.provider.listener.port, "/v1/responses")
+  assert services.calls(app.services) == []
+  assert provider.requests(app.provider) == []
+  let assert Ok(Nil) = app.stop(app)
+}
+
 // Approver authentication ---------------------------------------------------
 
 /// Answers the pending refund with `credential`, expects the desk to refuse
