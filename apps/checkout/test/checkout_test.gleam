@@ -22,6 +22,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
@@ -610,4 +611,23 @@ pub fn internal_errors_stay_out_of_response_bodies_test() {
   let assert Some(#(domain.Rejected, detail)) =
     db.order_status(pool, "broken-1")
   assert !string.contains(detail, "Postgresql")
+}
+
+// --- wisp secret key base ----------------------------------------------------------
+
+/// The signing secret comes from `CHECKOUT_SECRET_KEY_BASE`; one shorter
+/// than wisp's 64-character minimum stops startup, and an unset variable
+/// falls back to a random per-boot secret.
+pub fn secret_key_base_comes_from_the_environment_test() {
+  use application <- with_app(fn(c) { c })
+  let variable = "CHECKOUT_SECRET_KEY_BASE"
+  envoy.set(variable, "too-short")
+  let short = web.start(application)
+  envoy.set(variable, string.repeat("k", 64))
+  let configured = web.start(application)
+  envoy.unset(variable)
+  let generated = web.start(application)
+  assert result.is_error(short)
+  assert result.is_ok(configured)
+  assert result.is_ok(generated)
 }

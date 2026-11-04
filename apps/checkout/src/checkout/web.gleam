@@ -10,6 +10,7 @@ import checkout/codecs
 import checkout/db
 import checkout/domain.{type CheckoutError}
 import checkout/orders.{type Report}
+import envoy
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Pid}
 import gleam/http.{Get, Post}
@@ -23,9 +24,37 @@ import mist
 import wisp
 import wisp/wisp_mist
 
+/// The environment variable holding wisp's signing secret.
+pub const secret_key_base_variable = "CHECKOUT_SECRET_KEY_BASE"
+
+/// Wisp signs cookies and messages with this secret and requires at least
+/// 64 characters. A configured value shorter than that is refused; an unset
+/// one is replaced by a random per-boot secret, so anything signed does not
+/// survive a restart.
+pub fn secret_key_base(
+  configured: Result(String, Nil),
+) -> Result(String, String) {
+  case configured {
+    Ok(secret) ->
+      case string.byte_size(secret) >= 64 {
+        True -> Ok(secret)
+        False ->
+          Error(secret_key_base_variable <> " must be at least 64 characters")
+      }
+    Error(Nil) -> {
+      wisp.log_warning(
+        secret_key_base_variable
+        <> " is unset; using a random secret, so signed values will not survive a restart",
+      )
+      Ok(wisp.random_string(64))
+    }
+  }
+}
+
 pub fn start(app: App) -> Result(#(Pid, Int), String) {
+  use secret <- result.try(secret_key_base(envoy.get(secret_key_base_variable)))
   let port = process.new_subject()
-  wisp_mist.handler(handle(_, app), "checkout-demo-secret-key-base-0123456789")
+  wisp_mist.handler(handle(_, app), secret)
   |> mist.new
   |> mist.bind("127.0.0.1")
   |> mist.port(0)
