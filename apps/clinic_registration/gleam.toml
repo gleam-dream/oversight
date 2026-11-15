@@ -1,0 +1,31 @@
+name = "clinic_registration"
+version = "0.1.0"
+target = "erlang"
+description = "Composition app: registering a patient from a conversation through a decision point, built from decisions, decisions_postgres, decisions_otp, llm_wire, grind, wisp and sinal on pog and mist."
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_http = ">= 4.4.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+gleam_time = ">= 1.11.0 and < 2.0.0"
+gleam_crypto = ">= 1.6.0 and < 2.0.0"
+# One pool for the app, Grind and decisions_postgres: both pin pog 4.1.x.
+pog = ">= 4.1.0 and < 4.2.0"
+wisp = ">= 2.0.0 and < 3.0.0"
+mist = ">= 6.0.0 and < 7.0.0"
+envoy = ">= 1.0.0 and < 2.0.0"
+grind = ">= 0.1.1 and < 0.2.0"
+http_gun = ">= 0.1.0 and < 0.2.0"
+llm_wire = ">= 0.1.0 and < 0.2.0"
+json_blueprint = ">= 2.0.0 and < 3.0.0"
+sinal = ">= 0.1.0 and < 0.2.0"
+# Unpublished: local paths for now. Each becomes a Git+path pin on a verified
+# commit when the decisions repository is pushed.
+decisions = { path = "../../../../decisions" }
+decisions_otp = { path = "../../../../decisions/integrations/decisions_otp" }
+decisions_postgres = { path = "../../../../decisions/integrations/decisions_postgres" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
