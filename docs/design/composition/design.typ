@@ -16,6 +16,7 @@
     pending-entry(title: "A composed request budget needs explicit cleanup", kind: "ruling", since: "2026-10-06")[Relay owns one admitted request deadline and a separate bounded cleanup interval; its package design owns implementation acceptance. Saga driver timeout is followed by bounded synchronous cleanup. A composed foreground deadline must reserve admission, execution, cancellation grace, and cleanup rather than assigning the same duration to every phase.],
     pending-entry(title: "External schema breadth must be explicit", kind: "ruling", since: "2026-10-06")[Blueprint admits a finite runtime schema profile. General third-party MCP discovery requires a chosen supported vocabulary, bounded validation, and safe provider projection; sibling-to-sibling discovery alone does not establish that breadth.],
     pending-entry(title: "Durable scheduling integration remains application-owned", kind: "ruling", since: "2026-10-06")[Applications drive and cancel durable Saga and Fabric work through Grind jobs. The intended broader scheduling and retention integration requires a decision about authority before any common driver abstraction is introduced. See #adr(4).],
+    pending-entry(title: "A gated agent call cannot end its run", kind: "ruling", since: "2026-11-15", adr: [#adr(35)])[Fabric has no tool outcome that ends a run, so a #term("term-gated-agent-call") keeps its run parked on an approval that never expires until the occurrence settles. A tool outcome that ends the run would let the occurrence's outcome start a run of its own. The decision belongs to Fabric's maintainers.],
     pending-entry(title: "Carried-over caller contracts are unchecked against code", kind: "verify", since: "2026-10-17")[The caller-contract, execution-boundary, protocol and observation sections state rules moved from retired Oversight guides. Each rule needs a comparison against the owning package source before the section counts as verified.],
   )
 
@@ -60,6 +61,7 @@
         [Saga], [Workflow run, step and effect identity], [Checkpoint and known/unknown compensation evidence], [Destination deduplication merely from supplying a key],
         [Fabric], [Run, operation, approval and child identity], [Agent/graph state and recorded operation evidence], [The real-world result of a lost tool reply],
         [HTTP Gun / Relay / LLM Wire], [Exchange or caller-propagated identity], [Observed exchange and delivery evidence], [Application effect completion or successful compensation],
+        [Decisions], [Occurrence and release key], [Recommendation, verdicts, release and reported effect], [Whether an effect outside the database happened, until a lookup by the release key settles it],
       ))
       #contract(name: "Outcome translation", mission: "Preserve the facts needed to recover across libraries.", answers: answers-data(
         responsibility: [The application maps delivery, domain failure, compensation and #term("term-effect-evidence") without treating them as synonyms.],
@@ -102,12 +104,37 @@
     ]
       #subsection(title: "Pool and process lifetimes are explicit")[
       #contract(name: "Shared PostgreSQL lifetime", mission: "Share one application database without merging recovery authorities.", answers: answers-data(
-        responsibility: [Grind owns the pool it creates from caller configuration; application queries and the three PostgreSQL adapters borrow connections.],
+        responsibility: [Grind owns the pool it creates from caller configuration; application queries and the PostgreSQL adapters borrow connections.],
         interface: [Public connection accessors and borrowed transaction APIs; each adapter's migration and storage constructor.],
         interactions: [Startup establishes schema compatibility before admitting work. Shutdown stops producers and dependent runtimes before releasing the pool.],
         invariants: [A borrowed transaction is not committed by an enqueue helper. Claim fencing and destination effect fencing are distinct. Renewal connection reservations count toward deployment capacity.],
         failure: [Lost commit acknowledgement requires receipt/reconciliation handling. Stopping the pool invalidates borrowers; a stopped caller may still require durable recovery.],
       ))
+    ]
+    #subsection(title: "Decision points between recommendation and effect")[
+      #contract(name: "Decision record across execution libraries", mission: "Let a model or agent recommend, let people decide, and release the final output once.", answers: answers-data(
+        responsibility: [The `decisions` core owns the occurrence record, the desk's verbs, policy evaluation, cards and verdicts, and the release of a final output to its gated tool at most once. The application owns the points, the gated tools, the policy versions and where they are stored, who holds which decision set, and every process and pool.],
+        interface: [A desk bound to one point, its gated tool, a policy reader and a storage port; verbs run in the caller's transaction. `decisions_postgres` supplies the port over PostgreSQL and Grind workers; `decisions_otp` supplies an in-memory store, a supervised runtime, isolated model calls, parallel replay and hints.],
+        interactions: [LLM Wire, Fabric and Relay join the record through application recipes; no `decisions` package depends on them. Grind or the OTP runtime delivers wake-ups and settlement notices. A settlement notice reaches the application's follower in the transaction that marks it delivered; the follower admits what comes next, such as a Grind job or a Saga run. With PostgreSQL, start-up migrates the tables before any worker polls, builds the store from Grind's name and the desks over its port, registers the workers on Grind's configuration, starts Grind, and then sweeps, so that every pending wake-up and undelivered settlement notice has a job. Each runtime acts on a handler failure by the library's handling of it alone: a contended or unknown commit is delivered again uncounted, a retryable refusal or an application failure is counted toward setting the job aside, a refusal that needs an operator, such as an unreadable record, sets the job aside at once, and a final refusal ends the job.],
+        invariants: [The record decides where an occurrence stands and when a deadline or hold ends; a delivery only asks a verb to compare the store clock with the record. The gated tool's database effect commits with the `released` entry. An effect outside the database runs under the release key.],
+        failure: [A guard, release check or executor answers `Refuse` for a judgment about the release, or `Unsure` when it could not tell. A refused release rolls back the verdict's transaction and is recorded in a transaction of its own; the occurrence keeps waiting, or ends refused when nobody was waiting. An `Unsure` answer rolls the release back, records nothing as refused, and fails the verb as retryable. An uncertain outside effect is reported as uncertain and settled by a lookup under the release key, never by sending the effect again.],
+      ))
+      #md-table(3, (
+        [*Library*], [*What it supplies to a decision point*], [*What stays with the record*],
+        [LLM Wire], [One provider call with a typed answer; the exchange becomes evidence], [The recommendation and the reads the model received],
+        [Fabric], [An agent run whose gated tool call becomes an occurrence], [The answer to the #term("term-gated-agent-call")],
+        [Relay and Hellhound], [Desk tools for validators, behind bearer verification], [Eligibility; the application supplies the decision sets a validator holds],
+        [Grind], [Delivery of wake-ups, settlement notices and application jobs], [When a wake-up or hold is due],
+        [Saga], [The workflow of a released output, keyed by the release key], [The released output and its reported effect],
+        [OTP runtime], [Supervised workers, sweeper and dispatcher over the in-memory store], [Everything; the store owner holds the record in memory],
+      ))
+      #behavior(title: "An agent's gated call is answered by the record", area: "Decision composition", level: "boundary")[
+        #given[An agent's gated call waits for a decision point.]
+        #when[The agent's run answers before the occurrence settles, for example because its approval expired.]
+        #then[Nothing is told to the customer while the occurrence is undecided.]
+        #then[After the occurrence settles, the customer is told the outcome the record states; a reply that claims another outcome or amount is replaced by a message built from the record.]
+      ]
+      #adr(33) #adr(35)
     ]
   ])
 

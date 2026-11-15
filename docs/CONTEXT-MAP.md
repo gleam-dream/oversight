@@ -14,7 +14,8 @@
 
 ## Ownership of shared terms
 
-- Composition owns package authority, composition boundary, consumer recipe, effect evidence, unresolved effect, admission identity, capability scope, observation correlation and borrowed resource.
-- Applications owns composition application, scripted peer, business identity, reconciliation decision, applied marker and session publication.
+- Composition owns package authority, composition boundary, consumer recipe, effect evidence, unresolved effect, admission identity, capability scope, observation correlation, borrowed resource and gated agent call.
+- Applications owns composition application, scripted peer, business identity, reconciliation decision, applied marker, session publication, model exchange, recorded outcome and promotion gate.
 - Evidence owns public consumer, retained experiment, behavioral oracle, locked source, source provenance, validation profile, local-source capture and rendered layer.
 - A context cites another context's term by slug and never redefines it.
+- The `decisions` repository owns the decision-point vocabulary (decision point, occurrence, desk, card, verdict, policy, release, gated tool, release key, follower, hint). Oversight uses those words with the meanings that repository defines and does not redefine them.
