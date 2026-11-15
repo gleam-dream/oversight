@@ -17,7 +17,7 @@ for name in "$@"; do
     find src test -name '*.erl' -exec erlc -Werror -o "$output" {} +
     export OVERSIGHT_PG_LOG_DIR="$root/.artifacts/ci/$name/postgres"
     case "$name" in
-    email_portal | support_desk | tool_hub | session_replay) gleam test ;;
+    email_portal | support_desk | tool_hub | session_replay | moderation_desk) gleam test ;;
     *) "$root/apps/scripts/with-postgres.sh" gleam test ;;
     esac
   )

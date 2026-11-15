@@ -6,19 +6,22 @@
 Each application combines public library APIs with its own types, policy and
 resource cleanup. External services are scripted locally.
 
-| Application                                        | Caller task                                     | Main boundaries                                                                     |
-| -------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [checkout](checkout/README.md)                     | Reserve stock, charge payment and book shipment | Saga compensation, Grind delivery, transactional enqueue, shared PostgreSQL         |
-| [financial_recovery](financial_recovery/README.md) | Recover a payment without repeating its effect  | Application evidence, Saga resolvers, audited Grind replay, isolation and retention |
-| [webhooks](webhooks/README.md)                     | Deliver signed outbound events                  | Receiver idempotency, destination policy, HTTP failure to job outcome               |
-| [extractor](extractor/README.md)                   | Fetch documents and extract typed invoices      | Streaming bounds, provider portability, native codec, retry policy                  |
-| [support_desk](support_desk/README.md)             | Approve and execute a refund tool               | Authenticated approval, Saga reporting, preserved uncertainty                       |
-| [tool_hub](tool_hub/README.md)                     | Use and serve MCP tools through an agent        | Discovery schemas, typed protocol results, invocation identity and cancellation     |
-| [secure_mcp](secure_mcp/README.md)                 | Protect MCP tools and run long work as jobs     | Token validation, domain permission, HTTP mount, result lookup                      |
-| [sso_portal](sso_portal/README.md)                 | Sign in and call a protected API                | Browser sessions, durable token custody, concurrent refresh                         |
-| [email_portal](email_portal/README.md)             | Sign in through captured email                  | Development mailbox, explicit confirmation, account policy, session recovery        |
-| [research_agent](research_agent/README.md)         | Resume research and publish with compensation   | Grind/Fabric/Saga authority, effect evidence, cancellation and VM restart           |
-| [session_replay](session_replay/README.md)         | Record and reconstruct a cart session           | Retrace core, native application types, checkpoint continuation and refused gaps    |
+| Application                                          | Caller task                                     | Main boundaries                                                                                              |
+| ---------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [checkout](checkout/README.md)                       | Reserve stock, charge payment and book shipment | Saga compensation, Grind delivery, transactional enqueue, shared PostgreSQL                                  |
+| [financial_recovery](financial_recovery/README.md)   | Recover a payment without repeating its effect  | Application evidence, Saga resolvers, audited Grind replay, isolation and retention                          |
+| [webhooks](webhooks/README.md)                       | Deliver signed outbound events                  | Receiver idempotency, destination policy, HTTP failure to job outcome                                        |
+| [extractor](extractor/README.md)                     | Fetch documents and extract typed invoices      | Streaming bounds, provider portability, native codec, retry policy                                           |
+| [support_desk](support_desk/README.md)               | Approve and execute a refund tool               | Authenticated approval, Saga reporting, preserved uncertainty                                                |
+| [tool_hub](tool_hub/README.md)                       | Use and serve MCP tools through an agent        | Discovery schemas, typed protocol results, invocation identity and cancellation                              |
+| [secure_mcp](secure_mcp/README.md)                   | Protect MCP tools and run long work as jobs     | Token validation, domain permission, HTTP mount, result lookup                                               |
+| [sso_portal](sso_portal/README.md)                   | Sign in and call a protected API                | Browser sessions, durable token custody, concurrent refresh                                                  |
+| [email_portal](email_portal/README.md)               | Sign in through captured email                  | Development mailbox, explicit confirmation, account policy, session recovery                                 |
+| [research_agent](research_agent/README.md)           | Resume research and publish with compensation   | Grind/Fabric/Saga authority, effect evidence, cancellation and VM restart                                    |
+| [session_replay](session_replay/README.md)           | Record and reconstruct a cart session           | Retrace core, native application types, checkpoint continuation and refused gaps                             |
+| [clinic_registration](clinic_registration/README.md) | Register a patient from a conversation          | Decision point over one model call, desk API, gated release once, confirmation under the release key, replay |
+| [payout_desk](payout_desk/README.md)                 | Gate an agent's payout tool call on a decision  | Decision point answering a Fabric approval, MCP desk, release check and hold, Saga payout, recorded outcome  |
+| [moderation_desk](moderation_desk/README.md)         | Moderate posts at volume at a live desk         | Decision point on the OTP runtime, isolated model cascade, replay gate, live hints, in-memory store          |
 
 ## Run an application
 
@@ -41,6 +44,13 @@ and removes its own local database:
 No existing database, provider account or sibling checkout is needed. Published
 libraries resolve from Hex; unpublished adapters use Git+path pins. Each
 `manifest.toml` locks the resolved versions.
+
+`clinic_registration`, `payout_desk` and `moderation_desk` are the exception
+until the `decisions` repository is published: they resolve its packages through
+the path `../../../../decisions` from the application directory, that is a
+`decisions` checkout beside the directory that holds the Oversight checkout, and
+`nix build` does not build them
+([ADR 0034](../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md#adr-0034)).
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.

@@ -14,7 +14,7 @@
     The documentation ownership decision is recorded in #adr(1). The package and API boundaries are justified by #adr(2) and #adr(3).
   ])
 
-  #section(title: "System at a glance", lead: "The ecosystem contains independent libraries, four PostgreSQL adapters, a Postmark adapter, a development mailbox adapter and Retrace core, frontend and server packages. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
+  #section(title: "System at a glance", lead: "The ecosystem contains independent libraries, five PostgreSQL adapters, an OTP runtime package for Decisions, a Postmark adapter, a development mailbox adapter and Retrace core, frontend and server packages. Oversight supplies design coordination and executable composition evidence, with no production runtime dependency.", visual: diagram(
     altitude: "L1", viewpoint: "runtime", title: "Applications select independent library authorities",
     nodes: (
       (id: "app", label: "Application", kind: "external-system"),
@@ -29,6 +29,7 @@
       (id: "json", label: "JSON Blueprint", kind: "component"),
       (id: "sinal", label: "Sinal", kind: "component"),
       (id: "retrace", label: "Retrace", kind: "component"),
+      (id: "decisions", label: "Decisions", kind: "component"),
     ),
     edges: (
       (from: "app", to: "fabric", relation: "call", label: "uses"),
@@ -38,6 +39,9 @@
       (from: "app", to: "saga", relation: "call", label: "uses"),
       (from: "app", to: "grind", relation: "call", label: "uses"),
       (from: "app", to: "retrace", relation: "call", label: "uses"),
+      (from: "app", to: "decisions", relation: "call", label: "uses"),
+      (from: "decisions", to: "json", relation: "dependency", label: "imports"),
+      (from: "decisions", to: "grind", relation: "dependency", label: "imports"),
       (from: "fabric", to: "llm", relation: "dependency", label: "imports"),
       (from: "llm", to: "http", relation: "dependency", label: "imports"),
       (from: "relay", to: "http", relation: "dependency", label: "imports"),
@@ -49,7 +53,7 @@
       (from: "saga", to: "sinal", relation: "dependency", label: "imports"),
       (from: "grind", to: "sinal", relation: "dependency", label: "imports"),
     ),
-    caption: [The map shows the principal runtime dependencies. The package table lists every direct sibling dependency. The Retrace node groups its independently selected core, frontend and server packages. PostgreSQL adapters borrow an application-owned connection pool.],
+    caption: [The map shows the principal runtime dependencies. The package table lists every direct sibling dependency. The Retrace node groups its independently selected core, frontend and server packages. The Decisions node groups its core, OTP and PostgreSQL packages; its PostgreSQL package imports Grind. PostgreSQL adapters borrow an application-owned connection pool.],
   ), body: [
     #subsection(title: "Package responsibilities and dependencies")[The table lists every direct sibling dependency and its semantic exclusion.]
     #md-table(4, (
@@ -73,10 +77,13 @@
       [correio_postgres], [Atomic challenge persistence and retention], [Correio], [Pool ownership and account policy],
       [correio_postmark], [Postmark submission and delivery evidence], [Correio, HTTP Gun], [HTTP client ownership and automatic resend],
       [correio_mailbox], [Read-only development inspection of captured mail], [Correio], [HTTP server ownership and production access policy],
+      [Decisions core], [Decision points, occurrence records, desks and verdicts, policy as data, release at most once, card documents and learning], [JSON Blueprint], [Processes, delivery, pools and the Fabric, LLM Wire and Relay joins],
+      [decisions_otp], [In-memory process-safe store, supervised runtime, isolated model calls, parallel replay and hints], [Decisions core, Sinal], [Durable storage and the application's supervision tree],
+      [decisions_postgres], [Decision storage over PostgreSQL, wake-up and settlement-notice workers, queue reads], [Decisions core, Grind, Sinal], [Pool ownership, policy storage and gated tools],
     ))
     #points(
       [Each package repository owns its detailed layer. Oversight references those contracts without duplicating the package's state machines or glossary.],
-      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14), #adr(16) and #adr(17); removed bridge rationale is recorded in #adr(3).],
+      [The application selects the participating libraries; no package imports Oversight at runtime. The package set is recorded in #adr(14), #adr(16), #adr(17) and #adr(33); removed bridge rationale is recorded in #adr(3).],
       [A #term("term-consumer-recipe") may join packages absent from each other's dependency graph. The recipe must understand their public semantics, not their private representation.],
     )
   ])
