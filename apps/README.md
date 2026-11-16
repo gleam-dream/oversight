@@ -43,8 +43,7 @@ and removes its own local database:
 
 No existing database, provider account or sibling checkout is needed. Published
 libraries resolve from Hex; unpublished adapters and the `decisions` packages use
-Git+path pins. `payout_desk` also takes Fabric from a Git commit until Fabric 0.3.0 is
-published. Each `manifest.toml` locks the resolved versions.
+Git+path pins. Each `manifest.toml` locks the resolved versions.
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.

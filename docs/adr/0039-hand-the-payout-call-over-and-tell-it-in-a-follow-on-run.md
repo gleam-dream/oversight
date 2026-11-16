@@ -8,8 +8,6 @@ Recorded on 2026-11-16. Supersedes the mechanism of
 states an outcome, and the resumed parked run) and the cancellation of a
 parked run in
 [ADR 0037](0037-expect-recommendations-at-admission-and-key-payouts-by-request.md#adr-0037).
-Departs from [ADR 0031](0031-consume-published-ecosystem-packages-from-hex.md#adr-0031)
-for `payout_desk` until the condition below.
 
 ## Decision
 
@@ -85,15 +83,16 @@ for `payout_desk` until the condition below.
   attempt's digits before the request, keeps the two shapes apart.
 - **No Fabric approval.** `payout_desk` registers no approvers, sets no
   approval expiry and has no approval requirement.
-- **A temporary Git pin.** `apps/payout_desk/gleam.toml` takes `fabric` and
-  `fabric_postgres` from [gleam-dream/fabric](https://github.com/gleam-dream/fabric)
-  at commit `f7a49bfa13fcde77908b89344967a6e946f5f76e`: `fabric` at the
-  repository root, `fabric_postgres` at `integrations/fabric_postgres`. At
-  that commit the adapter depends on `fabric` by path (`../..`), which
-  resolves inside the same Git source. `nix/git-sources.nix` registers the
-  commit's source hash, `sha256-XP4rYfkhj21P2jQENvnWL9PCP2GClfOyvm2hX94NIWM=`.
-  The other applications keep `fabric` 0.2.0 from Hex and the earlier adapter
-  commit.
+- **Dependencies.** `apps/payout_desk/gleam.toml` requires
+  `fabric >= 0.3.0 and < 0.4.0` from Hex, the release that carries the
+  handover, as [ADR 0031](0031-consume-published-ecosystem-packages-from-hex.md#adr-0031)
+  rules. It pins `fabric_postgres` at commit
+  `b0cf82c6785309df0266648da53d5b76c90046ec` of
+  [gleam-dream/fabric](https://github.com/gleam-dream/fabric), tagged
+  `fabric_postgres-v0.2.0`, which requires that release.
+  `nix/git-sources.nix` registers the commit's source hash,
+  `sha256-/drhSUr5jEolHAKy70L5ZLYgRSiUFtlz2Y4M9ip3mno=`. The other
+  applications keep `fabric` 0.2.0 and the earlier adapter commit.
 
 ## Rationale and consequences
 
@@ -110,9 +109,9 @@ for `payout_desk` until the condition below.
   requirement, the approval expiry setting, the resumption that approved or
   rejected the parked call (`jobs.resume`), the cancellation of a parked run
   (`jobs.cancel_run`), the decoding of an outcome from a rejection's reason,
-  and `domain.lets_call_through`. With commit `f7a49bf` the follow-on prompt
-  (`agent.follow_on_prompt`) and the application's own action key
-  (`agent.action_key`) were removed too: Fabric now continues a history from
+  and `domain.lets_call_through`. The first conversion also needed an
+  invented follow-on prompt and an action key the application built by hand;
+  both are gone: Fabric continues a history from
   its tool results (`input.continuation`) and names an action in text
   (`run.action_id_to_string`, `run.action_ref_to_string` and their parse
   functions). The text form is the one the application wrote by hand, so no
@@ -123,20 +122,17 @@ for `payout_desk` until the condition below.
   removed. Fabric runs stay in `fabric_postgres`: the follow-on run needs the
   handed-over run's transcript after hours or days, across restarts and on
   any node.
-- **Why the pin departs from ADR 0031, and when it ends.** The handover is
-  not released: it is on the Fabric branch `feat/tool-outcome-ends-run`. The
-  owner chose to convert `payout_desk` before the release, so that a real
-  application uses the API before it is published. The pin ends when
-  `fabric` 0.3.0 is on Hex. `payout_desk` then requires
-  `fabric >= 0.3.0 and < 0.4.0` from Hex and moves `fabric_postgres` to a
-  commit that requires it, and the registered hash for this commit is
-  removed if nothing else uses it. Until then, `payout_desk` is the one
-  application whose `fabric` does not come from Hex. Its manifest locks
-  `fabric` as version 0.2.0 from Git, because the commit has not raised the
-  package version. If the branch is rewritten before the release, the commit
-  can become unreachable, and the pin, the manifest and the registered hash
-  must move together.
-- **Records.** At this commit every Fabric record is written as version 10.
+- **Converted before the release.** The owner chose to convert `payout_desk`
+  against Fabric's pull request before `fabric` 0.3.0 was published, so that
+  a real application used the handover before its API was fixed in a release.
+  The conversion found four gaps that Fabric closed before 0.3.0: a follow-on
+  run had to invent a user prompt, an action had no standard text form, and
+  two points were undocumented (a follow-on run is driven by the same policy,
+  and a run parked by the earlier mechanism cannot be continued). It also
+  showed that the documentation of `run.id_from_parts` led to the retry
+  collision above. During that work the application took `fabric` from a Git
+  commit; it was never merged in that state.
+- **Records.** With `fabric` 0.3.0 every Fabric record is written as version 10.
   A store that this application shares with a node on the published
   `fabric` 0.2.0 cannot read those records. A run parked on an approval by
   the earlier mechanism has no handover, so `fabric.handover_history` refuses
