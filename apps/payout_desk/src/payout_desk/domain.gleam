@@ -415,7 +415,7 @@ pub fn signals(
 // -- What really happened ----------------------------------------------------------
 
 /// What became of a payout, as the record says. This, and nothing the
-/// model or an approval says, is what the agent and the seller are told.
+/// model says, is what the agent and the seller are told.
 pub type Truth {
   /// The provider paid `amount_cents`. `asked_cents` is what the agent
   /// proposed, different when finance corrected it.
@@ -453,17 +453,6 @@ pub fn paid_cents(truth: Truth) -> Int {
   case truth {
     Paid(amount_cents:, ..) -> amount_cents
     _ -> 0
-  }
-}
-
-/// Whether the agent's run is resumed by letting the gated call through
-/// (its tool returns the outcome) or by rejecting it (the model sees the
-/// outcome as the rejection's reason).
-pub fn lets_call_through(truth: Truth) -> Bool {
-  case truth {
-    Paid(..) | NotPaid(..) -> True
-    Rejected(..) | Expired | Superseded(..) | Withdrawn(..) | Refused(..) ->
-      False
   }
 }
 

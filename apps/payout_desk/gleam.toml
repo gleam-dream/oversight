@@ -14,8 +14,15 @@ pog = ">= 4.1.0 and < 4.2.0"
 pgo = ">= 0.20.0 and < 0.21.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = ">= 0.2.0 and < 0.3.0"
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "54a23bc7bcff1fd1018a349b5ac4f5ec2164c3bd", path = "integrations/fabric_postgres" }
+# Temporary, against ADR 0031 (published libraries come from Hex): the policy
+# handover (`policy.HandOver`, `run.HandedOver`, `fabric.handover_history`)
+# is not released yet, so fabric and its adapter come from one commit of
+# gleam-dream/fabric. At that commit the adapter depends on fabric by path,
+# which resolves inside the same Git source. ADR 0039 records the pin; it ends
+# when fabric 0.3.0 is on Hex: fabric then returns to a Hex requirement
+# `>= 0.3.0 and < 0.4.0`, and fabric_postgres to a commit that requires it.
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "650e962cad6dac3c26113a2c1f951b53ea7e9176" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "650e962cad6dac3c26113a2c1f951b53ea7e9176", path = "integrations/fabric_postgres" }
 grind = ">= 0.1.1 and < 0.2.0"
 saga = ">= 0.2.0 and < 0.3.0"
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }

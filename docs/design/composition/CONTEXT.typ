@@ -8,5 +8,5 @@
   (slug: "term-capability-scope", title: [Capability scope], body: [The set of responsibilities a package is intended to support, including explicitly unresolved or unbuilt capabilities.]),
   (slug: "term-observation-correlation", title: [Observation correlation], body: [An application-selected value carried across observations so events can be associated with one operation. It neither authorizes work nor identifies a durable effect.]),
   (slug: "term-borrowed-resource", title: [Borrowed resource], body: [A pool, client, actor or transaction that one party owns and another party uses without controlling its lifetime.]),
-  (slug: "term-gated-agent-call", title: [Gated agent call], body: [An agent's tool call whose effect waits for a decision point. The decision point's record answers it; the agent library's approval expiry does not.]),
+  (slug: "term-gated-agent-call", title: [Gated agent call], body: [An agent's tool call whose effect a decision point decides. The agent's policy hands it over and the run ends; the decision point's record answers it, and a follow-on run continues from that answer. No approval expiry answers it.]),
 )

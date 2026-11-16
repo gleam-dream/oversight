@@ -7,18 +7,18 @@
 ////   that evidence, so the reads the model **received** are a fold over the
 ////   run's succeeded actions (`received`): a read whose tool failed after
 ////   reading never reaches the record.
-//// - **The gated call.** Fabric's policy answers `propose_payout` with an
-////   approval that only the `payout` decision point gives (`approvers`
-////   in `payout_desk/app`). The run parks with no process. `reported`
-////   turns the parked call into a recommendation for `decisions`; the
-////   call's run and action are its explanation, and the request's key is
-////   its key (`jobs.request_key`).
-//// - **Resuming.** When the decision settles, `jobs` answers the approval
-////   with what really happened: the call is let through with the outcome
-////   in the session (`settled`), and the tool returns that outcome, never
-////   its own arguments; or it is rejected with the outcome as the reason.
-////   The approval never expires (`run.Infinity`), so Fabric never answers
-////   it on its own.
+//// - **The gated call.** Fabric's policy hands `propose_payout` over to the
+////   `payout` decision point (`policy.HandOver`): the tool never runs, the
+////   model takes no further turn, and the run ends `run.HandedOver` with
+////   the call as the model sent it. No approval exists, so nothing can
+////   expire and answer the model. `reported` turns the handed-over call
+////   into a recommendation for `decisions`; the call's run and action are
+////   its explanation, and the request's key is its key
+////   (`jobs.request_key`).
+//// - **Telling.** When the decision settles, `tell` starts a follow-on run
+////   from the handed-over run's transcript (`fabric.handover_history`) in
+////   which the call's result is the recorded outcome, never the call's own
+////   arguments. The handed-over run itself never continues.
 
 import decisions/model.{type Sources} as decisions_model
 import decisions/vocabulary.{
@@ -27,7 +27,7 @@ import decisions/vocabulary.{
 import decisions/wire
 import fabric
 import fabric/agent.{type Agent}
-import fabric/approvers.{type Approvers}
+import fabric/input
 import fabric/model.{type Request} as fabric_model
 import fabric/policy
 import fabric/run.{type RunId}
@@ -35,7 +35,6 @@ import fabric/store.{type Store}
 import fabric/tool
 import gleam/bool
 import gleam/dict
-import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
@@ -56,8 +55,8 @@ pub type Session {
     seller: String,
     /// How the read tools reach the marketplace: capturing in production.
     sources: Sources,
-    /// What really happened to the payout, once it is known. Only the
-    /// approval that resumes the run carries it.
+    /// What really happened to the payout: `None` in the run that
+    /// proposes, the recorded outcome in the follow-on run that tells it.
     settled: Option(Truth),
   )
 }
@@ -66,17 +65,14 @@ pub type Session {
 /// new version, so agreement is counted per version.
 pub const recommender_id = AgentRecommender(kind: "payout_support", version: "1")
 
-/// The requirement the gated call waits for.
-pub const requirement = run.Requirement("payout", 1)
-
 pub const propose = "propose_payout"
 
 /// How the scripted model behaves once its proposal has an answer.
 pub type Script {
   /// It reads the answer and tells the seller what it says.
   Careful
-  /// It tells the seller the payout is done whatever the answer says:
-  /// the model the trap in the recipe's notes needs.
+  /// It tells the seller the payout is done whatever the answer says: a
+  /// model whose claim the application must not pass on.
   Naive
 }
 
@@ -146,7 +142,7 @@ fn read_tool(
 pub fn propose_definition() -> tool.Definition(Payout, Truth) {
   tool.define(
     propose,
-    "Propose a payout to the seller. Finance decides; the result says what really happened.",
+    "Propose a payout to the seller. Finance decides, possibly days later; the result says what really happened.",
     domain.payout_codec(),
     domain.truth_codec(),
   )
@@ -172,43 +168,42 @@ fn tools() -> List(tool.Tool(Session)) {
       seller_query_codec(),
       fn(q: SellerQuery) { q.seller },
     ),
+    // The policy never lets this call run: the run that proposes hands
+    // it over, and the follow-on run is refused a second proposal. Its
+    // result is the recorded outcome, given by `fabric.handover_history`.
     tool.bind(
       propose_definition(),
-      fn(session: Session, _call, _proposed) {
-        // The body runs only when the decision point lets the call through,
-        // with the outcome in the session. It returns that outcome, never
-        // its own arguments: the amount may have been corrected.
-        case session.settled {
-          Some(truth) -> Ok(truth)
-          None -> Error(Nil)
-        }
+      fn(_session: Session, _call, _proposed) { Error(Nil) },
+      fn(_) {
+        tool.Explain("a payout is decided by finance, never by the agent")
       },
-      fn(_) { tool.Explain("the payout has not been decided") },
     ),
   ]
 }
 
-/// Fabric's policy: every read runs, and the payout waits for the
-/// decision point.
+/// Fabric's policy: every read runs, and the payout is handed over to the
+/// decision point. A follow-on run already holds the outcome, so a second
+/// proposal there is refused and the model answers from the result.
 fn gate(
-  _session: Session,
+  session: Session,
   action: policy.Action,
 ) -> Result(policy.Decision, String) {
-  case action.name == propose {
-    True -> Ok(policy.RequireApproval(requirement))
-    False -> Ok(policy.Allow)
+  case action.name == propose, session.settled {
+    True, None -> Ok(policy.HandOver(handed_over_reason))
+    True, Some(_) -> Ok(policy.Deny("the payout is already decided"))
+    False, _ -> Ok(policy.Allow)
   }
 }
 
-/// The agent every run uses. `approvers` are the decision point's (see
-/// `payout_desk/app`); `expiry` is `run.Infinity` in production.
+const handed_over_reason = "finance decides payouts at the payout decision point"
+
+/// The agent every run uses, the one that proposes and the follow-on that
+/// tells.
 ///
 /// `unavailable` is a fault point: while it answers `True` the provider
 /// behind the model refuses every call, so the run fails.
 pub fn build(
-  approvers: Approvers(String),
   script: Script,
-  expiry: run.Timeout,
   unavailable: fn() -> Bool,
 ) -> Result(Agent(Session, Reply), String) {
   agent.new("payout_support", scripted(script, unavailable), tools(), gate)
@@ -216,8 +211,6 @@ pub fn build(
     "You help marketplace sellers with payouts. Read the order, its dispute and the seller's history, then propose a payout. Tell the seller only what the proposal's result says.",
   )
   |> agent.with_answer(domain.reply_codec())
-  |> agent.with_approvers(approvers)
-  |> agent.with_approval_expiry(expiry)
   |> agent.with_max_turns(6)
   |> agent.build
   |> result.map_error(agent.describe_config_errors)
@@ -225,13 +218,25 @@ pub fn build(
 
 /// The run of one attempt at a request: a redelivered request finds its
 /// run, and a request whose earlier run failed (`attempt` failed attempts
-/// on its record) starts a fresh one.
+/// on its record) starts a fresh one, since a failed run cannot continue.
 pub fn run_id(request: String, attempt: Int) -> RunId {
   case attempt {
     0 -> run.id_from_parts("payout", [request])
     _ -> run.id_from_parts("payout", [request, int.to_string(attempt)])
   }
 }
+
+/// The follow-on run that tells a request's outcome. A request is one
+/// payout and hands one call over, so the request names it: a telling
+/// delivered again finds the run it started. Its own prefix keeps it apart
+/// from every proposing run.
+pub fn follow_on_id(request: String) -> RunId {
+  run.id_from_parts("payouttold", [request])
+}
+
+/// The prompt the follow-on run adds after the recorded outcome.
+pub const follow_on_prompt =
+  "Finance has decided the payout. Tell the seller what the proposal's result says."
 
 /// The prompt a request starts its run with.
 pub fn prompt(request: domain.Request) -> String {
@@ -372,21 +377,11 @@ fn told(name: String, truth: Truth) -> String {
   }
 }
 
-/// The outcome in a proposal's result: the tool's own result, or the
-/// rejection's reason. Fabric's own rejection (an expired approval) carries
-/// no outcome.
+/// The outcome in a proposal's result: the recorded outcome the follow-on
+/// run was given. Any other result, such as a refusal, carries none.
 fn outcome_in(content: String) -> Option(Truth) {
-  case codec.decode_json(domain.truth_codec(), content) {
-    Ok(truth) -> Some(truth)
-    Error(_) ->
-      json.parse(content, decode.at(["detail"], decode.string))
-      |> result.replace_error(Nil)
-      |> result.try(fn(detail) {
-        codec.decode_json(domain.truth_codec(), detail)
-        |> result.replace_error(Nil)
-      })
-      |> option.from_result
-  }
+  codec.decode_json(domain.truth_codec(), content)
+  |> option.from_result
 }
 
 /// The amount the model proposed in this run.
@@ -470,21 +465,20 @@ fn line(text: String, name: String) -> String {
 
 // -- Driving a run -------------------------------------------------------------------------
 
-/// The gated call a run is parked on.
-pub type Parked {
-  Parked(
+/// The gated call a run handed over, as `run.HandedOver` names it.
+pub type Handed {
+  Handed(
     run: String,
     /// The action within the run: `turn.call_id`.
     action: String,
-    reference: run.ApprovalRef,
     arguments_json: String,
   )
 }
 
 /// Where a run came to rest.
 pub type Reached {
-  /// It waits for the decision point, with what it has done so far.
-  Waiting(call: Parked, actions: List(run.ActionRecord))
+  /// It handed its proposal over and ended, with what it had done.
+  HandedOver(call: Handed, actions: List(run.ActionRecord))
   /// It ended with its answer.
   Answered(reply: Reply)
 }
@@ -492,7 +486,8 @@ pub type Reached {
 pub type DriveError {
   /// Fabric's store could not be reached; try again.
   RunsUnavailable(detail: String)
-  /// The run ended without an answer, or is stuck on an uncertain read.
+  /// The run ended without an answer or a handover of the proposal, or is
+  /// stuck on an uncertain read.
   RunStopped(detail: String)
   /// The run was still working at the deadline.
   StillWorking
@@ -504,6 +499,10 @@ pub fn describe_drive_error(error: DriveError) -> String {
     RunStopped(detail) -> "the run stopped: " <> detail
     StillWorking -> "the run was still working at the deadline"
   }
+}
+
+fn unavailable(error: fabric.Error) -> DriveError {
+  RunsUnavailable(fabric.describe_error(error))
 }
 
 /// Start the request's run, or find it, and wait until it rests.
@@ -530,9 +529,75 @@ pub fn drive(
         fabric.recover(runs, agent, session, id)
       other -> other
     }
-    |> result.map_error(fn(e) { RunsUnavailable(fabric.describe_error(e)) }),
+    |> result.map_error(unavailable),
   )
   settle(handle, within)
+}
+
+/// Tell the recorded outcome through a follow-on run of the run that
+/// handed the proposal over, and wait until it rests. The follow-on run
+/// continues the handed-over run's conversation with `truth` as the
+/// proposal's result (`fabric.handover_history`). Started once per request
+/// (`follow_on_id`): a telling delivered again finds it and waits for it.
+pub fn tell(
+  runs: Store,
+  agent: Agent(Session, Reply),
+  session: Session,
+  handed handed: RunId,
+  truth truth: Truth,
+  within within: Duration,
+) -> Result(Reached, DriveError) {
+  let id = follow_on_id(session.request)
+  use input <- result.try(follow_on_input(runs, agent, session, handed, truth))
+  use handle <- result.try(
+    case
+      fabric.start_with_input(
+        runs,
+        agent,
+        id:,
+        context: session,
+        input:,
+        correlation: None,
+      )
+    {
+      Error(fabric.AlreadyStarted(..)) ->
+        fabric.recover(runs, agent, session, id)
+      other -> other
+    }
+    |> result.map_error(unavailable),
+  )
+  settle(handle, within)
+}
+
+/// The input of the follow-on run: the handed-over run's transcript, the
+/// recorded outcome as the proposal's result, and the follow-on prompt.
+fn follow_on_input(
+  runs: Store,
+  agent: Agent(Session, Reply),
+  session: Session,
+  handed: RunId,
+  truth: Truth,
+) -> Result(input.Input, DriveError) {
+  use first <- result.try(
+    fabric.open(runs, agent, session, handed) |> result.map_error(unavailable),
+  )
+  use snapshot <- result.try(
+    fabric.snapshot(first) |> result.map_error(unavailable),
+  )
+  use decided <- result.try(
+    tool.reconciliation(propose_definition(), Ok(truth))
+    |> result.map_error(fn(e) { RunStopped(string.inspect(e)) }),
+  )
+  use history <- result.try(
+    fabric.handover_history(snapshot, result: decided)
+    |> result.map_error(fn(e) {
+      RunStopped(
+        "the proposing run has no handover history: " <> string.inspect(e),
+      )
+    }),
+  )
+  input.new(history, follow_on_prompt)
+  |> result.map_error(fn(e) { RunStopped(string.inspect(e)) })
 }
 
 /// Wait until the run rests and say where.
@@ -541,42 +606,40 @@ pub fn settle(
   within: Duration,
 ) -> Result(Reached, DriveError) {
   use status <- result.try(
-    fabric.await(handle, within:)
-    |> result.map_error(fn(e) { RunsUnavailable(fabric.describe_error(e)) }),
+    fabric.await(handle, within:) |> result.map_error(unavailable),
   )
   case status {
     run.Finished(run.Completed(answer:)) -> Ok(Answered(answer))
+    run.Finished(run.HandedOver(action:, tool:, arguments_json:, ..))
+      if tool == propose
+    -> {
+      use snapshot <- result.map(
+        fabric.snapshot(handle) |> result.map_error(unavailable),
+      )
+      HandedOver(
+        call: Handed(
+          run: run.id_to_string(action.run),
+          action: action_key(action.id),
+          arguments_json:,
+        ),
+        actions: snapshot.actions,
+      )
+    }
     run.Finished(outcome) -> Error(RunStopped(run.describe_outcome(outcome)))
     run.Suspended(approvals:, uncertain:) ->
-      case list.find(approvals, fn(pending) { pending.tool == propose }) {
-        Ok(pending) -> {
-          use snapshot <- result.map(
-            fabric.snapshot(handle)
-            |> result.map_error(fn(e) {
-              RunsUnavailable(fabric.describe_error(e))
-            }),
-          )
-          Waiting(
-            call: Parked(
-              run: run.id_to_string(pending.reference.run),
-              action: action_key(pending.reference.id),
-              reference: pending.reference,
-              arguments_json: pending.arguments_json,
-            ),
-            actions: snapshot.actions,
-          )
-        }
-        Error(Nil) ->
-          Error(RunStopped(
-            string.inspect(list.length(uncertain)) <> " uncertain tool effects",
-          ))
-      }
+      Error(RunStopped(
+        int.to_string(list.length(approvals))
+        <> " approvals and "
+        <> int.to_string(list.length(uncertain))
+        <> " uncertain tool effects",
+      ))
     run.Working | run.Unattended -> Error(StillWorking)
   }
 }
 
-fn action_key(id: run.ActionId) -> String {
-  string.inspect(id.turn) <> "." <> id.call_id
+/// An action's key on the record: `turn.call_id`.
+pub fn action_key(id: run.ActionId) -> String {
+  int.to_string(id.turn) <> "." <> id.call_id
 }
 
 // -- What the model received ------------------------------------------------------------
@@ -617,11 +680,11 @@ fn received_content(
   |> option.from_result
 }
 
-/// The parked call as a recommendation for `decisions`: the output it
+/// The handed-over call as a recommendation for `decisions`: the output it
 /// asks for, the reads the model received, the signals computed from those
 /// reads, and the run and action as its explanation.
 pub fn recommendation(
-  call: Parked,
+  call: Handed,
   actions: List(run.ActionRecord),
 ) -> Result(vocabulary.Recommendation(Payout), decisions_model.Failure) {
   use output <- result.map(
@@ -643,14 +706,13 @@ pub fn recommendation(
   )
 }
 
-/// The parked call as a `decisions` model that **reports** the reads its
-/// model received: `decisions/model.run` believes the reads it puts on the
-/// recommendation and records nothing it observed. The `Sources` that
+/// The handed-over call as a `decisions` model that **reports** the reads
+/// its model received: `decisions/model.run` believes the reads it puts on
+/// the recommendation and records nothing it observed. The `Sources` that
 /// `model.run` hands it are not used: the tools ran in Fabric's processes
-/// through the session's own sources, and may run again after this returns
-/// (a recovery), when `model.run`'s sources are gone.
+/// through the session's own sources, before the run ended.
 pub fn reported(
-  call: Parked,
+  call: Handed,
   actions: List(run.ActionRecord),
 ) -> decisions_model.Model(Payout) {
   decisions_model.reporting(fn(_context, _sources) {

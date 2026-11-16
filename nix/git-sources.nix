@@ -7,6 +7,8 @@
   };
   "https://github.com/gleam-dream/fabric.git" = {
     "54a23bc7bcff1fd1018a349b5ac4f5ec2164c3bd" = "sha256-h9vSQ7nNXPxP7gy8AT5SKM2RbwTdQc7onfOjK2R4TG8=";
+    # payout_desk only, until fabric 0.3.0 is on Hex (ADR 0039).
+    "650e962cad6dac3c26113a2c1f951b53ea7e9176" = "sha256-BUZ7uW8FN3cjPpsJM+gaQSPpqym4PgBW52zBD2OiLoY=";
   };
   "https://github.com/gleam-dream/saga.git" = {
     "0d345cacf777515f2c9401d1ad90f5d67b07f38e" = "sha256-sRZbIpxhuwqIjoMZhkE0Md6H5kUjyog3rr8S+8uefZs=";

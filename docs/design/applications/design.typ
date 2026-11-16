@@ -363,15 +363,16 @@
       #answers(title: "An agent's payout decided by people and paid once",
         responsibility: [Admit a support agent's payout tool call at the `payout` decision point, let finance decide it over MCP, pay a released payout once, and tell the seller only the #term("term-recorded-outcome").],
         interface: [Request admission through `app.request`, and a seller's suspension through `app.suspend_seller`. Three Relay tools, `payout_queue`, `open_payout` and `decide_payout`, behind Hellhound bearer verification with the scope `payouts`. The card is the `decisions/view` document with its own codec. Native `Payout`, `Reply` and recorded-outcome types. Grind workers for the agent run, the payment, reconciliation and telling.],
-        interactions: [Fabric runs the agent with its runs in `fabric_postgres` and parks the gated call on an approval. The application records the call as an occurrence with the reads the model received. A consult handler asks the `risk` point first for a seller with a recent chargeback. `decisions_postgres` supplies the storage port and the wake-up and settlement workers. The settlement follower admits the payment or the telling. Saga reserves, pays and posts. Grind owns the one pool, which the record, Fabric, Saga and the application tables borrow. Start-up migrates every package's tables on a pool of its own, publishes the policies, starts Grind and the Fabric store, sweeps so that every pending wake-up and undelivered settlement notice has a job, and then starts the MCP listener.],
-        invariants: [The occurrence key is `payout:` followed by the request id, which is at most 64 bytes, so that the release key stays within the store's bound. One transaction records the request, records that a payout is expected for its key (`expect`), and admits the agent job. A failed agent run is a failed attempt under the same key, and the retried job starts a fresh run. The tool call's run and action are the occurrence's trigger and explanation, and a redelivered or replayed call admits one occurrence. The desk opens a card only for a validator who may decide it, so the requester gets none. The gated tool writes one payout instruction keyed by the release key in the releasing transaction. The release check compares the amount with the seller's available balance under a row lock and records the balance it compared. The Saga run identity and the provider's idempotency key derive from the release key. The seller is told once, only after the record states the outcome, and only that outcome.],
-        failure: [A guard or release check answers `Refuse` for a judgment about the release, and `Unsure` when a database query failed. A refused release keeps the occurrence waiting with the refusal on the record; a release refused after a hold settles the occurrence as refused. An `Unsure` answer rolls the release back and records nothing as refused: a wake-up is delivered again, and the MCP tool answers "try again", as it does when the desk is busy. A provider timeout is reported uncertain, and a reconciliation lookup reports the payment without sending it again. A desk refusal's disposition chooses whether the job snoozes, is discarded or fails. A seller's suspension supersedes every pending payout to that seller, expected, waiting or held, in the suspension's transaction; nothing is released, and the seller is told the payout was superseded. A proposal for a payout superseded before the agent proposed is refused (`SupersededBefore`), and the application cancels the parked run.],
+        interactions: [Fabric runs the agent with its runs in `fabric_postgres`, and the agent's policy hands the gated call over, which ends the run. The application records the handed-over call as an occurrence with the reads the model received. When the occurrence settles, a follow-on run continues the handed-over run's conversation with the recorded outcome as the call's result. A consult handler asks the `risk` point first for a seller with a recent chargeback. `decisions_postgres` supplies the storage port and the wake-up and settlement workers. The settlement follower admits the payment or the telling. Saga reserves, pays and posts. Grind owns the one pool, which the record, Fabric, Saga and the application tables borrow. Start-up migrates every package's tables on a pool of its own, publishes the policies, starts Grind and the Fabric store, sweeps so that every pending wake-up and undelivered settlement notice has a job, and then starts the MCP listener.],
+        invariants: [The occurrence key is `payout:` followed by the request id, which is at most 64 bytes, so that the release key stays within the store's bound. One transaction records the request, records that a payout is expected for its key (`expect`), and admits the agent job. A failed agent run is a failed attempt under the same key, and the retried job starts a fresh run. The handed-over call's run and action are the occurrence's trigger and explanation, and a redelivered or replayed agent job reads the ended run again, calls no model and admits one occurrence. The follow-on run's id is derived from the request, so a telling delivered again finds the run it started. The desk opens a card only for a validator who may decide it, so the requester gets none. The gated tool writes one payout instruction keyed by the release key in the releasing transaction. The release check compares the amount with the seller's available balance under a row lock and records the balance it compared. The Saga run identity and the provider's idempotency key derive from the release key. The seller is told once, only after the record states the outcome, and only that outcome.],
+        failure: [A guard or release check answers `Refuse` for a judgment about the release, and `Unsure` when a database query failed. A refused release keeps the occurrence waiting with the refusal on the record; a release refused after a hold settles the occurrence as refused. An `Unsure` answer rolls the release back and records nothing as refused: a wake-up is delivered again, and the MCP tool answers "try again", as it does when the desk is busy. A provider timeout is reported uncertain, and a reconciliation lookup reports the payment without sending it again. A desk refusal's disposition chooses whether the job snoozes, is discarded or fails. A seller's suspension supersedes every pending payout to that seller, expected, waiting or held, in the suspension's transaction; nothing is released, and the seller is told the payout was superseded. A proposal for a payout superseded before the agent proposed is refused (`SupersededBefore`); its run already ended with the handover, so nothing is cancelled.],
       )
       #points(
         [The policy is data, version 1. A seller with a recent chargeback and no known risk consults `risk`; high risk needs two approvals from finance. From 500.00, two from finance approve, and after 60 minutes waited two from finance or one from the head of finance. A payout below 50.00 whose dispute the seller won proceeds. Anything else needs one approval from someone in finance other than the requester.],
         [The undo window is part of the policy: the rule that lets a payout proceed holds it, 5 minutes by default, and its decider or any holder of `finance` may withdraw it meanwhile. A new policy version changes the window only for payouts admitted after it. A validator-accepted payout is released at once.],
-        [The decision point answers the #term("term-gated-agent-call"). Fabric's approval never expires; the approver accepts the occurrence id as its credential and refuses until the record states the outcome, including while a reported effect is uncertain. A record the approver cannot read is reported as unavailable, not as a refusal. The application resumes the same run, and the tool body returns the recorded outcome. A reply whose outcome or amount differs from the record is replaced by a message built from the record, and the agent's text is kept.],
-        [The access token names the person; the application's staff table supplies the decision sets that person holds. The identity provider is Hellhound's in-process testing provider. Fabric runs live in `fabric_postgres` because a parked run waits across restarts and may resume on any node.],
+        [The decision point answers the #term("term-gated-agent-call"). The agent's policy hands `propose_payout` over (`policy.HandOver`): the tool never runs, no approval exists, and the model takes no turn between the handover and the decision. Once the record states the outcome, including after an uncertain effect is settled, `fabric.handover_history` gives a follow-on run the handed-over run's conversation with the recorded outcome as the call's result. The follow-on run's policy refuses a second proposal. A reply whose outcome or amount differs from the record, or a follow-on run that ends without an answer, is replaced by a message built from the record, and the agent's text is kept.],
+        [Until Fabric 0.3.0 is on Hex, `fabric` and `fabric_postgres` come from one Git commit of the Fabric repository, against the rule that published libraries come from Hex.],
+        [The access token names the person; the application's staff table supplies the decision sets that person holds. The identity provider is Hellhound's in-process testing provider. Fabric runs live in `fabric_postgres` because the follow-on run reads the handed-over run's transcript after people decide, across restarts and on any node.],
         [Source owners: `apps/payout_desk/src/payout_desk/domain.gleam`, `desks.gleam`, `agent.gleam`, `jobs.gleam`, `workflow.gleam`, `desk_tools.gleam`, `auth.gleam`, `db.gleam`, `provider.gleam`, `review.gleam` and `app.gleam`.],
       )
       #behavior(title: "A correction is paid and told as recorded", area: "Payout desk", level: "boundary")[
@@ -380,11 +381,21 @@
         #then[The card marks only the dispute as changed, and the release records the balance the release check compared.]
         #then[One payment of 60.00 is made under the release key, and the seller is told it was paid.]
       ]
-      #behavior(title: "An expired approval tells the seller nothing", area: "Payout desk", level: "boundary")[
-        #given[The approval expires after one second and the agent's run then answers that 80.00 was paid.]
-        #when[The application delivers the reply while the occurrence still waits.]
-        #then[Nothing is told to the seller.]
-        #then[After a correction to 60.00 the seller receives the application's message with the recorded amounts, and the agent's claim is kept, not sent.]
+      #behavior(title: "A handed-over call leaves nothing to expire", area: "Payout desk", level: "boundary")[
+        #given[The agent's model says a payout is paid whatever its result says, and its run handed the proposal over.]
+        #when[More than a second passes and the run is recovered while the occurrence still waits.]
+        #then[The run stays ended as handed over, with no pending approval and two model turns, and nothing is told to the seller.]
+        #then[After a correction to 60.00 the follow-on run's model claims 80.00; the seller receives the application's message with the recorded amounts, and the claim is kept, not sent.]
+      ]
+      #behavior(title: "A job killed between the handover and the filing files once", area: "Payout desk", level: "boundary")[
+        #given[The agent job's handler dies after the run handed its proposal over and before the occurrence is filed.]
+        #when[Grind delivers the job again.]
+        #then[The ended run is read again with its two model turns, one occurrence is filed with no failed attempt, and the payout is paid and told as usual.]
+      ]
+      #behavior(title: "A settlement notice delivered twice tells once", area: "Payout desk", level: "boundary")[
+        #given[A payout was paid and told through its follow-on run.]
+        #when[The settlement follower runs again and the telling job runs twice at once.]
+        #then[The follow-on run takes no further turn, the seller has one reply, and one payment exists.]
       ]
       #behavior(title: "A release the balance does not cover is refused and kept", area: "Payout desk", level: "boundary")[
         #given[The seller's available balance is below the payout.]
@@ -412,6 +423,11 @@
         #when[The seller's account is suspended.]
         #then[The held and the waiting payout lapse as superseded, nothing is paid, and the seller is told each was superseded.]
         #then[The expected request is superseded before it began, and its agent job drives no run.]
+      ]
+      #behavior(title: "A suspension while the agent works leaves nothing to cancel", area: "Payout desk", level: "boundary")[
+        #given[A request's run has handed its proposal over, and the occurrence is not filed yet.]
+        #when[The seller is suspended, and then the proposal is admitted.]
+        #then[The proposal is refused as superseded before it began, the run stays ended as handed over with no follow-on run, nothing is paid, and the seller is told once.]
       ]
       #behavior(title: "A failed agent run and its payout are one record", area: "Payout desk", level: "boundary")[
         #given[The model's provider refuses the first call of a request's agent run.]
@@ -444,7 +460,7 @@
         #then[The head of finance becomes eligible, and the card shows each alternative's count: one of two approvals from finance, none of one from the head of finance.]
         #then[The head of finance approves alone, and the payout is released and told as paid.]
       ]
-      #adr(33) #adr(38) #adr(35) #adr(37)
+      #adr(33) #adr(38) #adr(35) #adr(37) #adr(39)
     ]
     #subsection(title: "Moderation desk")[
       #answers(title: "Moderation at volume without a database",

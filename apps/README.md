@@ -20,7 +20,7 @@ resource cleanup. External services are scripted locally.
 | [research_agent](research_agent/README.md)           | Resume research and publish with compensation   | Grind/Fabric/Saga authority, effect evidence, cancellation and VM restart                                    |
 | [session_replay](session_replay/README.md)           | Record and reconstruct a cart session           | Retrace core, native application types, checkpoint continuation and refused gaps                             |
 | [clinic_registration](clinic_registration/README.md) | Register a patient from a conversation          | Decision point over one model call, desk API, gated release once, confirmation under the release key, replay |
-| [payout_desk](payout_desk/README.md)                 | Gate an agent's payout tool call on a decision  | Decision point answering a Fabric approval, MCP desk, release check and hold, Saga payout, recorded outcome  |
+| [payout_desk](payout_desk/README.md)                 | Gate an agent's payout tool call on a decision  | Decision point taking a Fabric handover, MCP desk, release check and hold, Saga payout, recorded outcome     |
 | [moderation_desk](moderation_desk/README.md)         | Moderate posts at volume at a live desk         | Decision point on the OTP runtime, isolated model cascade, replay gate, live hints, in-memory store          |
 
 ## Run an application
@@ -43,7 +43,8 @@ and removes its own local database:
 
 No existing database, provider account or sibling checkout is needed. Published
 libraries resolve from Hex; unpublished adapters and the `decisions` packages use
-Git+path pins. Each `manifest.toml` locks the resolved versions.
+Git+path pins. `payout_desk` also takes Fabric from a Git commit until Fabric 0.3.0 is
+published. Each `manifest.toml` locks the resolved versions.
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.
