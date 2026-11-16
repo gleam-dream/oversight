@@ -20,5 +20,5 @@ Recorded on 2026-11-16. Supersedes the source selection in
 
 - A path dependency locked no commit and resolved only from a checkout at one directory depth. A pinned commit makes the three applications' test runs locked-source evidence, as for the other unpublished adapters ([ADR 0031](0031-consume-published-ecosystem-packages-from-hex.md#adr-0031)), and lets Gleam Nix build them ([ADR 0032](0032-build-applications-with-shared-nix-dependencies.md#adr-0032)).
 - The commit is on the branch `first-build`. The repository has no `main` branch. If `first-build` is rewritten before a release, this commit can become unreachable. The pin, the three manifests and the registered hash must then move together to a commit that stays reachable.
-- The repository is private. Continuous integration fetches the source only once the repository is readable without credentials. Until then, the three application jobs cannot resolve their dependencies there.
-- The registered hash was computed from a local export of the commit, not from a download from GitHub.
+- The repository is public, as the other tracked library repositories are, so continuous integration fetches the source without a credential.
+- The registered hash matches a download of the commit from GitHub.
