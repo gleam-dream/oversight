@@ -48,8 +48,8 @@ same record, and an agent whose approval expired before anyone decided.
 The [composition contract](../../docs/design/design-layer.pdf) describes the
 payout desk. [ADR 0035](../../docs/adr/0035-answer-a-gated-agent-call-from-the-decision-point.md)
 records why the decision point, not Fabric's approval expiry, answers the agent's
-call, and [ADR 0034](../../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md)
-why the `decisions` packages resolve by path, and
+call, [ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)
+which commit of the `decisions` packages it uses, and
 [ADR 0037](../../docs/adr/0037-expect-recommendations-at-admission-and-key-payouts-by-request.md)
 why a payout is expected when its request is admitted and keyed by the request, why a
 failed agent run is retried in a fresh run, and how a suspension supersedes it.

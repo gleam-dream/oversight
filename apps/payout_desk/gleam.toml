@@ -23,11 +23,10 @@ relay = ">= 0.2.0 and < 0.3.0"
 hellhound = ">= 0.1.0 and < 0.2.0"
 json_blueprint = ">= 2.0.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
-# The three decisions packages are not published yet. These paths become
-# Git+path pins to a verified commit of gleam-dream/decisions when that
-# repository is pushed, as fabric_postgres and saga_postgres are above.
-decisions = { path = "../../../../decisions" }
-decisions_postgres = { path = "../../../../decisions/integrations/decisions_postgres" }
+# The decisions packages are not published yet: Git+path pins to one verified
+# commit of gleam-dream/decisions, as fabric_postgres and saga_postgres are above.
+decisions = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

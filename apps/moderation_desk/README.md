@@ -43,5 +43,5 @@ records the supervision tree, why a restarted store starts empty and is seeded
 again, and why a trigger is set aside after 3 attempts.
 [ADR 0037](../../docs/adr/0037-expect-recommendations-at-admission-and-key-payouts-by-request.md)
 records why admission records an expected recommendation.
-[ADR 0034](../../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md)
-records why the `decisions` packages resolve by path.
+[ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)
+records which commit of the `decisions` packages it uses.

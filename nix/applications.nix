@@ -4,9 +4,12 @@ let
   gitHashes = import ./git-sources.nix;
   names = [
     "checkout"
+    "clinic_registration"
     "email_portal"
     "extractor"
     "financial_recovery"
+    "moderation_desk"
+    "payout_desk"
     "research_agent"
     "secure_mcp"
     "session_replay"
@@ -40,7 +43,9 @@ let
                       or (throw "Register the locked Git source hash for ${package.name} in nix/git-sources.nix.");
                 };
               in
-              "${source}/${package.path or "."}";
+              # A package at the repository root is the source itself; "${source}/."
+              # is a path the unpack phase cannot copy.
+              if package ? path then "${source}/${package.path}" else source;
           }) gitPackages
         );
         packageOverrides =

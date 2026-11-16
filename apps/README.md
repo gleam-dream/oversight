@@ -42,15 +42,8 @@ and removes its own local database:
 ```
 
 No existing database, provider account or sibling checkout is needed. Published
-libraries resolve from Hex; unpublished adapters use Git+path pins. Each
-`manifest.toml` locks the resolved versions.
-
-`clinic_registration`, `payout_desk` and `moderation_desk` are the exception
-until the `decisions` repository is published: they resolve its packages through
-the path `../../../../decisions` from the application directory, that is a
-`decisions` checkout beside the directory that holds the Oversight checkout, and
-`nix build` does not build them
-([ADR 0034](../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md#adr-0034)).
+libraries resolve from Hex; unpublished adapters and the `decisions` packages use
+Git+path pins. Each `manifest.toml` locks the resolved versions.
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.

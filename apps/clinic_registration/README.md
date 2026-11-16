@@ -32,8 +32,9 @@ stands in for identity in this example: a real application puts its own
 sign-in there and resolves the decision sets a person holds from it.
 
 `decisions`, `decisions_otp` and `decisions_postgres` are unpublished. They
-resolve through the path `../../../../decisions` from this directory
-([ADR 0034](../../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md)).
+resolve from one pinned commit of the
+[decisions repository](https://github.com/gleam-dream/decisions)
+([ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)).
 
 ## Run
 

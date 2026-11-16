@@ -357,7 +357,7 @@
         #when[The gate's thresholds are not met, and then they are.]
         #then[The stored versions stay at version 1, then version 2 is published and a confident registration is accepted by it and held for its undo window.]
       ]
-      #adr(33) #adr(34) #adr(37)
+      #adr(33) #adr(38) #adr(37)
     ]
     #subsection(title: "Payout desk")[
       #answers(title: "An agent's payout decided by people and paid once",
@@ -444,7 +444,7 @@
         #then[The head of finance becomes eligible, and the card shows each alternative's count: one of two approvals from finance, none of one from the head of finance.]
         #then[The head of finance approves alone, and the payout is released and told as paid.]
       ]
-      #adr(33) #adr(34) #adr(35) #adr(37)
+      #adr(33) #adr(38) #adr(35) #adr(37)
     ]
     #subsection(title: "Moderation desk")[
       #answers(title: "Moderation at volume without a database",
@@ -521,7 +521,7 @@
         #when[The application records the appeal.]
         #then[The record gains an assessment that the output was wrong; its status and verdicts are unchanged, the post is published and the strike is removed.]
       ]
-      #adr(33) #adr(34) #adr(36) #adr(37)
+      #adr(33) #adr(38) #adr(36) #adr(37)
     ]
   ])
 ]
