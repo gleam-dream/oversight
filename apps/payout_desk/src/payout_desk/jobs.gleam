@@ -85,6 +85,9 @@ pub type Deps {
     /// A fault point after the provider answered a payment, given the pay
     /// job's handler process; `fn(_) { Nil }` otherwise.
     after_paid: fn(process.Pid) -> Nil,
+    /// A fault point after the agent's run parked on its proposal and
+    /// before the proposal is admitted; `fn() { Nil }` otherwise.
+    before_admit: fn() -> Nil,
   )
 }
 
@@ -154,9 +157,24 @@ fn submit(
   |> result.map_error(grind.describe_submit_error)
 }
 
-/// Record a request and queue its agent, in one transaction. A request id
-/// over `max_request_id_bytes` is refused, so the keys built from it stay
-/// within the store's bounds.
+/// The occurrence's key: the request's. A request is one payout: its
+/// expectation, any failed attempt of its agent and the occurrence its
+/// gated tool call becomes are one record, and a redelivered or replayed
+/// tool call of the request's run admits nothing twice. The call's own
+/// identity (run and action) is the occurrence's trigger and explanation.
+/// A request id is at most 64 bytes, so the key, and the release key that
+/// adds `release:` to it, stay well within the store's 255.
+pub fn request_key(request: String) -> String {
+  "payout:" <> request
+}
+
+/// The longest request id `request` accepts, in bytes.
+pub const max_request_id_bytes = 64
+
+/// Record a request, expect a payout for it, and queue its agent, in one
+/// transaction: from then on the record knows the payout is in flight,
+/// and an event that makes it stale supersedes it even before the agent
+/// proposes. A request id over `max_request_id_bytes` is refused.
 pub fn request(
   deps: Deps,
   db: pog.Connection,
@@ -169,19 +187,40 @@ pub fn request(
       False -> Error("a request id is at most 64 bytes")
     },
   )
-  db.transaction(db, fn(tx) {
-    use Nil <- result.try(db.put_request(tx, request, requested_by))
+  decisions_postgres.transaction_with(db, fn(tx) {
+    use Nil <- result.try(
+      db.put_request(tx, request, requested_by)
+      |> result.map_error(fn(e) { decisions_postgres.Own(db.describe(e)) }),
+    )
+    use Nil <- result.try(
+      decisions.expect(
+        payouts(deps),
+        tx,
+        key: request_key(request.id),
+        trigger: Trigger("request", request.id),
+        about: Subject("seller", request.seller),
+      )
+      |> decisions_postgres.desk,
+    )
     submit(deps, tx, agent_worker(deps), request.id, request.id, None)
-    |> result.map_error(db.Query)
+    |> result.map_error(decisions_postgres.Own)
   })
-  |> result.map_error(db.describe)
+  |> result.map_error(fn(failure) {
+    case failure {
+      decisions_postgres.LibraryFailed(failure) ->
+        decisions_postgres.describe(failure)
+      decisions_postgres.OwnFailed(detail) -> detail
+    }
+  })
 }
 
 // -- payout.agent -------------------------------------------------------------------
 
 /// Drive a request's agent and admit its gated call: the `payout.agent`
-/// job's handler. Safe to run twice, at once or in turn: the run is found
-/// by the request, and the call by its key.
+/// job's handler. Safe to run twice, at once or in turn: the run and the
+/// occurrence are both found by the request. A request whose payout was
+/// superseded before the agent proposed is not driven; one superseded
+/// while it drove has its parked run cancelled.
 pub fn propose(
   deps: Deps,
   conn: pog.Connection,
@@ -189,70 +228,92 @@ pub fn propose(
 ) -> worker.Response(String, String) {
   case db.request(conn, request_id) {
     Error(error) -> worker.Discarded(db.describe(error))
-    Ok(#(request, requested_by)) -> {
-      let session =
-        Session(
-          request: request.id,
-          seller: request.seller,
-          sources: reads.live(conn),
-          settled: None,
-        )
-      let id = payout_agent.run_id(request.id)
-      case
-        payout_agent.drive(
-          deps.runs,
-          deps.agent,
-          session,
-          id:,
-          prompt: payout_agent.prompt(request),
-          within: duration.seconds(10),
-        )
-      {
-        // Delivered again after the payout was told: nothing to admit.
-        Ok(payout_agent.Answered(_)) -> worker.Succeeded("answered")
-        Ok(payout_agent.Waiting(call:, actions:)) ->
-          admit(deps, conn, request, requested_by, call, actions)
-        Error(payout_agent.StillWorking) ->
-          worker.Snoozed(duration.milliseconds(200), "the run is working")
-        Error(payout_agent.RunsUnavailable(detail)) ->
-          worker.Snoozed(duration.milliseconds(200), detail)
-        Error(payout_agent.RunStopped(detail)) -> {
-          // The record keeps the failed attempt, under the run's key.
-          let _ =
-            decisions_postgres.transaction(conn, decisions.record_failure(
-              payouts(deps),
-              _,
-              key: "payout:" <> run.id_to_string(id),
-              trigger: Trigger("request", request.id),
-              about: Subject("seller", request.seller),
-              failure: decisions_model.Declined(detail),
-            ))
-          worker.Failed(detail)
-        }
+    Ok(#(request, requested_by)) ->
+      case prior(deps, conn, request.id) {
+        Superseded -> worker.Succeeded("superseded before the agent proposed")
+        Attempts(failed) ->
+          drive_and_admit(deps, conn, request, requested_by, failed)
+      }
+  }
+}
+
+/// What the request's record says before the agent is driven.
+type Prior {
+  /// A newer event superseded the payout before anything was proposed.
+  Superseded
+  /// So many of the request's agent runs failed before this one.
+  Attempts(failed: Int)
+}
+
+fn prior(deps: Deps, conn: pog.Connection, request: String) -> Prior {
+  case
+    decisions_postgres.transaction(conn, decisions.read_record(
+      payouts(deps),
+      _,
+      key: request_key(request),
+    ))
+  {
+    Ok(decisions.NotBegun(pending)) ->
+      case pending.superseded {
+        Some(_) -> Superseded
+        None -> Attempts(list.length(pending.attempts))
+      }
+    Ok(decisions.Begun(known)) -> Attempts(list.length(known.attempts))
+    Error(_) -> Attempts(0)
+  }
+}
+
+fn drive_and_admit(
+  deps: Deps,
+  conn: pog.Connection,
+  request: domain.Request,
+  requested_by: String,
+  failed: Int,
+) -> worker.Response(String, String) {
+  {
+    let session =
+      Session(
+        request: request.id,
+        seller: request.seller,
+        sources: reads.live(conn),
+        settled: None,
+      )
+    let id = payout_agent.run_id(request.id, failed)
+    case
+      payout_agent.drive(
+        deps.runs,
+        deps.agent,
+        session,
+        id:,
+        prompt: payout_agent.prompt(request),
+        within: duration.seconds(10),
+      )
+    {
+      // Delivered again after the payout was told: nothing to admit.
+      Ok(payout_agent.Answered(_)) -> worker.Succeeded("answered")
+      Ok(payout_agent.Waiting(call:, actions:)) ->
+        admit(deps, conn, request, requested_by, call, actions)
+      Error(payout_agent.StillWorking) ->
+        worker.Snoozed(duration.milliseconds(200), "the run is working")
+      Error(payout_agent.RunsUnavailable(detail)) ->
+        worker.Snoozed(duration.milliseconds(200), detail)
+      Error(payout_agent.RunStopped(detail)) -> {
+        // The record keeps the failed attempt under the request's key,
+        // beside its expectation.
+        let _ =
+          decisions_postgres.transaction(conn, decisions.record_failure(
+            payouts(deps),
+            _,
+            key: request_key(request.id),
+            trigger: Trigger("request", request.id),
+            about: Subject("seller", request.seller),
+            failure: decisions_model.Declined(detail),
+          ))
+        worker.Failed(detail)
       }
     }
   }
 }
-
-/// The occurrence's key: the gated call's run and action. A redelivered or
-/// replayed tool call admits nothing twice.
-///
-/// The store refuses an occurrence id over 255 bytes, and the release key
-/// adds `release:` to it. The run is bounded (a request id is at most 64
-/// bytes, `request`), but the call id inside the action is the model's, so
-/// a key that would pass 200 bytes is replaced by the SHA-256 digest of the
-/// same run and action: 71 bytes, still one key per call. The
-/// recommendation's explanation keeps the run and action readable.
-pub fn call_key(call: payout_agent.Parked) -> String {
-  let readable = "payout:" <> call.run <> "/" <> call.action
-  case string.byte_size(readable) <= 200 {
-    True -> readable
-    False -> "payout:" <> decisions_model.digest(call.run <> "/" <> call.action)
-  }
-}
-
-/// The longest request id `request` accepts, in bytes.
-pub const max_request_id_bytes = 64
 
 fn admit(
   deps: Deps,
@@ -262,6 +323,7 @@ fn admit(
   call: payout_agent.Parked,
   actions: List(run.ActionRecord),
 ) -> worker.Response(String, String) {
+  deps.before_admit()
   let #(ref, _) = db.request_document(request)
   let context = Manifest(refs: [ref], renderer: "payout-1")
   case
@@ -288,7 +350,7 @@ fn admit(
             decisions.recommend_once(
               payouts(deps),
               tx,
-              key: call_key(call),
+              key: request_key(request.id),
               proposal:,
             )
             |> decisions_postgres.desk,
@@ -305,6 +367,14 @@ fn admit(
             occurrence.status_name(known.status),
           )
           worker.Succeeded(known.id)
+        }
+        // The seller's account was suspended while the agent worked: the
+        // payout is stale before it began, so the parked run ends here.
+        Error(decisions_postgres.LibraryFailed(decisions_postgres.Refused(decisions.SupersededBefore(
+          _,
+        )))) -> {
+          let _ = cancel_run(deps, conn, request, call)
+          worker.Succeeded("superseded before the agent proposed")
         }
         Error(decisions_postgres.LibraryFailed(decisions_postgres.Refused(
           refusal,
@@ -330,16 +400,95 @@ fn admit(
   }
 }
 
+fn cancel_run(
+  deps: Deps,
+  conn: pog.Connection,
+  request: domain.Request,
+  call: payout_agent.Parked,
+) -> Result(Nil, String) {
+  let session =
+    Session(
+      request: request.id,
+      seller: request.seller,
+      sources: reads.live(conn),
+      settled: None,
+    )
+  use handle <- result.try(
+    fabric.open(deps.runs, deps.agent, session, call.reference.run)
+    |> result.map_error(fabric.describe_error),
+  )
+  fabric.cancel(handle)
+  |> result.replace(Nil)
+  |> result.map_error(fabric.describe_error)
+}
+
 // -- The settlement follower -----------------------------------------------------------
 
 /// What follows a payout's settlement, in the transaction that marks the
 /// notice delivered: a released payout is paid; any other outcome is told.
 pub fn follower(deps: Deps) -> decisions_postgres.Follower {
   #(domain.payout_point_name, fn(tx, id) {
-    use known <- result.try(
-      decisions.read(payouts(deps), tx, occurrence: id)
-      |> result.map_error(decisions.DeskRefused),
+    case decisions.read(payouts(deps), tx, occurrence: id) {
+      Ok(known) -> follow(deps, tx, id, known)
+      // Superseded before the agent proposed: there is no occurrence and no
+      // run to resume, so the seller is told here, once.
+      Error(decisions.SupersededBefore(event:)) ->
+        tell_superseded_before(tx, id, event)
+      Error(refusal) -> Error(decisions.DeskRefused(refusal))
+    }
+  })
+}
+
+/// The request whose payout the record under `key` is (`request_key`).
+pub fn request_of_key(key: String) -> Result(String, Nil) {
+  case string.starts_with(key, "payout:") {
+    True -> Ok(string.drop_start(key, 7))
+    False -> Error(Nil)
+  }
+}
+
+fn tell_superseded_before(
+  tx: pog.Connection,
+  key: String,
+  event: String,
+) -> Result(Nil, decisions.HandlerFailure) {
+  let failed = fn(detail) { decisions.ApplicationFailed(detail) }
+  use request_id <- result.try(
+    request_of_key(key)
+    |> result.replace_error(failed("not a payout key: " <> key)),
+  )
+  use #(request, _) <- result.try(
+    db.request(tx, request_id)
+    |> result.map_error(fn(e) { failed(db.describe(e)) }),
+  )
+  let truth = domain.Superseded(event)
+  use first <- result.map(
+    db.tell(
+      tx,
+      key,
+      db.Told(
+        seller: request.seller,
+        outcome: domain.outcome_name(truth),
+        message: domain.plain_message(request.seller, truth),
+        from_agent: False,
+        agent_message: "",
+      ),
     )
+    |> result.map_error(fn(e) { failed(db.describe(e)) }),
+  )
+  case first {
+    True -> events.announce(request_id, events.Told, domain.outcome_name(truth))
+    False -> Nil
+  }
+}
+
+fn follow(
+  deps: Deps,
+  tx: pog.Connection,
+  id: String,
+  known: Occurrence(Payout),
+) -> Result(Nil, decisions.HandlerFailure) {
+  {
     use request <- result.try(
       db.request_of(tx, id)
       |> result.map_error(fn(e) { decisions.ApplicationFailed(db.describe(e)) }),
@@ -355,7 +504,7 @@ pub fn follower(deps: Deps) -> decisions_postgres.Follower {
       _ -> submit(deps, tx, tell_worker(deps), id, request, None)
     }
     |> result.map_error(decisions.ApplicationFailed)
-  })
+  }
 }
 
 // -- payout.pay -------------------------------------------------------------------------

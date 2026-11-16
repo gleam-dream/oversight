@@ -9,9 +9,10 @@
 ////   reading never reaches the record.
 //// - **The gated call.** Fabric's policy answers `propose_payout` with an
 ////   approval that only the `payout` decision point gives (`approvers`
-////   in `payout_desk/app`). The run parks with no process. `recommender`
+////   in `payout_desk/app`). The run parks with no process. `reported`
 ////   turns the parked call into a recommendation for `decisions`; the
-////   call's run and action are its key.
+////   call's run and action are its explanation, and the request's key is
+////   its key (`jobs.request_key`).
 //// - **Resuming.** When the decision settles, `jobs` answers the approval
 ////   with what really happened: the call is let through with the outcome
 ////   in the session (`settled`), and the tool returns that outcome, never
@@ -32,8 +33,10 @@ import fabric/policy
 import fabric/run.{type RunId}
 import fabric/store.{type Store}
 import fabric/tool
+import gleam/bool
 import gleam/dict
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -199,12 +202,16 @@ fn gate(
 
 /// The agent every run uses. `approvers` are the decision point's (see
 /// `payout_desk/app`); `expiry` is `run.Infinity` in production.
+///
+/// `unavailable` is a fault point: while it answers `True` the provider
+/// behind the model refuses every call, so the run fails.
 pub fn build(
   approvers: Approvers(String),
   script: Script,
   expiry: run.Timeout,
+  unavailable: fn() -> Bool,
 ) -> Result(Agent(Session, Reply), String) {
-  agent.new("payout_support", scripted(script), tools(), gate)
+  agent.new("payout_support", scripted(script, unavailable), tools(), gate)
   |> agent.with_system_prompt(
     "You help marketplace sellers with payouts. Read the order, its dispute and the seller's history, then propose a payout. Tell the seller only what the proposal's result says.",
   )
@@ -216,9 +223,14 @@ pub fn build(
   |> result.map_error(agent.describe_config_errors)
 }
 
-/// The run of one request: a redelivered request finds its run.
-pub fn run_id(request: String) -> RunId {
-  run.id_from_parts("payout", [request])
+/// The run of one attempt at a request: a redelivered request finds its
+/// run, and a request whose earlier run failed (`attempt` failed attempts
+/// on its record) starts a fresh one.
+pub fn run_id(request: String, attempt: Int) -> RunId {
+  case attempt {
+    0 -> run.id_from_parts("payout", [request])
+    _ -> run.id_from_parts("payout", [request, int.to_string(attempt)])
+  }
 }
 
 /// The prompt a request starts its run with.
@@ -236,8 +248,15 @@ pub fn prompt(request: domain.Request) -> String {
 // -- The scripted model ---------------------------------------------------------------
 
 /// A deterministic model: a pure function of the request Fabric sends.
-fn scripted(script: Script) -> fabric_model.Model {
+fn scripted(script: Script, unavailable: fn() -> Bool) -> fabric_model.Model {
   fabric_model.new(fn(request: Request) {
+    use <- bool.guard(
+      unavailable(),
+      Error(fabric_model.error(
+        fabric_model.Rejected,
+        "the model's provider refused the call",
+      )),
+    )
     let prompt = case request.messages {
       [fabric_model.UserMessage(text), ..] -> text
       _ -> ""
@@ -343,6 +362,9 @@ fn told(name: String, truth: Truth) -> String {
       name <> ", finance did not approve the payout: " <> reason <> "."
     domain.Expired ->
       name <> ", your request was not decided in time, so nothing was paid."
+    domain.Superseded(..) ->
+      name
+      <> ", your payout was stopped because your account is under review; nothing was paid."
     domain.Withdrawn(..) ->
       name <> ", the payout was withdrawn before it was made."
     domain.Refused(reason) ->

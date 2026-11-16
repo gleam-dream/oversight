@@ -14,6 +14,7 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import gleam/time/duration
+import gleam/time/timestamp
 import payout_desk/app
 import payout_desk/db
 import payout_desk/domain
@@ -112,4 +113,33 @@ pub fn a_release_refused_after_the_hold_is_told_as_refused_test() {
   let assert occurrence.Refused(_) = support.read(running, id).status
   assert told.outcome == "refused"
   assert db.instructions_of(running.db, id) == Ok(0)
+}
+
+pub fn a_new_policy_version_changes_the_undo_window_only_for_new_payouts_test() {
+  use running <- support.with_app("window", fn(s) {
+    app.Settings(..s, hold: duration.seconds(2))
+  })
+  let window = fn(id) {
+    let known = support.read(running, id)
+    let assert occurrence.Held(until:, ..) = known.status
+    timestamp.difference(occurrence.recommended_at(known), until)
+    |> duration.to_milliseconds
+  }
+  // Version 1 holds a small payout for 2 seconds.
+  let first = support.ask(running, "r-v1", "O-3007", domain.won_by_seller, 4000)
+  assert window(first) == 2000
+  // Version 2 says 10 seconds. It is publishable, and it applies to the
+  // payouts that arrive after it.
+  let v2 = domain.payout_policy(version: 2, hold: duration.seconds(10))
+  let point = domain.payout_point(validity: duration.hours(48))
+  assert decisions.publishable(point, v2) == Ok(Nil)
+  let assert Ok(Nil) = db.publish(running.db, point, v2)
+  let second =
+    support.ask(running, "r-v2", "O-3008", domain.won_by_seller, 3000)
+  assert window(second) == 10_000
+  // The payout already held keeps the window its version gave it.
+  assert window(first) == 2000
+  let assert Some(told) = support.told(running, first, 20_000)
+  assert told.outcome == "paid"
+  let assert occurrence.Held(..) = support.read(running, second).status
 }

@@ -24,6 +24,7 @@
 
 import decisions
 import decisions/store as decisions_store
+import decisions/vocabulary
 import decisions_postgres
 import envoy
 import fabric/run
@@ -69,8 +70,9 @@ pub type Settings {
     node: String,
     /// The payment provider. It is outside the application and outlives it.
     provider: Provider,
-    /// The wait before a payout the policy accepted on its own is released,
-    /// during which finance may withdraw it.
+    /// The undo window of the payouts the policy accepts on its own, as
+    /// policy version 1 publishes it: finance may withdraw them during it.
+    /// A version already published keeps its own.
     hold: Duration,
     /// How long a payout may wait for its verdicts.
     validity: Duration,
@@ -91,6 +93,11 @@ pub type Settings {
     /// A fault point: `True` makes the payout's guard lose its database
     /// connection.
     guard_fault: fn() -> Bool,
+    /// A fault point: `True` makes the model's provider refuse a call.
+    model_fault: fn() -> Bool,
+    /// A fault point after the agent's run parked on its proposal and
+    /// before the proposal is admitted.
+    before_admit: fn() -> Nil,
   )
 }
 
@@ -113,6 +120,8 @@ pub fn settings(
     provider_timeout_ms: 1000,
     after_paid: fn(_) { Nil },
     guard_fault: fn() { False },
+    model_fault: fn() { False },
+    before_admit: fn() { Nil },
   )
 }
 
@@ -187,8 +196,8 @@ fn publish(
   use Nil <- result.try(
     db.publish(
       database,
-      domain.payout_point(hold: settings.hold, validity: settings.validity),
-      domain.payout_policy(),
+      domain.payout_point(validity: settings.validity),
+      domain.payout_policy(version: 1, hold: settings.hold),
     )
     |> result.map_error(db.describe),
   )
@@ -242,7 +251,6 @@ pub fn start(settings: Settings) -> Result(App, String) {
   let desks =
     Desks(
       port: decisions_postgres.port(store),
-      hold: settings.hold,
       validity: settings.validity,
       guard_fault: settings.guard_fault,
     )
@@ -263,6 +271,7 @@ pub fn start(settings: Settings) -> Result(App, String) {
     approvers,
     settings.script,
     settings.approval_expiry,
+    settings.model_fault,
   ))
   let deps =
     jobs.Deps(
@@ -275,6 +284,7 @@ pub fn start(settings: Settings) -> Result(App, String) {
       sagas: saga_postgres.storage(sagas),
       provider_timeout_ms: settings.provider_timeout_ms,
       after_paid: settings.after_paid,
+      before_admit: settings.before_admit,
     )
   let lanes = fn(name) {
     queue.new(name)
@@ -437,6 +447,36 @@ pub fn payout_desk(app: App) -> decisions.Desk(domain.Payout, pog.Connection) {
 pub fn deliver_due(app: App, limit: Int) -> Result(Int, String) {
   decisions_postgres.deliver_due(app.store, app.db, app.wakers, limit:)
   |> result.map_error(decisions_store.describe)
+}
+
+/// Suspend a seller's account for review. In the same transaction the
+/// suspension supersedes every payout to them that is still pending: one
+/// expected and not yet proposed, one waiting for finance, and one on hold.
+/// Nothing of theirs is released; each is told as stopped.
+pub fn suspend_seller(
+  app: App,
+  seller: String,
+) -> Result(decisions.Supersession(domain.Payout), String) {
+  decisions_postgres.transaction_with(app.db, fn(tx) {
+    use Nil <- result.try(
+      db.set_seller_status(tx, seller, "suspended")
+      |> result.map_error(fn(e) { decisions_postgres.Own(db.describe(e)) }),
+    )
+    decisions.happened(
+      payout_desk(app),
+      tx,
+      domain.seller_suspended,
+      about: vocabulary.Subject("seller", seller),
+    )
+    |> decisions_postgres.desk
+  })
+  |> result.map_error(fn(failure) {
+    case failure {
+      decisions_postgres.LibraryFailed(failure) ->
+        decisions_postgres.describe(failure)
+      decisions_postgres.OwnFailed(detail) -> detail
+    }
+  })
 }
 
 /// Record a seller's request and queue its agent.

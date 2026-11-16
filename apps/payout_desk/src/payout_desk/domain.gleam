@@ -112,20 +112,22 @@ pub const finance = "finance"
 
 pub const head_of_finance = "head_of_finance"
 
-/// The `payout` point. Finance may approve, reject or correct. `hold` is
-/// the wait before a payout the policy accepted on its own is released,
-/// during which anyone in finance may withdraw it; a payout a person
-/// approved is released at once. `validity` is how long a payout may wait
-/// for its verdicts.
 /// The output's codec as the decision record keeps it.
 pub fn payout_record_codec() -> wire.Codec(Payout) {
   wire.codec(payout_codec())
 }
 
-pub fn payout_point(
-  hold hold: Duration,
-  validity validity: Duration,
-) -> Point(Payout) {
+/// The event that makes every pending payout to a seller stale: their
+/// account was suspended for review.
+pub const seller_suspended = "seller_suspended"
+
+/// The `payout` point. Finance may approve, reject or correct, and finance
+/// may withdraw a payout during the hold the policy gave it (the hold
+/// itself is the policy's, `payout_policy`); a payout a person approved is
+/// released at once. `validity` is how long a payout may wait for its
+/// verdicts. A suspended seller's pending payouts, held ones included, are
+/// superseded.
+pub fn payout_point(validity validity: Duration) -> Point(Payout) {
   decisions.point(payout_point_name, payout_record_codec())
   |> decisions.allowing(ApproveRejectOrCorrect)
   |> decisions.fact(amount(), fn(payout: Payout) {
@@ -134,8 +136,8 @@ pub fn payout_point(
   |> decisions.signal(dispute_for_seller())
   |> decisions.signal(recent_chargeback())
   |> decisions.signal(risk_level())
-  |> decisions.with_policy_hold(hold)
   |> decisions.withdrawn_by(finance)
+  |> decisions.superseded_by(seller_suspended)
   |> decisions.valid_for(validity)
 }
 
@@ -156,7 +158,8 @@ pub const large_from_cents = 50_000
 /// large payout alone.
 pub const escalate_after_minutes = 60
 
-/// The payout policy, version 1, as data:
+/// The payout policy as data, at `version`, with `hold` as the undo window
+/// of the payouts it lets proceed:
 ///
 /// 1. A seller with a recent chargeback is assessed by `risk` first.
 /// 2. A high risk needs two approvals from finance.
@@ -166,14 +169,14 @@ pub const escalate_after_minutes = 60
 /// 4. A large payout needs two approvals from finance, neither of them
 ///    whoever asked.
 /// 5. A small payout whose dispute the seller won proceeds, and waits out
-///    the point's policy hold, during which finance may withdraw it.
+///    `hold`, during which finance may withdraw it.
 /// 6. Anything else needs one approval from finance, never from whoever
 ///    asked.
-pub fn payout_policy() -> Policy {
+pub fn payout_policy(version version: Int, hold hold: Duration) -> Policy {
   let large = policy.at_least(amount(), int.to_float(large_from_cents) /. 100.0)
   let small = policy.below(amount(), int.to_float(small_below_cents) /. 100.0)
   Policy(
-    version: 1,
+    version:,
     rules: [
       When(
         All([
@@ -196,7 +199,10 @@ pub fn payout_policy() -> Policy {
         ),
       ),
       When(large, Ask(Several(2, SomeoneElseHolding(finance)))),
-      When(All([small, policy.is(dispute_for_seller(), True)]), Proceed(Never)),
+      When(
+        All([small, policy.is(dispute_for_seller(), True)]),
+        Proceed(sample: Never, hold: Some(hold)),
+      ),
     ],
     otherwise: Ask(SomeoneElseHolding(finance)),
   )
@@ -204,7 +210,7 @@ pub fn payout_policy() -> Policy {
 
 /// The risk point lets its rule's answer through.
 pub fn risk_policy() -> Policy {
-  Policy(version: 1, rules: [], otherwise: Proceed(Never))
+  Policy(version: 1, rules: [], otherwise: Proceed(sample: Never, hold: None))
 }
 
 /// The risk rule: two or more chargebacks in 90 days is high.
@@ -418,9 +424,11 @@ pub type Truth {
   NotPaid(amount_cents: Int, reason: String)
   /// Finance rejected it.
   Rejected(reason: String)
-  /// Nobody decided in time, or an event made the request moot.
+  /// Nobody decided in time.
   Expired
-  /// Finance took it back during the policy hold.
+  /// A newer event made the payout stale before it was released.
+  Superseded(event: String)
+  /// Finance took it back during the undo window the policy gave it.
   Withdrawn(by: String)
   /// The guard, the release check or the gated tool refused the release
   /// (the balance, for one).
@@ -434,6 +442,7 @@ pub fn outcome_name(truth: Truth) -> String {
     NotPaid(..) -> "not_paid"
     Rejected(..) -> "rejected"
     Expired -> "expired"
+    Superseded(..) -> "superseded"
     Withdrawn(..) -> "withdrawn"
     Refused(..) -> "refused"
   }
@@ -453,7 +462,8 @@ pub fn paid_cents(truth: Truth) -> Int {
 pub fn lets_call_through(truth: Truth) -> Bool {
   case truth {
     Paid(..) | NotPaid(..) -> True
-    Rejected(..) | Expired | Withdrawn(..) | Refused(..) -> False
+    Rejected(..) | Expired | Superseded(..) | Withdrawn(..) | Refused(..) ->
+      False
   }
 }
 
@@ -500,6 +510,7 @@ pub fn truth_codec() -> Codec(Truth) {
     )
     use rejected <- codec.variant("rejected", codec.string(), Rejected)
     use expired <- codec.unit_variant("expired", Expired)
+    use superseded <- codec.variant("superseded", codec.string(), Superseded)
     use withdrawn <- codec.variant("withdrawn", codec.string(), Withdrawn)
     use refused <- codec.variant("refused", codec.string(), Refused)
     codec.match(fn(truth) {
@@ -509,6 +520,7 @@ pub fn truth_codec() -> Codec(Truth) {
         NotPaid(amount_cents:, reason:) -> not_paid(#(amount_cents, reason))
         Rejected(reason) -> rejected(reason)
         Expired -> expired
+        Superseded(event) -> superseded(event)
         Withdrawn(by) -> withdrawn(by)
         Refused(reason) -> refused(reason)
       }
@@ -524,19 +536,20 @@ pub fn truth_of(known: Occurrence(Payout)) -> Option(Truth) {
   let asked = known.recommendation.output.amount_cents
   case occurrence.account(known) {
     occurrence.Undecided | occurrence.Done(effect: None, ..) -> None
-    occurrence.Done(final:, effect: Some(Performed(receipt:))) ->
+    occurrence.Done(final:, effect: Some(Performed(receipt:)), ..) ->
       Some(Paid(
         amount_cents: final.amount_cents,
         asked_cents: asked,
         receipt: receipt.revision,
       ))
-    occurrence.Done(final:, effect: Some(NotPerformed(reason:))) ->
+    occurrence.Done(final:, effect: Some(NotPerformed(reason:)), ..) ->
       Some(NotPaid(amount_cents: final.amount_cents, reason:))
     // `account` reports an uncertain effect as `None`.
     occurrence.Done(effect: Some(Uncertain(_)), ..) -> None
     occurrence.TurnedDown(reason:, ..) ->
       Some(Rejected(option.unwrap(reason.note, reason.category)))
-    occurrence.Lapsed(_) -> Some(Expired)
+    occurrence.Lapsed(vocabulary.Superseded(event:)) -> Some(Superseded(event))
+    occurrence.Lapsed(vocabulary.DeadlinePassed) -> Some(Expired)
     occurrence.TakenBack(by:) -> Some(Withdrawn(by))
     occurrence.Blocked(reason:) -> Some(Refused(reason))
   }
@@ -593,6 +606,9 @@ pub fn plain_message(seller: String, truth: Truth) -> String {
       name <> ", finance did not approve the payout: " <> reason <> "."
     Expired ->
       name <> ", your request was not decided in time; nothing was paid."
+    Superseded(..) ->
+      name
+      <> ", the payout was stopped while your account is under review; nothing was paid."
     Withdrawn(..) -> name <> ", the payout was withdrawn; nothing was paid."
     Refused(..) -> name <> ", the payout could not be made; nothing was paid."
   }

@@ -30,7 +30,6 @@ import pog
 pub type Desks {
   Desks(
     port: Port(pog.Connection),
-    hold: Duration,
     validity: Duration,
     /// A fault point for the tests: `True` makes the payout's guard lose
     /// its database connection once more. `fn() { False }` otherwise.
@@ -40,7 +39,7 @@ pub type Desks {
 
 pub fn payout(desks: Desks) -> Desk(Payout, pog.Connection) {
   decisions.desk(
-    domain.payout_point(hold: desks.hold, validity: desks.validity),
+    domain.payout_point(validity: desks.validity),
     drives: fn(_) { write_instruction(desks) },
     under: db.current_policy(_, domain.payout_point_name),
     over: desks.port,
