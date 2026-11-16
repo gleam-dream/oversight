@@ -116,7 +116,7 @@
         responsibility: [The `decisions` core owns the occurrence record, the desk's verbs, policy evaluation, cards and verdicts, and the release of a final output to its gated tool at most once. The application owns the points, the gated tools, the policy versions and where they are stored, who holds which decision set, and every process and pool.],
         interface: [A desk bound to one point, its gated tool, a policy reader and a storage port; verbs run in the caller's transaction. `decisions_postgres` supplies the port over PostgreSQL and Grind workers; `decisions_otp` supplies an in-memory store, a supervised runtime, isolated model calls, parallel replay and hints.],
         interactions: [LLM Wire, Fabric and Relay join the record through application recipes; no `decisions` package depends on them. Grind or the OTP runtime delivers wake-ups and settlement notices. A settlement notice reaches the application's follower in the transaction that marks it delivered; the follower admits what comes next, such as a Grind job or a Saga run. With PostgreSQL, start-up migrates the tables before any worker polls, builds the store from Grind's name and the desks over its port, registers the workers on Grind's configuration, starts Grind, and then sweeps, so that every pending wake-up and undelivered settlement notice has a job. Each runtime acts on a handler failure by the library's handling of it alone: a contended or unknown commit is delivered again uncounted, a retryable refusal or an application failure is counted toward setting the job aside, a refusal that needs an operator, such as an unreadable record, sets the job aside at once, and a final refusal ends the job.],
-        invariants: [The record decides where an occurrence stands and when a deadline or hold ends; a delivery only asks a verb to compare the store clock with the record. The gated tool's database effect commits with the `released` entry. An effect outside the database runs under the release key.],
+        invariants: [An application records that a recommendation is expected when it admits the trigger. A declared event about a subject supersedes every occurrence about it that is expected, waiting or held, and a later recommendation for a superseded key is refused and writes nothing. The library takes its lock on the subject first, so admissions about one subject run one after the other. The record decides where an occurrence stands and when a deadline or hold ends; a delivery only asks a verb to compare the store clock with the record. The gated tool's database effect commits with the `released` entry. An effect outside the database runs under the release key.],
         failure: [A guard, release check or executor answers `Refuse` for a judgment about the release, or `Unsure` when it could not tell. A refused release rolls back the verdict's transaction and is recorded in a transaction of its own; the occurrence keeps waiting, or ends refused when nobody was waiting. An `Unsure` answer rolls the release back, records nothing as refused, and fails the verb as retryable. An uncertain outside effect is reported as uncertain and settled by a lookup under the release key, never by sending the effect again.],
       ))
       #md-table(3, (
@@ -124,7 +124,7 @@
         [LLM Wire], [One provider call with a typed answer; the exchange becomes evidence], [The recommendation and the reads the model received],
         [Fabric], [An agent run whose gated tool call becomes an occurrence], [The answer to the #term("term-gated-agent-call")],
         [Relay and Hellhound], [Desk tools for validators, behind bearer verification], [Eligibility; the application supplies the decision sets a validator holds],
-        [Grind], [Delivery of wake-ups, settlement notices and application jobs], [When a wake-up or hold is due],
+        [Grind], [Delivery of wake-ups, settlement notices and application jobs], [When a wake-up or an undo window is due],
         [Saga], [The workflow of a released output, keyed by the release key], [The released output and its reported effect],
         [OTP runtime], [Supervised workers, sweeper and dispatcher over the in-memory store], [Everything; the store owner holds the record in memory],
       ))
@@ -134,7 +134,7 @@
         #then[Nothing is told to the customer while the occurrence is undecided.]
         #then[After the occurrence settles, the customer is told the outcome the record states; a reply that claims another outcome or amount is replaced by a message built from the record.]
       ]
-      #adr(33) #adr(35)
+      #adr(33) #adr(35) #adr(37)
     ]
   ])
 

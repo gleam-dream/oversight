@@ -276,15 +276,15 @@
     #subsection(title: "Patient registration")[
       #answers(title: "A patient record from a conversation",
         responsibility: [Turn a contact's message into one patient record through the decision point `registration`, and confirm the registration to the contact once.],
-        interface: [A webhook route `POST /inbound` and a JSON desk API: `GET /queue`, `POST /cards/:id/open`, `POST /cards/:id/verdict`, `GET /reviews` and `POST /cards/:id/review`. The header `x-clinic-validator` names the validator and the decision sets the validator holds for that request. Native `Inbound`, `Registration` and `Context` types; `Registration` is the point's output.],
+        interface: [A webhook route `POST /inbound` and a JSON desk API: `GET /queue`, `POST /cards/:id/open`, `POST /cards/:id/verdict`, `POST /cards/:id/withdraw`, `GET /reviews`, `POST /cards/:id/review`, and `GET /pending`, which lists the messages still waiting for a recommendation. The header `x-clinic-validator` names the validator and the decision sets the validator holds for that request. Native `Inbound`, `Registration` and `Context` types; `Registration` is the point's output.],
         interactions: [One LLM Wire call with structured output recommends a record. It runs as a `decisions_otp` isolated model call with a deadline, outside any transaction. `decisions_postgres` supplies the storage port, the queue reads and the Grind workers that deliver wake-ups and settlement notices. Grind owns the one pool and delivers the application's register and confirm jobs. HTTP Gun calls the scripted model provider and messaging provider; Wisp and Mist serve the desk; Sinal carries the application's events. Start-up migrates the tables on a pool of its own, builds the store from Grind's name and the desk over its port, registers the workers, starts Grind, and then sweeps, so that every pending wake-up and undelivered settlement notice has a job.],
-        invariants: [The occurrence key is derived from the message id, or from its SHA-256 digest when the id exceeds 200 bytes. Message insertion, superseding of the contact's waiting occurrence and admission of the register job share one transaction under a per-contact lock. A recommendation commits only while its message is the contact's latest. The gated tool inserts the patient row in the releasing transaction. Its guard refuses a contact whose phone already names a patient. The release check refuses a missing birth date, missing consent, and a corrected phone that names another patient. A unique phone constraint backs both. The desk opens a card only for a validator who may decide it. The card shows the context through the reader the model used and marks each read whose revision changed.],
-        failure: [A failed model attempt is recorded and retried while it is retryable and below the attempt limit. A guard or release check refuses with `Refuse` for a judgment about the release: the refusal is recorded and the occurrence keeps waiting. One whose query failed answers `Unsure`: the release rolls back, nothing is recorded as refused, and the desk API answers `503 try_again`. A confirmation whose answer was lost is reported uncertain and settled by a lookup under the release key; a send the provider refuses is reported as not performed.],
+        invariants: [The occurrence key is derived from the message id, or from its SHA-256 digest when the id exceeds 200 bytes. One admission transaction supersedes the contact's pending occurrences (`happened`, which first takes the library's lock on the contact, so admissions about one contact run one after the other), keeps the message, records that a recommendation is expected for its key (`expect`), and admits the register job. A recommendation for a message that a newer message superseded is refused by the record (`SupersededBefore`) and writes nothing. The gated tool inserts the patient row in the releasing transaction. Its guard refuses a contact whose phone already names a patient. The release check refuses a missing birth date, missing consent, and a corrected phone that names another patient. A unique phone constraint backs both. The desk opens a card only for a validator who may decide it. The card shows the context through the reader the model used and marks each read whose revision changed.],
+        failure: [A failed model attempt is recorded and retried while it is retryable and below the attempt limit. A guard or release check refuses with `Refuse` for a judgment about the release: the refusal is recorded and the occurrence keeps waiting. One whose query failed answers `Unsure`: the release rolls back, nothing is recorded as refused, and the desk API answers `503 try_again`. A confirmation whose answer was lost is reported uncertain and settled by a lookup under the release key; a send the provider refuses is reported as not performed. An admission that waits longer than the store's lock wait for the contact ends as contention and keeps nothing, and the webhook answers `503 try_again` so that the channel delivers the message again.],
       )
       #points(
         [The settlement follower admits the confirm job, keyed by the release key, in the transaction that delivers the settlement notice, and only for a released occurrence. Every delivery of that job looks the message up by the release key before sending, and the send carries the release key as its idempotency key.],
         [Every provider exchange is a #term("term-model-exchange"), stored before its answer is used, including an undecodable answer. Replay over the recorded exchanges answers an unchanged request without transport. A changed prompt stays unanswered until a live rerun records new exchanges.],
-        [Policy versions are rows of an application table. The desk reads the newest version in each verb's transaction, and publication requires the library's publishability check. Version 1 asks reception and, after 30 minutes waited, reception or the manager. Version 2 lets a confident, complete and consented record with an accepted insurer and no similar patient proceed, samples 20 in a hundred of those for the manager's review, and asks the manager about a possible duplicate. A #term("term-promotion-gate") over the record's tally publishes version 2 only above a minimum number of judged occurrences and a minimum agreement.],
+        [Policy versions are rows of an application table. The desk reads the newest version in each verb's transaction, and publication requires the library's publishability check. Version 1 asks reception and, after 30 minutes waited, reception or the manager. Version 2 lets a confident, complete and consented record with an accepted insurer and no similar patient proceed after an undo window of 10 minutes, samples 20 in a hundred of those for the manager's review, and asks the manager about a possible duplicate. During the undo window reception may withdraw the registration, and a newer message from the contact supersedes it. A #term("term-promotion-gate") over the record's tally publishes version 2 only above a minimum number of judged occurrences and a minimum agreement.],
         [The validator header stands in for sign-in, and the inbound webhook carries no signature check. A production application resolves the validator and the decision sets from its own authentication and verifies its provider's webhook.],
         [Source owners: `apps/clinic_registration/src/clinic_registration/domain.gleam`, `llm.gleam`, `desk.gleam`, `jobs.gleam`, `store.gleam`, `messaging.gleam`, `evaluation.gleam` and `web.gleam`.],
       )
@@ -315,6 +315,28 @@
         #when[Grind delivers the job again after its lease expires.]
         #then[One occurrence awaits a verdict and no failed attempt is recorded.]
       ]
+      #behavior(title: "A message overtaken by a newer one leaves one card", area: "Patient registration", level: "boundary")[
+        #given[A contact sends a second message while the model is still answering the first.]
+        #when[The first model call finishes after the second message was admitted.]
+        #then[The first message's record is superseded before it began, and reception is offered only the second message's card.]
+        #then[A recommendation sent for the first message is refused as superseded and leaves its record unchanged.]
+      ]
+      #behavior(title: "Two messages from one contact at once leave one expected", area: "Patient registration", level: "boundary")[
+        #given[Two different messages from one contact are admitted by two processes at once.]
+        #when[Both admissions commit.]
+        #then[Both are admitted; one record is superseded before anything was recommended for it, and the remaining card's conversation holds both messages.]
+      ]
+      #behavior(title: "An admission that waits too long is delivered again", area: "Patient registration", level: "boundary")[
+        #given[Another transaction holds the library's lock on the contact for longer than the store waits for a lock.]
+        #when[The webhook receives a message from that contact, and later receives it again.]
+        #then[The first delivery answers 503 and keeps nothing; the second is admitted and its occurrence awaits a verdict.]
+      ]
+      #behavior(title: "A registration accepted by the policy waits out its undo window", area: "Patient registration", level: "boundary")[
+        #given[Policy version 2 accepts a confident registration and holds it.]
+        #when[Eleven minutes pass on the store clock, or reception withdraws it first, or the contact sends a newer message first.]
+        #then[After the window the policy releases it, the patient row names `policy v2`, and the confirmation is performed.]
+        #then[A manager's withdrawal is refused and reception's succeeds; a withdrawn or superseded registration writes no patient row.]
+      ]
       #behavior(title: "A wake-up whose job was lost is swept and delivered", area: "Patient registration", level: "boundary")[
         #given[An occurrence awaits reception with its escalation due in seconds, and the application restarts with none of its Grind jobs.]
         #when[The start-up sweep runs.]
@@ -333,21 +355,21 @@
       #behavior(title: "A promotion gate publishes a version only above its threshold", area: "Patient registration", level: "boundary")[
         #given[Six registrations were decided under version 1.]
         #when[The gate's thresholds are not met, and then they are.]
-        #then[The stored versions stay at version 1, then version 2 is published and a confident registration is released by it.]
+        #then[The stored versions stay at version 1, then version 2 is published and a confident registration is accepted by it and held for its undo window.]
       ]
-      #adr(33) #adr(34)
+      #adr(33) #adr(34) #adr(37)
     ]
     #subsection(title: "Payout desk")[
       #answers(title: "An agent's payout decided by people and paid once",
         responsibility: [Admit a support agent's payout tool call at the `payout` decision point, let finance decide it over MCP, pay a released payout once, and tell the seller only the #term("term-recorded-outcome").],
-        interface: [Request admission through `app.request`. Three Relay tools, `payout_queue`, `open_payout` and `decide_payout`, behind Hellhound bearer verification with the scope `payouts`. The card is the `decisions/view` document with its own codec. Native `Payout`, `Reply` and recorded-outcome types. Grind workers for the agent run, the payment, reconciliation and telling.],
+        interface: [Request admission through `app.request`, and a seller's suspension through `app.suspend_seller`. Three Relay tools, `payout_queue`, `open_payout` and `decide_payout`, behind Hellhound bearer verification with the scope `payouts`. The card is the `decisions/view` document with its own codec. Native `Payout`, `Reply` and recorded-outcome types. Grind workers for the agent run, the payment, reconciliation and telling.],
         interactions: [Fabric runs the agent with its runs in `fabric_postgres` and parks the gated call on an approval. The application records the call as an occurrence with the reads the model received. A consult handler asks the `risk` point first for a seller with a recent chargeback. `decisions_postgres` supplies the storage port and the wake-up and settlement workers. The settlement follower admits the payment or the telling. Saga reserves, pays and posts. Grind owns the one pool, which the record, Fabric, Saga and the application tables borrow. Start-up migrates every package's tables on a pool of its own, publishes the policies, starts Grind and the Fabric store, sweeps so that every pending wake-up and undelivered settlement notice has a job, and then starts the MCP listener.],
-        invariants: [The occurrence key is the run and the action, with a long call id replaced by its digest so that the release key stays within the store's bound; a redelivered call admits one occurrence. The desk opens a card only for a validator who may decide it, so the requester gets none. The gated tool writes one payout instruction keyed by the release key in the releasing transaction. The release check compares the amount with the seller's available balance under a row lock and records the balance it compared. The Saga run identity and the provider's idempotency key derive from the release key. The seller is told once, only after the record states the outcome, and only that outcome.],
-        failure: [A guard or release check answers `Refuse` for a judgment about the release, and `Unsure` when a database query failed. A refused release keeps the occurrence waiting with the refusal on the record; a release refused after a hold settles the occurrence as refused. An `Unsure` answer rolls the release back and records nothing as refused: a wake-up is delivered again, and the MCP tool answers "try again", as it does when the desk is busy. A provider timeout is reported uncertain, and a reconciliation lookup reports the payment without sending it again. A desk refusal's disposition chooses whether the job snoozes, is discarded or fails.],
+        invariants: [The occurrence key is `payout:` followed by the request id, which is at most 64 bytes, so that the release key stays within the store's bound. One transaction records the request, records that a payout is expected for its key (`expect`), and admits the agent job. A failed agent run is a failed attempt under the same key, and the retried job starts a fresh run. The tool call's run and action are the occurrence's trigger and explanation, and a redelivered or replayed call admits one occurrence. The desk opens a card only for a validator who may decide it, so the requester gets none. The gated tool writes one payout instruction keyed by the release key in the releasing transaction. The release check compares the amount with the seller's available balance under a row lock and records the balance it compared. The Saga run identity and the provider's idempotency key derive from the release key. The seller is told once, only after the record states the outcome, and only that outcome.],
+        failure: [A guard or release check answers `Refuse` for a judgment about the release, and `Unsure` when a database query failed. A refused release keeps the occurrence waiting with the refusal on the record; a release refused after a hold settles the occurrence as refused. An `Unsure` answer rolls the release back and records nothing as refused: a wake-up is delivered again, and the MCP tool answers "try again", as it does when the desk is busy. A provider timeout is reported uncertain, and a reconciliation lookup reports the payment without sending it again. A desk refusal's disposition chooses whether the job snoozes, is discarded or fails. A seller's suspension supersedes every pending payout to that seller, expected, waiting or held, in the suspension's transaction; nothing is released, and the seller is told the payout was superseded. A proposal for a payout superseded before the agent proposed is refused (`SupersededBefore`), and the application cancels the parked run.],
       )
       #points(
         [The policy is data, version 1. A seller with a recent chargeback and no known risk consults `risk`; high risk needs two approvals from finance. From 500.00, two from finance approve, and after 60 minutes waited two from finance or one from the head of finance. A payout below 50.00 whose dispute the seller won proceeds. Anything else needs one approval from someone in finance other than the requester.],
-        [A payout the policy accepts waits out a policy hold of 5 minutes, during which its decider or any holder of `finance` may withdraw it. A validator-accepted payout is released at once.],
+        [The undo window is part of the policy: the rule that lets a payout proceed holds it, 5 minutes by default, and its decider or any holder of `finance` may withdraw it meanwhile. A new policy version changes the window only for payouts admitted after it. A validator-accepted payout is released at once.],
         [The decision point answers the #term("term-gated-agent-call"). Fabric's approval never expires; the approver accepts the occurrence id as its credential and refuses until the record states the outcome, including while a reported effect is uncertain. A record the approver cannot read is reported as unavailable, not as a refusal. The application resumes the same run, and the tool body returns the recorded outcome. A reply whose outcome or amount differs from the record is replaced by a message built from the record, and the agent's text is kept.],
         [The access token names the person; the application's staff table supplies the decision sets that person holds. The identity provider is Hellhound's in-process testing provider. Fabric runs live in `fabric_postgres` because a parked run waits across restarts and may resume on any node.],
         [Source owners: `apps/payout_desk/src/payout_desk/domain.gleam`, `desks.gleam`, `agent.gleam`, `jobs.gleam`, `workflow.gleam`, `desk_tools.gleam`, `auth.gleam`, `db.gleam`, `provider.gleam`, `review.gleam` and `app.gleam`.],
@@ -370,7 +392,7 @@
         #then[The approval is refused, the occurrence keeps waiting with one recorded refusal, and no instruction is written.]
       ]
       #behavior(title: "Redelivery and racing verdicts release one payout", area: "Payout desk", level: "boundary")[
-        #given[The same tool call is delivered twice at once, or two validators approve one payout at once.]
+        #given[The request's agent job runs twice at once and the request is submitted again, or two validators approve one payout at once.]
         #when[The desk handles both.]
         #then[One occurrence exists; one approval releases it, the other is refused as already decided, and one instruction is written.]
       ]
@@ -384,6 +406,22 @@
         #given[A small payout is held by policy, and the Grind job of its wake-up is deleted before the application stops.]
         #when[The application starts again.]
         #then[The start-up sweep admits one wake-up job, and the payout is released, told as paid and paid once.]
+      ]
+      #behavior(title: "A suspension supersedes pending payouts", area: "Payout desk", level: "boundary")[
+        #given[A seller has one payout held by policy and one waiting for finance, or one request whose agent has not run.]
+        #when[The seller's account is suspended.]
+        #then[The held and the waiting payout lapse as superseded, nothing is paid, and the seller is told each was superseded.]
+        #then[The expected request is superseded before it began, and its agent job drives no run.]
+      ]
+      #behavior(title: "A failed agent run and its payout are one record", area: "Payout desk", level: "boundary")[
+        #given[The model's provider refuses the first call of a request's agent run.]
+        #when[Grind retries the agent job.]
+        #then[The occurrence's key is the request's, it holds the failed attempt, and its recommendation comes from a fresh run.]
+      ]
+      #behavior(title: "A new undo window applies only to new payouts", area: "Payout desk", level: "boundary")[
+        #given[Version 1 holds a small payout for 2 seconds.]
+        #when[Version 2 with a 10-second window is published and another small payout arrives.]
+        #then[The new payout is held for 10 seconds, and the earlier one keeps its 2 seconds and is paid.]
       ]
       #behavior(title: "A provider timeout is settled by a lookup", area: "Payout desk", level: "boundary")[
         #given[The payment provider pays and answers after the client's deadline.]
@@ -406,18 +444,18 @@
         #then[The head of finance becomes eligible, and the card shows each alternative's count: one of two approvals from finance, none of one from the head of finance.]
         #then[The head of finance approves alone, and the payout is released and told as paid.]
       ]
-      #adr(33) #adr(34) #adr(35)
+      #adr(33) #adr(34) #adr(35) #adr(37)
     ]
     #subsection(title: "Moderation desk")[
       #answers(title: "Moderation at volume without a database",
         responsibility: [Moderate posts at the `moderation` decision point in one VM: a cascade of models recommends, versioned policies proceed or ask people at a live desk, and the follower applies the platform consequence.],
         interface: [`app.start`, `app.stop` and `app.receive`; `intake.receive`, which answers admitted or duplicate, `intake.edit` and `intake.appeal`; one desk process per person on duty; `gate.publish_if_clear`, which answers published or held. Native `Post` and `Action` types; `Action` is the point's output: publish, hide for a violation, or escalate.],
         interactions: [The `decisions` core owns the record, the verbs, policy evaluation, cards, examples, sequential replay and the invariant check. `decisions_otp` owns the in-memory store, the runtime's sweeper, dispatcher and eight workers, the isolated model call of each cascade stage, parallel replay and hints. Sinal carries the application's events and the runtime's events to the operator's counter.],
-        invariants: [A post revision is admitted once by its key, in the transaction that submits its trigger. The gated tool records only the action under the release key; its guard refuses a post that no longer exists. The follower applies visibility, a strike, a safety case and one notification in the transaction that delivers the settlement notice, and changes nothing for a revision an edit replaced. An edit supersedes the waiting occurrence, and a recommendation about the replaced revision cannot commit. A claim row keeps a second moderator off an open card. A policy version and its classifier version are published together.],
+        invariants: [A post revision is admitted once by its key, in the transaction that submits its trigger and records that a recommendation is expected for it (`expect`). The gated tool records only the action under the release key; its guard refuses a post that no longer exists. The follower applies visibility, a strike, a safety case and one notification in the transaction that delivers the settlement notice, and changes nothing for a revision an edit replaced. An edit supersedes every occurrence about the post that is expected, waiting or held; a recommendation about the replaced revision is then refused and writes nothing. A claim row keeps a second moderator off an open card. A policy version and its classifier version are published together.],
         failure: [A model that hangs is killed at its deadline and one that raises is contained; each failure is a recorded attempt, and after 3 attempts the trigger is set aside while later posts still settle. A refused release is recorded. A stale card is refused and the moderator reopens it; a refusal whose disposition is `Retry` is tried again up to 3 times; a moderator who missed hints reads the whole queue again. A desk process whose subscriptions cannot be made fails its start, and the desk supervisor starts it again. When the store owner exits, the tree restarts on an empty store and seeds it again.],
       )
       #points(
-        [Version 1 lets the rule model's answers proceed and asks moderators about the rest, then seniors after 30 minutes waited. Version 2 also lets a confident publish by an established author and a confident spam hide proceed with a 2 per cent sample for reviewers, asks seniors about self-harm and violence, and needs two different holders of `moderators` for a hide for abuse. After 30 minutes waited, either version asks one senior; a senior's approval already standing meets that step and releases the output, and a moderator's does not.],
+        [Version 1 lets the rule model's answers proceed and asks moderators about the rest, then seniors after 30 minutes waited. Version 2 also lets a confident publish by an established author proceed, and a confident spam hide proceed after an undo window of 5 minutes during which a senior may withdraw it, each with a 2 per cent sample for reviewers. It asks seniors about self-harm and violence, and it needs two different holders of `moderators` for a hide for abuse. After 30 minutes waited, either version asks one senior; a senior's approval already standing meets that step and releases the output, and a moderator's does not.],
         [The rule model declines when no rule applies and the classifier answers. Each stage is an isolated model call with its own deadline: 100 ms for the rules and 300 ms for the classifier. Replay runs the same cascade over recorded reads.],
         [A #term("term-promotion-gate") replays the recorded examples across schedulers under a candidate classifier and policy, and publishes both only when the candidate's agreement clears 98 per cent over at least 50 proceeding examples. Publication itself checks only publishability; the gate is the application's rule for when to call it.],
         [The root supervisor is rest-for-one over the store owner, the platform seeder, the operator's counter, the desk supervisor and the runtime. A store owner restart loses the whole record; this application makes no durability claim, and `decisions_postgres` is the durable store.],
@@ -462,6 +500,17 @@
         #then[The hide a senior approved is released and the post is hidden.]
         #then[The hide a moderator approved goes on waiting, now for seniors, and its post stays pending.]
       ]
+      #behavior(title: "An edit before the answer supersedes the expected recommendation", area: "Moderation desk", level: "boundary")[
+        #given[The runtime is paused after a post was admitted.]
+        #when[The author edits the post and the runtime resumes.]
+        #then[The first revision's record is superseded before it began, the backlog is empty, and the coverage counts one record superseded before a recommendation.]
+      ]
+      #behavior(title: "A held hide can be taken back or superseded", area: "Moderation desk", level: "boundary")[
+        #given[Version 2 accepts a confident spam hide and holds it.]
+        #when[A moderator and then a senior withdraw it, or the author edits the post during the hold.]
+        #then[The moderator is refused; the senior's withdrawal settles it as withdrawn, nothing is released, and the post stays published.]
+        #then[After an edit the held hide expires as superseded, and the only release is the new revision's publish.]
+      ]
       #behavior(title: "Escalations survive a stopped runtime", area: "Moderation desk", level: "boundary")[
         #given[The runtime is paused while three occurrences wait for moderators.]
         #when[The store clock passes 30 minutes waited and the runtime is started again.]
@@ -472,7 +521,7 @@
         #when[The application records the appeal.]
         #then[The record gains an assessment that the output was wrong; its status and verdicts are unchanged, the post is published and the strike is removed.]
       ]
-      #adr(33) #adr(34) #adr(36)
+      #adr(33) #adr(34) #adr(36) #adr(37)
     ]
   ])
 ]

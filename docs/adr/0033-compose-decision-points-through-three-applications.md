@@ -35,8 +35,8 @@ Recorded on 2026-11-15.
 - **A policy version is published data.**
   - The application stores its policy versions and the desk reads the newest one.
   - Publication requires the library's publishability check.
-  - The application decides when a candidate version is published.
-- **A card is opened only by a validator who may decide it.** `open` refuses whoever `decide` would refuse, such as the requester, and the card counts approvals per alternative of its eligibility. `clinic_registration` uses a tally from the record. `moderation_desk` uses a replay of the recorded examples against a threshold.
+  - The application decides when a candidate version is published. `clinic_registration` uses a tally from the record. `moderation_desk` uses a replay of the recorded examples against a threshold.
+- **A card is opened only by a validator who may decide it.** `open` refuses whoever `decide` would refuse, such as the requester, and the card counts approvals per alternative of its eligibility.
 
 ## Rationale and consequences
 
