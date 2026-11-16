@@ -27,8 +27,7 @@ if it was already working, its proposal is refused and its run has already ended
 seller is told it was stopped.
 
 The model is a scripted Fabric model and the payment provider is a scripted actor,
-both in process. Fabric and its PostgreSQL adapter come from one unreleased Fabric
-commit until Fabric 0.3.0 is on Hex. The decision record (`decisions_postgres`), Grind, Saga and Fabric
+both in process. The decision record (`decisions_postgres`), Grind, Saga and Fabric
 (`fabric_postgres`) share one PostgreSQL pool the application owns.
 
 ## Run
@@ -53,8 +52,7 @@ between the handover and the filing, and a settlement notice delivered twice.
 
 The [composition contract](../../docs/design/design-layer.pdf) describes the
 payout desk. [ADR 0039](../../docs/adr/0039-hand-the-payout-call-over-and-tell-it-in-a-follow-on-run.md)
-records why the agent hands its call over and a follow-on run tells the outcome, and
-the temporary Fabric pin;
+records why the agent hands its call over and a follow-on run tells the outcome;
 [ADR 0035](../../docs/adr/0035-answer-a-gated-agent-call-from-the-decision-point.md)
 why the decision point, not Fabric's approval expiry, answers the agent's call;
 [ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)
