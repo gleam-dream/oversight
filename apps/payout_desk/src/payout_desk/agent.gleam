@@ -74,6 +74,10 @@ pub type Script {
   /// It tells the seller the payout is done whatever the answer says: a
   /// model whose claim the application must not pass on.
   Naive
+  /// It proposes the payout again once it holds the outcome, and then
+  /// answers from what the second call returned: a model the follow-on
+  /// policy must stop from handing the payout over twice.
+  Insistent
 }
 
 // -- Tools -------------------------------------------------------------------------
@@ -219,10 +223,19 @@ pub fn build(
 /// The run of one attempt at a request: a redelivered request finds its
 /// run, and a request whose earlier run failed (`attempt` failed attempts
 /// on its record) starts a fresh one, since a failed run cannot continue.
+///
+/// `run.id_from_parts` joins its parts with `-` and does not keep them
+/// apart, and a request id is free text, so each shape has its own prefix
+/// and a fixed-shape part comes first: the first attempt is
+/// `payout-<request>`, a later one `payoutretry-<attempt>-<request>`. The
+/// attempt is digits, so the first `-` after it ends it, and request `x-1`
+/// at the first attempt (`payout-x-1`) and request `x` at the second
+/// (`payoutretry-1-x`) name different runs. A request that is not a valid
+/// id text is hashed under the same prefix, which stays apart too.
 pub fn run_id(request: String, attempt: Int) -> RunId {
   case attempt {
     0 -> run.id_from_parts("payout", [request])
-    _ -> run.id_from_parts("payout", [request, int.to_string(attempt)])
+    _ -> run.id_from_parts("payoutretry", [int.to_string(attempt), request])
   }
 }
 
@@ -233,10 +246,6 @@ pub fn run_id(request: String, attempt: Int) -> RunId {
 pub fn follow_on_id(request: String) -> RunId {
   run.id_from_parts("payouttold", [request])
 }
-
-/// The prompt the follow-on run adds after the recorded outcome.
-pub const follow_on_prompt =
-  "Finance has decided the payout. Tell the seller what the proposal's result says."
 
 /// The prompt a request starts its run with.
 pub fn prompt(request: domain.Request) -> String {
@@ -270,7 +279,11 @@ fn scripted(script: Script, unavailable: fn() -> Bool) -> fabric_model.Model {
     let order = line(prompt, "order")
     let results = results(request)
     Ok(case dict.get(results, propose), dict.get(results, domain.read_dispute) {
-      Ok(answer), _ -> final(script, seller, answer, proposed(request))
+      Ok(answer), _ ->
+        case script, outcome_in(answer) {
+          Insistent, Some(_) -> call([#("p2", propose, proposal(request))])
+          _, _ -> final(script, seller, answer, proposed(request))
+        }
       Error(Nil), Ok(dispute) -> {
         let owed =
           envelope_content(dispute, domain.dispute_codec())
@@ -321,13 +334,13 @@ fn final(
           <> domain.money(asked)
           <> " is on its way.",
       )
-    Careful, Some(truth) ->
+    _, Some(truth) ->
       Reply(
         outcome: domain.outcome_name(truth),
         amount_cents: domain.paid_cents(truth),
         message: told(name, truth),
       )
-    Careful, None ->
+    _, None ->
       Reply(
         outcome: "unknown",
         amount_cents: 0,
@@ -384,24 +397,28 @@ fn outcome_in(content: String) -> Option(Truth) {
   |> option.from_result
 }
 
-/// The amount the model proposed in this run.
+/// The amount the model proposed in this conversation.
 fn proposed(request: Request) -> Int {
+  codec.decode_json(domain.payout_codec(), proposal(request))
+  |> result.map(fn(p: Payout) { p.amount_cents })
+  |> result.unwrap(0)
+}
+
+/// The arguments of the model's first proposal in this conversation.
+fn proposal(request: Request) -> String {
   list.find_map(request.messages, fn(message) {
     case message {
       fabric_model.AssistantMessage(turn) ->
         list.find_map(turn.calls, fn(call) {
           case call.name == propose {
-            True ->
-              codec.decode_json(domain.payout_codec(), call.arguments_json)
-              |> result.map(fn(p: Payout) { p.amount_cents })
-              |> result.replace_error(Nil)
+            True -> Ok(call.arguments_json)
             False -> Error(Nil)
           }
         })
       _ -> Error(Nil)
     }
   })
-  |> result.unwrap(0)
+  |> result.unwrap("{}")
 }
 
 /// Each tool's latest result, by tool name.
@@ -468,9 +485,11 @@ fn line(text: String, name: String) -> String {
 /// The gated call a run handed over, as `run.HandedOver` names it.
 pub type Handed {
   Handed(
-    run: String,
-    /// The action within the run: `turn.call_id`.
-    action: String,
+    /// The handed-over action: its run and its action id. On the record
+    /// it is written in Fabric's text forms (`run.action_ref_to_string`,
+    /// `run.action_id_to_string`) and read back with their parse
+    /// functions.
+    action: run.ActionRef,
     arguments_json: String,
   )
 }
@@ -537,13 +556,16 @@ pub fn drive(
 /// Tell the recorded outcome through a follow-on run of the run that
 /// handed the proposal over, and wait until it rests. The follow-on run
 /// continues the handed-over run's conversation with `truth` as the
-/// proposal's result (`fabric.handover_history`). Started once per request
-/// (`follow_on_id`): a telling delivered again finds it and waits for it.
+/// proposal's result (`fabric.handover_history`), with no prompt of its
+/// own (`input.continuation`). Started once per request (`follow_on_id`): a
+/// telling delivered again finds it and waits for it. `handed` is the
+/// action the record names; a run that handed over another action is
+/// refused.
 pub fn tell(
   runs: Store,
   agent: Agent(Session, Reply),
   session: Session,
-  handed handed: RunId,
+  handed handed: run.ActionRef,
   truth truth: Truth,
   within within: Duration,
 ) -> Result(Reached, DriveError) {
@@ -569,21 +591,34 @@ pub fn tell(
   settle(handle, within)
 }
 
-/// The input of the follow-on run: the handed-over run's transcript, the
-/// recorded outcome as the proposal's result, and the follow-on prompt.
+/// The input of the follow-on run: the handed-over run's transcript, then
+/// the recorded outcome as the proposal's result. The model's first turn
+/// continues from that result.
 fn follow_on_input(
   runs: Store,
   agent: Agent(Session, Reply),
   session: Session,
-  handed: RunId,
+  handed: run.ActionRef,
   truth: Truth,
 ) -> Result(input.Input, DriveError) {
   use first <- result.try(
-    fabric.open(runs, agent, session, handed) |> result.map_error(unavailable),
+    fabric.open(runs, agent, session, handed.run)
+    |> result.map_error(unavailable),
   )
   use snapshot <- result.try(
     fabric.snapshot(first) |> result.map_error(unavailable),
   )
+  use Nil <- result.try(case snapshot.status {
+    run.Finished(run.HandedOver(action:, ..)) if action == handed -> Ok(Nil)
+    run.Finished(run.HandedOver(action:, ..)) ->
+      Error(RunStopped(
+        "the run handed over "
+        <> run.action_ref_to_string(action)
+        <> ", not "
+        <> run.action_ref_to_string(handed),
+      ))
+    _ -> Ok(Nil)
+  })
   use decided <- result.try(
     tool.reconciliation(propose_definition(), Ok(truth))
     |> result.map_error(fn(e) { RunStopped(string.inspect(e)) }),
@@ -596,7 +631,7 @@ fn follow_on_input(
       )
     }),
   )
-  input.new(history, follow_on_prompt)
+  input.continuation(history)
   |> result.map_error(fn(e) { RunStopped(string.inspect(e)) })
 }
 
@@ -617,11 +652,7 @@ pub fn settle(
         fabric.snapshot(handle) |> result.map_error(unavailable),
       )
       HandedOver(
-        call: Handed(
-          run: run.id_to_string(action.run),
-          action: action_key(action.id),
-          arguments_json:,
-        ),
+        call: Handed(action:, arguments_json:),
         actions: snapshot.actions,
       )
     }
@@ -635,11 +666,6 @@ pub fn settle(
       ))
     run.Working | run.Unattended -> Error(StillWorking)
   }
-}
-
-/// An action's key on the record: `turn.call_id`.
-pub fn action_key(id: run.ActionId) -> String {
-  int.to_string(id.turn) <> "." <> id.call_id
 }
 
 // -- What the model received ------------------------------------------------------------
@@ -700,7 +726,10 @@ pub fn recommendation(
   Recommendation(
     output:,
     by: recommender_id,
-    explanation: RunAction(run: call.run, action: call.action),
+    explanation: RunAction(
+      run: run.id_to_string(call.action.run),
+      action: run.action_id_to_string(call.action.id),
+    ),
     signals: domain.signals(dispute, history),
     reads: received(actions),
   )

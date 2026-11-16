@@ -20,7 +20,7 @@ Finance decides from its own assistant through three typed MCP tools served by R
 behind Hellhound bearer verification; the card they open is `decisions/view`'s
 document, served with its own codec. The released payout runs as a durable Saga
 (reserve, pay, post) delivered by Grind, and the provider's answer is reported to the
-record. A follow-on agent run then continues the conversation with what really happened
+record. A follow-on agent run then continues the conversation from what really happened
 as the call's result, and the seller hears its reply only when it matches the record. A
 payout superseded before the agent proposed is not filed: its agent is not driven, or,
 if it was already working, its proposal is refused and its run has already ended; the
@@ -47,7 +47,8 @@ killed after the provider answered, a guard that lost its connection at a hold's
 wake-up, a restart after a wake-up's job was lost, a restart with an escalation
 pending, a provider that times out, withdrawing during the hold and after it, a
 suspension before and after the agent proposed, a failed agent run retried under the
-same record, a handed-over run that takes no turn before the decision, a job killed
+same record, a request named like another request's retry, a handed-over run that takes
+no turn before the decision, a follow-on model that proposes again, a job killed
 between the handover and the filing, and a settlement notice delivered twice.
 
 The [composition contract](../../docs/design/design-layer.pdf) describes the

@@ -13,6 +13,7 @@ import decisions/vocabulary.{Approve, Performed, RunAction, Subject, Uncertain}
 import decisions_postgres
 import decisions_postgres/queue
 import fabric
+import fabric/model as fabric_model
 import fabric/run
 import gleam/dynamic/decode
 import gleam/erlang/process
@@ -368,6 +369,16 @@ pub fn a_settlement_notice_delivered_twice_tells_once_test() {
   let follow_on = payout_agent.follow_on_id("r-notice")
   let first = run_of(running, "r-notice", follow_on)
   let assert run.Finished(run.Completed(_)) = first.status
+  // The follow-on run continued from the proposal's result: the only user
+  // message is the request's prompt, and the model's answer follows the
+  // result directly.
+  assert support.count(first.transcript, fn(m) {
+      case m {
+        fabric_model.UserMessage(_) -> True
+        _ -> False
+      }
+    })
+    == 1
   // The notice's follower runs again, as a second delivery would: the job
   // it admits has the id of the one already admitted, so nothing new runs.
   let #(_, follow) = jobs.follower(running.deps)

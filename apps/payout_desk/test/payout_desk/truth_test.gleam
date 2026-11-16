@@ -111,6 +111,43 @@ pub fn the_trap_cannot_occur_no_approval_and_no_turn_after_the_handover_test() {
   assert jobs.deliver(running.db, known, Some(claim)) == Error(jobs.NotKnownYet)
 }
 
+pub fn a_follow_on_model_that_proposes_again_is_denied_and_told_from_the_record_test() {
+  use running <- support.with_app("insistent", fn(s) {
+    app.Settings(..s, script: payout_agent.Insistent)
+  })
+  let id = support.ask(running, "r-again", "O-4003", "partial", 8000)
+  let assert Ok(_) = support.decide(running, id, "bia", Approve)
+  let assert Some(told) = support.told(running, id, 20_000)
+  // The follow-on run's model proposed the payout again. The policy denied
+  // it instead of handing it over a second time, and the run completed.
+  let session =
+    Session(
+      request: "r-again",
+      seller: "dora",
+      sources: reads.live(running.db),
+      settled: None,
+    )
+  let assert Ok(handle) =
+    fabric.open(
+      running.deps.runs,
+      running.deps.agent,
+      session,
+      payout_agent.follow_on_id("r-again"),
+    )
+  let assert Ok(follow_on) = fabric.snapshot(handle)
+  let assert run.Finished(run.Completed(_)) = follow_on.status
+  assert list.map(follow_on.actions, fn(a) { #(a.call.name, a.state) })
+    == [#(payout_agent.propose, run.Denied("the payout is already decided"))]
+  // The model answered from the denial, which states no outcome: its reply
+  // does not match the record, so Dora is told from the record and the
+  // reply is kept.
+  assert told.outcome == "paid"
+  assert !told.from_agent
+  assert told.message == "Dora, we paid you 80.00."
+  assert told.agent_message
+    == "Dora, I could not confirm your payout yet; finance will follow up."
+}
+
 pub fn every_stage_of_a_payout_is_announced_test() {
   let seen = process.new_subject()
   let attachment =

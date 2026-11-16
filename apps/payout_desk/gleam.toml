@@ -21,8 +21,8 @@ envoy = ">= 1.0.0 and < 2.0.0"
 # which resolves inside the same Git source. ADR 0039 records the pin; it ends
 # when fabric 0.3.0 is on Hex: fabric then returns to a Hex requirement
 # `>= 0.3.0 and < 0.4.0`, and fabric_postgres to a commit that requires it.
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "650e962cad6dac3c26113a2c1f951b53ea7e9176" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "650e962cad6dac3c26113a2c1f951b53ea7e9176", path = "integrations/fabric_postgres" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "f7a49bfa13fcde77908b89344967a6e946f5f76e" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "f7a49bfa13fcde77908b89344967a6e946f5f76e", path = "integrations/fabric_postgres" }
 grind = ">= 0.1.1 and < 0.2.0"
 saga = ">= 0.2.0 and < 0.3.0"
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }
