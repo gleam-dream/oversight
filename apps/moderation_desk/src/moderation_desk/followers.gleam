@@ -24,10 +24,8 @@ pub fn settlement(known: Occurrence(Action)) -> Result(Settlement, Nil) {
     occurrence.Expired(cause: DeadlinePassed) ->
       Ok(domain.Unreleased(domain.NobodyDecided))
     occurrence.Rejected(_) -> Ok(domain.Unreleased(domain.ModeratorRejected))
-    // The point has no hold, so nothing is withdrawn; a withdrawal would
-    // release nothing, as a refusal does.
-    occurrence.Refused(_) | occurrence.Withdrawn(_) ->
-      Ok(domain.Unreleased(domain.ReleaseRefused))
+    occurrence.Withdrawn(_) -> Ok(domain.TakenBack)
+    occurrence.Refused(_) -> Ok(domain.Unreleased(domain.ReleaseRefused))
     occurrence.Recommended(_)
     | occurrence.Awaiting(_)
     | occurrence.Accepted(..)
@@ -43,7 +41,10 @@ pub fn revision_of(known: Occurrence(Action)) -> Result(Int, Nil) {
 
 /// Apply a settlement to the platform's state. A settlement about a
 /// revision an edit has since replaced changes nothing: the edit's own
-/// decision will.
+/// decision will. An edit supersedes what is expected, waiting or held,
+/// but not what is released: a release committed just before the edit
+/// can have its settlement delivered just after it, and that one must not
+/// overwrite the new revision's visibility.
 pub fn settled(
   tx: Tx,
   known: Occurrence(Action),

@@ -8,6 +8,7 @@ import decisions_otp/store.{type Store, type Tx}
 import gleam/erlang/process.{type Name}
 import gleam/list
 import gleam/result
+import gleam/time/duration
 import moderation_desk/app.{type App}
 import moderation_desk/desk.{type Person}
 import moderation_desk/domain.{type Action, type Post}
@@ -36,7 +37,16 @@ pub fn receive_all(a: App, posts: List(Post)) -> Nil {
 }
 
 /// Wait for every post's current revision to be decided and delivered.
+/// A confident hide held for its undo window is released by moving the
+/// store's clock past the window.
 pub fn settle(a: App, posts: List(Post), within ms: Int) -> Nil {
+  let assert True =
+    app.wait_until(fn() { app.all_settled_or_held(a, posts) }, within: ms)
+  case app.all_settled(a, posts) {
+    True -> Nil
+    False ->
+      store.advance(app.store_of(a), duration.minutes(point.undo_minutes + 1))
+  }
   let assert True =
     app.wait_until(fn() { app.all_settled(a, posts) }, within: ms)
   Nil

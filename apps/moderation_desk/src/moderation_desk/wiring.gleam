@@ -153,13 +153,6 @@ fn revision_key(id: String, revision: String) -> String {
   id <> "@" <> revision
 }
 
-/// Lock a post's row, which names its latest revision, until the
-/// transaction ends: an edit and the transaction that recommends take it,
-/// so a recommendation about a replaced revision cannot commit.
-pub fn lock_post(tx: Tx, id: String) -> Result(Nil, port.StoreError) {
-  store.lock(tx, "post:" <> id)
-}
-
 /// Lock a post's visibility until the transaction ends, so that a
 /// settlement, an edit and an appeal change it one at a time.
 pub fn lock_visibility(tx: Tx, id: String) -> Result(Nil, port.StoreError) {

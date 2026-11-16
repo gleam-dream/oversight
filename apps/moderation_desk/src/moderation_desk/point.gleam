@@ -3,7 +3,8 @@
 ////
 //// Version 1 lets the rule model's answers through and asks a moderator
 //// for everything else. Version 2 proceeds on confident publishes by
-//// established authors and on confident hides of spam, samples 2 % of
+//// established authors and on confident hides of spam, holding a hide
+//// for `undo_minutes` so that a senior may take it back, samples 2 % of
 //// what it proceeds for a later review, asks a senior for anything in a
 //// sensitive category, asks two moderators to agree before a post is
 //// hidden for abuse (a senior counts as a moderator), and asks a
@@ -19,6 +20,7 @@ import decisions/policy.{
 }
 import decisions/vocabulary.{ApproveRejectOrCorrect}
 import decisions/wire
+import gleam/option.{None, Some}
 import gleam/time/duration
 import moderation_desk/domain.{type Action}
 
@@ -42,6 +44,10 @@ pub const escalate_after_minutes = 30
 
 /// Minutes an occurrence may wait before it expires.
 pub const valid_minutes = 120
+
+/// Minutes during which a senior may take back a hide of spam version 2
+/// let through without a person.
+pub const undo_minutes = 5
 
 /// How confident the classifier must be for version 2 to proceed.
 pub const confident = 0.9
@@ -85,10 +91,11 @@ pub fn declaration() -> decisions.Point(Action) {
   |> decisions.valid_for(duration.minutes(valid_minutes))
   |> decisions.superseded_by(edited)
   |> decisions.reviewed_by(reviewers)
+  |> decisions.withdrawn_by(seniors)
 }
 
 fn rules_settle() -> policy.Rule {
-  When(policy.is(stage(), "rules"), Proceed(Never))
+  When(policy.is(stage(), "rules"), Proceed(sample: Never, hold: None))
 }
 
 fn escalation() -> policy.Rule {
@@ -124,7 +131,7 @@ pub fn version_2() -> Policy {
           policy.at_least(confidence(), confident),
           policy.is(new_author(), False),
         ]),
-        Proceed(PerCent(2)),
+        Proceed(sample: PerCent(2), hold: None),
       ),
       When(
         policy.All([
@@ -132,7 +139,9 @@ pub fn version_2() -> Policy {
           policy.is(category(), domain.violation_name(domain.Spam)),
           policy.at_least(confidence(), confident),
         ]),
-        Proceed(PerCent(2)),
+        // A senior may take a confident hide of spam back within the undo
+        // window, and an edit during it supersedes the hide.
+        Proceed(sample: PerCent(2), hold: Some(duration.minutes(undo_minutes))),
       ),
       escalation(),
       When(

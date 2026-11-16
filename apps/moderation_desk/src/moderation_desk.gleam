@@ -135,6 +135,15 @@ fn at_volume(a: App) -> Nil {
   })
   let healthy =
     list.filter(posts, fn(post) { !string.contains(post.text, "[raise]") })
+  // Confident hides of spam wait out their undo window: once everything
+  // else has settled, the clock moves past it and the sweeper releases
+  // them.
+  let assert True =
+    app.wait_until(
+      fn() { app.all_settled_or_held(a, healthy) },
+      within: 300_000,
+    )
+  store.advance(app.store_of(a), duration.minutes(point.undo_minutes + 1))
   let assert True =
     app.wait_until(fn() { app.all_settled(a, healthy) }, within: 300_000)
   let us = app.monotonic_us() - started
@@ -186,6 +195,7 @@ fn at_volume(a: App) -> Nil {
     <> count(per_mille % 10)
     <> " %, within the 1.5 % to 2.5 % this run requires",
   )
+  say(coverage_line(a))
   say("these are one run on this machine, not a guarantee")
   io.println("")
 }
@@ -269,7 +279,7 @@ fn awaiting(handle: store.Tx, post: domain.Post) -> List(String) {
 
 /// Step 5: an edit supersedes, an appeal assesses.
 fn edits_and_appeals(a: App) -> Nil {
-  io.println("5. An edit and an appeal")
+  io.println("5. Edits, the undo window and an appeal")
   let s = app.store_of(a)
   let handle = store.handle(s)
   let insult = scripted.post(20_391)
@@ -294,6 +304,8 @@ fn edits_and_appeals(a: App) -> Nil {
       within: 10_000,
     )
   say("the new revision proceeded under version 2 and is published")
+  undo_window(a)
+  say(coverage_line(a))
   list.each(["ana", "bruno", "carla"], fn(name) {
     desk.on_duty(person(a, name), True)
   })
@@ -332,6 +344,61 @@ fn visibility_name(found: Result(domain.Visibility, Nil)) -> String {
     Ok(domain.HiddenPendingReview(_)) -> "hidden pending review"
     Error(Nil) -> "unknown"
   }
+}
+
+/// Confident hides of spam are held for the undo window: a senior takes
+/// one back, and an edit supersedes another before its release.
+fn undo_window(a: App) -> Nil {
+  let s = app.store_of(a)
+  let handle = store.handle(s)
+  // Posts 20 581 and 20 582 are crypto spam by established authors.
+  let taken_back = scripted.post(20_581)
+  let edited = scripted.post(20_582)
+  list.each([taken_back, edited], fn(post) {
+    let assert Ok(_) = app.receive(a, post)
+  })
+  let assert True =
+    app.wait_until(
+      fn() { app.all_settled_or_held(a, [taken_back, edited]) },
+      within: 10_000,
+    )
+  let assert Ok(_) =
+    store.transaction(s, fn(tx) {
+      decisions.withdraw_as(
+        app.desk_of(a),
+        tx,
+        occurrence: wiring.key(taken_back),
+        by: desk.senior("carla"),
+      )
+    })
+  let assert Ok(new) =
+    intake.edit(s, app.desk_of(a), edited.id, "thanks! fixed the link")
+  let assert True =
+    app.wait_until(
+      fn() { app.all_settled(a, [taken_back, new.post]) },
+      within: 10_000,
+    )
+  say(
+    "two confident spam hides were held for "
+    <> count(point.undo_minutes)
+    <> " minutes: carla took one back and the post is "
+    <> visibility_name(wiring.visibility(handle, taken_back.id))
+    <> "; the other's author edited it during the hold, "
+    <> count(new.superseded)
+    <> " held hide superseded, and the new revision is "
+    <> visibility_name(wiring.visibility(handle, edited.id)),
+  )
+}
+
+fn coverage_line(a: App) -> String {
+  let c = app.coverage(a)
+  "coverage: "
+  <> count(c.expected)
+  <> " triggers expected, "
+  <> count(c.superseded_before)
+  <> " superseded before a recommendation, "
+  <> count(c.still_expected)
+  <> " still expected"
 }
 
 /// Step 6: a senior corrects a card a moderator holds.

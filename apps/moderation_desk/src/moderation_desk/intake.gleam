@@ -79,11 +79,24 @@ pub fn receive(
   outcome
 }
 
+/// Admit a revision: its trigger in the backlog, and on the record that a
+/// recommendation is expected for its key, so that an edit committed
+/// before the worker answers supersedes it (`decisions.expect`).
 fn admit(s: Store, tx: Tx, post: Post) -> Result(Nil, String) {
   let key = wiring.key(post)
   store.put(tx, wiring.intake, key, "admitted")
-  store.backlog(s).submit(tx, key, models.payload(post))
-  |> result.map_error(store_text)
+  use Nil <- result.try(
+    store.backlog(s).submit(tx, key, models.payload(post))
+    |> result.map_error(store_text),
+  )
+  decisions.expect(
+    wiring.desk(),
+    tx,
+    key:,
+    trigger: models.trigger(key),
+    about: wiring.subject(post.id),
+  )
+  |> result.map_error(decisions.describe)
 }
 
 fn store_text(error: port.StoreError) -> String {
@@ -97,10 +110,10 @@ pub type Edited {
 
 /// The author edits a post. The new revision is admitted, and every
 /// waiting recommendation about the post expires as superseded in the
-/// same transaction. The post's row names its latest revision, and both
-/// this transaction and the one that recommends lock it, so a worker
-/// still classifying the old revision recommends nothing
-/// (`moderation_desk/models`).
+/// same transaction: those still expected, waiting or held. A worker
+/// still classifying the old revision is then refused and writes nothing.
+/// The new revision is expected after the supersession, so the edit does
+/// not supersede its own trigger.
 pub fn edit(
   s: Store,
   desk: Desk(Action, Tx),
@@ -108,16 +121,13 @@ pub fn edit(
   text: String,
 ) -> Result(Edited, String) {
   store.transaction(s, fn(tx) {
-    // Occurrences first, then the post's row, then its visibility. A
-    // settlement takes an occurrence before the visibility, and a
-    // recommending transaction takes the post's row before an occurrence
-    // that does not exist yet, so no two of them wait for each other.
+    // `happened` first: it takes the post's subject lock, so two edits of
+    // one post run one after the other and number their revisions in
+    // turn. Then the visibility, which a settlement also takes after an
+    // occurrence, and last the new revision's `expect`.
     use done <- result.try(
       decisions.happened(desk, tx, point.edited, about: wiring.subject(post_id))
       |> result.map_error(decisions.describe),
-    )
-    use Nil <- result.try(
-      wiring.lock_post(tx, post_id) |> result.map_error(store_text),
     )
     use Nil <- result.try(
       wiring.lock_visibility(tx, post_id) |> result.map_error(store_text),

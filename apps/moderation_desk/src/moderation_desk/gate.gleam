@@ -5,13 +5,13 @@
 //// candidate is published only when, among the posts it would let
 //// through without a person, it agrees with the moderators often enough.
 ////
-//// The library replays a model (`decisions_otp/replay`) and answers what
-//// a policy would have said about a recorded example
-//// (`decisions/learning.answer_under`); a candidate's autonomy is the
+//// The library replays a model (`decisions_otp/replay`) and judges a
+//// candidate model under a candidate policy on a recorded example
+//// (`decisions/learning.candidate_under`): a candidate's autonomy is the
 //// candidate policy's answer to the candidate model's output.
 
 import decisions.{type Desk}
-import decisions/learning.{type Example, Archive, Example}
+import decisions/learning.{type Example, Archive}
 import decisions/model
 import decisions/occurrence
 import decisions/policy.{type Policy}
@@ -170,31 +170,20 @@ fn would_proceed(
   model: model.Model(Action),
   candidate: Policy,
 ) -> Option(Bool) {
-  case model.run(model, example.known.context, learning.sources(example)) {
-    Error(_) -> None
-    Ok(recommendation) -> {
-      // `answer_under` reads the recorded recommendation; the candidate
-      // policy is judged on the candidate model's answer instead.
-      let answered =
-        Example(
-          ..example,
-          known: occurrence.Occurrence(..example.known, recommendation:),
-        )
-      case
-        learning.answer_under(
-          answered,
-          policy: candidate,
-          point: point.declaration(),
-        )
-      {
-        // An occurrence people only rejected let nothing through: it is
-        // not judged, as `decisions/learning` does not judge it.
-        policy.Proceed(_) ->
-          occurrence.final(example.known)
-          |> option.map(fn(passed) { passed == recommendation.output })
-        _ -> None
-      }
-    }
+  case
+    learning.candidate_under(
+      example,
+      candidate: model,
+      policy: candidate,
+      point: point.declaration(),
+    )
+  {
+    // An occurrence people only rejected let nothing through: it is not
+    // judged, as `decisions/learning` does not judge it.
+    Ok(#(recommendation, policy.Proceed(..))) ->
+      occurrence.final(example.known)
+      |> option.map(fn(passed) { passed == recommendation.output })
+    Ok(_) | Error(_) -> None
   }
 }
 

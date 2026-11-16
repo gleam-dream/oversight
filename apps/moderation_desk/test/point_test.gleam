@@ -7,6 +7,8 @@ import decisions/policy.{
   UndeclaredFact, When,
 }
 import decisions/vocabulary.{type Facts, Classifier, Rules}
+import gleam/option.{None, Some}
+import gleam/time/duration
 import moderation_desk/domain.{Escalate, Hide, Publish, Spam}
 import moderation_desk/point
 
@@ -40,7 +42,9 @@ pub fn a_policy_reading_an_undeclared_fact_is_refused_test() {
   let typo =
     Policy(
       version: 3,
-      rules: [When(policy.Known("confidense"), Proceed(Never))],
+      rules: [
+        When(policy.Known("confidense"), Proceed(sample: Never, hold: None)),
+      ],
       otherwise: Ask(AnyoneHolding(point.moderators)),
     )
   assert decisions.publishable(point.declaration(), typo)
@@ -54,7 +58,7 @@ pub fn version_1_lets_only_the_rules_through_test() {
       Rules("moderation-rules", "1"),
       facts(Hide(Spam), "rules", "spam", 1.0, False),
     )
-    == Proceed(Never)
+    == Proceed(sample: Never, hold: None)
   assert policy.evaluate(
       v1,
       classifier,
@@ -70,13 +74,16 @@ pub fn version_2_proceeds_on_confident_publishes_and_spam_test() {
       classifier,
       facts(Publish, "classifier", "clean", 0.95, False),
     )
-    == Proceed(PerCent(2))
+    == Proceed(sample: PerCent(2), hold: None)
   assert policy.evaluate(
       v2,
       classifier,
       facts(Hide(Spam), "classifier", "spam", 0.95, True),
     )
-    == Proceed(PerCent(2))
+    == Proceed(
+      sample: PerCent(2),
+      hold: Some(duration.minutes(point.undo_minutes)),
+    )
 }
 
 pub fn version_2_asks_for_new_authors_doubt_and_abuse_test() {

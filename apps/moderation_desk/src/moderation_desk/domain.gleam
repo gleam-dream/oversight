@@ -90,6 +90,8 @@ pub type Settlement {
   Decided(action: Action)
   /// An edit made the decision moot; the new revision has its own.
   Superseded
+  /// A senior took back an action during its undo window.
+  TakenBack
   Unreleased(why: Unreleased)
 }
 
@@ -123,6 +125,9 @@ pub fn consequence(settlement: Settlement) -> Consequence {
         notify: Some(YourPostIsWithTheSafetyTeam),
       )
     Superseded -> Consequence(None, strike: False, notify: None)
+    // The hide was taken back: the post is shown.
+    TakenBack ->
+      Consequence(Some(Published), strike: False, notify: Some(YourPostIsLive))
     Unreleased(why) ->
       Consequence(
         Some(HiddenPendingReview(why)),

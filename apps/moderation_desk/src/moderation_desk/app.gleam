@@ -25,13 +25,15 @@
 //// neither uses the other, so a runtime restart leaves the desk running.
 
 import decisions.{type Desk}
+import decisions/learning
+import decisions/store as port
 import decisions/vocabulary
 import decisions_otp/runtime
 import decisions_otp/store.{type Store, type Tx}
 import gleam/erlang/process.{type Name, type Pid}
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import gleam/otp/supervision
@@ -43,6 +45,7 @@ import moderation_desk/domain.{type Action, type Post}
 import moderation_desk/followers
 import moderation_desk/intake
 import moderation_desk/models
+import moderation_desk/point
 import moderation_desk/scripted.{type Fault}
 import moderation_desk/telemetry
 import moderation_desk/wiring
@@ -316,6 +319,50 @@ pub fn all_settled(app: App, posts: List(Post)) -> Bool {
       Ok(_) -> True
     }
   })
+}
+
+/// Whether every one of these posts is settled, as `all_settled`, or
+/// accepted and held in its undo window.
+pub fn all_settled_or_held(app: App, posts: List(Post)) -> Bool {
+  let s = store_of(app)
+  let handle = store.handle(s)
+  let heads = store.heads(handle)
+  list.all(posts, fn(post) {
+    case wiring.visibility(handle, post.id) {
+      Ok(domain.Pending) | Error(Nil) ->
+        case list.key_find(heads, wiring.key(post)) {
+          Ok(head) -> head.status == port.Held
+          Error(Nil) -> False
+        }
+      Ok(_) -> True
+    }
+  })
+}
+
+/// How triggers fared before a recommendation, over every record of the
+/// point: expected, superseded before a recommendation, still expected.
+pub fn coverage(app: App) -> learning.Coverage {
+  let s = store_of(app)
+  let handle = store.handle(s)
+  records(handle, None, [])
+  |> list.filter_map(fn(id) {
+    decisions.read_record(wiring.desk(), handle, key: id)
+    |> result.replace_error(Nil)
+  })
+  |> learning.coverage
+}
+
+fn records(
+  handle: Tx,
+  after: option.Option(store.Cursor),
+  so_far: List(String),
+) -> List(String) {
+  let page = store.occurrences_of(handle, point.name, after:, limit: 1000)
+  let so_far = list.append(so_far, page.ids)
+  case page.next {
+    Some(next) -> records(handle, Some(next), so_far)
+    None -> so_far
+  }
 }
 
 /// Silence the logger, so that killed processes print no crash report.
