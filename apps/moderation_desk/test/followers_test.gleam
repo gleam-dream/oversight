@@ -266,3 +266,77 @@ pub fn a_rejection_hides_the_post_pending_review_test() {
     == Ok(domain.HiddenPendingReview(domain.ModeratorRejected))
   app.stop(a)
 }
+
+/// Version 2 holds a confident hide of spam for its undo window. A
+/// moderator may not take it back; a senior may, and the post is shown.
+pub fn a_senior_takes_back_a_held_hide_test() {
+  let a = support.start(nobody())
+  support.publish_version_2(a)
+  let s = app.store_of(a)
+  // Post 81 is crypto spam by an established author.
+  let spam = scripted.post(81)
+  support.receive_all(a, [spam])
+  let assert True =
+    app.wait_until(fn() { app.all_settled_or_held(a, [spam]) }, within: 5000)
+  let key = wiring.key(spam)
+  let assert occurrence.Held(final: domain.Hide(domain.Spam), ..) =
+    support.occurrence(a, spam).status
+  let assert Error(_) =
+    store.transaction(s, fn(tx) {
+      decisions.withdraw_as(
+        app.desk_of(a),
+        tx,
+        occurrence: key,
+        by: desk.moderator("bia"),
+      )
+    })
+  let assert Ok(_) =
+    store.transaction(s, fn(tx) {
+      decisions.withdraw_as(
+        app.desk_of(a),
+        tx,
+        occurrence: key,
+        by: desk.senior("carla"),
+      )
+    })
+  support.settle(a, [spam], within: 5000)
+  assert support.occurrence(a, spam).status == occurrence.Withdrawn("carla")
+  assert support.visibility(a, spam) == Ok(domain.Published)
+  assert store.count(support.handle(a), wiring.released) == 0
+  let assert [#(_, _, domain.YourPostIsLive)] =
+    wiring.notifications(support.handle(a))
+  support.check(a)
+  app.stop(a)
+}
+
+/// An edit during the undo window supersedes the held hide: nothing is
+/// released for the old text, and the new revision is decided on its own.
+pub fn an_edit_during_the_hold_supersedes_the_held_hide_test() {
+  let a = support.start(nobody())
+  support.publish_version_2(a)
+  let s = app.store_of(a)
+  let spam = scripted.post(82)
+  support.receive_all(a, [spam])
+  let assert True =
+    app.wait_until(fn() { app.all_settled_or_held(a, [spam]) }, within: 5000)
+  let assert Ok(edited) =
+    intake.edit(s, app.desk_of(a), spam.id, "thanks for the patch, it works")
+  assert edited.superseded == 1
+  support.settle(a, [edited.post], within: 5000)
+  // Past the old hold's end: its wake-up was cancelled.
+  store.advance(s, duration.minutes(point.undo_minutes + 1))
+  process.sleep(50)
+  let assert Ok(old) =
+    decisions.read(
+      app.desk_of(a),
+      support.handle(a),
+      occurrence: wiring.key(spam),
+    )
+  assert old.status == occurrence.Expired(Superseded(point.edited))
+  assert support.visibility(a, spam) == Ok(domain.Published)
+  // One release: the new revision's publish.
+  assert store.count(support.handle(a), wiring.released) == 1
+  assert support.notified(a) == [#(wiring.key(edited.post), 1)]
+  support.check(a)
+  app.stop(a)
+}

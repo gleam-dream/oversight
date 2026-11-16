@@ -305,7 +305,9 @@ pub fn chaos_while_thousands_of_posts_move_test() {
   // Let anything in flight finish before reading the record.
   process.sleep(200)
   let summary = support.check(a)
-  assert summary.occurrences == list.length(healthy)
+  // The checker reads every record, the two broken posts' too: they
+  // were expected and hold only failed attempts.
+  assert summary.occurrences == list.length(posts)
   assert summary.settled == list.length(healthy)
   let notified = support.notified(a)
   assert list.length(notified) == list.length(healthy)

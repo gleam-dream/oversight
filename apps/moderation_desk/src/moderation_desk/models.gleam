@@ -10,15 +10,14 @@ import decisions.{type Desk, type HandlerFailure}
 import decisions/fact
 import decisions/model.{type Failure, type Model, type Sources, Sources}
 import decisions/occurrence.{type Occurrence}
-import decisions/store as port
 import decisions/vocabulary.{
-  type Manifest, Classifier, Manifest, Recommendation, RuleFired, Rules, Trigger,
+  type Manifest, type Trigger, Classifier, Manifest, Recommendation, RuleFired,
+  Rules, Trigger,
 }
 import decisions_otp/backlog.{type Submitted}
 import decisions_otp/isolated
 import decisions_otp/store.{type Store, type Tx}
 import gleam/erlang/process
-import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -228,6 +227,11 @@ pub type Env {
   )
 }
 
+/// What asked for the decision about a key: the post revision it names.
+pub fn trigger(key: String) -> Trigger {
+  Trigger(kind: "post", id: key)
+}
+
 /// The payload of a trigger: the post's id and revision.
 pub fn payload(post: Post) -> String {
   wiring.key(post)
@@ -265,7 +269,7 @@ fn attempt(
     isolated.Request(
       source: env.source,
       key: submitted.key,
-      trigger: Trigger(kind: "post", id: submitted.key),
+      trigger: trigger(submitted.key),
       about: wiring.subject(post.id),
       context: Manifest(
         refs: [wiring.post_ref(post)],
@@ -280,37 +284,24 @@ fn attempt(
       env.timing,
     )
   case
-    isolated.recommend_when(
+    isolated.recommend(
       env.desk,
       in: store.transaction(env.store, _),
       request:,
       model:,
-      holds: still_latest(_, post),
     )
   {
     Ok(isolated.Recommended(occurrence:)) -> {
       report(env.source, occurrence)
       Ok(Nil)
     }
-    // An edit came after this trigger; the edit's own trigger decides.
-    Ok(isolated.Skipped(_)) -> Ok(Nil)
+    // An edit superseded the expected recommendation: nothing is written,
+    // and the edit's own trigger decides. `recommend` has no precondition,
+    // so it never skips; the branch is there for the exhaustive match.
+    Ok(isolated.Superseded(_)) | Ok(isolated.Skipped(_)) -> Ok(Nil)
     Ok(isolated.Failed(failure:, ..)) ->
       Error(decisions.ApplicationFailed(model.describe(failure)))
     Error(refusal) -> Error(decisions.DeskRefused(refusal))
-  }
-}
-
-/// Inside the recommending transaction: the post's row still names this
-/// revision. The post's lock serialises this check with an edit, which
-/// takes the same lock to name a newer revision.
-fn still_latest(tx: Tx, post: Post) -> Result(Nil, String) {
-  use Nil <- result.try(
-    wiring.lock_post(tx, post.id) |> result.map_error(port.describe),
-  )
-  case wiring.post(tx, post.id) {
-    Ok(current) if current.revision == post.revision -> Ok(Nil)
-    Ok(_) -> Error("an edit replaced revision " <> int.to_string(post.revision))
-    Error(Nil) -> Error("the post is gone")
   }
 }
 
