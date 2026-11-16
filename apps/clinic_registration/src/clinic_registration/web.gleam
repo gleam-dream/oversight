@@ -14,6 +14,10 @@
 ////   one with `POST /cards/:occurrence/open` and reviews it with
 ////   `POST /cards/:occurrence/review`, the same body as a verdict. A review
 ////   changes nothing and counts toward agreement.
+//// - `POST /cards/:occurrence/withdraw` takes back, during its undo window,
+////   a registration the policy let proceed (reception may).
+//// - `GET /pending` lists the messages still waiting for a recommendation
+////   and since when (`decisions_postgres/queue.pending`), for an operator.
 //// - `POST /inbound` is the channel's webhook for a new message. Its
 ////   signature is not verified: anyone who can reach the route can deliver
 ////   a message.
@@ -88,6 +92,8 @@ pub fn handle(req: wisp.Request, routes: Routes) -> wisp.Response {
         Post, ["cards", id, "verdict"] ->
           verdict(req, routes, validator, id, Deciding)
         Get, ["reviews"] -> show_reviews(routes)
+        Post, ["cards", id, "withdraw"] -> withdraw(routes, validator, id)
+        Get, ["pending"] -> show_pending(routes)
         Post, ["cards", id, "review"] ->
           verdict(req, routes, validator, id, Reviewing)
         _, _ -> wisp.not_found()
@@ -158,6 +164,58 @@ fn show_queue(routes: Routes, validator: Validator) -> wisp.Response {
       |> wisp.json_response(200)
     Error(_) ->
       error_response(503, "store_unavailable", "the queue could not be read")
+  }
+}
+
+/// Take back a registration the policy let proceed, during its undo
+/// window. The point lets reception do it (`withdrawn_by`).
+fn withdraw(routes: Routes, validator: Validator, id: String) -> wisp.Response {
+  case
+    decisions_postgres.transaction(routes.db, decisions.withdraw_as(
+      routes.desk,
+      _,
+      occurrence: id,
+      by: validator,
+    ))
+  {
+    Ok(known) ->
+      json.object([
+        #("occurrence", json.string(known.id)),
+        #("status", json.string(occurrence.status_name(known.status))),
+      ])
+      |> json.to_string
+      |> wisp.json_response(200)
+    Error(failure) -> failure_response(failure)
+  }
+}
+
+/// The messages still waiting for a recommendation, the oldest first, with
+/// when each was received: their model has not answered yet, or has only
+/// failed.
+fn show_pending(routes: Routes) -> wisp.Response {
+  case
+    queue.pending(routes.db, point: domain.point_name, limit: 50, after: None)
+  {
+    Ok(records) ->
+      json.object([
+        #(
+          "pending",
+          json.array(records, fn(record: queue.Summary) {
+            json.object([
+              #("occurrence", json.string(record.occurrence)),
+              #("since", wire.time(record.arrived)),
+            ])
+          }),
+        ),
+      ])
+      |> json.to_string
+      |> wisp.json_response(200)
+    Error(_) ->
+      error_response(
+        503,
+        "store_unavailable",
+        "the pending records could not be read",
+      )
   }
 }
 
@@ -299,9 +357,15 @@ fn inbound(req: wisp.Request, routes: Routes) -> wisp.Response {
       case routes.admit(message) {
         Ok(jobs.Admitted(..)) -> wisp.json_response("{\"admitted\":true}", 202)
         Ok(jobs.Duplicate) -> wisp.json_response("{\"admitted\":false}", 200)
+        // Nothing was kept (contention on the contact included): a 503
+        // makes the channel deliver the message again.
         Error(reason) -> {
           wisp.log_warning("inbound " <> message.id <> ": " <> reason)
-          error_response(503, "store_unavailable", "try again")
+          error_response(
+            503,
+            "try_again",
+            "the message was not kept; deliver it again",
+          )
         }
       }
   }
@@ -338,7 +402,8 @@ pub fn refusal_response(refusal: Refusal) -> wisp.Response {
     decisions.AlreadyDecided(..) ->
       error_response(409, "already_decided", detail)
     decisions.NotAwaiting -> error_response(410, "not_awaiting", detail)
-    decisions.NotEligible | decisions.NeverShown ->
+    decisions.SupersededBefore(..) -> error_response(410, "superseded", detail)
+    decisions.NotEligible | decisions.NeverShown | decisions.NotTheDecider ->
       error_response(403, "not_yours", detail)
     decisions.VerdictNotAllowed
     | decisions.ReasonRequired
@@ -357,7 +422,6 @@ pub fn refusal_response(refusal: Refusal) -> wisp.Response {
       error_response(409, "not_registered", reason)
     decisions.NotRecommended(..)
     | decisions.NotHeld
-    | decisions.NotTheDecider
     | decisions.NotReleased
     | decisions.NotSampled
     | decisions.NotSettled

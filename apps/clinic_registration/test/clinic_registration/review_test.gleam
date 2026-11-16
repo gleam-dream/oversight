@@ -24,7 +24,7 @@ fn sampled_message(phone: String) -> domain.Inbound {
 }
 
 pub fn the_manager_reviews_a_sampled_registration_test() {
-  use env <- support.with_app(fn(config) { config })
+  use env <- support.with_restarts
   let assert Ok(Nil) = desk.publish(env.app.db, domain.proceed_when_sure())
   let phone = support.phone()
   scripted.script(env.services, phone, [
@@ -32,6 +32,9 @@ pub fn the_manager_reviews_a_sampled_registration_test() {
   ])
   let message = sampled_message(phone)
   let assert Ok(_) = app.admit(env.app, message)
+  // Released by the policy once its undo window has passed.
+  let _ = support.await_status(env, message.id, "held")
+  let #(env, _) = support.later(env, 11)
   let released = support.await_status(env, message.id, "released")
   assert released.sampled
 
@@ -73,4 +76,5 @@ pub fn the_manager_reviews_a_sampled_registration_test() {
   assert support.eventually(5000, fn() {
     list.length(scripted.sent(env.services)) == 1
   })
+  env
 }

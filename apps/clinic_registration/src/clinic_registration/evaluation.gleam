@@ -33,37 +33,62 @@ import gleam/time/timestamp.{type Timestamp}
 import http_gun
 import pog
 
-/// Every registration the record holds, in id order, read page by page
-/// from the heads (`decisions_postgres/queue.occurrences_of`).
-pub fn recorded(
+/// Every record of the point, in id order, read page by page from the heads
+/// (`decisions_postgres/queue.occurrences_of`): occurrences, and records
+/// that never began (still expected, or superseded before a
+/// recommendation).
+pub fn records(
   db: pog.Connection,
   desk: Desk(Registration, pog.Connection),
-) -> Result(List(Occurrence(Registration)), String) {
-  recorded_after(db, desk, None, [])
+) -> Result(List(decisions.Record(Registration)), String) {
+  records_after(db, desk, None, [])
 }
 
-fn recorded_after(
+fn records_after(
   db: pog.Connection,
   desk: Desk(Registration, pog.Connection),
   after: Option(String),
-  so_far: List(Occurrence(Registration)),
-) -> Result(List(Occurrence(Registration)), String) {
+  so_far: List(decisions.Record(Registration)),
+) -> Result(List(decisions.Record(Registration)), String) {
   use page <- result.try(
     queue.occurrences_of(db, point: domain.point_name, limit: 100, after:)
     |> result.map_error(store.describe),
   )
   use read <- result.try(
     list.try_map(page, fn(summary) {
-      decisions.read(desk, db, occurrence: summary.occurrence)
+      decisions.read_record(desk, db, key: summary.occurrence)
       |> result.map_error(decisions.describe)
     }),
   )
   let so_far = list.append(so_far, read)
   // A short page is the last one.
   case list.length(page) == 100, list.last(page) {
-    True, Ok(last) -> recorded_after(db, desk, Some(last.occurrence), so_far)
+    True, Ok(last) -> records_after(db, desk, Some(last.occurrence), so_far)
     _, _ -> Ok(so_far)
   }
+}
+
+/// The registrations that began: the occurrences among the records.
+pub fn recorded(
+  db: pog.Connection,
+  desk: Desk(Registration, pog.Connection),
+) -> Result(List(Occurrence(Registration)), String) {
+  use all <- result.map(records(db, desk))
+  list.filter_map(all, fn(record) {
+    case record {
+      decisions.Begun(known) -> Ok(known)
+      decisions.NotBegun(_) -> Error(Nil)
+    }
+  })
+}
+
+/// How many messages expected a registration, how many a newer message
+/// superseded before a recommendation, and how many are still expected.
+pub fn coverage(
+  db: pog.Connection,
+  desk: Desk(Registration, pog.Connection),
+) -> Result(learning.Coverage, String) {
+  records(db, desk) |> result.map(learning.coverage)
 }
 
 /// Where an example's parts come from. The prompt a provider was sent is

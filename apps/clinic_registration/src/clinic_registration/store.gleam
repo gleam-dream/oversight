@@ -80,20 +80,6 @@ pub fn describe(error: pog.QueryError) -> String {
 
 // -- Messages -------------------------------------------------------------------
 
-/// Serialise the transactions that change one contact's conversation or
-/// recommend for it, until the transaction ends.
-pub fn lock_contact(
-  tx: pog.Connection,
-  contact: String,
-) -> Result(Nil, pog.QueryError) {
-  pog.query(
-    "SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtextextended($1, 41))) AS held",
-  )
-  |> pog.parameter(pog.text("clinic-contact:" <> contact))
-  |> pog.execute(tx)
-  |> result.replace(Nil)
-}
-
 /// Keep an inbound message. `True` when it is new, `False` when the
 /// channel delivered it before.
 pub fn insert_message(
@@ -130,23 +116,6 @@ pub fn message(
   })
   |> pog.execute(db)
   |> result.map(fn(returned) { list.first(returned.rows) |> option.from_result })
-}
-
-/// Whether no later message from the same contact has arrived.
-pub fn is_latest(
-  db: pog.Connection,
-  message_id: String,
-) -> Result(Bool, pog.QueryError) {
-  pog.query(
-    "SELECT NOT EXISTS (
-       SELECT 1 FROM clinic_messages later, clinic_messages this
-       WHERE this.id = $1 AND later.contact = this.contact
-         AND later.position > this.position)",
-  )
-  |> pog.parameter(pog.text(message_id))
-  |> pog.returning(decode.at([0], decode.bool))
-  |> pog.execute(db)
-  |> result.map(fn(returned) { returned.rows == [True] })
 }
 
 /// The conversation of `contact` up to and including the message `upto`.

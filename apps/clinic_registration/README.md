@@ -6,13 +6,25 @@
 Patient registration from a conversation, built on the `decisions` decision
 point with `decisions_postgres`, `decisions_otp`, LLM Wire, Grind, Wisp and
 Sinal on PostgreSQL. A message from a contact on a messaging channel is the
-trigger. A single LLM call with structured output recommends a patient
-record; a stored, versioned policy proceeds or asks reception or the
-manager; a receptionist approves, rejects or corrects the record through a
-JSON desk API; the patient row is inserted exactly once by the gated tool;
-a Grind job sends the contact a confirmation under the release key; and the
-manager reviews the registrations policy version 2 let proceed and sampled. The
-LLM provider and the messaging provider are scripted servers on loopback.
+trigger. The transaction that admits it supersedes what the contact's earlier
+messages started and records that a recommendation is expected for this
+message, so a model call for an older message that finishes later writes
+nothing ([ADR 0037](../../docs/adr/0037-expect-recommendations-at-admission-and-key-payouts-by-request.md)).
+The library serialises admissions about one contact; an admission that waits
+too long for another is answered `503 try_again`, and the channel delivers it
+again. A single LLM call with structured output recommends a patient record.
+
+A stored, versioned policy decides what happens next. Version 1 asks
+reception. Version 2 lets a sure registration proceed after a ten-minute undo
+window, during which reception may take it back
+(`POST /cards/:id/withdraw`) and a newer message supersedes it; it asks the
+manager about a possible duplicate and reception about anything else. A
+receptionist approves, rejects or corrects a record through a JSON desk API.
+The gated tool inserts the patient row exactly once, and a Grind job sends the
+contact a confirmation under the release key. The manager reviews the sampled
+registrations that version 2 let proceed. `GET /pending` lists the messages
+still waiting for a recommendation, and since when. The LLM provider and the
+messaging provider are scripted servers on loopback.
 
 The desk identifies the validator from one header,
 `x-clinic-validator: <name>; <set>,<set>`, read by `web.authenticate`. It

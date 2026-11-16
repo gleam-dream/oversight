@@ -548,9 +548,9 @@ fn describe_account(
   account: occurrence.Account(domain.Registration),
 ) -> String {
   case account {
-    occurrence.Done(final:, effect: Some(effect)) ->
+    occurrence.Done(final:, effect: Some(effect), ..) ->
       final.name <> " registered; confirmation " <> jobs.describe_effect(effect)
-    occurrence.Done(final:, effect: None) ->
+    occurrence.Done(final:, effect: None, ..) ->
       final.name <> " registered; confirmation not known yet"
     occurrence.Undecided -> "not decided yet"
     occurrence.TurnedDown(by:, reason:) ->
