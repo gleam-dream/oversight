@@ -21,7 +21,13 @@ for `payout_desk` until the condition below.
 - **Filing.** The `payout.agent` job reads the `HandedOver` outcome and admits
   the call at the `payout` point with `recommend_once` under the request's key
   (`payout:` and the request id, as ADR 0037 states). The handed-over action
-  (run id and `turn.call_id`) is the occurrence's trigger and explanation. A
+  is the occurrence's trigger and explanation, written in Fabric's text
+  forms: the trigger `tool_call` carries the whole reference
+  (`run.action_ref_to_string`, such as `payout-r-1/2.p1`), and the
+  explanation `RunAction(run, action)` carries the run id and the action id
+  (`run.action_id_to_string`, such as `2.p1`) in its two fields. The
+  application reads the explanation back with `run.parse_id` and
+  `run.parse_action_id`. A
   job delivered again, or replayed after it died between the handover and the
   filing, starts the same run id, finds the ended run (`AlreadyStarted`, then
   `recover`), reads the same outcome and files nothing twice. The model is not
@@ -32,9 +38,13 @@ for `payout_desk` until the condition below.
   outcome encoded by `tool.reconciliation(propose_definition(), Ok(truth))`.
   Every outcome (paid, not paid, rejected, expired, superseded, withdrawn,
   refused) is a value of the tool's output type, so no outcome is sent as a
-  rejection. The input adds one user prompt after the result, and the job
-  starts the follow-on run with `fabric.start_with_input`. The handed-over run
-  never continues.
+  rejection. `input.continuation(history)` makes that history the follow-on
+  run's whole input, with no user message after the result, and the job
+  starts the follow-on run with `fabric.start_with_input`. The follow-on
+  model's first request ends with the proposal's result, so the model
+  continues as it would have in the original run. The handed-over run never
+  continues. Before it continues, the job checks that the run handed over
+  the action the record names.
 - **The follow-on run's identity.** The follow-on run's id is
   `run.id_from_parts("payouttold", [request])`. A request is one payout and
   hands one call over, so the request names its follow-on run. The prefix
@@ -45,7 +55,10 @@ for `payout_desk` until the condition below.
 - **The follow-on policy.** The follow-on run's context carries the recorded
   outcome. The policy denies a second `propose_payout` there, so a model that
   proposes again is told the payout is already decided and answers from the
-  result. It is not handed over a second time.
+  result. It is not handed over a second time. `truth_test.gleam` runs a
+  model that proposes again in the follow-on run: the call is denied with
+  "the payout is already decided", the run completes, and the seller is told
+  from the record.
 - **What the seller hears.** Unchanged from ADR 0035. A reply reaches the
   seller only when its outcome and amount equal the record's. Otherwise the
   application sends its own message from the record and keeps the agent's
@@ -61,16 +74,24 @@ for `payout_desk` until the condition below.
 - **Retries of a failed agent attempt.** Unchanged: a run that fails (for
   example, the model's provider refuses) has ended, and a failed run cannot
   continue. The failure is recorded as an attempt under the request's key,
-  and the retried job starts a fresh run whose id adds the attempt number.
+  and the retried job starts a fresh run. The first attempt's run is
+  `run.id_from_parts("payout", [request])`, and a later attempt's run is
+  `run.id_from_parts("payoutretry", [attempt, request])`.
+  `run.id_from_parts` joins its parts with `-` without keeping them apart,
+  and a request id is free text. The earlier form,
+  `payout-<request>-<attempt>`, gave request `x-1` at its first attempt and
+  request `x` at its second the same run `payout-x-1`, and the second request
+  would then have filed the first one's proposal. A separate prefix, with the
+  attempt's digits before the request, keeps the two shapes apart.
 - **No Fabric approval.** `payout_desk` registers no approvers, sets no
   approval expiry and has no approval requirement.
 - **A temporary Git pin.** `apps/payout_desk/gleam.toml` takes `fabric` and
   `fabric_postgres` from [gleam-dream/fabric](https://github.com/gleam-dream/fabric)
-  at commit `650e962cad6dac3c26113a2c1f951b53ea7e9176`: `fabric` at the
+  at commit `f7a49bfa13fcde77908b89344967a6e946f5f76e`: `fabric` at the
   repository root, `fabric_postgres` at `integrations/fabric_postgres`. At
   that commit the adapter depends on `fabric` by path (`../..`), which
   resolves inside the same Git source. `nix/git-sources.nix` registers the
-  commit's source hash, `sha256-BUZ7uW8FN3cjPpsJM+gaQSPpqym4PgBW52zBD2OiLoY=`.
+  commit's source hash, `sha256-XP4rYfkhj21P2jQENvnWL9PCP2GClfOyvm2hX94NIWM=`.
   The other applications keep `fabric` 0.2.0 from Hex and the earlier adapter
   commit.
 
@@ -89,7 +110,13 @@ for `payout_desk` until the condition below.
   requirement, the approval expiry setting, the resumption that approved or
   rejected the parked call (`jobs.resume`), the cancellation of a parked run
   (`jobs.cancel_run`), the decoding of an outcome from a rejection's reason,
-  and `domain.lets_call_through`.
+  and `domain.lets_call_through`. With commit `f7a49bf` the follow-on prompt
+  (`agent.follow_on_prompt`) and the application's own action key
+  (`agent.action_key`) were removed too: Fabric now continues a history from
+  its tool results (`input.continuation`) and names an action in text
+  (`run.action_id_to_string`, `run.action_ref_to_string` and their parse
+  functions). The text form is the one the application wrote by hand, so no
+  stored key changed shape.
 - **What stays.** The fresh run per failed attempt stays, for the reason
   above. The `decisions` tracker issue 26 names it beside the cancellation as
   work the handover would make unnecessary; only the cancellation is

@@ -335,13 +335,13 @@ fn admit(
     Ok(recommendation) -> {
       let proposal =
         decisions.proposal(
-          trigger: Trigger("tool_call", call.run <> "/" <> call.action),
+          trigger: Trigger("tool_call", run.action_ref_to_string(call.action)),
           about: Subject("seller", request.seller),
           context:,
           recommending: recommendation,
         )
         |> decisions.asked_by(requested_by)
-        |> decisions.hanging_from(ParentRun(call.run))
+        |> decisions.hanging_from(ParentRun(run.id_to_string(call.action.run)))
       let admitted =
         decisions_postgres.transaction_with(conn, fn(tx) {
           use known <- result.try(
@@ -723,14 +723,7 @@ pub fn tell(
     use truth <- result.try(
       domain.truth_of(known) |> option.to_result("the outcome is not known yet"),
     )
-    use run_text <- result.try(case known.recommendation.explanation {
-      RunAction(run:, ..) -> Ok(run)
-      _ -> Error("the recommendation names no run")
-    })
-    use handed <- result.try(
-      run.parse_id(run_text)
-      |> result.replace_error("not a run id: " <> run_text),
-    )
+    use handed <- result.try(handed_action(known))
     use request <- result.try(
       db.request_of(conn, id) |> result.map_error(db.describe),
     )
@@ -773,6 +766,25 @@ pub fn tell(
           worker.Snoozed(duration.milliseconds(300), detail)
       }
     }
+  }
+}
+
+/// The handed-over action an occurrence's explanation names, read back from
+/// Fabric's text forms of its run id and action id.
+fn handed_action(known: Occurrence(Payout)) -> Result(run.ActionRef, String) {
+  case known.recommendation.explanation {
+    RunAction(run: run_text, action: action_text) -> {
+      use id <- result.try(
+        run.parse_id(run_text)
+        |> result.replace_error("not a run id: " <> run_text),
+      )
+      use action <- result.map(
+        run.parse_action_id(action_text)
+        |> result.replace_error("not an action id: " <> action_text),
+      )
+      run.ActionRef(run: id, id: action)
+    }
+    _ -> Error("the recommendation names no handed-over action")
   }
 }
 

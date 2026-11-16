@@ -183,8 +183,38 @@ pub fn a_failed_agent_run_and_its_payout_are_one_record_test() {
   let known = support.read(running, id)
   let assert [attempt] = known.attempts
   assert attempt.trigger == vocabulary.Trigger("request", "r-a1")
-  let assert vocabulary.RunAction(run: "payout-r-a1-1", ..) =
+  let assert vocabulary.RunAction(run: "payoutretry-1-r-a1", ..) =
     known.recommendation.explanation
   assert occurrence.was_expected(known)
   let assert occurrence.Awaiting(_) = known.status
+}
+
+pub fn a_retried_request_and_a_request_named_like_its_retry_are_two_runs_test() {
+  // `x-1` at its first attempt and `x` at its second once named the same
+  // run: `payout-x-1`.
+  assert payout_agent.run_id("x-1", 0) != payout_agent.run_id("x", 1)
+  let key = "collide-" <> int.to_string(support.unique())
+  use running <- support.with_app("collide", fn(s) {
+    app.Settings(..s, model_fault: fn() { support.once(key) })
+  })
+  // Request `c`'s first run fails; its retry runs as its second attempt.
+  let first = support.ask(running, "c", "O-6106", "partial", 8000)
+  // Request `c-1` then runs its own first attempt, not `c`'s retry.
+  let second = support.ask(running, "c-1", "O-6107", "partial", 6000)
+  let c = support.read(running, first)
+  let c1 = support.read(running, second)
+  let assert vocabulary.RunAction(run: "payoutretry-1-c", ..) =
+    c.recommendation.explanation
+  let assert vocabulary.RunAction(run: "payout-c-1", ..) =
+    c1.recommendation.explanation
+  // Each payout is its own request's: its order and amount.
+  assert #(c.recommendation.output.order, c.recommendation.output.amount_cents)
+    == #("O-6106", 8000)
+  assert #(
+      c1.recommendation.output.order,
+      c1.recommendation.output.amount_cents,
+    )
+    == #("O-6107", 6000)
+  assert list.length(c.attempts) == 1
+  assert c1.attempts == []
 }
