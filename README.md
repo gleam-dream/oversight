@@ -25,6 +25,7 @@ applications supply domain types, policy and resource lifetimes.
 | [Correio](https://github.com/gleam-dream/correio)            | Transactional email, captured-mail tests and passwordless verification |
 | [Fabric](https://github.com/gleam-dream/fabric)              | Bounded LLM agents, approvals and durable control graphs               |
 | [Retrace](https://github.com/gleam-dream/retrace)            | Typed session capture, delivery and inert replay                       |
+| [Decisions](https://github.com/gleam-dream/decisions)        | Decision points: recommendations, verdicts and release at most once    |
 
 The package READMEs state release status and supported targets. Retrace includes
 separate core, frontend and server packages; PostgreSQL adapters are optional

@@ -21,11 +21,10 @@ http_gun = ">= 0.1.0 and < 0.2.0"
 llm_wire = ">= 0.1.0 and < 0.2.0"
 json_blueprint = ">= 2.0.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
-# Unpublished: local paths for now. Each becomes a Git+path pin on a verified
-# commit when the decisions repository is pushed.
-decisions = { path = "../../../../decisions" }
-decisions_otp = { path = "../../../../decisions/integrations/decisions_otp" }
-decisions_postgres = { path = "../../../../decisions/integrations/decisions_postgres" }
+# Unpublished: Git+path pins to one verified commit of gleam-dream/decisions.
+decisions = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf" }
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf", path = "integrations/decisions_otp" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

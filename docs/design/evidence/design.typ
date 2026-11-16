@@ -15,7 +15,7 @@
 
   #pending-ledger(
     pending-entry(title: "Application callbacks lack a remaining-deadline port", kind: "ruling", since: "2026-10-08")[The admission experiment introduces no public remaining-deadline or cancellation argument for application callbacks. Such a port needs its own concrete consumer before a signature is chosen. See #adr(22).],
-    pending-entry(title: "The decisions packages lack locked sources", kind: "build", since: "2026-11-15", adr: [#adr(34)])[`clinic_registration`, `payout_desk` and `moderation_desk` resolve the `decisions` packages through path dependencies to an unpublished working tree, so their manifests lock no commit of it. They need Git+path dependencies on a verified commit with registered source hashes, entries in the Nix application list and the continuous-integration matrix, before `nix build` and continuous integration qualify them.],
+    pending-entry(title: "Continuous integration cannot fetch the decisions packages", kind: "build", since: "2026-11-15", adr: [#adr(38)])[`clinic_registration`, `payout_desk` and `moderation_desk` lock the `decisions` packages to one commit of a repository that is private. Continuous integration holds no credential, so it cannot fetch that source and has not run the three applications. The pinned commit is on the branch `first-build`; the pin moves if that branch is rewritten before a release.],
     pending-entry(title: "A pending evidence marker cannot show an in-flight effect", kind: "ruling", since: "2026-10-07")[A worker that stops after committing its pending marker and before sending leaves a condition that provider evidence alone can distinguish from an in-flight effect. The protocol reports uncertainty rather than inferring non-execution. See #adr(20).],
   )
 

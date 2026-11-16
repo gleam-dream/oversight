@@ -38,9 +38,12 @@ jobs:
         application:
           [
             checkout,
+            clinic_registration,
             email_portal,
             extractor,
             financial_recovery,
+            moderation_desk,
+            payout_desk,
             research_agent,
             secure_mcp,
             sso_portal,
