@@ -6,18 +6,24 @@
 //// recommends once.
 
 import clinic_registration/app
+import clinic_registration/domain
+import clinic_registration/evaluation
+import clinic_registration/llm
 import clinic_registration/scripted
 import decisions
 import decisions/model
 import decisions/occurrence
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/http
 import gleam/list
 import gleam/time/duration
 import support
 
 fn failures(known: occurrence.Occurrence(a)) -> List(model.Failure) {
-  list.map(known.attempts, fn(attempt) { attempt.failure })
+  list.map(known.attempts, fn(attempt) {
+    model.without_evidence(attempt.failure)
+  })
 }
 
 pub fn a_provider_failure_is_an_attempt_and_the_job_retries_test() {
@@ -52,6 +58,10 @@ pub fn an_undecodable_answer_is_an_attempt_with_its_exchange_kept_test() {
   let known = support.arrive(env, message)
 
   let assert [model.Undecodable(_)] = failures(known)
+  // The failed attempt points at the exchange it could not read.
+  let assert [attempt] = known.attempts
+  let assert [exchange] = attempt.evidence
+  assert exchange.kind == llm.call_read
   // Both exchanges are evidence; only the second one is on the
   // recommendation.
   assert support.count(
@@ -129,4 +139,37 @@ pub fn a_worker_killed_after_the_model_answered_recommends_once_test() {
   assert known.attempts == []
   assert scripted.llm_calls(env.services, phone) == 2
   assert support.registrations(env) == 1
+}
+
+pub fn an_operator_sees_the_messages_still_waiting_for_a_recommendation_test() {
+  use env <- support.with_app(fn(config) {
+    app.Config(..config, max_attempts: 1)
+  })
+  let phone = support.phone()
+  scripted.script(env.services, phone, [scripted.Status(503)])
+  let message = support.message(phone, "Ana", support.ana_says)
+  let assert Ok(_) = app.admit(env.app, message)
+  assert support.eventually(5000, fn() {
+    case support.read(env, message.id) {
+      Error(decisions.NotRecommended(attempts: [_])) -> True
+      _ -> False
+    }
+  })
+
+  // The model gave up; the message is still expected, since it arrived.
+  let pending =
+    support.call(env, http.Get, "/pending", support.felipe, "").body
+    |> support.field(
+      ["pending"],
+      decode.list({
+        use occurrence <- decode.field("occurrence", decode.string)
+        use since <- decode.field("since", decode.int)
+        decode.success(#(occurrence, since))
+      }),
+    )
+  let assert [#(occurrence, since)] = pending
+  assert occurrence == domain.key(message.id)
+  assert since > 0
+  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  assert coverage.still_expected == 1
 }

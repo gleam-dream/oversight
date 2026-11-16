@@ -147,16 +147,22 @@ pub fn the_record_teaches_and_gates_version_2_test() {
     )
   assert store.policy_versions(env.app.db, "registration") == Ok([1, 2])
 
-  // Under version 2 a sure registration proceeds.
+  // Under version 2 a sure registration proceeds, held for its undo
+  // window.
   let phone = support.phone()
   scripted.script(env.services, phone, [
     scripted.Answer(support.ana_answer(phone)),
   ])
   let message = support.message(phone, "Ana", support.ana_says)
   let assert Ok(_) = app.admit(env.app, message)
-  let released = support.await_status(env, message.id, "released")
-  assert released.policy_version == Some(2)
-  assert occurrence.final(released) != option.None
+  let held = support.await_status(env, message.id, "held")
+  assert held.policy_version == Some(2)
+  assert occurrence.final(held) != option.None
+
+  // Every message expected a registration, and none is still waiting.
+  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  assert coverage
+    == learning.Coverage(expected: 7, superseded_before: 0, still_expected: 0)
 }
 
 fn unwrap_closed(

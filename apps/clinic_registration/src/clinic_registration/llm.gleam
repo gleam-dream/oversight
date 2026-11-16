@@ -370,8 +370,15 @@ fn build(
     use context <- result.try(reader()(manifest, sources))
     use prepared <- result.try(prepared(configuration, provider, context))
     use captured <- result.try(ask(call_key(prepared), prepared, sources))
-    use exchange <- result.try(parse(captured.body))
-    use extraction <- result.try(answer_of(exchange))
+    // A failure after the exchange was captured points at it, so the
+    // recorded attempt shows what the provider answered.
+    let with_exchange = model.with_evidence(_, [captured.ref])
+    use exchange <- result.try(
+      parse(captured.body) |> result.map_error(with_exchange),
+    )
+    use extraction <- result.try(
+      answer_of(exchange) |> result.map_error(with_exchange),
+    )
     Ok(
       Recommendation(
         output: configuration.interpret(context, extraction),

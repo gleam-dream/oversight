@@ -10,6 +10,7 @@ import clinic_registration/scripted.{type Services}
 import clinic_registration/store
 import decisions
 import decisions/occurrence.{type Occurrence}
+import decisions_postgres
 import decisions_postgres/queue
 import envoy
 import gleam/bit_array
@@ -23,6 +24,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
+import gleam/time/duration
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
@@ -356,4 +358,48 @@ pub fn registrations(env: Env) -> Int {
 /// A number as text.
 pub fn show(n: Int) -> String {
   int.to_string(n)
+}
+
+/// The same clinic `minutes` later: the application restarts with its
+/// store's clock that much ahead, and the wake-ups due by then (the end of
+/// an undo window, an escalation) are delivered through the wake worker's
+/// own code path. Returns the restarted environment and how many were
+/// delivered.
+pub fn later(env: Env, minutes: Int) -> #(Env, Int) {
+  let later =
+    restart(env, fn(config) {
+      app.Config(..config, clock_offset: duration.minutes(minutes))
+    })
+  let assert Ok(delivered) =
+    decisions_postgres.deliver_due(
+      later.app.records,
+      later.app.db,
+      [decisions.waker(later.app.desk)],
+      limit: 50,
+    )
+  #(later, delivered)
+}
+
+/// Start the scripted providers and a fresh database, run `body` with an
+/// application booted on them, and stop whatever application `body`
+/// returns: for tests that restart the application.
+pub fn with_restarts(body: fn(Env) -> Env) -> Nil {
+  quiet_pool_shutdown()
+  let assert Ok(services) = scripted.start()
+  let first = boot(services, fresh_database(), fn(config) { config })
+  let last = body(first)
+  app.stop(last.app)
+  scripted.stop(services)
+}
+
+/// Run `body` on a pool of its own over `url`, closed afterwards.
+pub fn with_pool(url: String, body: fn(pog.Connection) -> a) -> Nil {
+  let assert Ok(config) = pog.url_config(process.new_name("clinic_side"), url)
+  let assert Ok(#(Nil, pool)) =
+    owner.start(fn() {
+      let assert Ok(started) = pog.start(pog.pool_size(config, 1))
+      let _ = body(started.data)
+      Ok(Nil)
+    })
+  owner.stop(pool)
 }

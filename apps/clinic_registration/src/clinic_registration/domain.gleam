@@ -216,14 +216,16 @@ pub fn consent() -> fact.Key(Bool) {
 
 /// The decision point: a registration may be approved, rejected or
 /// corrected; a recommendation is valid for 24 hours; a newer message from
-/// the same contact supersedes a waiting one; the manager reviews the
-/// sampled registrations the policy let proceed.
+/// the same contact supersedes one not yet released; reception may take
+/// back a registration the policy let proceed while it is held; the
+/// manager reviews the sampled ones after release.
 pub fn point() -> decisions.Point(Registration) {
   decisions.point(point_name, wire.codec(registration_codec()))
   |> decisions.allowing(ApproveRejectOrCorrect)
   |> decisions.valid_for(duration.hours(24))
   |> decisions.superseded_by(newer_message)
   |> decisions.reviewed_by(manager)
+  |> decisions.withdrawn_by(reception)
   |> decisions.fact(consent(), fn(registration: Registration) {
     registration.consent
   })
@@ -231,6 +233,13 @@ pub fn point() -> decisions.Point(Registration) {
   |> decisions.signal(missing_fields())
   |> decisions.signal(insurer_accepted())
   |> decisions.signal(similar_patient())
+}
+
+/// How long a registration the policy lets proceed is held before the
+/// patient row is written. Reception may withdraw it meanwhile, and a newer
+/// message from the contact supersedes it.
+pub fn undo_window() -> duration.Duration {
+  duration.minutes(10)
 }
 
 /// After 30 minutes without a verdict, anyone at reception or the manager
@@ -252,8 +261,9 @@ pub fn always_ask() -> Policy {
 }
 
 /// Version 2: a confident, complete, consented registration with an
-/// accepted insurer and no similar patient proceeds, and one in five of
-/// those is sampled for a review after the fact. A possible duplicate asks
+/// accepted insurer and no similar patient proceeds after a 10-minute undo
+/// window (`undo_window`) in which reception may take it back, and one in
+/// five of those is sampled for a review after the fact. A possible duplicate asks
 /// the manager. Anything else asks reception.
 pub fn proceed_when_sure() -> Policy {
   Policy(
@@ -267,7 +277,7 @@ pub fn proceed_when_sure() -> Policy {
           policy.is(similar_patient(), False),
           policy.is(consent(), True),
         ]),
-        Proceed(PerCent(20)),
+        Proceed(sample: PerCent(20), hold: Some(undo_window())),
       ),
       escalation(),
       When(policy.is(similar_patient(), True), Ask(AnyoneHolding(manager))),

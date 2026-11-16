@@ -8,18 +8,20 @@
 import clinic_registration/app
 import clinic_registration/desk
 import clinic_registration/domain
+import clinic_registration/jobs
 import clinic_registration/scripted
 import clinic_registration/store
 import clinic_registration/telemetry
 import decisions
 import decisions/occurrence
 import decisions/policy.{AnyoneHolding, Ask, Never, Policy, Proceed, When}
-import decisions/vocabulary.{DeadlinePassed, Flag, Performed}
+import decisions/vocabulary.{DeadlinePassed, Flag, Performed, Superseded}
 import decisions_postgres
 import gleam/dynamic/decode
+import gleam/erlang/process
 import gleam/http
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/time/duration
 import pog
 import support
@@ -29,7 +31,12 @@ pub fn a_policy_version_is_checked_before_it_is_stored_test() {
   let misspelt =
     Policy(
       version: 3,
-      rules: [When(policy.AtLeast("confidense", 0.9), Proceed(Never))],
+      rules: [
+        When(
+          policy.AtLeast("confidense", 0.9),
+          Proceed(sample: Never, hold: None),
+        ),
+      ],
       otherwise: Ask(AnyoneHolding(domain.reception)),
     )
   let assert Error(desk.Unpublishable([policy.UndeclaredFact("confidense")])) =
@@ -37,7 +44,12 @@ pub fn a_policy_version_is_checked_before_it_is_stored_test() {
   let wrong_kind =
     Policy(
       version: 3,
-      rules: [When(policy.Is("confidence", Flag(True)), Proceed(Never))],
+      rules: [
+        When(
+          policy.Is("confidence", Flag(True)),
+          Proceed(sample: Never, hold: None),
+        ),
+      ],
       otherwise: Ask(AnyoneHolding(domain.reception)),
     )
   let assert Error(desk.Unpublishable([policy.WrongKind(fact: "confidence", ..)])) =
@@ -49,34 +61,21 @@ pub fn a_policy_version_is_checked_before_it_is_stored_test() {
   assert store.policy_versions(env.app.db, domain.point_name) == Ok([1, 2])
 }
 
-pub fn version_2_lets_a_sure_registration_proceed_test() {
-  use env <- support.with_app(fn(config) { config })
+pub fn version_2_lets_a_sure_registration_proceed_after_its_undo_window_test() {
+  use env <- support.with_restarts
   let assert Ok(Nil) = desk.publish(env.app.db, domain.proceed_when_sure())
 
-  // Sure, complete, consented, accepted insurer, nobody similar.
+  // Sure, complete, consented, accepted insurer, nobody similar: the
+  // policy accepts it and holds it for the undo window.
   let sure = support.phone()
   scripted.script(env.services, sure, [
     scripted.Answer(support.ana_answer(sure)),
   ])
   let message = support.message(sure, "Ana", support.ana_says)
   let assert Ok(_) = app.admit(env.app, message)
-  let released = support.await_status(env, message.id, "released")
-  assert released.policy_version == Some(2)
-  let assert occurrence.Released(by: occurrence.ByPolicy(2), ..) =
-    released.status
-  let assert Ok([patient]) = store.patients_with_phone(env.app.db, sure)
-  assert patient.registered_by == "policy v2"
-  assert support.eventually(5000, fn() {
-    case support.read(env, message.id) {
-      Ok(known) ->
-        case occurrence.effect(known) {
-          Some(Performed(_)) -> True
-          _ -> False
-        }
-      _ -> False
-    }
-  })
-
+  let held = support.await_status(env, message.id, "held")
+  assert held.policy_version == Some(2)
+  assert store.patients_with_phone(env.app.db, sure) == Ok([])
   // Unsure: reception decides.
   let unsure = support.phone()
   scripted.script(env.services, unsure, [
@@ -108,6 +107,103 @@ pub fn version_2_lets_a_sure_registration_proceed_test() {
   let waiting =
     support.arrive(env, support.message(other, "Carla", "Quero marcar."))
   let assert occurrence.Awaiting(AnyoneHolding("reception")) = waiting.status
+
+  // Eleven minutes later the undo window has ended: the registration is
+  // released by the policy, the patient row is written, Ana is told.
+  let #(env, delivered) = support.later(env, 11)
+  assert delivered >= 1
+  let released = support.await_status(env, message.id, "released")
+  let assert occurrence.Released(by: occurrence.ByPolicy(2), ..) =
+    released.status
+  let assert Ok([patient]) = store.patients_with_phone(env.app.db, sure)
+  assert patient.registered_by == "policy v2"
+  assert support.eventually(5000, fn() {
+    case support.read(env, message.id) {
+      Ok(known) ->
+        case occurrence.effect(known) {
+          Some(Performed(_)) -> True
+          _ -> False
+        }
+      _ -> False
+    }
+  })
+  env
+}
+
+pub fn reception_takes_back_a_registration_during_its_undo_window_test() {
+  use env <- support.with_restarts
+  let assert Ok(Nil) = desk.publish(env.app.db, domain.proceed_when_sure())
+  let phone = support.phone()
+  scripted.script(env.services, phone, [
+    scripted.Answer(support.ana_answer(phone)),
+  ])
+  let message = support.message(phone, "Ana", support.ana_says)
+  let assert Ok(_) = app.admit(env.app, message)
+  let held = support.await_status(env, message.id, "held")
+
+  // A manager may not; reception may.
+  let refused =
+    support.call(
+      env,
+      http.Post,
+      "/cards/" <> held.id <> "/withdraw",
+      support.marta,
+      "",
+    )
+  assert refused.status == 403
+  let withdrawn =
+    support.call(
+      env,
+      http.Post,
+      "/cards/" <> held.id <> "/withdraw",
+      support.felipe,
+      "",
+    )
+  assert withdrawn.status == 200
+  assert support.field(withdrawn.body, ["status"], decode.string) == "withdrawn"
+
+  // After the window nothing is released, written or sent.
+  let #(env, _) = support.later(env, 11)
+  assert support.status_of(env, message.id) == "withdrawn"
+  assert store.patients_with_phone(env.app.db, phone) == Ok([])
+  process.sleep(300)
+  assert !list.any(scripted.sent(env.services), fn(sent) { sent.to == phone })
+  env
+}
+
+pub fn a_newer_message_supersedes_a_held_registration_test() {
+  use env <- support.with_restarts
+  let assert Ok(Nil) = desk.publish(env.app.db, domain.proceed_when_sure())
+  let phone = support.phone()
+  scripted.script(env.services, phone, [
+    scripted.Answer(support.ana_answer(phone)),
+    scripted.Answer(scripted.extraction(
+      name: "Ana Souza",
+      birth_date: Some("1990-04-12"),
+      phone:,
+      insurer: Some("Unimed"),
+      plan: Some("Unimed Flex"),
+      confidence: 0.5,
+    )),
+  ])
+  let first = support.message(phone, "Ana", support.ana_says)
+  let assert Ok(_) = app.admit(env.app, first)
+  let held = support.await_status(env, first.id, "held")
+
+  // Ana writes again during the undo window: the held registration is
+  // superseded, and the new message is registered on its own.
+  let second = support.message(phone, "Ana", "Na verdade é Unimed Nacional.")
+  let assert Ok(jobs.Admitted(superseded:)) = app.admit(env.app, second)
+  assert list.contains(superseded, held.id)
+  let assert Ok(expired) = support.read(env, first.id)
+  assert expired.status == occurrence.Expired(Superseded(domain.newer_message))
+  let _ = support.await_status(env, second.id, "awaiting")
+
+  // After the window nothing of the first registration is released.
+  let #(env, _) = support.later(env, 11)
+  assert support.status_of(env, first.id) == "expired"
+  assert store.patients_with_phone(env.app.db, phone) == Ok([])
+  env
 }
 
 pub fn a_possible_duplicate_asks_the_manager_test() {

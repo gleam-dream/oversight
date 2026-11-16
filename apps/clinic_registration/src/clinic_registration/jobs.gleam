@@ -1,14 +1,15 @@
 //// The work that runs outside a request, as Grind jobs.
 ////
-//// - `admit` keeps an inbound message, supersedes the contact's waiting
-////   recommendation, and admits a `clinic.register` job in the same
+//// - `admit` keeps an inbound message, supersedes what the contact's earlier
+////   messages started, records that this message expects a registration
+////   (`decisions.expect`), and admits a `clinic.register` job, all in one
 ////   transaction. A redelivered message admits nothing.
 //// - `clinic.register` runs the model outside any transaction, with a
-////   deadline (`decisions_otp/isolated`). Inside the recommending
-////   transaction it checks that the message is still the contact's latest
-////   (`isolated.recommend_when`) and recommends under the message's key;
-////   when the model failed, it records the failed attempt in a transaction
-////   of its own and lets Grind retry.
+////   deadline, and recommends under the message's key, or records the
+////   failed attempt (pointing at the provider exchange when there was one)
+////   and lets Grind retry (`decisions_otp/isolated.recommend`). A newer
+////   message that superseded the key in between makes the record refuse
+////   both, and the job ends done.
 //// - The settlement follower admits a `clinic.confirm` job for a released
 ////   registration, in the transaction that delivers the settlement notice.
 //// - `clinic.confirm` sends Ana her confirmation under the release key and
@@ -26,7 +27,6 @@ import clinic_registration/telemetry
 import decisions.{type Desk, type Refusal}
 import decisions/model
 import decisions/occurrence
-import decisions/store as port
 import decisions/vocabulary.{NotPerformed, Performed, Ref, Uncertain}
 import decisions_otp/isolated
 import decisions_postgres
@@ -72,11 +72,20 @@ pub type Env {
 
 // -- Admission -------------------------------------------------------------------
 
+/// Why the admission's transaction rolled back.
+type Unadmitted {
+  /// The channel delivered this message before.
+  Redelivered
+  /// A verb, the store or Grind failed, contention included.
+  NotAdmitted(reason: String)
+}
+
 /// What `admit` did with a message.
 pub type Admission {
-  /// The message is new: it is kept, the contact's waiting recommendations
-  /// are superseded (their ids are listed), and a registration job is
-  /// admitted.
+  /// The message is new: it is kept, the contact's registrations not yet
+  /// released (waiting, held, or still expected) are superseded (their ids
+  /// are listed), its own registration is expected, and a registration job
+  /// is admitted.
   Admitted(superseded: List(String))
   /// The channel delivered this message before; nothing changed.
   Duplicate
@@ -84,57 +93,88 @@ pub type Admission {
 
 /// The trigger. Safe to call again with the same message: the message's id
 /// is its key, and the job's id is derived from it.
+///
+/// One transaction supersedes what the contact's earlier messages started
+/// (`happened`), keeps the message, records that a recommendation is
+/// expected for it (`expect`, after `happened`, so a message does not
+/// supersede its own), and admits the job. A model call for an older
+/// message that finishes later is then refused by the record
+/// (`SupersededBefore`) and writes nothing. The library serialises
+/// admissions about one contact: `happened` takes its lock on the contact
+/// first. Keeping the message after that lock makes the message kept
+/// second the one admitted second, so its conversation holds the first.
+/// A redelivered message rolls the transaction back, supersession
+/// included, and admits nothing.
 pub fn admit(
   env: Env,
   db: pog.Connection,
   message: Inbound,
   register: Worker(String, String, String),
 ) -> Result(Admission, String) {
-  pog.transaction(db, fn(tx) {
-    use Nil <- result.try(
-      store.lock_contact(tx, message.contact)
-      |> result.map_error(store.describe),
-    )
-    use new <- result.try(
-      store.insert_message(tx, message) |> result.map_error(store.describe),
-    )
-    case new {
-      False -> Ok(Duplicate)
-      True -> {
-        use superseded <- result.try(
-          decisions.happened(
-            env.desk,
-            tx,
-            domain.newer_message,
-            about: domain.subject(message.contact),
-          )
-          |> result.map_error(decisions.describe),
+  let ran =
+    pog.transaction(db, fn(tx) {
+      use superseded <- result.try(
+        decisions.happened(
+          env.desk,
+          tx,
+          domain.newer_message,
+          about: domain.subject(message.contact),
         )
-        use _ <- result.try(
-          grind.submit_in(
-            env.jobs,
-            tx,
-            job.new(register, message.id)
-              // Keys built from the channel's id are bounded
-              // (`domain.bounded`): the store refuses an occurrence id over
-              // 255 bytes.
-              |> job.with_id("register:" <> domain.bounded(message.id))
-              |> job.with_correlation(
-                correlation.from_key(domain.key(message.id)),
-              ),
-          )
-          |> result.map_error(grind.describe_submit_error),
+        |> result.map_error(fn(refusal) {
+          NotAdmitted(decisions.describe(refusal))
+        }),
+      )
+      use new <- result.try(
+        store.insert_message(tx, message)
+        |> result.map_error(fn(error) { NotAdmitted(store.describe(error)) }),
+      )
+      use Nil <- result.try(case new {
+        True -> Ok(Nil)
+        False -> Error(Redelivered)
+      })
+      use Nil <- result.try(
+        decisions.expect(
+          env.desk,
+          tx,
+          key: domain.key(message.id),
+          trigger: domain.trigger(message.id),
+          about: domain.subject(message.contact),
         )
-        Ok(Admitted(list.map(superseded.expired, fn(known) { known.id })))
-      }
-    }
-  })
-  |> result.map_error(fn(error) {
-    case error {
-      pog.TransactionRolledBack(reason) -> reason
-      pog.TransactionQueryError(error) -> store.describe(error)
-    }
-  })
+        |> result.map_error(fn(refusal) {
+          NotAdmitted(decisions.describe(refusal))
+        }),
+      )
+      use _ <- result.try(
+        grind.submit_in(
+          env.jobs,
+          tx,
+          job.new(register, message.id)
+            // Keys built from the channel's id are bounded
+            // (`domain.bounded`): the store refuses an occurrence id over
+            // 255 bytes.
+            |> job.with_id("register:" <> domain.bounded(message.id))
+            |> job.with_correlation(
+              correlation.from_key(domain.key(message.id)),
+            ),
+        )
+        |> result.map_error(fn(error) {
+          NotAdmitted(grind.describe_submit_error(error))
+        }),
+      )
+      Ok(
+        Admitted(list.append(
+          list.map(superseded.expired, fn(known) { known.id }),
+          superseded.not_begun,
+        )),
+      )
+    })
+  case ran {
+    Ok(admission) -> Ok(admission)
+    Error(pog.TransactionRolledBack(Redelivered)) -> Ok(Duplicate)
+    // Nothing was kept: the channel delivers the message again.
+    Error(pog.TransactionRolledBack(NotAdmitted(reason))) -> Error(reason)
+    Error(pog.TransactionQueryError(error)) -> Error(store.describe(error))
+  }
   |> result.map(fn(admission) {
     telemetry.emit(
       telemetry.admitted(),
@@ -184,15 +224,15 @@ pub fn register(
     Error(error) -> worker.Failed(store.describe(error))
     Ok(None) -> worker.Discarded("no message " <> message_id)
     Ok(Some(message)) ->
-      case decisions.read(env.desk, db, key) {
-        Ok(_) -> worker.Succeeded("recommended by an earlier delivery")
-        Error(decisions.UnknownOccurrence)
-        | Error(decisions.NotRecommended(_)) ->
-          case store.is_latest(db, message_id) {
-            Error(error) -> worker.Failed(store.describe(error))
-            Ok(False) -> worker.Succeeded("a newer message supersedes it")
-            Ok(True) -> attempt(env, db, message, key)
-          }
+      // A delivery after the recommendation, or after a newer message
+      // superseded the key, has nothing to do; the record says which.
+      case decisions.read_record(env.desk, db, key:) {
+        Ok(decisions.Begun(_)) ->
+          worker.Succeeded("recommended by an earlier delivery")
+        Ok(decisions.NotBegun(occurrence.Pending(superseded: Some(_), ..))) ->
+          worker.Succeeded("a newer message superseded it")
+        Ok(decisions.NotBegun(_)) | Error(decisions.UnknownOccurrence) ->
+          attempt(env, db, message, key)
         Error(refusal) -> refused(refusal)
       }
   }
@@ -233,9 +273,9 @@ fn attempt(
     ))
     |> after_answer(env.after_model, message.id)
   let attempted =
-    isolated.recommend_when(
+    isolated.recommend(
       env.desk,
-      in: in_transaction(db, _),
+      in: decisions_postgres.refusing(db, _),
       request: isolated.Request(
         source: "clinic_registration",
         key:,
@@ -245,10 +285,6 @@ fn attempt(
         sources: llm.sources(db),
       ),
       model: chosen,
-      // The superseding window of `decisions.happened`: the contact's lock
-      // serialises this transaction with `admit`, and only the latest
-      // message recommends.
-      holds: fn(tx) { still_latest(tx, message) },
     )
   case attempted {
     Ok(isolated.Recommended(known)) -> {
@@ -262,13 +298,12 @@ fn attempt(
       )
       worker.Succeeded(occurrence.status_name(known.status))
     }
-    Ok(isolated.Skipped(reason)) ->
-      // The check also fails when the store does: the message is then
-      // still the latest, and the job is delivered again.
-      case store.is_latest(db, message.id) {
-        Ok(False) -> worker.Succeeded(reason)
-        _ -> worker.Failed(reason)
-      }
+    // A newer message superseded the key before this answer arrived: the
+    // record refused it and nothing was written.
+    Ok(isolated.Superseded(event:)) ->
+      worker.Succeeded("superseded by " <> event)
+    // Only `recommend_when` skips.
+    Ok(isolated.Skipped(reason)) -> worker.Succeeded(reason)
     Ok(isolated.Failed(failure:, attempts:)) -> {
       let retry =
         model.retryable(failure) && list.length(attempts) < env.max_attempts
@@ -288,34 +323,6 @@ fn attempt(
     }
     Error(refusal) -> refused(refusal)
   }
-}
-
-fn still_latest(tx: pog.Connection, message: Inbound) -> Result(Nil, String) {
-  use Nil <- result.try(
-    store.lock_contact(tx, message.contact) |> result.map_error(store.describe),
-  )
-  case store.is_latest(tx, message.id) {
-    Ok(True) -> Ok(Nil)
-    Ok(False) -> Error("a newer message supersedes it")
-    Error(error) -> Error(store.describe(error))
-  }
-}
-
-/// `isolated.recommend_when` runs its steps through a transaction whose
-/// failure is a `Refusal`; a query error of the transaction itself is an
-/// unavailable store.
-fn in_transaction(
-  db: pog.Connection,
-  body: fn(pog.Connection) -> Result(a, Refusal),
-) -> Result(a, Refusal) {
-  pog.transaction(db, body)
-  |> result.map_error(fn(error) {
-    case error {
-      pog.TransactionRolledBack(refusal) -> refusal
-      pog.TransactionQueryError(error) ->
-        decisions.StoreFailed(port.Unavailable(store.describe(error)))
-    }
-  })
 }
 
 /// The model, followed by `hook` once it has answered.
@@ -466,18 +473,21 @@ pub fn describe_effect(effect: vocabulary.Effect) -> String {
 
 /// What follows a settled registration: a released one gets a confirmation
 /// job, admitted in the transaction that delivers the settlement notice. A
-/// rejected, expired or refused one needs nothing here.
+/// rejected, expired, withdrawn or refused one needs nothing here.
 pub fn follower(
   env: Env,
   confirm: Worker(Confirmation, String, String),
 ) -> decisions_postgres.Follower {
   #(domain.point_name, fn(tx, id) {
+    // A notice for a record superseded before it began reads as
+    // `SupersededBefore`; returned as the desk's refusal, the notice ends
+    // delivered.
     use known <- result.try(
       decisions.read(env.desk, tx, occurrence: id)
       |> result.map_error(decisions.DeskRefused),
     )
-    case known.status {
-      occurrence.Released(final:, key:, ..) ->
+    case occurrence.account(known) {
+      occurrence.Done(final:, key:, ..) ->
         grind.submit_in(
           env.jobs,
           tx,
