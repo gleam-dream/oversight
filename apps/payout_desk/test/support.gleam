@@ -31,7 +31,7 @@ pub fn unique() -> Int {
 }
 
 /// Settings for a test: a schema of its own, a provider of its own, and a
-/// policy hold short enough to wait out.
+/// policy version 1 whose undo window is short enough to wait out.
 pub fn settings(name: String) -> Settings {
   let assert Ok(url) = app.database_url()
   let assert Ok(provider) = provider.start()

@@ -48,7 +48,7 @@ pub fn the_trap_an_expired_approval_never_tells_the_seller_done_test() {
       running.deps.runs,
       running.deps.agent,
       session,
-      payout_agent.run_id("r-trap"),
+      payout_agent.run_id("r-trap", 0),
     )
   let assert Ok(payout_agent.Answered(reply)) =
     payout_agent.settle(handle, duration.seconds(10))

@@ -5,19 +5,23 @@
 
 A marketplace pays its sellers. A Fabric support agent investigates a seller's
 request after a disputed order and proposes a payout, and its `propose_payout` tool
-call is a `decisions` decision point: the call pays nothing; it is admitted at the
-`payout` point under the call's run and action, with the reads the model received.
-A versioned policy lets a small payout the seller's dispute won proceed, held for a few
-minutes during which finance may withdraw it; asks someone in finance other than the
+call is a `decisions` decision point: the call pays nothing. The request is expected
+at the `payout` point under its own key when it is admitted, and the call is admitted
+under that key, with the reads the model received. A versioned policy lets a small
+payout the seller's dispute won proceed after an undo window stated in the policy rule,
+during which finance may withdraw it; asks someone in finance other than the
 person who asked for the rest; asks two from finance from 500.00, and after an hour two
 from finance or one from the head of finance; and consults a second point, `risk`, for a
-seller with recent chargebacks. A release check compares the amount with the seller's
+seller with recent chargebacks. Suspending a seller's account supersedes every payout to
+them not yet released: expected, waiting for finance, or held. A release check compares the amount with the seller's
 balance and records the balance it compared.
 Finance decides from its own assistant through three typed MCP tools served by Relay
 behind Hellhound bearer verification; the card they open is `decisions/view`'s
 document, served with its own codec. The released payout runs as a durable Saga
 (reserve, pay, post) delivered by Grind, the provider's answer is reported to the
-record, and the parked agent run is resumed with what really happened.
+record, and the parked agent run is resumed with what really happened. A payout
+superseded before the agent proposed is never resumed: its agent is not driven, or, if
+it was already working, its parked run is cancelled; the seller is told it was stopped.
 
 The model is a scripted Fabric model and the payment provider is a scripted actor,
 both in process. The decision record (`decisions_postgres`), Grind, Saga and Fabric
@@ -33,15 +37,19 @@ From this directory, inside the Oversight shell:
 ```
 
 `gleam run` walks Dora's payout from her request to the provider's receipt and prints
-the card as finance sees it. The tests cover the failure paths: a tool call delivered
-twice, two validators approving at once, a card shown before a correction, a worker
+the card as finance sees it. The tests cover the failure paths: a request's agent job
+driven twice at once and the request submitted again, admitting one payout, two validators approving at once, a card shown before a correction, a worker
 killed after the provider answered, a guard that lost its connection at a hold's
 wake-up, a restart after a wake-up's job was lost, a restart with an escalation
-pending, a provider that times out, withdrawing during the hold and after it, and an
-agent whose approval expired before anyone decided.
+pending, a provider that times out, withdrawing during the hold and after it, a
+suspension before and after the agent proposed, a failed agent run retried under the
+same record, and an agent whose approval expired before anyone decided.
 
 The [composition contract](../../docs/design/design-layer.pdf) describes the
 payout desk. [ADR 0035](../../docs/adr/0035-answer-a-gated-agent-call-from-the-decision-point.md)
 records why the decision point, not Fabric's approval expiry, answers the agent's
 call, and [ADR 0034](../../docs/adr/0034-consume-the-decisions-packages-by-path-until-published.md)
-why the `decisions` packages resolve by path.
+why the `decisions` packages resolve by path, and
+[ADR 0037](../../docs/adr/0037-expect-recommendations-at-admission-and-key-payouts-by-request.md)
+why a payout is expected when its request is admitted and keyed by the request, why a
+failed agent run is retried in a fresh run, and how a suspension supersedes it.

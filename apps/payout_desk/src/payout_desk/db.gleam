@@ -110,6 +110,18 @@ pub fn put_seller(
   |> exec(db, _)
 }
 
+/// Set a seller's account status: `active` or `suspended`.
+pub fn set_seller_status(
+  db: pog.Connection,
+  id: String,
+  status: String,
+) -> Result(Nil, DbError) {
+  pog.query("UPDATE sellers SET status = $2 WHERE id = $1")
+  |> pog.parameter(pog.text(id))
+  |> pog.parameter(pog.text(status))
+  |> exec(db, _)
+}
+
 pub fn put_order(db: pog.Connection, order: Order) -> Result(Nil, DbError) {
   pog.query(
     "INSERT INTO orders (id, seller, total_cents, status) VALUES ($1, $2, $3, $4)

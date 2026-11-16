@@ -11,7 +11,6 @@ import decisions/view
 import decisions/vocabulary.{Approve, Performed, Subject, Uncertain}
 import decisions_postgres
 import decisions_postgres/queue
-import fabric/run
 import gleam/erlang/process
 import gleam/int
 import gleam/list
@@ -19,7 +18,6 @@ import gleam/option.{Some}
 import gleam/string
 import gleam/time/duration
 import grind/worker
-import payout_desk/agent as payout_agent
 import payout_desk/app
 import payout_desk/auth
 import payout_desk/db
@@ -37,7 +35,7 @@ fn payouts_of_dora(running: app.App) -> Int {
   list.count(about, fn(summary) { summary.point == "payout" })
 }
 
-pub fn a_tool_call_delivered_twice_admits_one_payout_test() {
+pub fn a_request_driven_twice_admits_one_payout_test() {
   use running <- support.with_app("twice", fn(s) { s })
   let id = support.ask(running, "r-twice", "O-2001", "partial", 8000)
   // The same request driven again, twice at once: the run is found by the
@@ -316,23 +314,14 @@ pub fn withdraw_during_the_hold_and_after_it_test() {
   assert told.outcome == "paid"
 }
 
-pub fn a_call_key_stays_within_the_store_bounds_test() {
-  let parked = fn(call_id: String) {
-    payout_agent.Parked(
-      run: "payout-r-1",
-      action: "2." <> call_id,
-      reference: run.ApprovalRef(
-        run: payout_agent.run_id("r-1"),
-        id: run.ActionId(turn: 2, call_id:),
-        requirement: payout_agent.requirement,
-        revision: 1,
-      ),
-      arguments_json: "{}",
+pub fn a_request_key_stays_within_the_store_bounds_test() {
+  let longest = string.repeat("r", jobs.max_request_id_bytes)
+  assert string.byte_size("release:" <> jobs.request_key(longest)) <= 255
+  use running <- support.with_app("key_bound", fn(s) { s })
+  let assert Error("a request id is at most 64 bytes") =
+    app.request(
+      running,
+      world.request(longest <> "r", "O-2011"),
+      requested_by: "fiona",
     )
-  }
-  assert jobs.call_key(parked("p1")) == "payout:payout-r-1/2.p1"
-  let long = string.repeat("x", 1000)
-  let key = jobs.call_key(parked(long))
-  assert string.byte_size("release:" <> key) <= 255
-  assert key != jobs.call_key(parked(long <> "y"))
 }

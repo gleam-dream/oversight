@@ -22,7 +22,8 @@ import payout_desk/domain.{type Payout, Payout}
 import payout_desk/reads
 import pog
 
-/// What finance did with the agent's proposals.
+/// What finance did with the agent's proposals, and how requests fared
+/// before there was one.
 pub type Summary {
   Summary(
     /// Agreement as `decisions/learning` counts it: of the payouts people
@@ -31,29 +32,47 @@ pub type Summary {
     /// Payouts where finance lowered the amount. The tally counts the
     /// rejections (`tally.rejected`).
     lowered: Int,
+    /// Requests expected a payout; of those, how many a newer event
+    /// superseded before the agent proposed, and how many still wait for
+    /// one (an agent in flight, or one that failed for good).
+    coverage: learning.Coverage,
   )
 }
 
-/// Every recorded payout, read through its desk.
-pub fn recorded(
+/// Every payout record, whether or not its agent proposed.
+pub fn records(
   db: pog.Connection,
   desk: decisions.Desk(Payout, pog.Connection),
-) -> Result(List(Occurrence(Payout)), String) {
+) -> Result(List(decisions.Record(Payout)), String) {
   decisions_postgres.transaction(db, fn(tx) {
     use ids <- result.try(
       decisions_postgres.inspection().occurrences(tx, domain.payout_point_name)
       |> result.map_error(decisions.StoreFailed),
     )
     list.sort(ids, string.compare)
-    |> list.try_map(fn(id) { decisions.read(desk, tx, occurrence: id) })
+    |> list.try_map(fn(id) { decisions.read_record(desk, tx, key: id) })
   })
   |> result.map_error(decisions_postgres.describe)
 }
 
-pub fn summary(known: List(Occurrence(Payout))) -> Summary {
+/// The payouts the agent proposed, among `records`.
+pub fn begun(
+  records: List(decisions.Record(Payout)),
+) -> List(Occurrence(Payout)) {
+  list.filter_map(records, fn(record) {
+    case record {
+      decisions.Begun(known) -> Ok(known)
+      decisions.NotBegun(_) -> Error(Nil)
+    }
+  })
+}
+
+pub fn summary(records: List(decisions.Record(Payout))) -> Summary {
+  let known = begun(records)
   Summary(
     tally: learning.tally(known) |> learning.total,
     lowered: list.count(known, lowered),
+    coverage: learning.coverage(records),
   )
 }
 

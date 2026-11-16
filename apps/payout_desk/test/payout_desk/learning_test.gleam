@@ -22,14 +22,18 @@ pub fn finance_decisions_are_tallied_and_replayed_test() {
   let assert Ok(_) =
     support.decide(running, rejected, "carl", Reject(Reason("buyer_won", None)))
 
-  let assert Ok(known) = review.recorded(running.db, app.payout_desk(running))
-  let summary = review.summary(known)
+  let assert Ok(records) = review.records(running.db, app.payout_desk(running))
+  let summary = review.summary(records)
+  let known = review.begun(records)
   // Finance let two through, one as proposed; it lowered one and rejected
   // one, which lets nothing through and so is not judged.
   assert summary.tally.judged == 2
   assert summary.tally.agreed == 1
   assert summary.lowered == 1
   assert summary.tally.rejected == 1
+  // Every request expected its payout, and each became one.
+  assert summary.coverage
+    == learning.Coverage(expected: 3, superseded_before: 0, still_expected: 0)
 
   let #(examples, missing) = review.export(running.db, known)
   assert missing == []
