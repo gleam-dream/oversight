@@ -16,7 +16,7 @@
     pending-entry(title: "A composed request budget needs explicit cleanup", kind: "ruling", since: "2026-10-06")[Relay owns one admitted request deadline and a separate bounded cleanup interval; its package design owns implementation acceptance. Saga driver timeout is followed by bounded synchronous cleanup. A composed foreground deadline must reserve admission, execution, cancellation grace, and cleanup rather than assigning the same duration to every phase.],
     pending-entry(title: "External schema breadth must be explicit", kind: "ruling", since: "2026-10-06")[Blueprint admits a finite runtime schema profile. General third-party MCP discovery requires a chosen supported vocabulary, bounded validation, and safe provider projection; sibling-to-sibling discovery alone does not establish that breadth.],
     pending-entry(title: "Durable scheduling integration remains application-owned", kind: "ruling", since: "2026-10-06")[Applications drive and cancel durable Saga and Fabric work through Grind jobs. The intended broader scheduling and retention integration requires a decision about authority before any common driver abstraction is introduced. See #adr(4).],
-    pending-entry(title: "A gated agent call cannot end its run", kind: "ruling", since: "2026-11-15", adr: [#adr(35)])[Fabric has no tool outcome that ends a run, so a #term("term-gated-agent-call") keeps its run parked on an approval that never expires until the occurrence settles. A tool outcome that ends the run would let the occurrence's outcome start a run of its own. The decision belongs to Fabric's maintainers.],
+    pending-entry(title: "The handover of a gated agent call is unreleased", kind: "ruling", since: "2026-11-16", adr: [#adr(39)])[Fabric's policy handover, which ends the run of a #term("term-gated-agent-call"), is not on Hex. `payout_desk` takes `fabric` and `fabric_postgres` from one Git commit until Fabric 0.3.0 is published, and then returns to a Hex requirement.],
     pending-entry(title: "Carried-over caller contracts are unchecked against code", kind: "verify", since: "2026-10-17")[The caller-contract, execution-boundary, protocol and observation sections state rules moved from retired Oversight guides. Each rule needs a comparison against the owning package source before the section counts as verified.],
   )
 
@@ -129,12 +129,12 @@
         [OTP runtime], [Supervised workers, sweeper and dispatcher over the in-memory store], [Everything; the store owner holds the record in memory],
       ))
       #behavior(title: "An agent's gated call is answered by the record", area: "Decision composition", level: "boundary")[
-        #given[An agent's gated call waits for a decision point.]
-        #when[The agent's run answers before the occurrence settles, for example because its approval expired.]
-        #then[Nothing is told to the customer while the occurrence is undecided.]
+        #given[An agent's gated call is handed over to a decision point, and the agent's run ends.]
+        #when[Time passes before the occurrence settles.]
+        #then[No approval waits to expire, the model takes no turn, and nothing is told to the customer while the occurrence is undecided.]
         #then[After the occurrence settles, the customer is told the outcome the record states; a reply that claims another outcome or amount is replaced by a message built from the record.]
       ]
-      #adr(33) #adr(35) #adr(37)
+      #adr(33) #adr(35) #adr(37) #adr(39)
     ]
   ])
 

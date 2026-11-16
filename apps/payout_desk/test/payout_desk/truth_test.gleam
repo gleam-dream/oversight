@@ -1,14 +1,17 @@
 //// Telling the agent and the seller the truth.
 ////
 //// The trap in the recipe's notes: an agent's approval request expires
-//// unanswered, Fabric rejects the call and gives the model its next turn,
-//// and a model that reads any answer as success tells the customer the
-//// payout is done. Here the approval never expires in production; and
-//// whatever the model says, the seller is sent only what the record says.
+//// unanswered, the agent library rejects the call and gives the model its
+//// next turn, and a model that reads any answer as success tells the
+//// customer the payout is done. Here the policy hands the proposal over and
+//// the run ends at once: no approval exists to expire, and no model turn
+//// happens between the handover and the decision. Whatever the follow-on
+//// run's model then says, the seller is sent only what the record says.
 
 import decisions/occurrence
 import decisions/vocabulary.{Approve}
 import fabric
+import fabric/model as fabric_model
 import fabric/run
 import gleam/erlang/process
 import gleam/list
@@ -17,6 +20,7 @@ import gleam/time/duration
 import payout_desk/agent.{Session} as payout_agent
 import payout_desk/app
 import payout_desk/db
+import payout_desk/domain
 import payout_desk/events
 import payout_desk/jobs
 import payout_desk/reads
@@ -24,18 +28,11 @@ import sinal
 import sinal/correlation
 import support
 
-pub fn the_trap_an_expired_approval_never_tells_the_seller_done_test() {
+pub fn the_trap_cannot_occur_no_approval_and_no_turn_after_the_handover_test() {
   use running <- support.with_app("trap", fn(s) {
-    app.Settings(
-      ..s,
-      script: payout_agent.Naive,
-      approval_expiry: run.After(duration.seconds(1)),
-    )
+    app.Settings(..s, script: payout_agent.Naive)
   })
   let id = support.ask(running, "r-trap", "O-4001", "partial", 8000)
-  process.sleep(1500)
-  // The approval expired. Whoever touches the run next rejects the call,
-  // and the run goes on: its model says the payout is done.
   let session =
     Session(
       request: "r-trap",
@@ -50,17 +47,50 @@ pub fn the_trap_an_expired_approval_never_tells_the_seller_done_test() {
       session,
       payout_agent.run_id("r-trap", 0),
     )
-  let assert Ok(payout_agent.Answered(reply)) =
-    payout_agent.settle(handle, duration.seconds(10))
-  assert reply.outcome == "paid"
-  assert reply.message == "Done, Dora: 80.00 is on its way."
-  // Nothing is sent on the strength of it: the record says no one decided.
+  // The run ended when its policy handed the proposal over: the call never
+  // ran, and no approval exists to answer or expire.
+  let assert Ok(snapshot) = fabric.snapshot(handle)
+  let assert run.Finished(run.HandedOver(tool: "propose_payout", ..)) =
+    snapshot.status
+  assert fabric.pending(handle) == Ok([])
+  let assert Ok(proposal) =
+    list.find(snapshot.actions, fn(a) { a.call.name == payout_agent.propose })
+  let assert run.Handover(_) = proposal.state
+  // The model took two turns, the reads and the proposal, and the
+  // transcript ends with the proposal: no result, no turn after it.
+  assert snapshot.turns_used == 2
+  let assert Ok(fabric_model.AssistantMessage(last)) =
+    list.last(snapshot.transcript)
+  assert list.map(last.calls, fn(c) { c.name }) == [payout_agent.propose]
+  // Time passes, longer than the one-second expiry the trap needed, and
+  // recovering the run changes nothing: an ended run takes no turn.
+  process.sleep(1500)
+  let assert Ok(recovered) =
+    fabric.recover(
+      running.deps.runs,
+      running.deps.agent,
+      session,
+      payout_agent.run_id("r-trap", 0),
+    )
+  let assert Ok(run.Finished(run.HandedOver(..))) =
+    fabric.await(recovered, within: duration.seconds(1))
+  let assert Ok(later) = fabric.snapshot(recovered)
+  assert later.turns_used == 2
+  assert later.transcript == snapshot.transcript
+  // Nothing is told while the record waits, and no follow-on run exists.
   let known = support.read(running, id)
   let assert occurrence.Awaiting(_) = known.status
-  assert jobs.deliver(running.db, known, Some(reply)) == Error(jobs.NotKnownYet)
   assert db.told(running.db, id) == Ok(None)
-  // Finance corrects it later. The seller is sent what the record says,
-  // and the model's claim is kept beside it for review.
+  let assert Error(_) =
+    fabric.open(
+      running.deps.runs,
+      running.deps.agent,
+      session,
+      payout_agent.follow_on_id("r-trap"),
+    )
+  // Finance corrects it. The follow-on run's model claims 80.00 was paid;
+  // the seller is sent what the record says, and the claim is kept beside
+  // it for review.
   let standing = occurrence.standing(known).0
   let assert Ok(_) =
     support.decide(running, id, "bia", support.corrected(6000)(standing))
@@ -70,6 +100,15 @@ pub fn the_trap_an_expired_approval_never_tells_the_seller_done_test() {
   assert told.message
     == "Dora, we paid you 60.00. Finance corrected the 80.00 we first proposed."
   assert told.agent_message == "Done, Dora: 80.00 is on its way."
+  // A model's claim read against the record before it stated the outcome
+  // is never delivered.
+  let claim =
+    domain.Reply(
+      outcome: "paid",
+      amount_cents: 8000,
+      message: "Done, Dora: 80.00 is on its way.",
+    )
+  assert jobs.deliver(running.db, known, Some(claim)) == Error(jobs.NotKnownYet)
 }
 
 pub fn every_stage_of_a_payout_is_announced_test() {

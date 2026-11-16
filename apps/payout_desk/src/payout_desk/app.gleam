@@ -17,17 +17,17 @@
 //// 5. Start the identity provider and the MCP listener.
 ////
 //// Fabric's store is `fabric_postgres`, as `research_agent` uses it, and
-//// not the in-memory store `support_desk` uses: a run here stays parked
-//// while people decide, for an hour or more, across restarts, and the job
-//// that resumes it may run on any node. Only a leased database store keeps
-//// the parked run and lets any node answer it.
+//// not the in-memory store `support_desk` uses: the run that handed a
+//// proposal over must stay readable while people decide, for an hour or
+//// more, across restarts, and the job that tells the outcome may run on any
+//// node. Only a database store keeps the handed-over run's transcript for
+//// the follow-on run, and lets any node continue from it.
 
 import decisions
 import decisions/store as decisions_store
 import decisions/vocabulary
 import decisions_postgres
 import envoy
-import fabric/run
 import fabric/store as fabric_store
 import fabric_postgres
 import gleam/erlang/process.{type Pid}
@@ -84,8 +84,6 @@ pub type Settings {
     /// `False`: nothing delivers jobs (a test that restarts the runtime).
     consumers: Bool,
     script: payout_agent.Script,
-    /// When the agent's approval request expires: never, in production.
-    approval_expiry: run.Timeout,
     provider_timeout_ms: Int,
     /// A fault point after the provider answered a payment, given the pay
     /// job's handler process.
@@ -95,8 +93,8 @@ pub type Settings {
     guard_fault: fn() -> Bool,
     /// A fault point: `True` makes the model's provider refuse a call.
     model_fault: fn() -> Bool,
-    /// A fault point after the agent's run parked on its proposal and
-    /// before the proposal is admitted.
+    /// A fault point after the agent's run handed its proposal over and
+    /// ended, and before the proposal is admitted.
     before_admit: fn() -> Nil,
   )
 }
@@ -116,7 +114,6 @@ pub fn settings(
     record_skew: duration.seconds(0),
     consumers: True,
     script: payout_agent.Careful,
-    approval_expiry: run.Infinity,
     provider_timeout_ms: 1000,
     after_paid: fn(_) { Nil },
     guard_fault: fn() { False },
@@ -265,12 +262,8 @@ pub fn start(settings: Settings) -> Result(App, String) {
     fabric_postgres.store(runs_name, fabric) |> result.map_error(string.inspect),
   )
   use sagas <- result.try(saga_settings(settings, database))
-  // Built once: the agent and the job that answers its approvals share it.
-  let approvers = jobs.approvers(database, payout_desk)
   use agent <- result.try(payout_agent.build(
-    approvers,
     settings.script,
-    settings.approval_expiry,
     settings.model_fault,
   ))
   let deps =
@@ -278,7 +271,6 @@ pub fn start(settings: Settings) -> Result(App, String) {
       jobs: grind.named(jobs_name),
       runs:,
       agent:,
-      approvers:,
       desks:,
       provider: settings.provider,
       sagas: saga_postgres.storage(sagas),

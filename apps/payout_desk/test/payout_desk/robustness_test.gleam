@@ -1,23 +1,28 @@
 //// The failure paths: deliveries repeated, verdicts racing, a stale card,
 //// a worker killed between the provider's answer and the report, restarts
-//// with a hold or an escalation pending, a provider that times out, and
-//// withdrawing during the hold and after it.
+//// with a hold or an escalation pending, a provider that times out,
+//// withdrawing during the hold and after it, a settlement notice delivered
+//// twice, and a job killed between the handover and the filing.
 
 import decisions
 import decisions/entry
 import decisions/occurrence
 import decisions/policy
 import decisions/view
-import decisions/vocabulary.{Approve, Performed, Subject, Uncertain}
+import decisions/vocabulary.{Approve, Performed, RunAction, Subject, Uncertain}
 import decisions_postgres
 import decisions_postgres/queue
+import fabric
+import fabric/run
+import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/string
 import gleam/time/duration
 import grind/worker
+import payout_desk/agent as payout_agent
 import payout_desk/app
 import payout_desk/auth
 import payout_desk/db
@@ -25,6 +30,7 @@ import payout_desk/desk_tools
 import payout_desk/domain
 import payout_desk/jobs
 import payout_desk/provider
+import payout_desk/reads
 import payout_desk/world
 import pog
 import support
@@ -324,4 +330,110 @@ pub fn a_request_key_stays_within_the_store_bounds_test() {
       world.request(longest <> "r", "O-2011"),
       requested_by: "fiona",
     )
+}
+
+fn replies_of(running: app.App, id: String) -> List(Int) {
+  let assert Ok(rows) =
+    pog.query("SELECT count(*) FROM replies WHERE occurrence = $1")
+    |> pog.parameter(pog.text(id))
+    |> pog.returning(decode.at([0], decode.int))
+    |> pog.execute(running.db)
+  rows.rows
+}
+
+fn run_of(
+  running: app.App,
+  request: String,
+  id: run.RunId,
+) -> run.Snapshot(domain.Reply) {
+  let session =
+    payout_agent.Session(
+      request:,
+      seller: "dora",
+      sources: reads.live(running.db),
+      settled: None,
+    )
+  let assert Ok(handle) =
+    fabric.open(running.deps.runs, running.deps.agent, session, id)
+  let assert Ok(snapshot) = fabric.snapshot(handle)
+  snapshot
+}
+
+pub fn a_settlement_notice_delivered_twice_tells_once_test() {
+  use running <- support.with_app("notice_twice", fn(s) { s })
+  let id = support.ask(running, "r-notice", "O-2012", "partial", 8000)
+  let assert Ok(_) = support.decide(running, id, "bia", Approve)
+  let assert Some(told) = support.told(running, id, 20_000)
+  assert told.from_agent
+  let follow_on = payout_agent.follow_on_id("r-notice")
+  let first = run_of(running, "r-notice", follow_on)
+  let assert run.Finished(run.Completed(_)) = first.status
+  // The notice's follower runs again, as a second delivery would: the job
+  // it admits has the id of the one already admitted, so nothing new runs.
+  let #(_, follow) = jobs.follower(running.deps)
+  let assert Ok(Nil) = pog.transaction(running.db, fn(tx) { follow(tx, id) })
+  // The telling runs twice more at once, as a replayed job would: each
+  // finds the follow-on run by the request and reads its answer.
+  let again = support.race(2, fn(_) { jobs.tell(running.deps, running.db, id) })
+  assert again == [worker.Succeeded("told"), worker.Succeeded("told")]
+  process.sleep(500)
+  // One follow-on run, which took no further turn.
+  let later = run_of(running, "r-notice", follow_on)
+  assert later.status == first.status
+  assert later.turns_used == first.turns_used
+  assert later.transcript == first.transcript
+  // Dora was told once, and paid once.
+  assert replies_of(running, id) == [1]
+  assert db.told(running.db, id) == Ok(Some(told))
+  let assert occurrence.Released(key:, ..) = support.read(running, id).status
+  assert provider.counts(running.settings.provider, key).payments == 1
+}
+
+pub fn a_job_killed_between_the_handover_and_the_filing_files_once_test() {
+  let key = "filing-" <> int.to_string(support.unique())
+  use running <- support.with_app("filing_killed", fn(s) {
+    app.Settings(..s, before_admit: fn() {
+      // The run has handed its proposal over and ended; the job that drove
+      // it dies before the occurrence is filed.
+      case support.once(key) {
+        True -> process.kill(process.self())
+        False -> Nil
+      }
+    })
+  })
+  let assert Ok(Nil) =
+    world.disputed(
+      running.db,
+      order: "O-2013",
+      status: "partial",
+      owed_cents: 8000,
+      fee_cents: 2000,
+    )
+  let assert Ok(Nil) =
+    app.request(
+      running,
+      world.request("r-filing", "O-2013"),
+      requested_by: "fiona",
+    )
+  // Grind delivers the job again; it finds the ended run and files its
+  // call.
+  let assert Ok(id) = app.occurrence_of(running, "r-filing", 40_000)
+  assert id == jobs.request_key("r-filing")
+  // The handed-over run was read again, not run again: two model turns,
+  // the proposal handed over once.
+  let handed = run_of(running, "r-filing", payout_agent.run_id("r-filing", 0))
+  let assert run.Finished(run.HandedOver(tool: "propose_payout", ..)) =
+    handed.status
+  assert handed.turns_used == 2
+  // One occurrence, with no failed attempt, explained by that run.
+  let known = support.read(running, id)
+  assert known.attempts == []
+  let assert RunAction(run: "payout-r-filing", ..) =
+    known.recommendation.explanation
+  assert payouts_of_dora(running) == 1
+  // It goes on as any payout: approved, paid once, told by the agent.
+  let assert Ok(_) = support.decide(running, id, "bia", Approve)
+  let assert Some(told) = support.told(running, id, 20_000)
+  assert told.outcome == "paid"
+  assert told.from_agent
 }

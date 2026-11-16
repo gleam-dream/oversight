@@ -7,8 +7,10 @@
 ////   handler died is replayed after its lease expires
 ////   (`ReplayAfterLeaseExpiry`), because every handler here converges on
 ////   what is already recorded.
-//// - **Fabric** owns the agent's conversation (`fabric_postgres`): a parked
-////   run waits there, with no process, for as long as people take.
+//// - **Fabric** owns the agent's conversations (`fabric_postgres`). The run
+////   that proposes ends when its policy hands the proposal over; its
+////   transcript stays there, with no process, for as long as people take,
+////   and the follow-on run that tells the outcome continues from it.
 //// - **decisions** owns the decision record, its wake-ups and settlement
 ////   notices (`decisions_postgres`), and the record of the effect
 ////   (`report`).
@@ -23,10 +25,10 @@
 ////
 //// | Worker | Input | Does |
 //// | --- | --- | --- |
-//// | `payout.agent` | request id | Drives the agent's run until it parks on `propose_payout`, and admits the call at the `payout` point |
+//// | `payout.agent` | request id | Drives the agent's run until it hands `propose_payout` over, and admits the call at the `payout` point |
 //// | `payout.pay` | occurrence id | Runs the payout workflow for a released occurrence and reports the effect |
 //// | `payout.reconcile` | occurrence id | Settles an uncertain payout by asking the provider |
-//// | `payout.tell` | occurrence id | Resumes the run with what really happened, and tells the seller what the record says |
+//// | `payout.tell` | occurrence id | Runs the follow-on run with what really happened, and tells the seller what the record says |
 
 import decisions.{type Desk}
 import decisions/model as decisions_model
@@ -36,15 +38,11 @@ import decisions/vocabulary.{
   Trigger, Uncertain,
 }
 import decisions_postgres
-import fabric
 import fabric/agent.{type Agent}
-import fabric/approvers.{type Approvers}
-import fabric/reviewer
 import fabric/run
 import fabric/store.{type Store}
 import gleam/dynamic/decode
 import gleam/erlang/process
-import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -54,11 +52,10 @@ import gleam/time/duration
 import grind
 import grind/job
 import grind/worker.{type Worker}
-import json/blueprint/codec
 import payout_desk/agent.{type Session, Session} as payout_agent
 import payout_desk/db
 import payout_desk/desks.{type Desks}
-import payout_desk/domain.{type Payout, type Reply, type Truth}
+import payout_desk/domain.{type Payout, type Reply}
 import payout_desk/events
 import payout_desk/provider.{type Provider}
 import payout_desk/reads
@@ -77,7 +74,6 @@ pub type Deps {
     jobs: grind.Grind,
     runs: Store,
     agent: Agent(Session, Reply),
-    approvers: Approvers(String),
     desks: Desks,
     provider: Provider,
     sagas: Storage,
@@ -85,8 +81,9 @@ pub type Deps {
     /// A fault point after the provider answered a payment, given the pay
     /// job's handler process; `fn(_) { Nil }` otherwise.
     after_paid: fn(process.Pid) -> Nil,
-    /// A fault point after the agent's run parked on its proposal and
-    /// before the proposal is admitted; `fn() { Nil }` otherwise.
+    /// A fault point after the agent's run handed its proposal over and
+    /// ended, and before the proposal is admitted; `fn() { Nil }`
+    /// otherwise.
     before_admit: fn() -> Nil,
   )
 }
@@ -218,9 +215,10 @@ pub fn request(
 
 /// Drive a request's agent and admit its gated call: the `payout.agent`
 /// job's handler. Safe to run twice, at once or in turn: the run and the
-/// occurrence are both found by the request. A request whose payout was
+/// occurrence are both found by the request, and a run that already handed
+/// its call over is read, not run again. A request whose payout was
 /// superseded before the agent proposed is not driven; one superseded
-/// while it drove has its parked run cancelled.
+/// while it drove is refused at admission, and its run has already ended.
 pub fn propose(
   deps: Deps,
   conn: pog.Connection,
@@ -291,7 +289,7 @@ fn drive_and_admit(
     {
       // Delivered again after the payout was told: nothing to admit.
       Ok(payout_agent.Answered(_)) -> worker.Succeeded("answered")
-      Ok(payout_agent.Waiting(call:, actions:)) ->
+      Ok(payout_agent.HandedOver(call:, actions:)) ->
         admit(deps, conn, request, requested_by, call, actions)
       Error(payout_agent.StillWorking) ->
         worker.Snoozed(duration.milliseconds(200), "the run is working")
@@ -320,7 +318,7 @@ fn admit(
   conn: pog.Connection,
   request: domain.Request,
   requested_by: String,
-  call: payout_agent.Parked,
+  call: payout_agent.Handed,
   actions: List(run.ActionRecord),
 ) -> worker.Response(String, String) {
   deps.before_admit()
@@ -369,13 +367,12 @@ fn admit(
           worker.Succeeded(known.id)
         }
         // The seller's account was suspended while the agent worked: the
-        // payout is stale before it began, so the parked run ends here.
+        // payout is stale before it began. The run already ended with its
+        // handover, so nothing waits on it; the settlement follower tells
+        // the seller.
         Error(decisions_postgres.LibraryFailed(decisions_postgres.Refused(decisions.SupersededBefore(
           _,
-        )))) -> {
-          let _ = cancel_run(deps, conn, request, call)
-          worker.Succeeded("superseded before the agent proposed")
-        }
+        )))) -> worker.Succeeded("superseded before the agent proposed")
         Error(decisions_postgres.LibraryFailed(decisions_postgres.Refused(
           refusal,
         ))) ->
@@ -400,28 +397,6 @@ fn admit(
   }
 }
 
-fn cancel_run(
-  deps: Deps,
-  conn: pog.Connection,
-  request: domain.Request,
-  call: payout_agent.Parked,
-) -> Result(Nil, String) {
-  let session =
-    Session(
-      request: request.id,
-      seller: request.seller,
-      sources: reads.live(conn),
-      settled: None,
-    )
-  use handle <- result.try(
-    fabric.open(deps.runs, deps.agent, session, call.reference.run)
-    |> result.map_error(fabric.describe_error),
-  )
-  fabric.cancel(handle)
-  |> result.replace(Nil)
-  |> result.map_error(fabric.describe_error)
-}
-
 // -- The settlement follower -----------------------------------------------------------
 
 /// What follows a payout's settlement, in the transaction that marks the
@@ -431,7 +406,7 @@ pub fn follower(deps: Deps) -> decisions_postgres.Follower {
     case decisions.read(payouts(deps), tx, occurrence: id) {
       Ok(known) -> follow(deps, tx, id, known)
       // Superseded before the agent proposed: there is no occurrence and no
-      // run to resume, so the seller is told here, once.
+      // handed-over call to continue from, so the seller is told here, once.
       Error(decisions.SupersededBefore(event:)) ->
         tell_superseded_before(tx, id, event)
       Error(refusal) -> Error(decisions.DeskRefused(refusal))
@@ -727,52 +702,11 @@ fn reconcile(
 
 // -- payout.tell ------------------------------------------------------------------------
 
-/// The decision point as Fabric's approver: the credential is a payout
-/// occurrence's id, and it answers only for an occurrence whose outcome is
-/// known on the record. The reviewer Fabric records is whoever decided it
-/// (`occurrence.decided_by`), or `decisions:expired` when nobody did.
-pub fn approvers(
-  db: pog.Connection,
-  desk: fn() -> Desk(Payout, pog.Connection),
-) -> Approvers(String) {
-  approvers.new(
-    "decisions",
-    fn(occurrence_id: String, requirement: run.Requirement) {
-      case requirement == payout_agent.requirement {
-        False -> Error(approvers.NotAuthorized("only payouts are decided here"))
-        True ->
-          case
-            decisions_postgres.transaction(db, decisions.read(
-              desk(),
-              _,
-              occurrence: occurrence_id,
-            ))
-          {
-            Error(failure) ->
-              Error(approvers.Unavailable(decisions_postgres.describe(failure)))
-            Ok(known) ->
-              case domain.truth_of(known) {
-                None ->
-                  Error(approvers.NotAuthorized("the payout is not settled"))
-                Some(_) ->
-                  reviewer.new(case occurrence.decided_by(known) {
-                    Some(occurrence.APerson(subject:)) -> subject
-                    Some(occurrence.ThePolicy(version:)) ->
-                      "policy:" <> int.to_string(version)
-                    // Nobody decided an expired payout: its validity ended.
-                    None -> "decisions:" <> occurrence.status_name(known.status)
-                  })
-                  |> result.map_error(fn(e) {
-                    approvers.NotAuthenticated(reviewer.describe_error(e))
-                  })
-              }
-          }
-      }
-    },
-  )
-}
-
-fn tell(
+/// Tell the seller a settled payout: the `payout.tell` job's handler. The
+/// follow-on run continues the handed-over run's conversation with the
+/// recorded outcome as the proposal's result. Safe to run twice: the
+/// follow-on run is found by the request, and the seller is told once.
+pub fn tell(
   deps: Deps,
   conn: pog.Connection,
   id: String,
@@ -789,24 +723,22 @@ fn tell(
     use truth <- result.try(
       domain.truth_of(known) |> option.to_result("the outcome is not known yet"),
     )
-    use #(run_text, action) <- result.try(
-      case known.recommendation.explanation {
-        RunAction(run:, action:) -> Ok(#(run, action))
-        _ -> Error("the recommendation names no run")
-      },
-    )
-    use run_id <- result.try(
+    use run_text <- result.try(case known.recommendation.explanation {
+      RunAction(run:, ..) -> Ok(run)
+      _ -> Error("the recommendation names no run")
+    })
+    use handed <- result.try(
       run.parse_id(run_text)
       |> result.replace_error("not a run id: " <> run_text),
     )
     use request <- result.try(
       db.request_of(conn, id) |> result.map_error(db.describe),
     )
-    Ok(#(known, truth, run_id, action, request))
+    Ok(#(known, truth, handed, request))
   }
   case found {
     Error(detail) -> worker.Discarded(detail)
-    Ok(#(known, truth, run_id, action, request)) -> {
+    Ok(#(known, truth, handed, request)) -> {
       let session =
         Session(
           request:,
@@ -814,72 +746,31 @@ fn tell(
           sources: reads.live(conn),
           settled: Some(truth),
         )
-      case resume(deps, session, known.id, run_id, action, truth) {
-        Error(detail) -> worker.Snoozed(duration.milliseconds(300), detail)
-        Ok(handle) ->
-          case payout_agent.settle(handle, duration.seconds(10)) {
-            Ok(payout_agent.Answered(reply)) -> {
-              let _ = deliver(conn, known, Some(reply))
-              worker.Succeeded("told")
-            }
-            Error(payout_agent.RunStopped(_)) -> {
-              let _ = deliver(conn, known, None)
-              worker.Succeeded("told without the agent")
-            }
-            Ok(payout_agent.Waiting(..)) | Error(_) ->
-              worker.Snoozed(duration.milliseconds(300), "the run is not done")
-          }
-      }
-    }
-  }
-}
-
-/// Answer the run's pending approval of the gated call with the outcome:
-/// let it through when the payout was released, reject it otherwise. An
-/// approval already answered (a redelivered job) or expired (the trap)
-/// leaves the run as it is.
-fn resume(
-  deps: Deps,
-  session: Session,
-  occurrence_id: String,
-  run_id: run.RunId,
-  action: String,
-  truth: Truth,
-) -> Result(fabric.Run(Session, Reply), String) {
-  use handle <- result.try(
-    fabric.open(deps.runs, deps.agent, session, run_id)
-    |> result.map_error(fabric.describe_error),
-  )
-  use pending <- result.try(
-    fabric.pending(handle) |> result.map_error(fabric.describe_error),
-  )
-  let mine =
-    list.find(pending, fn(p) {
-      string.inspect(p.reference.id.turn) <> "." <> p.reference.id.call_id
-      == action
-    })
-  case mine {
-    Error(Nil) -> Ok(handle)
-    Ok(p) -> {
-      use proof <- result.try(
-        approvers.check(deps.approvers, occurrence_id, p.reference.requirement)
-        |> result.map_error(approvers.describe_denial),
-      )
-      let answered = case domain.lets_call_through(truth) {
-        True -> fabric.approve(handle, p.reference, proof:, context: session)
-        False ->
-          fabric.reject(
-            handle,
-            p.reference,
-            proof:,
-            reason: codec.encode_json(domain.truth_codec(), truth)
-              |> result.unwrap(domain.outcome_name(truth)),
-          )
-      }
-      case answered {
-        Ok(_) | Error(fabric.AlreadyAnswered) | Error(fabric.ApprovalExpired) ->
-          Ok(handle)
-        Error(error) -> Error(fabric.describe_error(error))
+      case
+        payout_agent.tell(
+          deps.runs,
+          deps.agent,
+          session,
+          handed:,
+          truth:,
+          within: duration.seconds(10),
+        )
+      {
+        Ok(payout_agent.Answered(reply)) -> {
+          let _ = deliver(conn, known, Some(reply))
+          worker.Succeeded("told")
+        }
+        // The follow-on run ended without an answer, or the run named by
+        // the record has no handover to continue from: the application
+        // tells the seller from the record alone.
+        Ok(payout_agent.HandedOver(..)) | Error(payout_agent.RunStopped(_)) -> {
+          let _ = deliver(conn, known, None)
+          worker.Succeeded("told without the agent")
+        }
+        Error(payout_agent.StillWorking) ->
+          worker.Snoozed(duration.milliseconds(300), "the run is not done")
+        Error(payout_agent.RunsUnavailable(detail)) ->
+          worker.Snoozed(duration.milliseconds(300), detail)
       }
     }
   }
@@ -888,7 +779,7 @@ fn resume(
 /// Why a reply was not delivered.
 pub type Undelivered {
   /// The record does not say what happened yet: no reply is sent on the
-  /// strength of an approval, an expired request or a model's claim.
+  /// strength of a model's claim.
   NotKnownYet
   Failed(detail: String)
 }

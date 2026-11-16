@@ -2,7 +2,9 @@
 //// own key from the moment it is admitted, so a failed agent run and the
 //// payout that follows are one record, and a newer event (the seller's
 //// account suspended) supersedes a payout at any stage before release:
-//// expected, waiting for finance, or on hold.
+//// expected, waiting for finance, or on hold. A run that handed its
+//// proposal over has already ended, so a supersession leaves nothing in
+//// Fabric to cancel.
 
 import decisions
 import decisions/learning
@@ -86,10 +88,10 @@ pub fn a_suspension_before_the_agent_proposed_supersedes_the_expectation_test() 
     == learning.Coverage(expected: 1, superseded_before: 1, still_expected: 0)
 }
 
-pub fn a_suspension_while_the_agent_is_working_cancels_its_parked_run_test() {
-  // The barrier: once the agent's run has parked on its proposal, and
-  // before the proposal is admitted, the job hands the test a release and
-  // waits for it.
+pub fn a_suspension_while_the_agent_is_working_leaves_nothing_to_cancel_test() {
+  // The barrier: once the agent's run has handed its proposal over and
+  // ended, and before the proposal is admitted, the job hands the test a
+  // release and waits for it.
   let parked = process.new_subject()
   use running <- support.with_app("suspend_working", fn(s) {
     app.Settings(..s, before_admit: fn() {
@@ -129,7 +131,8 @@ pub fn a_suspension_while_the_agent_is_working_cancels_its_parked_run_test() {
   let assert Ok(decisions.NotBegun(pending)) = read()
   assert pending.superseded
     == Some(vocabulary.Superseded(event: domain.seller_suspended))
-  // The parked run is cancelled, never resumed.
+  // The run ended with its handover, before the suspension, and stays so:
+  // nothing cancelled it, and no follow-on run continues it.
   let session =
     payout_agent.Session(
       request: "r-s4",
@@ -144,14 +147,16 @@ pub fn a_suspension_while_the_agent_is_working_cancels_its_parked_run_test() {
       session,
       payout_agent.run_id("r-s4", 0),
     )
-  let cancelled =
-    support.eventually(20_000, fn() {
-      case fabric.snapshot(handle) {
-        Ok(snapshot) -> snapshot.status == run.Finished(run.Cancelled)
-        Error(_) -> False
-      }
-    })
-  assert cancelled
+  let assert Ok(snapshot) = fabric.snapshot(handle)
+  let assert run.Finished(run.HandedOver(tool: "propose_payout", ..)) =
+    snapshot.status
+  let assert Error(_) =
+    fabric.open(
+      running.deps.runs,
+      running.deps.agent,
+      session,
+      payout_agent.follow_on_id("r-s4"),
+    )
   // Nothing was paid, and the seller was told once.
   assert db.instructions_of(running.db, key) == Ok(0)
   assert provider.counts(running.settings.provider, "release:" <> key)

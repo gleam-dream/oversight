@@ -70,7 +70,7 @@ pub fn main() -> Nil {
     <> ").",
   )
   say(
-    "   The call did not pay. It became occurrence "
+    "   The policy handed the call over and the run ended: it did not pay. It became occurrence "
     <> id
     <> ", "
     <> occurrence.status_name(known.status)
@@ -148,7 +148,7 @@ pub fn main() -> Nil {
   case told {
     Some(told) -> {
       say(
-        "   The agent's run was resumed with what really happened. Dora is told:",
+        "   A follow-on run gave the agent what really happened. Dora is told:",
       )
       say("     \"" <> told.message <> "\"")
     }
