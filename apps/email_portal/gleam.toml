@@ -6,7 +6,7 @@ licences = ["Apache-2.0"]
 
 [dependencies]
 correio = ">= 0.1.0 and < 0.2.0"
-correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "236c4359b31ddaf25d26fb94bd0be5f325751ca6", path = "adapters/correio_mailbox" }
+correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "2b3a0ac58c1c6e4e1fac141eba4e32550c687511", path = "adapters/correio_mailbox" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_http = ">= 4.4.0 and < 5.0.0"
 envoy = ">= 1.2.0 and < 2.0.0"

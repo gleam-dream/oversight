@@ -8,20 +8,21 @@
 
 packages = [
   { name = "correio", version = "0.1.0", build_tools = ["gleam"], requirements = ["gen_smtp", "gleam_stdlib"], otp_app = "correio", source = "hex", outer_checksum = "263F9C485158D5B44339185EBE0759024B8CEC337C4C3CC2B889D135E91C23F1" },
-  { name = "correio_mailbox", version = "0.1.0", build_tools = ["gleam"], requirements = ["correio", "gleam_http", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "236c4359b31ddaf25d26fb94bd0be5f325751ca6", path = "adapters/correio_mailbox" },
+  { name = "correio_mailbox", version = "0.1.1", build_tools = ["gleam"], requirements = ["correio", "gleam_http", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/correio.git", commit = "2b3a0ac58c1c6e4e1fac141eba4e32550c687511", path = "adapters/correio_mailbox" },
   { name = "envoy", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "9C6FBB6BFA02A52798BEEC5977A738CAD6E4A057F4B67FD0C8061AD2502C191A" },
   { name = "gen_smtp", version = "1.3.0", build_tools = ["rebar3"], requirements = ["ranch"], otp_app = "gen_smtp", source = "hex", outer_checksum = "0B73FBF069864ECBCE02FE653B16D3F35FD889D0FDD4E14527675565C39D84E6" },
   { name = "gleam_crypto", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_crypto", source = "hex", outer_checksum = "2DE9E4EF53CF6FEE049D4F765731F7178F7A11AEFAE00EEE63BF7536B354AD3F" },
   { name = "gleam_erlang", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "1124AD3AA21143E5AF0FC5CF3D9529F6DB8CA03E43A55711B60B6B7B3874375C" },
-  { name = "gleam_http", version = "4.4.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_http", source = "hex", outer_checksum = "F065CE9941A7756ABBAEAE7F9F32A96CAD29DA3311A381DB2D926EA8E8C156DC" },
-  { name = "gleam_stdlib", version = "1.0.5", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "CEE5B6C076A85B45F60C585F4316C63EC8B7127C119D5738C3958A9C4D50404E" },
+  { name = "gleam_http", version = "4.5.0", build_tools = ["gleam"], requirements = ["gleam_stdlib", "splitter"], otp_app = "gleam_http", source = "hex", outer_checksum = "38D7E5698759D44F21436F365259F7015104F6FAFA23181CD0B2BB0E5B67BE2B" },
+  { name = "gleam_stdlib", version = "1.1.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "E191E535492DDFE6A6499E96C89A40D9BDF2B7F1DADD4D6BEDABE34027E5B1EA" },
   { name = "gleeunit", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "EC31ABA74256AEA531EDF8169931D775BBB384FED0A8A1BDC4DD9354E3E21826" },
-  { name = "ranch", version = "2.3.0", build_tools = ["make", "rebar3"], requirements = [], otp_app = "ranch", source = "hex", outer_checksum = "6168EC49409D982F7CFBD83DD083144F6CBE67CAA4036551D2F0A3AD67C9D023" },
+  { name = "ranch", version = "2.4.0", build_tools = ["make", "rebar3"], requirements = [], otp_app = "ranch", source = "hex", outer_checksum = "64D98B8C61D39B7B9A2E2CF92AE659B8623A69766F415AE13DC726864EC04AB9" },
+  { name = "splitter", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "splitter", source = "hex", outer_checksum = "8F1485306E0D59168A39E12ED8844F9F616EC59C3C63AFCFDAE04DBD68690CBC" },
 ]
 
 [requirements]
 correio = { version = ">= 0.1.0 and < 0.2.0" }
-correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "236c4359b31ddaf25d26fb94bd0be5f325751ca6", path = "adapters/correio_mailbox" }
+correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "2b3a0ac58c1c6e4e1fac141eba4e32550c687511", path = "adapters/correio_mailbox" }
 envoy = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_crypto = { version = ">= 1.6.0 and < 2.0.0" }
 gleam_erlang = { version = ">= 1.0.0 and < 2.0.0" }

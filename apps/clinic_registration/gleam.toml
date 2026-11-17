@@ -17,14 +17,14 @@ wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 grind = ">= 0.1.1 and < 0.2.0"
-http_gun = ">= 0.1.0 and < 0.2.0"
-llm_wire = ">= 0.1.0 and < 0.2.0"
+http_gun = ">= 0.1.1 and < 0.2.0"
+llm_wire = ">= 0.1.1 and < 0.2.0"
 json_blueprint = ">= 2.0.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
 # Unpublished: Git+path pins to one verified commit of gleam-dream/decisions.
-decisions = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf" }
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf", path = "integrations/decisions_otp" }
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "33279f78e618cc3139936b444959b85a4517eacf", path = "integrations/decisions_postgres" }
+decisions = { git = "https://github.com/gleam-dream/decisions.git", ref = "4691bcec7ef899a00819ea4bed462cb6311268d6" }
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "4691bcec7ef899a00819ea4bed462cb6311268d6", path = "integrations/decisions_otp" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "4691bcec7ef899a00819ea4bed462cb6311268d6", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
