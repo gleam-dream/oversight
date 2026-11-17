@@ -13,8 +13,8 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = ">= 0.2.0 and < 0.3.0"
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "54a23bc7bcff1fd1018a349b5ac4f5ec2164c3bd", path = "integrations/fabric_postgres" }
+fabric = ">= 0.3.1 and < 0.4.0"
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "b0cf82c6785309df0266648da53d5b76c90046ec", path = "integrations/fabric_postgres" }
 grind = ">= 0.1.0 and < 0.2.0"
 saga = ">= 0.2.0 and < 0.3.0"
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }
