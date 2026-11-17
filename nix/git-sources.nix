@@ -6,7 +6,6 @@
     "33279f78e618cc3139936b444959b85a4517eacf" = "sha256-jK44lTNvGvjoE6UV/o9eTvtU+RHAufE2GbB5qdTasLY=";
   };
   "https://github.com/gleam-dream/fabric.git" = {
-    "54a23bc7bcff1fd1018a349b5ac4f5ec2164c3bd" = "sha256-h9vSQ7nNXPxP7gy8AT5SKM2RbwTdQc7onfOjK2R4TG8=";
     "b0cf82c6785309df0266648da53d5b76c90046ec" = "sha256-/drhSUr5jEolHAKy70L5ZLYgRSiUFtlz2Y4M9ip3mno=";
   };
   "https://github.com/gleam-dream/saga.git" = {
