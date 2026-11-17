@@ -7,12 +7,12 @@ Recorded on 2026-11-16. Supersedes the source selection in
 
 ## Decision
 
-- `clinic_registration`, `payout_desk` and `moderation_desk` declare the `decisions` packages as Git+path dependencies on the repository [gleam-dream/decisions](https://github.com/gleam-dream/decisions), at commit `33279f78e618cc3139936b444959b85a4517eacf`:
+- `clinic_registration`, `payout_desk` and `moderation_desk` declare the `decisions` packages as Git+path dependencies on the repository [gleam-dream/decisions](https://github.com/gleam-dream/decisions), at commit `4691bcec7ef899a00819ea4bed462cb6311268d6`:
   - `decisions` at the repository root;
   - `decisions_otp` at `integrations/decisions_otp`;
   - `decisions_postgres` at `integrations/decisions_postgres`.
 - Each application's `manifest.toml` locks these packages with `source = "git"`, the repository address and that commit. The lock replaces the earlier `source = "local"` entries. It records `gleam_crypto` as a requirement of `decisions`.
-- `nix/git-sources.nix` registers the fixed source hash of that commit: `sha256-jK44lTNvGvjoE6UV/o9eTvtU+RHAufE2GbB5qdTasLY=`.
+- `nix/git-sources.nix` registers the fixed source hash of that commit: `sha256-Eg7bkUyPhAtvzgkqChkLSWor6c500FDlrmeJFOcjhp0=`.
 - `nix/applications.nix` builds the three applications. The continuous-integration application matrix runs them.
 - A Git package at the repository root is the fetched source itself. `nix/applications.nix` gives a root package the source path, and a package with a `path` the subdirectory.
 

@@ -1,9 +1,9 @@
 {
   "https://github.com/gleam-dream/correio.git" = {
-    "236c4359b31ddaf25d26fb94bd0be5f325751ca6" = "sha256-DWjk1s86IBKgtNLGfVBz/OSdI73fvtxq+iqKF3M9+Uo=";
+    "2b3a0ac58c1c6e4e1fac141eba4e32550c687511" = "sha256-AzxADLjOHA9uvVZ+ntDgrsu1r7r7B7+NMYNrjYNPZQs=";
   };
   "https://github.com/gleam-dream/decisions.git" = {
-    "33279f78e618cc3139936b444959b85a4517eacf" = "sha256-jK44lTNvGvjoE6UV/o9eTvtU+RHAufE2GbB5qdTasLY=";
+    "4691bcec7ef899a00819ea4bed462cb6311268d6" = "sha256-Eg7bkUyPhAtvzgkqChkLSWor6c500FDlrmeJFOcjhp0=";
   };
   "https://github.com/gleam-dream/fabric.git" = {
     "b0cf82c6785309df0266648da53d5b76c90046ec" = "sha256-/drhSUr5jEolHAKy70L5ZLYgRSiUFtlz2Y4M9ip3mno=";

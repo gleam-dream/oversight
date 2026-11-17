@@ -10,7 +10,7 @@ gleam_json = ">= 3.0.0 and < 4.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 fabric = ">= 0.3.1 and < 0.4.0"
 fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "b0cf82c6785309df0266648da53d5b76c90046ec", path = "integrations/fabric_postgres" }
-hellhound = ">= 0.1.0 and < 0.2.0"
+hellhound = ">= 0.2.1 and < 0.3.0"
 relay = ">= 0.2.0 and < 0.3.0"
 json_blueprint = ">= 2.0.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
