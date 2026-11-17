@@ -91,8 +91,7 @@ parked run in
   [gleam-dream/fabric](https://github.com/gleam-dream/fabric), tagged
   `fabric_postgres-v0.2.0`, which requires that release.
   `nix/git-sources.nix` registers the commit's source hash,
-  `sha256-/drhSUr5jEolHAKy70L5ZLYgRSiUFtlz2Y4M9ip3mno=`. The other
-  applications keep `fabric` 0.2.0 and the earlier adapter commit.
+  `sha256-/drhSUr5jEolHAKy70L5ZLYgRSiUFtlz2Y4M9ip3mno=`.
 
 ## Rationale and consequences
 
