@@ -1,4 +1,6 @@
+import gleam/float
 import gleam/list
+import gleam/option
 import gleam/string
 import pages/beam
 import pages/beam/processes.{
@@ -6,6 +8,7 @@ import pages/beam/processes.{
   StartedAgain, Unlinked,
 }
 import pages/beam/scheduler.{Cooperative, Preemptive, WellBehaved, WithGreedy}
+import pages/beam/scheduler_widget
 import site/context
 import site/motion
 import site/progress
@@ -127,29 +130,155 @@ pub fn the_log_and_trace_are_capped_test() {
 
 // SCHEDULER -------------------------------------------------------------------
 
-fn lanes(schedule: scheduler.Schedule) -> List(String) {
-  list.map(schedule.cores, fn(core) {
-    string.concat(list.map(core, scheduler.label))
+/// Every step of `seconds` of simulation under one setting.
+fn trace(
+  sim: scheduler.Sim,
+  seconds: Float,
+  scheduling: scheduler.Scheduling,
+) -> List(scheduler.Sim) {
+  let steps = float.round(seconds /. scheduler.step_seconds)
+  list.scan(list.repeat(Nil, steps), sim, fn(sim, _) {
+    scheduler.step(sim, scheduling)
   })
 }
 
-pub fn well_behaved_processes_share_the_cores_test() {
-  let schedule = scheduler.run(Preemptive, WellBehaved)
-  assert lanes(schedule) == ["ACACACACACACACAC", "BDBDBDBDBDBDBDBD"]
-  assert schedule.longest_wait == 1
-  assert scheduler.run(Cooperative, WellBehaved) == schedule
+fn holder(sim: scheduler.Sim, core: Int) -> option.Option(scheduler.Task) {
+  case list.drop(scheduler.running(sim), core) {
+    [option.Some(p), ..] -> option.Some(p.task)
+    _ -> option.None
+  }
 }
 
-pub fn a_greedy_process_hogs_a_cooperative_core_test() {
-  let schedule = scheduler.run(Cooperative, WithGreedy)
-  assert lanes(schedule) == ["ACGGGGGGGGGGGGGG", "BDABCDABCDABCDAB"]
-  assert schedule.longest_wait == 3
+pub fn the_simulation_is_the_same_on_every_visit_test() {
+  let run = fn() {
+    scheduler.new()
+    |> scheduler.set_workload(WithGreedy)
+    |> scheduler.run(12.0, Preemptive)
+  }
+  assert run() == run()
 }
 
-pub fn preemption_keeps_the_greedy_process_to_its_share_test() {
-  let schedule = scheduler.run(Preemptive, WithGreedy)
-  assert lanes(schedule) == ["ACGBDACGBDACGBDA", "BDACGBDACGBDACGB"]
-  assert schedule.longest_wait == 2
+pub fn a_core_runs_one_process_and_every_process_is_in_one_place_test() {
+  let sims =
+    scheduler.new()
+    |> scheduler.set_workload(WithGreedy)
+    |> trace(30.0, Preemptive)
+  list.each(sims, fn(sim) {
+    let on_cores =
+      list.filter_map(scheduler.running(sim), fn(p) { option.to_result(p, Nil) })
+    assert list.length(list.unique(list.map(on_cores, fn(p) { p.task })))
+      == list.length(on_cores)
+    // Nobody waits while a core is idle.
+    case list.any(scheduler.running(sim), option.is_none) {
+      True -> {
+        assert scheduler.queue(sim) == []
+      }
+      False -> Nil
+    }
+  })
+}
+
+pub fn the_run_queue_is_first_come_first_served_test() {
+  let sims = scheduler.new() |> trace(30.0, Cooperative)
+  list.each(sims, fn(sim) {
+    let since =
+      list.map(scheduler.queue(sim), fn(p) {
+        case p.phase {
+          scheduler.Ready(since) -> since
+          _ -> -1.0
+        }
+      })
+    assert since == list.sort(since, float.compare)
+  })
+}
+
+pub fn a_cooperative_greedy_process_never_gives_its_core_back_test() {
+  let sims =
+    scheduler.new()
+    |> scheduler.set_workload(WithGreedy)
+    |> trace(30.0, Cooperative)
+  let assert Ok(start) =
+    list.find(sims, fn(sim) {
+      holder(sim, 0) == option.Some(scheduler.Greedy)
+      || holder(sim, 1) == option.Some(scheduler.Greedy)
+    })
+  let core = case holder(start, 0) == option.Some(scheduler.Greedy) {
+    True -> 0
+    False -> 1
+  }
+  let after = list.drop_while(sims, fn(sim) { sim != start })
+  list.each(after, fn(sim) {
+    assert holder(sim, core) == option.Some(scheduler.Greedy)
+  })
+}
+
+pub fn preemption_cuts_every_turn_at_the_budget_test() {
+  let sims =
+    scheduler.new()
+    |> scheduler.set_workload(WithGreedy)
+    |> trace(30.0, Preemptive)
+  list.each(sims, fn(sim) {
+    list.each(scheduler.processes(sim), fn(p) {
+      case p.phase {
+        scheduler.Running(since:, ..) -> {
+          assert scheduler.clock(sim) -. since
+            <. scheduler.budget +. scheduler.step_seconds
+        }
+        _ -> Nil
+      }
+    })
+  })
+}
+
+pub fn the_greedy_process_doubles_waits_unless_preempted_test() {
+  let wait = fn(scheduling, workload) {
+    scheduler.new()
+    |> scheduler.set_workload(workload)
+    |> scheduler.run(24.0, scheduling)
+    |> scheduler.longest_wait
+  }
+  let calm = wait(Preemptive, WellBehaved)
+  let hogged = wait(Cooperative, WithGreedy)
+  let fair = wait(Preemptive, WithGreedy)
+  assert calm <. scheduler.budget *. 1.5
+  assert hogged >. fair *. 2.0
+  assert fair <. scheduler.budget *. 2.5
+}
+
+pub fn removing_the_greedy_process_frees_its_core_test() {
+  let sim =
+    scheduler.new()
+    |> scheduler.set_workload(WithGreedy)
+    |> scheduler.run(10.0, Cooperative)
+    |> scheduler.set_workload(WellBehaved)
+  assert list.all(scheduler.processes(sim), fn(p) { p.task != scheduler.Greedy })
+  // The freed core went to whoever was waiting.
+  case scheduler.queue(sim) {
+    [] -> Nil
+    _ -> {
+      assert !list.any(scheduler.running(sim), option.is_none)
+    }
+  }
+}
+
+pub fn the_timelines_keep_the_last_sixteen_slices_test() {
+  let sim = scheduler.new() |> scheduler.run(20.0, Preemptive)
+  list.each(scheduler.timelines(sim), fn(slices) {
+    assert list.length(slices) == scheduler.timeline
+  })
+}
+
+pub fn the_widget_controls_survive_their_attribute_test() {
+  let controls =
+    scheduler_widget.Controls(
+      scheduling: Cooperative,
+      workload: WithGreedy,
+      resets: 3,
+      advances: 12,
+    )
+  assert scheduler_widget.decode(scheduler_widget.encode(controls))
+    == option.Some(controls)
+  assert scheduler_widget.decode("sideways greedy 1 2") == option.None
 }
 
 // TOURS -----------------------------------------------------------------------
@@ -223,4 +352,21 @@ pub fn the_scheduler_tour_adds_greedy_then_preempts_test() {
   let model = send(model, beam.SchedulerTour, tour.Replay)
   assert model.scheduling == Preemptive
   assert model.workload == WellBehaved
+}
+
+pub fn without_motion_the_scheduler_tour_runs_the_widget_ahead_test() {
+  let still = context.new(motion.Off, progress.empty())
+  let next = fn(model) {
+    beam.update(model, beam.Tour(beam.SchedulerTour, tour.Next), still).0
+  }
+  let model = beam.init() |> next
+  // Step 2 adds G cooperatively and runs eight seconds ahead.
+  assert model.scheduler_advances == 8
+  let model = next(model)
+  assert model.scheduler_advances == 14
+  // Back resets the widget and replays step 2.
+  let model =
+    beam.update(model, beam.Tour(beam.SchedulerTour, tour.Back), still).0
+  assert model.scheduler_resets == 1
+  assert model.workload == WithGreedy
 }

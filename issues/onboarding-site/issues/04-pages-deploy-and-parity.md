@@ -113,3 +113,32 @@ hold except the first item. Content was not changed.
 - Switch Pages to "GitHub Actions" and run the workflow once.
 - Decide whether `onboarding/reference/` stays as an oracle (then it needs an
   entry in `docs/ORACLE.md`) or is removed.
+
+AI-assisted contribution. Two changes on request after the parity run, so
+both now differ from the reference by design:
+
+- A log beside another column (the process log, the job history, the
+  decision record) fills the height of its row. While touring it never makes
+  the card taller, so fit to screen is unchanged; stacked, it keeps the cap.
+- The module 1 scheduler is a real-time widget (`gd-scheduler`) instead of a
+  fixed grid. A process is `Asleep(wakes_at) | Ready(since) | Running(core,
+since)`; the run queue is derived from the ready processes in arrival
+  order; idle cores take its head; a preemptive turn ends when the half-second
+  work budget runs out, a cooperative one when the process yields, so G pins
+  a core. The simulation starts four seconds into calm running, is seeded and
+  steps in fixed 50 ms steps; the widget shows sleepers, the run queue, both
+  cores with their budget, a scrolling timeline of slices, and the run queue
+  length, longest wait over the last four seconds and core use. The tour keeps
+  its four steps with wording adjusted to the moving picture and longer steps;
+  with motion off the tour runs the widget ahead and the page offers "Advance
+  1 second".
+
+Checks: `gleam test` 227 passed (scheduler invariants: one process per core,
+nobody waits while a core idles, first-come queue, a cooperative G never
+leaves its core, no preemptive turn outlives the budget, the greedy process
+at least doubles waits only without preemption); `tours.py beam` unchanged
+(`tours=2 tourClicks=12 free=2`, no holes or errors); `zoom.py` 100% for the
+scheduler at both sizes; with motion on the page DOM changed 0 times in two
+seconds while the widget changed 1,303 times; with motion off the widget draws
+statically, the tour shows waits of 1, 3 and 2 slices, and "Advance 1 second"
+works.

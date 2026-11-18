@@ -17,6 +17,7 @@ import pages/beam/scheduler.{
   type Scheduling, type Workload, Cooperative, Preemptive, WellBehaved,
   WithGreedy,
 }
+import pages/beam/scheduler_widget
 import site/context.{type Context}
 import site/msc
 import site/tour
@@ -34,6 +35,9 @@ pub type Model {
     processes: Processes,
     scheduling: Scheduling,
     workload: Workload,
+    /// Commands sent to the live scheduler, as counters that only grow.
+    scheduler_resets: Int,
+    scheduler_advances: Int,
     tours: tour.Tours(TourId),
   )
 }
@@ -50,6 +54,11 @@ pub type Msg {
   ReaderResetProcesses
   ReaderPickedScheduling(Scheduling)
   ReaderToggledGreedy
+  ReaderAdvancedScheduler
+  /// A tour step with motion off: run the scheduler ahead so the step's
+  /// effect shows in the still picture.
+  TourHurriedScheduler(seconds: Int)
+  TourResetScheduler
   Tour(TourId, tour.Command)
 }
 
@@ -58,6 +67,8 @@ pub fn init() -> Model {
     processes: processes.new(),
     scheduling: Preemptive,
     workload: WellBehaved,
+    scheduler_resets: 0,
+    scheduler_advances: 0,
     tours: tour.new(),
   )
 }
@@ -93,6 +104,22 @@ pub fn update(
       }),
       effect.none(),
     )
+    ReaderAdvancedScheduler -> #(
+      Model(..model, scheduler_advances: model.scheduler_advances + 1),
+      effect.none(),
+    )
+    TourHurriedScheduler(seconds) ->
+      case context.animates(context) {
+        True -> #(model, effect.none())
+        False -> #(
+          Model(..model, scheduler_advances: model.scheduler_advances + seconds),
+          effect.none(),
+        )
+      }
+    TourResetScheduler -> #(
+      Model(..model, scheduler_resets: model.scheduler_resets + 1),
+      effect.none(),
+    )
     Tour(id, command) ->
       tour.update(driver(context), model, id, command, context.motion)
   }
@@ -103,9 +130,9 @@ pub fn leave(model: Model) -> Model {
   Model(..model, tours: tour.pause_all(model.tours))
 }
 
-/// This page has no real-time widgets.
+/// The live two-core scheduler.
 pub fn register() -> Result(Nil, lustre.Error) {
-  Ok(Nil)
+  scheduler_widget.register()
 }
 
 fn driver(context: Context) -> tour.Driver(TourId, Model, Msg) {
@@ -165,22 +192,35 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
     SchedulerTour ->
       tour.Script(
         reset: fn(model: Model) {
-          [ReaderPickedScheduling(Preemptive), ..remove_greedy(model)]
+          [
+            ReaderPickedScheduling(Preemptive),
+            TourResetScheduler,
+            ..remove_greedy(model)
+          ]
         },
         steps: [
           tour.say(
-            "Two cores, four well-behaved processes. Each square is one time slice; everyone gets a turn every couple of slices.",
-          ),
+            "Two cores, four well-behaved processes. Each wakes when a message arrives, queues, works and sleeps again. Each square is one time slice; everyone gets a turn within a slice or two.",
+          )
+            |> tour.lasting(6000),
           tour.act(
-            "Add a greedy process G that never stops working, on a cooperative runtime: it grabs core 1 and never gives it back.",
+            "Add a greedy process G that never stops working, on a cooperative runtime: it grabs a core and never gives it back. The run queue backs up and the longest wait climbs.",
             fn(model: Model) {
-              [ReaderPickedScheduling(Cooperative), ..add_greedy(model)]
+              list.flatten([
+                [ReaderPickedScheduling(Cooperative)],
+                add_greedy(model),
+                [TourHurriedScheduler(8)],
+              ])
             },
-          ),
+          )
+            |> tour.lasting(8000),
           tour.act(
-            "Same greedy process, BEAM style: the scheduler cuts it off after its work budget, like everyone else. The longest wait drops right back down.",
-            fn(_) { [ReaderPickedScheduling(Preemptive)] },
-          ),
+            "Same greedy process, BEAM style: the scheduler cuts it off when its work budget runs out, like everyone else. The queue drains and the longest wait drops right back down.",
+            fn(_) {
+              [ReaderPickedScheduling(Preemptive), TourHurriedScheduler(6)]
+            },
+          )
+            |> tour.lasting(8000),
           tour.say(
             "That fairness is why one runaway loop can’t freeze a BEAM service. Try the switches yourself.",
           ),
@@ -234,7 +274,7 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
         ),
       ]),
       tour.lab(model.tours, SchedulerTour, driver(context), context, [], [
-        scheduler_playground(model.scheduling, model.workload),
+        scheduler_playground(model, context),
       ]),
     ]),
     one_picture(),
@@ -656,12 +696,17 @@ fn chart_event(
 
 // SCHEDULER PLAYGROUND --------------------------------------------------------
 
-fn scheduler_playground(
-  scheduling: Scheduling,
-  workload: Workload,
-) -> Element(Msg) {
-  let schedule = scheduler.run(scheduling, workload)
+fn scheduler_playground(model: Model, context: Context) -> Element(Msg) {
+  let scheduling = model.scheduling
+  let workload = model.workload
   let greedy = workload == WithGreedy
+  let controls =
+    scheduler_widget.Controls(
+      scheduling:,
+      workload:,
+      resets: model.scheduler_resets,
+      advances: model.scheduler_advances,
+    )
   element.fragment([
     html.div([class("labh")], [
       html.div([], [
@@ -671,7 +716,7 @@ fn scheduler_playground(
         ]),
         html.p([class("muted"), css("margin-top:6px;max-width:640px")], [
           html.text(
-            "Each square is one time slice on a core. Add a greedy process that never stops working, then switch between scheduling styles.",
+            "Processes wake when a message arrives, wait in the run queue for a free core, work, and sleep again. Each square is one time slice on a core. Add a greedy process that never stops working, then switch between scheduling styles.",
           ),
         ]),
       ]),
@@ -688,6 +733,7 @@ fn scheduler_playground(
             True -> "btn warn"
             False -> "btn"
           }),
+          ui.pressed(greedy),
           event.on_click(ReaderToggledGreedy),
         ],
         [
@@ -697,34 +743,29 @@ fn scheduler_playground(
           }),
         ],
       ),
+      case context.animates(context) {
+        True -> element.none()
+        False ->
+          html.button(
+            [
+              attribute.type_("button"),
+              class("btn sm"),
+              event.on_click(ReaderAdvancedScheduler),
+            ],
+            [html.text("Advance 1 second")],
+          )
+      },
     ]),
-    element.fragment(
-      list.index_map(schedule.cores, fn(slots, core) {
-        html.div(
-          [css("display:flex;align-items:center;gap:12px;margin-bottom:10px")],
-          [
-            html.span([class("meta"), css("width:64px")], [
-              html.text("core " <> int.to_string(core + 1)),
-            ]),
-            html.div(
-              [
-                css(
-                  "display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:4px;flex:1",
-                ),
-              ],
-              list.map(slots, slot),
-            ),
-          ],
-        )
-      }),
+    element.element(
+      scheduler_widget.tag,
+      [
+        attribute("data-live", "scheduler"),
+        class("live"),
+        css("display:block;width:100%"),
+        ..scheduler_widget.attributes(controls, context.motion)
+      ],
+      [],
     ),
-    html.div([class("row"), css("margin-top:8px;gap:24px")], [
-      html.span([class("meta")], [html.text("time →")]),
-      html.span([], [
-        html.b([], [html.text("Longest wait for a normal process:")]),
-        html.text(" " <> int.to_string(schedule.longest_wait) <> " slices"),
-      ]),
-    ]),
     html.div([class("note"), css("margin-top:16px")], [
       html.text(scheduler.note(scheduling, workload)),
     ]),
@@ -743,22 +784,6 @@ fn style_button(
       event.on_click(ReaderPickedScheduling(style)),
     ],
     [html.text(label)],
-  )
-}
-
-fn slot(task: scheduler.Task) -> Element(Msg) {
-  let #(bg, fg) = scheduler.colours(task)
-  html.div(
-    [
-      css(
-        "height:44px;border-radius:8px;background:"
-        <> bg
-        <> ";color:"
-        <> fg
-        <> ";display:flex;align-items:center;justify-content:center;font:600 14px 'JetBrains Mono',monospace",
-      ),
-    ],
-    [html.text(scheduler.label(task))],
   )
 }
 
