@@ -1,7 +1,7 @@
 import asyncio, pathlib
 import os
-# SITE points the check at another build, for example the Lustre site's dist/index.html.
-SITE = os.environ.get('SITE') or (pathlib.Path(__file__).resolve().parent.parent / 'site' / 'index.html').as_uri()
+# The built site; SITE points the check at another build or an HTTP URL.
+SITE = os.environ.get('SITE') or (pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'index.html').as_uri()
 OUT = pathlib.Path(__file__).resolve().parent / 'out'
 OUT.mkdir(exist_ok=True)
 from playwright.async_api import async_playwright

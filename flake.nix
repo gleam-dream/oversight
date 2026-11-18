@@ -46,8 +46,6 @@
           settings.global.excludes = [
             "**/*.pdf"
             ".render/**"
-            # The onboarding reference is a behaviour oracle, kept verbatim.
-            "onboarding/reference/**"
           ];
           programs.gleam.enable = true;
           programs.mix-format = {

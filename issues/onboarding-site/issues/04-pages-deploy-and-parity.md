@@ -1,6 +1,6 @@
 # GitHub Pages deployment and parity checks
 
-Status: ready-for-human
+Status: done
 Category: enhancement
 
 Add a GitHub Actions workflow that builds `onboarding/site/` and deploys it
@@ -142,3 +142,12 @@ scheduler at both sizes; with motion on the page DOM changed 0 times in two
 seconds while the widget changed 1,303 times; with motion off the widget draws
 statically, the tour shows waits of 1, 3 and 2 slices, and "Advance 1 second"
 works.
+
+AI-assisted contribution. Decision: `onboarding/reference/` is removed rather
+than kept as an oracle; it stays in the Git history at `7b4d961`. Its
+Playwright checks moved to `onboarding/site/check/` and now default to
+`onboarding/site/dist/index.html` (`SITE` still overrides); `mob.py` clicks the
+tour bar's Next button (`.tbn`), since the selector it used never matched.
+treefmt no longer needs to exclude the reference. The PRD records the
+decision. Still open outside this issue: switching the repository's Pages
+source to "GitHub Actions" and the first deploy run.

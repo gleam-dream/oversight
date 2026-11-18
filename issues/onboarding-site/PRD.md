@@ -11,12 +11,11 @@ code: concepts, pictures, guided playgrounds and simulations. The goal is a
 mental model the reader can navigate by: what each layer gives them, what
 each package owns, and how the packages compose.
 
-A complete, working reference implementation lives in
-[`onboarding/reference/`](../../onboarding/reference/). It is a single
-self-contained HTML page (`site/index.html`) generated from per-module
-fragments by a small Python assembler. The task is to rebuild it as a
-**Lustre** application and publish it with **GitHub Pages**, with behaviour
-parity to the reference.
+The course was first built as a single self-contained HTML page generated
+from per-module fragments by a small Python assembler (see "Reference
+implementation"). It is rebuilt as a **Lustre** application in
+`onboarding/site/` and published with **GitHub Pages**, with behaviour parity
+to that reference.
 
 ## Audience and success criteria
 
@@ -130,8 +129,8 @@ Honesty labels that must stay visible in the port:
   playground fits at 75% or more; at 1366×768 most are 80–100%, the worst
   65%.
 - After the tour, a light "Free play" bar offers "Replay the guided tour".
-- The tour scripts for all 34 tours are in `onboarding/reference/src/*.x.js`
-  (`tourDefs()`); keep the wording.
+- The tour scripts for all 34 tours live in each page's `script` function
+  under `onboarding/site/src/pages/`, with the reference's wording.
 
 ### Real-time widgets (GenStage-explainer style)
 
@@ -200,22 +199,12 @@ markers in the module menu and on the course map, stored in `localStorage`
   `aria-live` on tour narration, `role="img"` with labels on charts,
   4.5:1 text contrast, works at phone width.
 
-## Reference implementation map
+## Reference implementation
 
-| Path                                        | What it is                                                                                                                                           |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboarding/reference/site/index.html`      | The built site; open it in a browser. The behaviour reference.                                                                                       |
-| `onboarding/reference/src/<Module>.html`    | Module markup with `{{holes}}`, `<sc-for>`, `<sc-if>` and `onClick` bindings.                                                                        |
-| `onboarding/reference/src/<Module>.js`      | Module state and `renderVals()` (the original logic).                                                                                                |
-| `onboarding/reference/src/<Module>.x.js`    | Additions: `tourDefs()`, real-time widgets (`liveFrame`), ladder views, `extraVals()`.                                                               |
-| `onboarding/reference/src/<Module>.json`    | Module metadata (title, minutes).                                                                                                                    |
-| `onboarding/reference/project/Main.dc.html` | The course-map page source.                                                                                                                          |
-| `onboarding/reference/tools/site.py`        | Assembler: wraps modules, inserts tour bars and chart SVG, writes `site/index.html`.                                                                 |
-| `onboarding/reference/tools/shell.html`     | App shell and runtime: template engine with DOM morphing, router, tours, fit-to-screen, sequence-chart layout, seeded RNG, motion toggle, live loop. |
-| `onboarding/reference/tools/build.py`       | Shared CSS and font constants (originally a canvas builder).                                                                                         |
-| `onboarding/reference/check/*.py`           | Playwright checks (see Validation).                                                                                                                  |
-
-Rebuild: `python3 onboarding/reference/tools/site.py`.
+The single-page reference the port was built against lived in
+`onboarding/reference/` until parity was verified (issue 04) and was then
+removed; it remains in the Git history at commit `7b4d961`. Its Playwright
+checks moved to `onboarding/site/check/`.
 
 ## Requirements for the Lustre port
 
@@ -249,8 +238,9 @@ Rebuild: `python3 onboarding/reference/tools/site.py`.
 
 ## Validation
 
-- Reference checks (Python Playwright; `pip install playwright` and
-  `playwright install chromium`), run from `onboarding/reference/check/`:
+- Browser checks (Python Playwright; `pip install playwright` and
+  `playwright install chromium`), in `onboarding/site/check/`, run against
+  the build in `onboarding/site/dist/`:
   - `python3 tours.py start,beam,otp,gleam,principles,atlas,foundations,outside-world,durable-work,agents,compose,field-guide`
     clicks every tour to the end, then every unlocked control; expects
     no unresolved holes and zero page errors.
@@ -259,8 +249,7 @@ Rebuild: `python3 onboarding/reference/tools/site.py`.
   - `python3 still2.py` checks motion-off mode.
   - `python3 play.py <route> <lab-index> <ms> <out.png> <w> <h>` plays a tour
     and screenshots the viewport.
-- The same checks must pass against the Lustre build (point the scripts at
-  its output), plus gleeunit tests for the pure simulation and tour logic.
+- gleeunit tests for the pure simulation and tour logic.
 
 ## Decision history
 
@@ -276,6 +265,9 @@ Rebuild: `python3 onboarding/reference/tools/site.py`.
   style real-time widgets added.
 - The sibling library repositories were read only; nothing outside this
   repository was changed.
+- Rebuilt in Lustre with behaviour parity to the reference, verified with the
+  reference's own browser checks; the reference was then removed rather than
+  kept as an oracle.
 
 ## Inspiration links
 
@@ -292,7 +284,5 @@ Rebuild: `python3 onboarding/reference/tools/site.py`.
 
 - Final public URL and whether Pages serves from this repository or a
   dedicated one.
-- Whether to keep `onboarding/reference/` after parity, as an oracle in
-  `docs/ORACLE.md`, or remove it.
 - Whether the site needs a "last verified against" stamp per package so
   content staleness is visible.
