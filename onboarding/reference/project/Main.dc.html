@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>gleam-dream onboarding · Course map</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#FAF8F4}
+a{color:#B0186E}a:hover{color:#7E0F4E}
+.pg{font-family:Inter,system-ui,sans-serif;color:#17162B;background:#FAF8F4;line-height:1.55;font-size:17px}
+.wrap{max-width:1120px;margin:0 auto;padding:0 24px}
+h1,h2,h3,h4{font-family:'Space Grotesk',Inter,sans-serif;margin:0;line-height:1.15;letter-spacing:-0.01em}
+.top{border-bottom:1px solid #E4E0D8;background:#FAF8F4}
+.topin{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:center;justify-content:space-between;padding:16px 0}
+.brand{font:600 15px 'JetBrains Mono',monospace;color:#17162B;text-decoration:none}
+.meta{font:500 13px 'JetBrains Mono',monospace;color:#5B5970}
+.k{font:600 12px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;color:#B0186E}
+.muted{color:#5B5970}
+.card{background:#fff;border:1px solid #E4E0D8;border-radius:16px;padding:24px}
+.btnl{display:inline-flex;align-items:center;min-height:48px;padding:0 22px;border-radius:999px;font:600 15px Inter,sans-serif;text-decoration:none;border:1px solid #17162B}
+.btnl.pri{background:#17162B;color:#fff}.btnl.pri:hover{background:#2E2C4F;color:#fff}
+.btnl.sec{background:#fff;color:#17162B}.btnl.sec:hover{background:#F1EEE8;color:#17162B}
+.layer{display:flex;align-items:center;gap:16px;width:100%;min-height:64px;padding:12px 20px;border-radius:14px;border:2px solid transparent;cursor:pointer;text-align:left;font:inherit;transition:transform .15s}
+.layer:hover{transform:translateX(4px)}
+.layer.on{border-color:#17162B;box-shadow:0 6px 0 #17162B}
+.ln{font:600 12px 'JetBrains Mono',monospace;opacity:.8;width:28px}
+.lt{font:600 19px 'Space Grotesk',sans-serif}
+.ls{font-size:14px;opacity:.85}
+.mod{display:flex;flex-direction:column;gap:8px;text-decoration:none;color:#17162B;background:#fff;border:1px solid #E4E0D8;border-radius:16px;padding:20px;transition:border-color .15s,transform .15s}
+.mod:hover{border-color:#17162B;color:#17162B;transform:translateY(-2px)}
+.mnum{font:600 12px 'JetBrains Mono',monospace;color:#5B5970;display:flex;justify-content:space-between}
+.mt{font:600 19px 'Space Grotesk',sans-serif}
+.chip{display:inline-block;font:600 12px 'JetBrains Mono',monospace;padding:4px 10px;border-radius:999px}
+.dark{background:#17162B;color:#fff;border-radius:20px;padding:40px}
+</style>
+</helmet>
+<div class="pg">
+<nav class="top" aria-label="Course">
+<div class="wrap topin">
+<a class="brand" href="Main.dc.html">gleam-dream / onboarding</a>
+<span class="meta">Course map · about 3½ hours · 11 modules</span>
+<a href="M1-Beam.dc.html" style="font-weight:600">Start module 1 →</a>
+</div>
+</nav>
+
+<header class="wrap" style="padding-top:80px;padding-bottom:56px">
+<div class="k">Onboarding for new developers</div>
+<h1 style="font-size:clamp(40px,6vw,76px);margin-top:16px;max-width:900px">From the BEAM to real systems</h1>
+<p style="font-size:21px;max-width:760px;margin:24px 0 0" class="muted">A guided path through the runtime, the language and the gleam-dream libraries. You'll leave with a mental model you can navigate by: what each layer gives you, what each package owns, and how they snap together into real services.</p>
+<div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:32px">
+<a class="btnl pri" href="M1-Beam.dc.html">Start with the BEAM →</a>
+<a class="btnl sec" href="M5-Atlas.dc.html">Jump to the package atlas</a>
+</div>
+<div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:40px" class="muted">
+<span><b style="color:#17162B">No code required.</b> Concepts, pictures and playgrounds.</span>
+<span><b style="color:#17162B">Self-paced.</b> Every module stands alone.</span>
+<span><b style="color:#17162B">Checks included.</b> Each module ends with a short quiz.</span>
+</div>
+</header>
+
+<section class="wrap" style="padding-bottom:72px">
+<div class="card" style="padding:32px">
+<div style="display:flex;flex-wrap:wrap;gap:32px">
+<div style="flex:1 1 420px;min-width:0">
+<div class="k">Playground · the whole picture</div>
+<h2 style="font-size:32px;margin:10px 0 8px">Six layers, one stack</h2>
+<p class="muted" style="margin:0 0 20px">Everything you'll learn sits on one of these layers. Each layer leans on the one below it. Click a layer to see what it gives you.</p>
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{layers}}" as="l" hint-placeholder-count="6">
+<button type="button" class="{{l.cls}}" style="background:{{l.bg}};color:{{l.fg}}" onClick="{{l.pick}}" aria-pressed="{{l.on}}">
+<span class="ln">{{l.n}}</span>
+<span style="display:flex;flex-direction:column"><span class="lt">{{l.name}}</span><span class="ls">{{l.tag}}</span></span>
+</button>
+</sc-for>
+</div>
+</div>
+<div style="flex:1 1 380px;min-width:0;display:flex">
+<div style="flex:1;border-radius:16px;padding:28px;background:{{sel.bg}};color:{{sel.fg}};display:flex;flex-direction:column;gap:16px">
+<div style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;opacity:.85">Layer {{sel.n}}</div>
+<h3 style="font-size:34px">{{sel.name}}</h3>
+<p style="margin:0;font-size:18px">{{sel.summary}}</p>
+<div>
+<div style="font:600 12px 'JetBrains Mono',monospace;letter-spacing:.08em;text-transform:uppercase;opacity:.85;margin-bottom:8px">It gives you</div>
+<sc-for list="{{sel.gives}}" as="g" hint-placeholder-count="3">
+<div style="display:flex;gap:10px;margin-bottom:6px"><span aria-hidden="true">→</span><span>{{g}}</span></div>
+</sc-for>
+</div>
+<div style="margin-top:auto;padding-top:12px;border-top:1px solid currentColor;opacity:.95">
+<div style="font-size:14px">{{sel.where}}</div>
+<a href="{{sel.href}}" style="color:inherit;font-weight:700">{{sel.cta}} →</a>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap" style="padding-bottom:72px">
+<div class="k">How every module works</div>
+<h2 style="font-size:32px;margin:10px 0 24px">Read a little, play a lot, check, carry one idea forward</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+<div class="card"><div class="chip" style="background:#EBEAFD;color:#2B2862">1 · Read</div><h3 style="font-size:20px;margin:14px 0 6px">Short concepts</h3><p class="muted" style="margin:0;font-size:15px">A handful of cards, each a single idea in plain words.</p></div>
+<div class="card"><div class="chip" style="background:#FCE7F3;color:#8A1056">2 · Play</div><h3 style="font-size:20px;margin:14px 0 6px">Playgrounds</h3><p class="muted" style="margin:0;font-size:15px">Crash processes, inject failures, flip policies. Watch what happens.</p></div>
+<div class="card"><div class="chip" style="background:#FDF0DC;color:#8A3F06">3 · Check</div><h3 style="font-size:20px;margin:14px 0 6px">A short quiz</h3><p class="muted" style="margin:0;font-size:15px">Three scenario questions with an explanation for every answer.</p></div>
+<div class="card"><div class="chip" style="background:#DDF3F0;color:#0B5A54">4 · Carry</div><h3 style="font-size:20px;margin:14px 0 6px">One key idea</h3><p class="muted" style="margin:0;font-size:15px">The sentence to remember when you open a real repository.</p></div>
+</div>
+</section>
+
+<section class="wrap" style="padding-bottom:72px">
+<div class="k">Your path · about 3½ hours</div>
+<h2 style="font-size:32px;margin:10px 0 8px">Four phases, eleven modules</h2>
+<p class="muted" style="margin:0 0 32px;max-width:720px">Go in order the first time. Each phase builds the vocabulary the next one uses. Times assume you try every playground.</p>
+
+<sc-for list="{{phases}}" as="p" hint-placeholder-count="4">
+<div style="margin-bottom:40px">
+<div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:16px">
+<span class="chip" style="background:{{p.cbg}};color:#fff">{{p.label}}</span>
+<h3 style="font-size:24px">{{p.title}}</h3>
+<span class="meta">{{p.time}}</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px">
+<sc-for list="{{p.mods}}" as="m" hint-placeholder-count="3">
+<a class="mod" href="{{m.href}}">
+<span class="mnum"><span>Module {{m.n}}</span><span>{{m.min}} min</span></span>
+<span class="mt">{{m.title}}</span>
+<span class="muted" style="font-size:15px">{{m.blurb}}</span>
+<span style="font-size:13px;font-weight:600;color:#B0186E;margin-top:auto">Playground: {{m.play}}</span>
+</a>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</section>
+
+<section class="wrap" style="padding-bottom:96px">
+<div class="dark">
+<div class="k" style="color:#F9A8D4">The one-sentence version</div>
+<p style="font:600 clamp(24px,3vw,34px)/1.3 'Space Grotesk',sans-serif;margin:14px 0 0;max-width:900px">The BEAM gives you isolated processes, OTP turns failure into restarts, Gleam adds types, and gleam-dream adds twelve focused libraries that each own one mechanism while your application keeps every decision.</p>
+<p style="margin:20px 0 0;color:#C9C6E0;max-width:760px">By module 11 that sentence should feel obvious. If any part of it doesn't yet, that's the module to start with.</p>
+<div style="margin-top:28px"><a class="btnl" style="background:#fff;color:#17162B;border-color:#fff" href="M1-Beam.dc.html">Begin →</a></div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":3400}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { layer: 0 }; }
+  renderVals() {
+    const L = [
+      { n: '6', name: 'Your systems', tag: 'Checkout, support desk, research agent…', bg: '#17162B', fg: '#FFFFFF',
+        summary: 'The application you write. It owns the types, the policy, the database and every resource lifetime, and composes the libraries below in plain code.',
+        gives: ['A product that survives crashes, retries and restarts', 'Clear ownership: you decide, libraries execute', 'Reference compositions to start from'],
+        where: 'Modules 10 and 11 assemble real systems from the pieces.', href: 'M10-Compose.dc.html', cta: 'Open the composition studio' },
+      { n: '5', name: 'Building blocks', tag: 'LLM Wire, Relay, Hellhound, Correio, Grind, Saga, Fabric, Decisions, Retrace', bg: '#FCE7F3', fg: '#5E0B3A',
+        summary: 'Focused libraries for the hard parts of services: talking to models and tools, signing people in, sending mail, durable jobs, workflows, agents and human approval.',
+        gives: ['Typed contracts at every boundary', 'Honest evidence when an effect may or may not have happened', 'Durable records you can recover from'],
+        where: 'Modules 7, 8 and 9 tour them by job to be done.', href: 'M7-Edges.dc.html', cta: 'Meet the building blocks' },
+      { n: '4', name: 'Foundations', tag: 'Sinal, JSON Blueprint, HTTP Gun', bg: '#DDF3F0', fg: '#0B4A45',
+        summary: 'Three shared libraries almost every other package stands on: typed telemetry, typed JSON with schemas, and a bounded HTTP client.',
+        gives: ['One way to observe everything (Sinal)', 'One way to describe data shapes (JSON Blueprint)', 'One way to reach the network (HTTP Gun)'],
+        where: 'Module 6 opens each one up.', href: 'M6-Foundations.dc.html', cta: 'Explore the foundations' },
+      { n: '3', name: 'Gleam', tag: 'A typed language that compiles to the BEAM', bg: '#F9D7F0', fg: '#4A1340',
+        summary: 'A friendly, statically typed language. Errors are values, impossible states can’t be built, and messages between processes are checked by the compiler.',
+        gives: ['Types for data, results and messages', 'Exhaustive pattern matching', 'Full access to Erlang and Elixir libraries'],
+        where: 'Module 3 covers what Gleam adds.', href: 'M3-Gleam.dc.html', cta: 'Learn what Gleam adds' },
+      { n: '2', name: 'OTP', tag: 'Patterns for processes: actors, supervisors, applications', bg: '#DCD9FF', fg: '#241F6B',
+        summary: 'Battle-tested building patterns for processes. Actors hold state, supervisors restart what crashes, applications start and stop the whole tree.',
+        gives: ['Supervision trees: failure becomes a restart', 'Actors: one message at a time, no locks', 'A standard place to plug every library in'],
+        where: 'Module 2 has a supervision simulator.', href: 'M2-Otp.dc.html', cta: 'Play with supervision' },
+      { n: '1', name: 'The BEAM', tag: 'The virtual machine under Erlang, Elixir and Gleam', bg: '#2B2862', fg: '#FFFFFF',
+        summary: 'A runtime built for systems that never stop. Millions of tiny isolated processes share nothing and talk only by sending messages.',
+        gives: ['Cheap, isolated processes', 'Message passing instead of shared memory', 'Fair, preemptive scheduling across all cores'],
+        where: 'Module 1 starts here.', href: 'M1-Beam.dc.html', cta: 'Start with the BEAM' }
+    ];
+    const sel = this.state.layer;
+    const layers = L.map((l, i) => ({ ...l, on: i === sel,
+      cls: 'layer' + (i === sel ? ' on' : ''),
+      style: 'background:' + l.bg + ';color:' + l.fg,
+      pick: () => this.setState({ layer: i }) }));
+    const M = (n, title, min, blurb, play, href) => ({ n, title, min, blurb, play, href });
+    const phases = [
+      { label: 'Phase 1', title: 'The runtime', time: 'about 55 min', cbg: '#2B2862', mods: [
+        M(1, 'The BEAM', 20, 'Processes, messages, mailboxes and why nothing is shared.', 'crash a process', 'M1-Beam.dc.html'),
+        M(2, 'OTP', 20, 'Actors, supervisors and the art of letting things crash.', 'supervision tree', 'M2-Otp.dc.html'),
+        M(3, 'Gleam', 15, 'Types, results and messages the compiler can check.', 'impossible states', 'M3-Gleam.dc.html') ] },
+      { label: 'Phase 2', title: 'The mental model', time: 'about 35 min', cbg: '#B0186E', mods: [
+        M(4, 'How gleam-dream thinks', 20, 'Seven principles every package shares. Learn them once.', 'did it happen?', 'M4-Principles.dc.html'),
+        M(5, 'The package atlas', 15, 'All twelve libraries on one map, with what each owns.', 'interactive map', 'M5-Atlas.dc.html') ] },
+      { label: 'Phase 3', title: 'The building blocks', time: 'about 85 min', cbg: '#0F766E', mods: [
+        M(6, 'Foundations', 20, 'Sinal, JSON Blueprint and HTTP Gun.', 'emit, decode, request', 'M6-Foundations.dc.html'),
+        M(7, 'The outside world', 20, 'LLM Wire, Relay (MCP), Hellhound (sign-in) and Correio (email).', 'four flows', 'M7-Edges.dc.html'),
+        M(8, 'Work that outlives a request', 20, 'Grind jobs and Saga workflows.', 'job lifecycle', 'M8-Durable.dc.html'),
+        M(9, 'Agents & people in the loop', 25, 'Fabric agents and Decisions decision points.', 'policy gate', 'M9-Oversight.dc.html') ] },
+      { label: 'Phase 4', title: 'Putting it together', time: 'about 40 min', cbg: '#B45309', mods: [
+        M(10, 'Composition studio', 25, 'Real systems, step by step, and a builder for your own.', 'system builder', 'M10-Compose.dc.html'),
+        M(11, 'Field guide & final check', 15, 'Retrace, tooling, a cheat sheet and the final quiz.', 'final quiz', 'M11-FieldGuide.dc.html') ] }
+    ];
+    return { layers, sel: layers[sel], phases };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<header class="wrap" style="padding-top:72px;padding-bottom:56px">
+<div class="k">Module 2 · Phase 1: the runtime</div>
+<h1 style="font-size:clamp(38px,5.5vw,64px);margin-top:14px;max-width:900px">OTP: turning failure into a restart</h1>
+<p class="lead" style="margin-top:20px;font-size:20px">OTP is the toolkit that ships with Erlang: a set of proven patterns for processes that hold state, watch each other and restart cleanly. Gleam uses it through the <span class="mono">gleam_otp</span> and <span class="mono">gleam_erlang</span> packages, and every gleam-dream library is built on it.</p>
+<div class="card" style="margin-top:32px;max-width:760px">
+<div class="k" style="color:#5B5970">By the end you can explain</div>
+<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+<span>→ what an actor is, and why it needs no locks</span>
+<span>→ how a supervisor decides what to restart, and when it gives up</span>
+<span>→ where each gleam-dream library plugs into your application</span>
+</div>
+</div>
+</header>
+
+<section class="wrap sec">
+<div class="k">Read · the building patterns</div>
+<h2 class="h2">Four shapes you'll see everywhere</h2>
+<p class="lead">OTP calls these "behaviours". You'll rarely write them from scratch, but every library in this course uses them, so it pays to recognise them.</p>
+<div class="cards">
+<div class="card"><span class="chip" style="background:#DCD9FF;color:#241F6B">actor</span><h3>Actor</h3><p>A process with private state and a loop: take a message, compute the new state, maybe reply, repeat. Erlang calls it a gen_server.</p></div>
+<div class="card"><span class="chip" style="background:#DCD9FF;color:#241F6B">call · send</span><h3>Call or send</h3><p>"Send" delivers a message and moves on. "Call" sends and waits for a reply, always with a timeout, because the other side might be dead.</p></div>
+<div class="card"><span class="chip" style="background:#DCD9FF;color:#241F6B">supervisor</span><h3>Supervisor</h3><p>A process whose only job is to start children in order and restart them when they crash, following a strategy you choose.</p></div>
+<div class="card"><span class="chip" style="background:#DCD9FF;color:#241F6B">application</span><h3>Application</h3><p>The top of the tree. It starts the root supervisor and stops everything, in reverse order, when the program shuts down.</p></div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="lab" data-tour="actor">
+<div class="labh">
+<div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Inside an actor</h2>
+<p class="muted" style="margin-top:6px;max-width:660px">A shopping-cart actor. Messages queue up in its mailbox and it handles them strictly one at a time. Step through and watch the state change.</p></div>
+<div class="row"><button type="button" class="btn" onClick="{{burst}}">Two requests at the same instant</button><button type="button" class="btn sm" onClick="{{resetActor}}">Reset</button></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;align-items:stretch">
+<div class="box" style="background:#F6F4FF;border-color:#DCD9FF">
+<div class="meta">1 · Mailbox</div>
+<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px;min-height:160px">
+<sc-for list="{{mailbox}}" as="m" hint-placeholder-count="4"><div style="padding:8px 12px;border-radius:10px;background:{{m.bg}};border:1px solid #DCD9FF;font:600 13px 'JetBrains Mono',monospace;display:flex;justify-content:space-between"><span>{{m.label}}</span><span style="opacity:.7">{{m.kind}}</span></div></sc-for>
+<sc-if value="{{mailEmpty}}" hint-placeholder-val="{{false}}"><div class="muted" style="font-size:14px">Empty. The actor sleeps until a message arrives, using no CPU.</div></sc-if>
+</div>
+</div>
+<div class="box" style="display:flex;flex-direction:column;gap:12px;align-items:stretch;justify-content:center;text-align:center">
+<div class="meta">2 · Handler</div>
+<div style="font:600 15px 'JetBrains Mono',monospace;padding:16px;border-radius:12px;background:#17162B;color:#fff">handle(message, state)<br>→ new state</div>
+<div style="font-size:15px;min-height:72px">{{lastStep}}</div>
+<button type="button" class="btn pri" onClick="{{step}}" disabled="{{mailEmpty}}" style="justify-content:center">Handle next message</button>
+</div>
+<div class="box" style="background:#FDF0DC;border-color:#F3D9B1">
+<div class="meta">3 · State (private)</div>
+<div style="display:flex;flex-direction:column;gap:6px;margin-top:10px">
+<sc-for list="{{items}}" as="it" hint-placeholder-count="2"><div style="display:flex;justify-content:space-between;padding:8px 12px;background:#fff;border-radius:10px"><span>{{it.name}}</span><b>{{it.price}}</b></div></sc-for>
+<div style="display:flex;justify-content:space-between;padding:8px 12px;border-top:2px solid #17162B;margin-top:4px"><b>Total</b><b>{{total}}</b></div>
+<div class="meta" style="margin-top:6px">version {{version}} · only this actor can change it</div>
+</div>
+</div>
+</div>
+<div class="card" style="margin-top:16px;padding:16px"><div class="k" style="margin-bottom:8px">Timeline · two callers, one actor</div><!--MSC:actorChart--></div>
+<div class="note tour-hide" style="margin-top:16px"><b>Why no locks?</b> Two requests "at the same instant" just become two messages in a row. The actor finishes one before it looks at the other, so its state is never half-updated. A "call" gets its reply sent back; a "send" gets none.</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="lab" data-tour="load" style="margin-top:0">
+<div class="labh"><div><span class="tag">Real time</span><h2 style="font-size:28px;margin-top:10px">Send or call: a mailbox under load</h2><p class="muted" style="margin-top:6px;max-width:720px">Four request processes talk to one actor that handles 4 messages a second. BEAM mailboxes have no size limit, so the only thing that can slow a sender down is the sender waiting. Turn up the rate, then switch between send and call.</p></div>
+<div class="row"><button type="button" class="btn sm" onClick="{{mbPause}}">{{mbPauseLabel}}</button><button type="button" class="btn sm" onClick="{{mbReset}}">Reset</button></div></div>
+<div class="row" style="gap:18px;margin-bottom:10px">
+<div class="seg"><sc-for list="{{mbModes}}" as="m" hint-placeholder-count="2"><button type="button" class="{{m.cls}}" onClick="{{m.pick}}">{{m.label}}</button></sc-for></div>
+<label style="display:flex;align-items:center;gap:10px;flex:1 1 260px;max-width:420px"><span style="white-space:nowrap"><b>{{mbRate}}</b> per second</span><input type="range" min="1" max="12" step="1" value="{{mbRate}}" onChange="{{mbSetRate}}" style="flex:1"></label>
+<sc-if value="{{noMotion}}"><button type="button" class="btn sm" onClick="{{mbStep}}">Advance 1 second</button></sc-if>
+</div>
+<div class="live" data-live="mailbox" style="width:100%"></div>
+<div class="note" style="margin-top:10px">{{mbNote}}</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Read · let it crash</div>
+<h2 class="h2">Separate the happy path from recovery</h2>
+<p class="lead">Instead of defending every line against every failure, write the normal case clearly and let unexpected errors crash the process. A supervisor, written once and tested by decades of telecom use, restarts it from a known good state.</p>
+<div class="lab" data-tour="tree">
+<div class="labh">
+<div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Supervision tree simulator</h2>
+<p class="muted" style="margin-top:6px;max-width:660px">A small shop service. Pick a restart strategy, then crash a child. Crash things quickly, more than 3 times in 5 seconds, to see the supervisor give up and escalate.</p></div>
+<button type="button" class="btn sm" onClick="{{resetTree}}">Reset</button>
+</div>
+<div class="row" style="margin-bottom:24px;gap:16px">
+<span class="meta">Strategy</span>
+<div class="seg"><sc-for list="{{strategies}}" as="s" hint-placeholder-count="3"><button type="button" class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button></sc-for></div>
+</div>
+<p class="tour-hide" style="margin-bottom:20px;font-size:15px"><b>{{stratName}}:</b> {{stratDesc}}</p>
+
+<div style="display:flex;flex-direction:column;align-items:center">
+<div style="padding:12px 20px;border-radius:12px;background:#17162B;color:#fff;text-align:center;min-width:220px"><div class="meta" style="color:#C9C6E0">application</div><b>shop</b></div>
+<div style="width:2px;height:20px;background:#8A8698"></div>
+<div style="padding:12px 20px;border-radius:12px;background:{{rootBg}};color:{{rootFg}};text-align:center;min-width:260px;border:2px solid #241F6B"><div class="meta" style="color:inherit;opacity:.8">root supervisor · {{stratShort}}</div><b>{{rootStatus}}</b><div style="font-size:13px;margin-top:4px">restarts in window: {{windowCount}} / 3</div></div>
+<div style="width:2px;height:20px;background:#8A8698"></div>
+<div style="height:2px;background:#8A8698;width:76%"></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;width:100%">
+<sc-for list="{{kids}}" as="c" hint-placeholder-count="4">
+<div style="display:flex;flex-direction:column;align-items:center">
+<div style="width:2px;height:20px;background:#8A8698"></div>
+<div style="width:100%;box-sizing:border-box;border-radius:14px;padding:14px;border:2px solid {{c.border}};background:{{c.bg}};display:flex;flex-direction:column;gap:6px;min-height:136px">
+<div class="meta">child {{c.order}} · started {{c.orderWord}}</div>
+<b>{{c.name}}</b>
+<span class="muted tour-hide" style="font-size:13px">{{c.what}}</span>
+<span class="chip" style="background:{{c.sbg}};color:{{c.sfg}};align-self:flex-start">{{c.status}}</span>
+<span class="meta" style="font-size:12px">pid #{{c.pid}} · restarted {{c.restarts}}×</span>
+<button type="button" class="btn sm warn" onClick="{{c.crash}}" disabled="{{c.cantCrash}}" style="margin-top:auto">Crash it</button>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div class="card" style="margin-top:20px;padding:16px"><div class="k" style="margin-bottom:8px">Timeline · what the supervisor saw and did</div><!--MSC:treeChart--></div>
+<div class="row" style="margin-top:20px;gap:16px">
+<button type="button" class="btn" onClick="{{wait}}">Let 5 seconds pass (clear the window)</button>
+<span class="muted" style="font-size:14px">{{treeMsg}}</span>
+</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Read · your tree, their children</div>
+<h2 class="h2">Where gleam-dream plugs in</h2>
+<p class="lead">No gleam-dream library starts hidden background processes of its own. Each hands you a ready-made child (usually a function called <span class="mono">supervised</span>), and you place it in your tree. Click a library to see what it brings.</p>
+<div class="lab" data-tour="plug">
+<div class="split" style="align-items:flex-start">
+<div style="flex:1 1 420px">
+<div style="padding:12px 16px;border-radius:12px;background:#17162B;color:#fff;margin-bottom:8px"><span class="meta" style="color:#C9C6E0">your application</span> · <b>root supervisor</b></div>
+<div style="display:flex;flex-direction:column;gap:8px;padding-left:24px;border-left:2px solid #8A8698;margin-left:16px">
+<sc-for list="{{plugs}}" as="p" hint-placeholder-count="6">
+<button type="button" class="{{p.cls}}" onClick="{{p.pick}}" style="text-align:left;display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:52px;padding:10px 14px;border-radius:12px;border:2px solid {{p.border}};background:{{p.bg}};color:#17162B;font:inherit;cursor:pointer"><span><b>{{p.lib}}</b> <span class="muted" style="font-size:14px">· {{p.short}}</span></span><span class="chip" style="background:{{p.tint}};color:{{p.ink}}">{{p.layer}}</span></button>
+</sc-for>
+</div>
+</div>
+<div style="flex:1 1 340px">
+<div style="border-radius:16px;padding:24px;background:{{plug.tint}};color:{{plug.ink}}">
+<div class="k" style="color:inherit">{{plug.layer}}</div>
+<h3 style="font-size:28px;margin:8px 0">{{plug.lib}}</h3>
+<p style="font-size:16px">{{plug.brings}}</p>
+<div style="margin-top:16px;padding-top:12px;border-top:1px solid currentColor;font-size:15px"><b>You decide:</b> {{plug.you}}</div>
+</div>
+</div>
+</div>
+</div>
+<div class="key"><div class="k">Carry this forward</div><p>Write the happy path and let supervisors handle the rest. Libraries give you children; your application decides where they live, when they start, and when they stop.</p></div>
+</section>
+<!--QUIZ-->

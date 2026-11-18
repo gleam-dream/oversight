@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gleam-dream onboarding: from the BEAM to real systems</title>
+<link rel="stylesheet" href="FONTS_URL">
+<style>
+/*CSS*/
+html{scroll-behavior:smooth}
+.appbar{position:sticky;top:0;z-index:20;background:rgba(250,248,244,.94);backdrop-filter:blur(8px);border-bottom:1px solid #E4E0D8}
+.appin{max-width:1120px;margin:0 auto;padding:10px 24px;display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;justify-content:space-between}
+.prog{display:flex;align-items:center;gap:10px;flex:1 1 220px;max-width:360px}
+.progbar{flex:1;height:8px;border-radius:99px;background:#E4E0D8;overflow:hidden}
+.progbar span{display:block;height:8px;background:#B0186E;border-radius:99px;transition:width .3s}
+.drawer{max-width:1120px;margin:0 auto;padding:4px 24px 20px;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.drawer a{display:flex;gap:10px;align-items:center;justify-content:space-between;text-decoration:none;color:#17162B;background:#fff;border:1px solid #E4E0D8;border-radius:12px;padding:10px 14px;min-height:48px;font-size:15px}
+.drawer a:hover{border-color:#17162B;color:#17162B}
+.drawer a.cur{border:2px solid #17162B}
+.drawer .dn{font:600 12px 'JetBrains Mono',monospace;color:#5B5970;white-space:nowrap}
+.drawer .ok{color:#15803D}
+.donebtn{font:600 15px Inter,sans-serif;min-height:52px;padding:0 22px;border-radius:999px;border:2px solid #15803D;background:#fff;color:#0E4D25;cursor:pointer}
+.donebtn:hover{background:#F1FAF3}
+.donebtn.on{background:#15803D;color:#fff}
+#view:focus{outline:none}
+.drawer[hidden]{display:none}
+input[type=range]{accent-color:#B0186E;min-height:28px}
+body.still *{transition:none!important;animation:none!important;scroll-behavior:auto!important}
+.tourbar{background:#17162B;color:#fff;border-radius:14px;padding:12px 14px 10px;margin-bottom:16px}
+.tourbar.freebar{background:#F1FAF3;color:#0E4D25;border:1px solid #B9E2C4;padding:8px 12px}
+.tb-top{display:flex;gap:12px;align-items:center}
+.tourn{font:600 12px 'JetBrains Mono',monospace;color:#F9A8D4;white-space:nowrap;min-width:34px}
+.tourtext{font-size:15px;line-height:1.45;margin:0;flex:1;min-height:44px;display:flex;align-items:center}
+.tb-ctl{display:flex;gap:6px;align-items:center}
+.tbi{width:40px;height:40px;border-radius:999px;border:1px solid rgba(255,255,255,.5);background:transparent;color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+.tbi:hover{background:rgba(255,255,255,.14)}
+.tbi:disabled{opacity:.3;cursor:default}
+.tbn{height:40px;padding:0 16px;border-radius:999px;border:0;background:#fff;color:#17162B;font:600 14px Inter,sans-serif;cursor:pointer;white-space:nowrap}
+.tbn:hover{background:#FCE7F3}
+.tb-foot{display:flex;gap:12px;align-items:center;margin-top:8px}
+.tdots{display:flex;gap:4px;flex:1}
+.tdots span{flex:1;height:4px;border-radius:9px;background:rgba(255,255,255,.22);overflow:hidden}
+.tdots i{display:block;height:100%;width:0;background:#F9A8D4;border-radius:9px;transition:width .35s ease}
+@keyframes tfA{from{width:0}to{width:100%}}
+@keyframes tfB{from{width:0}to{width:100%}}
+.tblink{background:none;border:0;color:#C9C6E0;font:500 12px Inter,sans-serif;cursor:pointer;padding:4px 0;text-decoration:underline;white-space:nowrap}
+.tblink:hover{color:#fff}
+.freebar .btn{color:#0E4D25;border-color:#15803D}
+.freebar .btn:hover{background:#E2F4E7}
+.lab.touring .labh p{display:none}
+.lab.touring .labh{margin-bottom:12px}
+.lab.touring .labh h2{font-size:22px!important;margin-top:6px!important}
+.lab.touring{scroll-margin-top:70px;padding:20px 24px}
+.lab.touring .tour-hide{display:none!important}
+.lab.touring .log{min-height:0!important;max-height:140px;overflow:hidden}
+.lab.touring .syslist button{min-height:38px!important;padding:6px 12px!important}
+.lab.touring .note{padding:10px 14px;font-size:14px}
+.lab[data-rt-z="60"]>:not(.tourbar){zoom:0.60}
+.lab[data-rt-z="65"]>:not(.tourbar){zoom:0.65}
+.lab[data-rt-z="70"]>:not(.tourbar){zoom:0.70}
+.lab[data-rt-z="75"]>:not(.tourbar){zoom:0.75}
+.lab[data-rt-z="80"]>:not(.tourbar){zoom:0.80}
+.lab[data-rt-z="85"]>:not(.tourbar){zoom:0.85}
+.lab[data-rt-z="90"]>:not(.tourbar){zoom:0.90}
+.lab[data-rt-z="95"]>:not(.tourbar){zoom:0.95}
+@keyframes mscin{from{opacity:0}to{opacity:1}}
+@keyframes mscdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.msc-new{animation:mscin .45s ease-out}
+.msc-new path.solid{stroke-dasharray:1;animation:mscdraw .55s ease-out}
+.live svg text{font-family:Inter,system-ui,sans-serif}
+.lab.touring button:not(.tb),.lab.touring input,.lab.touring select,.lab.touring label{pointer-events:none}
+.lab.touring .labh~*,.lab.touring>.split,.lab.touring>div:not(.tourbar):not(.labh){cursor:default}
+.msc-h{font:600 13px Inter,sans-serif;fill:#17162B}
+.msc-l{font:500 12px 'JetBrains Mono',monospace}
+@keyframes pulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
+.pulse{animation:pulse 1s infinite}
+@media (max-width:640px){.tb-top{flex-wrap:wrap}.tourtext{flex-basis:100%;order:3}.lab{padding:18px}.tourbar{padding:14px}.key{padding:24px}}
+</style>
+</head>
+<body>
+<div class="pg">
+<header class="appbar">
+<div class="appin">
+<a class="brand" href="#start">gleam-dream / onboarding</a>
+<div class="prog" aria-live="polite"><div class="progbar" aria-hidden="true"><span id="pbar" style="width:0%"></span></div><span class="meta" id="ptext">0 of 11 done</span></div>
+<div class="row" style="gap:8px"><button type="button" class="btn sm" id="motionBtn" aria-pressed="true" title="Turn animations and auto-play on or off">Motion: on</button><button type="button" class="btn sm" id="menuBtn" aria-expanded="false" aria-controls="drawer">All modules</button></div>
+</div>
+<nav id="drawer" class="drawer" aria-label="Modules" hidden></nav>
+</header>
+<main id="view" tabindex="-1"></main>
+<footer id="foot" class="wrap foot"></footer>
+</div>
+<!--TEMPLATES-->
+<script>
+/* ---------- tiny component runtime: {{holes}}, sc-for, sc-if, on* handlers ---------- */
+class DCLogic {
+  constructor(props) { this.props = props || {}; this.state = {}; }
+  setState(u) { const p = typeof u === 'function' ? u(this.state) : u; this.state = Object.assign({}, this.state, p); GD.schedule(this); }
+  forceUpdate() { GD.schedule(this); }
+  __vals() { return Object.assign(this.renderVals(), this.extraVals ? this.extraVals() : {}); }
+  /* ---- guided tours: each playground explains itself before it unlocks ---- */
+  __stopTours() { clearTimeout(this.__tt); this.__tt = null; const t = this.state.__t || {}; let any = false; const n = {}; for (const k in t) { n[k] = Object.assign({}, t[k], { playing: false }); if (t[k].playing) any = true; } if (any) this.state = Object.assign({}, this.state, { __t: n }); }
+  __tourVals() {
+    const defs = this.tourDefs ? this.tourDefs() : {};
+    const T = {}, $ = () => this.__vals();
+    const get = (id) => (this.state.__t || {})[id] || { i: 0, free: false, playing: false };
+    const set = (id, patch) => this.setState({ __t: Object.assign({}, this.state.__t || {}, { [id]: Object.assign({}, get(id), patch) }) });
+    for (const id in defs) {
+      const d = defs[id], steps = d.steps, n = steps.length, s = get(id);
+      const apply = (k) => { const st = steps[k]; if (st && st.a) { try { st.a($); } catch (e) { console.error(e); } } };
+      const reset = () => { if (d.reset) { try { d.reset($); } catch (e) { console.error(e); } } };
+      const finish = () => { clearTimeout(this.__tt); set(id, { free: true, playing: false }); };
+      const goTo = (k) => { apply(k); set(id, { i: k }); };
+      const next = () => { const c = get(id); if (c.i >= n - 1) finish(); else goTo(c.i + 1); };
+      const schedule = () => {
+        clearTimeout(this.__tt);
+        const c = get(id); if (!c.playing || c.free) return;
+        const ms = (steps[c.i] && steps[c.i].ms) || 3600;
+        this.__tt = setTimeout(() => { const c2 = get(id); if (!c2.playing) return; if (c2.i >= n - 1) { set(id, { playing: false }); return; } goTo(c2.i + 1); schedule(); }, ms);
+      };
+      T[id] = {
+        n: s.i + 1, total: n, text: steps[s.i] ? steps[s.i].t : '', touring: !s.free, free: !!s.free,
+        cls: s.free ? '' : 'touring', atStart: s.i === 0, canPlay: GD.motion(),
+        nextLabel: s.i >= n - 1 ? 'Finish and unlock' : 'Next →',
+        playLabel: s.playing ? 'Pause' : 'Play', 
+        playing: !!s.playing, paused: !s.playing,
+        dots: steps.map((_, k) => ({ w: k < s.i || (k === s.i && !s.playing) ? '100%' : '0%', anim: k === s.i && s.playing ? (s.i % 2 ? 'tfA ' : 'tfB ') + ((steps[k] && steps[k].ms) || 3600) + 'ms linear forwards' : 'none' })),
+        next: () => { set(id, { playing: false }); clearTimeout(this.__tt); next(); GD.focusTour(id); },
+        prev: () => { const c = get(id); if (c.i <= 0) return; clearTimeout(this.__tt); reset(); for (let k = 1; k < c.i; k++) apply(k); set(id, { i: c.i - 1, playing: false }); GD.focusTour(id); },
+        toggle: () => { const c = get(id); if (c.playing) { clearTimeout(this.__tt); set(id, { playing: false }); } else { if (c.i === 0 && steps[0].a == null) { goTo(1); } set(id, { playing: true }); schedule(); GD.focusTour(id); } },
+        skip: finish,
+        replay: () => { clearTimeout(this.__tt); reset(); apply(0); set(id, { i: 0, free: false, playing: false }); GD.focusTour(id); }
+      };
+    }
+    return T;
+  }
+}
+const GD = (() => {
+  const META = /*META*/;
+  const KEY = 'gd-onboarding-done-v1';
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { done = {}; }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(done)); } catch (e) {} };
+  const classes = {}, inst = {};
+  const MKEY = 'gd-onboarding-motion-v1';
+  let motion = true;
+  try { motion = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); const m = localStorage.getItem(MKEY); if (m === 'on') motion = true; if (m === 'off') motion = false; } catch (e) {}
+  const rng = (seed) => { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
+  /* message sequence chart: lanes are processes/systems, events become arrows down a time axis */
+  const COL = { ink: '#17162B', red: '#B42318', green: '#15803D', pink: '#B0186E', blue: '#1D4ED8', amber: '#B45309', grey: '#8A8698' };
+  function msc(spec) {
+    const lanes = spec.lanes, gap = spec.laneGap || 170, pad = 90, row = spec.row || 40, top = 52;
+    const w = pad * 2 + gap * (lanes.length - 1) + (spec.rightPad == null ? 130 : spec.rightPad);
+    const xs = lanes.map((_, i) => pad + i * gap);
+    const evs = spec.events || [], upto = spec.upto == null ? evs.length : spec.upto;
+    const arrows = [];
+    evs.forEach((e, i) => {
+      const y = top + 26 + i * row, c = COL[e.color || (e.kind === 'crash' ? 'red' : 'ink')] || COL.ink;
+      const op = i < upto ? (i === upto - 1 && spec.highlightLast !== false ? 1 : 0.85) : 0.12;
+      const f = xs[e.f], t = xs[e.t == null ? e.f : e.t];
+      let d = '', lx = 0, ly = y - 8, anchor = 'middle', mark = 'url(#mk-' + spec.id + '-' + (e.color || (e.kind === 'crash' ? 'red' : 'ink')) + ')';
+      if (e.kind === 'crash') { d = 'M' + (f - 9) + ' ' + (y - 9) + ' L' + (f + 9) + ' ' + (y + 9) + ' M' + (f + 9) + ' ' + (y - 9) + ' L' + (f - 9) + ' ' + (y + 9); lx = f + 16; ly = y + 5; anchor = 'start'; mark = ''; }
+      else if (e.kind === 'note') { d = 'M' + (f - 5) + ' ' + y + ' L' + (f + 5) + ' ' + y; lx = f + 14; ly = y + 5; anchor = 'start'; mark = ''; }
+      else if (f === t) { d = 'M' + f + ' ' + (y - 8) + ' C' + (f + 46) + ' ' + (y - 8) + ' ' + (f + 46) + ' ' + (y + 10) + ' ' + (f + 4) + ' ' + (y + 10); lx = f + 54; ly = y + 5; anchor = 'start'; }
+      else { const dir = t > f ? 1 : -1; d = 'M' + f + ' ' + y + ' L' + (t - dir * 6) + ' ' + y; lx = (f + t) / 2; }
+      if (e.lost) { d = 'M' + f + ' ' + y + ' L' + ((f + t) / 2) + ' ' + y; lx = (f + t) / 2; mark = ''; }
+      arrows.push({ d, lx, ly, anchor, label: e.label || '', color: c, op, mark, dash: e.dash ? '6 5' : '', sw: e.kind === 'crash' ? 3 : 2,
+        cls: i === upto - 1 && spec.animateLast !== false ? 'msc-new' : '', pc: e.dash || e.kind === 'crash' ? '' : 'solid', pl: e.dash || e.kind === 'crash' ? null : 1,
+        lost: !!e.lost, cx: (f + t) / 2 + 8, cy: y, n: i + 1, nx: 26, ny: y + 4, num: spec.numbers ? String(i + 1) : '' });
+    });
+    const h = top + 26 + Math.max(evs.length, 1) * row + 10;
+    return { id: spec.id, w, h, lineEnd: h - 6, aria: spec.aria || 'Message sequence chart',
+      lanes: lanes.map((l, i) => ({ x: xs[i], label: l, bx: xs[i] - 70, active: spec.active === i ? '#17162B' : '#F1EEE8', fg: spec.active === i ? '#FFFFFF' : '#17162B' })), arrows };
+  }
+  const setMotion = (m) => { motion = m; try { localStorage.setItem(MKEY, m ? 'on' : 'off'); } catch (e) {} document.body.classList.toggle('still', !m); const b = document.getElementById('motionBtn'); if (b) { b.textContent = 'Motion: ' + (m ? 'on' : 'off'); b.setAttribute('aria-pressed', String(m)); } if (current) { if (current.__stopTours) current.__stopTours(); if (current.componentWillUnmount) current.componentWillUnmount(); if (current.extraUnmount) current.extraUnmount(); paint(); if (current.componentDidMount) current.componentDidMount(); if (current.extraMount) current.extraMount(); } };
+  let current = null, curRoute = null, pending = false;
+  const HOLE = /\{\{\s*([\w.$]+)\s*\}\}/g, WHOLE = /^\s*\{\{\s*([\w.$]+)\s*\}\}\s*$/;
+  const lookup = (scope, path) => {
+    if (path === 'true') return true; if (path === 'false') return false;
+    if (/^-?\d+(\.\d+)?$/.test(path)) return Number(path);
+    const parts = path.split('.'); let v = scope[parts[0]];
+    for (let i = 1; i < parts.length; i++) { if (v == null) return undefined; v = v[parts[i]]; }
+    return v;
+  };
+  const interp = (s, scope) => s.indexOf('{{') < 0 ? s : s.replace(HOLE, (_, p) => { const v = lookup(scope, p); return v == null ? '' : String(v); });
+  const raw = (s, scope) => { const m = WHOLE.exec(s || ''); return m ? lookup(scope, m[1]) : interp(s || '', scope); };
+  function renderNodes(nodes, scope, out) {
+    for (const n of nodes) {
+      if (n.nodeType === 3) { out.appendChild(document.createTextNode(interp(n.nodeValue, scope))); continue; }
+      if (n.nodeType !== 1) continue;
+      const tag = n.localName;
+      if (tag === 'sc-for') {
+        const list = raw(n.getAttribute('list'), scope) || [], as = n.getAttribute('as');
+        list.forEach((it, i) => { const s = Object.create(scope); s[as] = it; s.$index = i; renderNodes(n.childNodes, s, out); });
+        continue;
+      }
+      if (tag === 'sc-if') { if (raw(n.getAttribute('value'), scope)) renderNodes(n.childNodes, scope, out); continue; }
+      const el = document.createElementNS(n.namespaceURI, n.localName);
+      for (const a of n.attributes) {
+        const name = a.name;
+        if (name.startsWith('hint-')) continue;
+        if (name.startsWith('on')) { const fn = raw(a.value, scope); if (typeof fn === 'function') { el.__h = el.__h || {}; el.__h[name.slice(2)] = fn; } continue; }
+        const v = WHOLE.test(a.value) ? raw(a.value, scope) : interp(a.value, scope);
+        if (typeof v === 'boolean') { if (name.startsWith('aria-')) el.setAttribute(name, String(v)); else if (v) el.setAttribute(name, ''); }
+        else if (v != null && typeof v !== 'function' && typeof v !== 'object') el.setAttribute(name, String(v));
+      }
+      renderNodes((n.content || n).childNodes, scope, el);
+      out.appendChild(el);
+    }
+  }
+  function morph(oldP, newP) {
+    const oc = Array.from(oldP.childNodes), nc = Array.from(newP.childNodes);
+    for (let i = 0; i < nc.length; i++) {
+      const o = oc[i], n = nc[i];
+      if (!o) { oldP.appendChild(n); continue; }
+      if (o.nodeType !== n.nodeType || (o.nodeType === 1 && (o.namespaceURI !== n.namespaceURI || o.localName !== n.localName))) { oldP.replaceChild(n, o); continue; }
+      if (o.nodeType === 3) { if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue; continue; }
+      for (const a of Array.from(o.attributes)) if (!n.hasAttribute(a.name) && a.name.indexOf('data-rt-') !== 0) o.removeAttribute(a.name);
+      for (const a of Array.from(n.attributes)) if (o.getAttribute(a.name) !== a.value) o.setAttribute(a.name, a.value);
+      o.__h = n.__h;
+      if (o.hasAttribute('data-live')) continue;
+      if (o.localName === 'input') { const v = n.getAttribute('value'); if (v !== null && o.value !== v && (o.type === 'range' || document.activeElement !== o)) o.value = v; }
+      morph(o, n);
+    }
+    for (let i = oc.length - 1; i >= nc.length; i--) oldP.removeChild(oc[i]);
+  }
+  const view = () => document.getElementById('view');
+  function paint() {
+    if (!current) return;
+    let vals;
+    try { vals = current.__vals(); vals.T = current.__tourVals(); vals.motion = motion; } catch (e) { console.error(e); return; }
+    const tpl = document.getElementById('t-' + curRoute);
+    const frag = document.createElement('div');
+    renderNodes(tpl.content.childNodes, vals, frag);
+    morph(view(), frag);
+    fitStages();
+    if (current.liveFrame && !motion) { try { current.liveFrame(0); } catch (e) { console.error(e); } }
+  }
+  const barH = () => { const b = document.querySelector('.appbar'); return b ? b.getBoundingClientRect().height : 0; };
+  function fitStages() {
+    const avail = window.innerHeight - barH() - 16, narrow = window.innerWidth < 760;
+    view().querySelectorAll('.lab').forEach((lab) => {
+      if (narrow || !lab.classList.contains('touring')) { if (lab.hasAttribute('data-rt-z')) lab.removeAttribute('data-rt-z'); lab.__fitKey = null; return; }
+      const tt = lab.querySelector('.tourtext'), key = (tt ? tt.textContent : '') + '|' + window.innerHeight + 'x' + window.innerWidth;
+      let z = Number(lab.getAttribute('data-rt-z') || 100);
+      const setZ = (v) => { z = v; if (v >= 100) lab.removeAttribute('data-rt-z'); else lab.setAttribute('data-rt-z', String(v)); };
+      if (lab.__fitKey === key && z < 100 && lab.offsetHeight < avail - 90) lab.__fitKey = null;
+      if (lab.__fitKey !== key) { lab.__fitKey = key; setZ(100); }
+      let guard = 0;
+      while (lab.offsetHeight > avail && z > 60 && guard++ < 10) setZ(z - 5);
+    });
+  }
+  function focusTour(id) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = view().querySelector('[data-tid="' + id + '"]'); if (!el) return;
+      const r = el.getBoundingClientRect(), want = barH() + 10;
+      if (Math.abs(r.top - want) > 24) window.scrollTo({ top: window.scrollY + r.top - want, behavior: motion ? 'smooth' : 'auto' });
+    }));
+  }
+  function schedule(i) {
+    if (i !== current || pending) return;
+    pending = true;
+    Promise.resolve().then(() => { pending = false; paint(); });
+  }
+  const isRoute = (r) => META.some((m) => m.route === r);
+  const isDone = (r) => !!done[String(r || '').replace(/^#/, '')];
+  function chrome() {
+    const mods = META.filter((m) => m.n > 0), cnt = mods.filter((m) => done[m.route]).length;
+    document.getElementById('pbar').style.width = Math.round((cnt / mods.length) * 100) + '%';
+    document.getElementById('ptext').textContent = cnt + ' of ' + mods.length + ' done';
+    const dr = document.getElementById('drawer');
+    dr.innerHTML = '';
+    META.forEach((m) => {
+      const a = document.createElement('a');
+      a.href = '#' + m.route; if (m.route === curRoute) { a.className = 'cur'; a.setAttribute('aria-current', 'page'); }
+      const t = document.createElement('span'); t.textContent = (m.n ? m.n + ' · ' : '') + m.title;
+      const d = document.createElement('span'); d.className = 'dn' + (done[m.route] ? ' ok' : '');
+      d.textContent = m.n ? (done[m.route] ? '✓ done' : m.min + ' min') : 'start';
+      a.appendChild(t); a.appendChild(d); dr.appendChild(a);
+    });
+    const ft = document.getElementById('foot');
+    ft.innerHTML = '';
+    const me = META.find((m) => m.route === curRoute);
+    if (!me || me.n === 0) { ft.hidden = true; return; }
+    ft.hidden = false;
+    const row = document.createElement('div'); row.className = 'row'; row.style.cssText = 'justify-content:space-between;gap:16px;margin-bottom:24px';
+    const lbl = document.createElement('div'); lbl.innerHTML = '<div class="k">Finished module ' + me.n + '?</div>';
+    const btn = document.createElement('button'); btn.type = 'button';
+    btn.className = 'donebtn' + (done[me.route] ? ' on' : '');
+    btn.textContent = done[me.route] ? '✓ Marked as done' : 'Mark module ' + me.n + ' as done';
+    btn.setAttribute('aria-pressed', String(!!done[me.route]));
+    btn.onclick = () => { if (done[me.route]) delete done[me.route]; else done[me.route] = 1; save(); chrome(); };
+    row.appendChild(lbl); row.appendChild(btn); ft.appendChild(row);
+    const nav = document.createElement('div'); nav.className = 'row'; nav.style.cssText = 'gap:16px;align-items:stretch';
+    const card = (m, dir) => {
+      const a = document.createElement('a'); a.className = 'navc'; a.href = '#' + m.route; if (dir === 'next') a.style.textAlign = 'right';
+      const s1 = document.createElement('span'); s1.className = 'meta'; s1.textContent = dir === 'next' ? 'Next →' : '← Previous';
+      const s2 = document.createElement('span'); s2.style.font = "600 19px 'Space Grotesk',sans-serif"; s2.textContent = (m.n ? m.n + ' · ' : '') + m.title;
+      a.appendChild(s1); a.appendChild(s2); return a;
+    };
+    const prev = META[me.n - 1], next = META[me.n + 1];
+    if (prev) nav.appendChild(card(prev, 'prev'));
+    nav.appendChild(card(next || META[0], 'next'));
+    ft.appendChild(nav);
+    const src = document.createElement('p'); src.className = 'meta'; src.style.marginTop = '24px';
+    src.innerHTML = 'Built from the gleam-dream repositories on <a href="https://github.com/gleam-dream" target="_blank" rel="noopener">GitHub</a>.';
+    ft.appendChild(src);
+  }
+  function go(route) {
+    if (!isRoute(route)) route = 'start';
+    if (current && current.__stopTours) current.__stopTours();
+    if (current && current.componentWillUnmount) current.componentWillUnmount();
+    if (current && current.extraUnmount) current.extraUnmount();
+    curRoute = route;
+    if (!inst[route]) { const c = new classes[route]({}); if (c.extraState) c.state = Object.assign({}, c.state, c.extraState()); inst[route] = c; }
+    current = inst[route];
+    view().innerHTML = '';
+    paint();
+    if (current.componentDidMount) current.componentDidMount();
+    if (current.extraMount) current.extraMount();
+    const me = META.find((m) => m.route === route);
+    document.title = (me.n ? 'Module ' + me.n + ' · ' + me.title : 'Course map') + ' · gleam-dream onboarding';
+    chrome();
+    window.scrollTo(0, 0);
+    view().focus({ preventScroll: true });
+  }
+  function boot() {
+    const v = view();
+    const fire = (e, types) => {
+      let el = e.target;
+      while (el && el !== v) { if (el.__h) { for (const t of types) if (el.__h[t]) { el.__h[t](e); return; } } el = el.parentNode; }
+    };
+    v.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('a[href^="#"]');
+      if (a) { const id = a.getAttribute('href').slice(1); if (!isRoute(id)) { e.preventDefault(); const t = document.getElementById(id); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; } }
+      fire(e, ['click']);
+    });
+    v.addEventListener('input', (e) => fire(e, ['change', 'input']));
+    v.addEventListener('change', (e) => fire(e, ['change']));
+    document.getElementById('motionBtn').addEventListener('click', () => setMotion(!motion));
+    window.addEventListener('resize', () => fitStages());
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { view().querySelectorAll('.lab').forEach((l) => { l.__fitKey = null; }); fitStages(); });
+    requestAnimationFrame(loop);
+    setMotion(motion);
+    const mb = document.getElementById('menuBtn'), dr = document.getElementById('drawer');
+    mb.addEventListener('click', () => { const open = dr.hidden; dr.hidden = !open; mb.setAttribute('aria-expanded', String(open)); mb.textContent = open ? 'Close' : 'All modules'; });
+    dr.addEventListener('click', (e) => { if (e.target.closest('a')) { dr.hidden = true; mb.setAttribute('aria-expanded', 'false'); mb.textContent = 'All modules'; } });
+    window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (isRoute(h)) go(h); });
+    const h = location.hash.slice(1);
+    go(isRoute(h) ? h : 'start');
+  }
+  /* live engine: one requestAnimationFrame loop drives the current module's real-time widgets */
+  let lastTs = 0;
+  function loop(ts) {
+    requestAnimationFrame(loop);
+    const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0; lastTs = ts;
+    if (current && current.liveFrame && motion && !document.hidden) { try { current.liveFrame(dt); } catch (e) { console.error(e); } }
+  }
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(svgNS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  return { register: (r, c) => (classes[r] = c), schedule, isDone, boot, msc, rng, motion: () => motion, focusTour, fitStages, svg: el, startLoop: () => requestAnimationFrame(loop) };
+})();
+</script>
+<script>
+/*CLASSES*/
+GD.boot();
+</script>
+</body>
+</html>

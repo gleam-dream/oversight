@@ -1,0 +1,56 @@
+<header class="wrap" style="padding-top:72px;padding-bottom:48px">
+<div class="k">Module 5 · Phase 2: the mental model</div>
+<h1 style="font-size:clamp(38px,5.5vw,64px);margin-top:14px;max-width:900px">The package atlas</h1>
+<p class="lead" style="margin-top:20px;font-size:20px">Twelve libraries and three tools on one map, arranged by layer. Lower layers are used by higher ones, never the other way round. Click any package to see what it owns, what it leaves to you, what it builds on, and where it shows up in real applications.</p>
+</header>
+
+<section class="wrap sec">
+<div class="lab" data-tour="atlas" style="margin-top:0">
+<div class="labh">
+<div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">The map</h2><p class="muted" style="margin-top:6px">Filter by what you need to do, or pick a package. Outlined tiles are what it builds on; dashed tiles use it.</p></div>
+</div>
+<div class="meta" style="margin-bottom:8px">I need to…</div>
+<div class="row" style="gap:6px;margin-bottom:24px"><sc-for list="{{needs}}" as="n" hint-placeholder-count="8"><button type="button" class="{{n.cls}}" onClick="{{n.pick}}">{{n.label}}</button></sc-for></div>
+<div class="split" style="align-items:flex-start">
+<div style="flex:3 1 560px;display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="6">
+<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;padding:12px;border-radius:16px;background:{{r.band}}">
+<div style="width:132px;display:flex;flex-direction:column;justify-content:center"><span class="mono" style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:{{r.ink}}">{{r.name}}</span><span style="font-size:12px;color:{{r.ink}};opacity:.85">{{r.sub}}</span></div>
+<sc-for list="{{r.tiles}}" as="t" hint-placeholder-count="2">
+<button type="button" onClick="{{t.pick}}" style="flex:1 1 150px;text-align:left;font:inherit;cursor:pointer;border-radius:12px;padding:12px 14px;min-height:46px;background:#FFFFFF;color:#17162B;border:2px {{t.bstyle}} {{t.bcolor}};opacity:{{t.op}};box-shadow:{{t.shadow}};display:flex;flex-direction:column;gap:4px">
+<span style="display:flex;justify-content:space-between;gap:8px;align-items:center"><b style="font:600 16px 'Space Grotesk',sans-serif">{{t.name}}</b><span class="mono" style="font-size:10px;color:#5B5970">{{t.rel}}</span></span>
+<span class="tour-hide" style="font-size:13px;color:#5B5970;line-height:1.35">{{t.tiny}}</span>
+</button>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<div style="flex:2 1 340px;min-width:0">
+<div style="border-radius:20px;padding:26px;background:{{sel.tint}};color:{{sel.ink}};display:flex;flex-direction:column;gap:14px">
+<div class="row" style="justify-content:space-between"><span class="k" style="color:inherit">{{sel.layerName}}</span><span class="chip" style="background:#FFFFFF;color:#17162B">{{sel.status}}</span></div>
+<h3 style="font-size:32px">{{sel.name}}</h3>
+<p style="font-size:16px">{{sel.one}}</p>
+<div><div class="mono" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">It owns</div><sc-for list="{{sel.owns}}" as="x" hint-placeholder-count="3"><div style="font-size:14px;margin-bottom:4px">→ {{x}}</div></sc-for></div>
+<div><div class="mono" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">You own</div><sc-for list="{{sel.you}}" as="x" hint-placeholder-count="3"><div style="font-size:14px;margin-bottom:4px">→ {{x}}</div></sc-for></div>
+<div><div class="mono" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Builds on</div><div class="row" style="gap:6px"><sc-for list="{{sel.depNames}}" as="x" hint-placeholder-count="2"><span class="chip" style="background:#FFFFFF;color:#17162B">{{x}}</span></sc-for><span style="font-size:14px">{{sel.depNone}}</span></div></div>
+<div><div class="mono" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Seen in example apps</div><div class="row" style="gap:6px"><sc-for list="{{sel.apps}}" as="x" hint-placeholder-count="2"><span class="chip" style="background:rgba(255,255,255,.7);color:#17162B">{{x}}</span></sc-for><span style="font-size:14px">{{sel.appsNone}}</span></div></div>
+<div class="tour-hide" style="font-size:14px;border-top:1px solid currentColor;padding-top:12px"><b>Not for:</b> {{sel.notFor}}</div>
+<a class="tour-hide" href="{{sel.repo}}" style="color:inherit;font-weight:700;font-size:14px">Open the repository →</a>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Read · what the map tells you</div>
+<h2 class="h2">Three things to notice</h2>
+<div class="cards">
+<div class="card"><span class="chip" style="background:#DDF3F0;color:#0B4A45">Sinal</span><h3>Observability is built in</h3><p>{{sinalCount}} of the 11 other libraries emit Sinal events. Attach observers once and you can see inside HTTP calls, jobs, workflows and agents alike.</p></div>
+<div class="card"><span class="chip" style="background:#DDF3F0;color:#0B4A45">JSON Blueprint</span><h3>Data crossing a boundary is typed</h3><p>Wherever data meets a model, a protocol or a stored record (LLM Wire, Relay, Fabric, Decisions), JSON Blueprint codecs describe its shape and generate the schema.</p></div>
+<div class="card"><span class="chip" style="background:#E0E9FD;color:#163A8A">HTTP Gun</span><h3>One door to the network</h3><p>LLM Wire, Relay, Hellhound and Fabric all reach the network through an HTTP Gun client that <i>your</i> application starts. One place to set limits and destination rules.</p></div>
+</div>
+<div class="note" style="margin-top:16px"><b>Storage is opt-in.</b> Most libraries run in memory out of the box. PostgreSQL support comes as separate adapter packages (Saga, Fabric, Hellhound, Correio and Decisions each have one), and they borrow your connection pool. Grind is the exception: it is built on PostgreSQL.</div>
+<div class="key"><div class="k">Carry this forward</div><p>Find a package by the job it does and the layer it sits on. Lower layers are shared plumbing; higher layers coordinate work, and your application sits on top of them all.</p></div>
+</section>
+<!--QUIZ-->

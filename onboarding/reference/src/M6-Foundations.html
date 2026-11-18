@@ -1,0 +1,94 @@
+<header class="wrap" style="padding-top:72px;padding-bottom:48px">
+<div class="k">Module 6 · Phase 3: the building blocks</div>
+<h1 style="font-size:clamp(38px,5.5vw,64px);margin-top:14px;max-width:900px">Foundations: observe, shape, reach</h1>
+<p class="lead" style="margin-top:20px;font-size:20px">Three small libraries carry most of the ecosystem on their backs. <b>Sinal</b> lets everything report what it's doing. <b>JSON Blueprint</b> describes the shape of data at every boundary. <b>HTTP Gun</b> is the single, bounded door to the network.</p>
+<div class="row" style="margin-top:28px;gap:10px">
+<a class="pill" href="#sinal" style="text-decoration:none;color:#0B4A45;background:#DDF3F0">Sinal · telemetry</a>
+<a class="pill" href="#blueprint" style="text-decoration:none;color:#0B4A45;background:#DDF3F0">JSON Blueprint · data shapes</a>
+<a class="pill" href="#gun" style="text-decoration:none;color:#163A8A;background:#E0E9FD">HTTP Gun · the network</a>
+</div>
+</header>
+
+<section class="wrap sec" id="sinal">
+<div class="k">Sinal · typed telemetry</div>
+<h2 class="h2">Report facts without slowing the work</h2>
+<p class="lead">You define an event once, with typed fields. Code emits it; observers react to it. Underneath, it's the same :telemetry registry Erlang and Elixir libraries already share, so their handlers can listen too. Observers normally run inside the emitting process. If they're slow, route them through a bounded <b>forwarder</b>.</p>
+<div class="lab" data-tour="sinal">
+<div class="labh"><div><span class="tag">Real time</span><h2 style="font-size:28px;margin-top:10px">Emit request.finished, live</h2><p class="muted" style="margin-top:6px;max-width:700px">A request handler emits an event for every request it finishes. Attach a slow observer, then compare running observers inline against routing them through a bounded forwarder. To make it visible, this forwarder holds 12 events; the real default is 1,024.</p></div>
+<div class="row"><button type="button" class="btn sm" onClick="{{lvPause}}">{{lvPauseLabel}}</button><button type="button" class="btn sm" onClick="{{lvReset}}">Reset</button></div></div>
+<div class="row" style="gap:14px;margin-bottom:10px">
+<div class="seg"><sc-for list="{{routes}}" as="r" hint-placeholder-count="2"><button type="button" class="{{r.cls}}" onClick="{{r.pick}}">{{r.label}}</button></sc-for></div>
+<button type="button" class="{{slowCls}}" onClick="{{toggleSlow}}">{{slowLabel}}</button>
+<label style="display:flex;align-items:center;gap:10px;flex:1 1 220px;max-width:340px"><span style="white-space:nowrap"><b>{{lvRate}}</b> requests/s</span><input type="range" min="1" max="20" step="1" value="{{lvRate}}" onChange="{{lvSetRate}}" style="flex:1"></label>
+</div>
+<div class="live" data-live="sinal" style="width:100%"></div>
+<div class="row" style="margin-top:8px;gap:10px"><button type="button" class="btn sm" onClick="{{lvBurst}}">Burst of 30 events</button><sc-if value="{{noMotion}}"><button type="button" class="btn sm" onClick="{{lvStep}}">Advance 1 second</button></sc-if></div>
+<div class="note" style="margin-top:10px">{{lvNote}}</div>
+</div>
+<div class="note" style="margin-top:16px;background:#FFF7E0"><b>Two rules from the README:</b> event names become permanent BEAM atoms, so write them in source code and never build them from input. And forwarding is best effort: never use a telemetry event as proof that something happened. That's what durable records are for.</div>
+</section>
+
+<section class="wrap sec" id="blueprint">
+<div class="k">JSON Blueprint · data shapes</div>
+<h2 class="h2">One codec, three faces</h2>
+<p class="lead">A codec describes a Gleam type's JSON shape: which fields exist, which are optional, which values are allowed. From that one definition you get an <b>encoder</b>, a strict <b>decoder</b> and a <b>JSON Schema</b>. LLM Wire, Relay, Fabric and Decisions all accept codecs, which is why the schema a model sees always matches the decoder that checks its answer.</p>
+<div class="lab" data-tour="codec">
+<div class="labh"><div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">The User codec</h2><p class="muted" style="margin-top:6px">name (text) · age (whole number from 0 to 150) · email (optional) · role (admin or member)</p></div></div>
+<div class="seg" style="margin-bottom:20px"><sc-for list="{{faces}}" as="f" hint-placeholder-count="3"><button type="button" class="{{f.cls}}" onClick="{{f.pick}}">{{f.label}}</button></sc-for></div>
+<sc-if value="{{faceEncode}}" hint-placeholder-val="{{false}}">
+<div class="split" style="align-items:center">
+<div class="box" style="background:#FFF7FC;border-color:#F3C6E6"><div class="meta">Gleam value</div><div class="mono" style="font-size:15px;margin-top:8px;line-height:1.7">User<br>· name: "Ada"<br>· age: 36<br>· email: None<br>· role: Admin</div></div>
+<div class="arrow" style="flex:0 0 40px" aria-hidden="true">→</div>
+<div class="box" style="background:#17162B;color:#E8E6F5;border:0"><div class="meta" style="color:#C9C6E0">JSON out</div><div class="mono" style="font-size:15px;margin-top:8px;line-height:1.7">{ "name": "Ada",<br>&#160;&#160;"age": 36,<br>&#160;&#160;"role": "admin" }</div><p style="font-size:13px;margin-top:8px;color:#C9C6E0">The optional email is simply left out.</p></div>
+</div>
+</sc-if>
+<sc-if value="{{faceDecode}}" hint-placeholder-val="{{false}}">
+<div class="meta" style="margin-bottom:8px">Pick some incoming JSON</div>
+<div class="row" style="gap:6px;margin-bottom:16px"><sc-for list="{{cases}}" as="c" hint-placeholder-count="6"><button type="button" class="{{c.cls}}" onClick="{{c.pick}}">{{c.label}}</button></sc-for></div>
+<div class="split" style="align-items:stretch">
+<div class="box" style="background:#17162B;color:#E8E6F5;border:0"><div class="meta" style="color:#C9C6E0">JSON in</div><div class="mono" style="font-size:15px;margin-top:8px;white-space:pre-wrap;line-height:1.6">{{caseJson}}</div></div>
+<div class="box" style="background:{{caseBg}};border-color:{{caseBorder}}"><div class="meta">decode result</div><div class="mono" style="font-size:16px;font-weight:600;margin:8px 0;white-space:pre-wrap">{{caseResult}}</div><p style="font-size:14px">{{caseWhy}}</p></div>
+</div>
+</sc-if>
+<sc-if value="{{faceSchema}}" hint-placeholder-val="{{false}}">
+<div style="overflow-x:auto"><div style="min-width:560px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:#E4E0D8;border-radius:12px;overflow:hidden;font-size:15px">
+<div style="background:#F1EEE8;padding:10px 14px;font-weight:600">field</div><div style="background:#F1EEE8;padding:10px 14px;font-weight:600">type</div><div style="background:#F1EEE8;padding:10px 14px;font-weight:600">rule</div><div style="background:#F1EEE8;padding:10px 14px;font-weight:600">required</div>
+<div style="background:#fff;padding:10px 14px" class="mono">name</div><div style="background:#fff;padding:10px 14px">string</div><div style="background:#fff;padding:10px 14px">any text</div><div style="background:#fff;padding:10px 14px">yes</div>
+<div style="background:#fff;padding:10px 14px" class="mono">age</div><div style="background:#fff;padding:10px 14px">integer</div><div style="background:#fff;padding:10px 14px">0 to 150</div><div style="background:#fff;padding:10px 14px">yes</div>
+<div style="background:#fff;padding:10px 14px" class="mono">email</div><div style="background:#fff;padding:10px 14px">string</div><div style="background:#fff;padding:10px 14px">any text</div><div style="background:#fff;padding:10px 14px">no</div>
+<div style="background:#fff;padding:10px 14px" class="mono">role</div><div style="background:#fff;padding:10px 14px">string enum</div><div style="background:#fff;padding:10px 14px">"admin" or "member"</div><div style="background:#fff;padding:10px 14px">yes</div>
+</div></div>
+<p class="muted" style="font-size:15px;margin-top:12px">This is published as a standard Draft 2020-12 JSON Schema. Hand it to a model as the shape of a structured answer or a tool's arguments, and the same codec checks what comes back.</p>
+</sc-if>
+</div>
+</section>
+
+<section class="wrap sec" id="gun">
+<div class="k">HTTP Gun · the network</div>
+<h2 class="h2">A client that tells the truth</h2>
+<p class="lead">HTTP Gun moves bytes, enforces limits and reports exactly what happened. It deliberately doesn't interpret statuses, retry, follow redirects or speak protocols like SSE: those belong to adapters such as LLM Wire, or to your app. Click a part of the client to see its job.</p>
+<div class="lab" data-tour="anatomy">
+<div class="labh"><div><span class="tag">Explore</span><h2 style="font-size:28px;margin-top:10px">Anatomy of a request</h2></div></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:stretch">
+<sc-for list="{{parts}}" as="p" hint-placeholder-count="5">
+<button type="button" onClick="{{p.pick}}" style="font:inherit;cursor:pointer;text-align:left;border-radius:14px;padding:14px;min-height:96px;background:{{p.bg}};color:{{p.fg}};border:2px solid {{p.border}};display:flex;flex-direction:column;gap:4px"><span class="mono" style="font-size:11px;opacity:.8">{{p.n}}</span><b>{{p.name}}</b><span style="font-size:13px;opacity:.85">{{p.tiny}}</span></button>
+</sc-for>
+</div>
+<div class="box" style="margin-top:12px;background:#F6F4FF;border-color:#DCD9FF;font-size:16px"><b>{{part.name}}.</b> {{part.long}}</div>
+</div>
+<div class="lab" data-tour="dest">
+<div class="labh"><div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Destination policy</h2><p class="muted" style="margin-top:6px;max-width:680px">Before connecting, HTTP Gun checks where an address really resolves. When a model or a user chooses the URL, this is what keeps them out of your private network.</p></div></div>
+<div class="row" style="gap:16px;margin-bottom:16px"><span class="meta">Policy</span><div class="seg"><sc-for list="{{policies}}" as="p" hint-placeholder-count="3"><button type="button" class="{{p.cls}}" onClick="{{p.pick}}">{{p.label}}</button></sc-for></div></div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{dests}}" as="d" hint-placeholder-count="5">
+<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:12px;background:{{d.bg}};border:1px solid {{d.border}}">
+<span><b class="mono" style="font-size:14px">{{d.url}}</b> <span class="muted" style="font-size:13px">→ {{d.resolves}}</span></span>
+<span style="font-size:14px"><b>{{d.verdict}}</b> · {{d.why}}</span>
+</div>
+</sc-for>
+</div>
+<p class="muted" style="font-size:14px;margin-top:12px">The research-agent example goes one step further: its tool policy parses every URL the model picks and only admits one host and path prefix.</p>
+</div>
+<div class="key"><div class="k">Carry this forward</div><p>Sinal reports, Blueprint describes, Gun reaches. Each is bounded, each is typed, and each leaves the decisions to your application.</p></div>
+</section>
+<!--QUIZ-->

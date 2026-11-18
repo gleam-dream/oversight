@@ -1,0 +1,92 @@
+<header class="wrap" style="padding-top:72px;padding-bottom:48px">
+<div class="k">Module 11 · Phase 4: putting it together</div>
+<h1 style="font-size:clamp(38px,5.5vw,64px);margin-top:14px;max-width:940px">Field guide &amp; final check</h1>
+<p class="lead" style="margin-top:20px;font-size:20px">The last pieces, then a reference to keep. Meet Retrace and the tooling around the libraries, look anything up in the glossary, take the final check, and leave with a reading plan for the repositories.</p>
+</header>
+
+<section class="wrap sec">
+<div class="k">Retrace · see what happened</div>
+<h2 class="h2">Replay a user's session, from typed events</h2>
+<p class="lead">Retrace records the state and messages you explicitly select from a Lustre app, delivers them durably, and reconstructs the session later in an inert replay frame. It records your app's own typed events, never pixels, and only what you've classified as safe. It's experimental.</p>
+<div class="lab" data-tour="retrace">
+<div class="labh"><div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Scrub through a recorded cart</h2><p class="muted" style="margin-top:6px;max-width:680px">Drag along the recording. Switch replay strategy, and choose whether the email field counts as private.</p></div></div>
+<div class="row" style="gap:16px;margin-bottom:18px">
+<div class="seg"><sc-for list="{{strategies}}" as="s" hint-placeholder-count="2"><button type="button" class="{{s.cls}}" onClick="{{s.pick}}">{{s.label}}</button></sc-for></div>
+<button type="button" class="{{privCls}}" onClick="{{togglePriv}}">{{privLabel}}</button>
+</div>
+<label style="display:flex;flex-direction:column;gap:8px"><span class="meta">recording position: event {{pos}} of 6</span><input type="range" min="0" max="6" step="1" value="{{pos}}" onChange="{{setPos}}"></label>
+<div class="row" style="gap:6px;margin:14px 0 20px"><sc-for list="{{events}}" as="e" hint-placeholder-count="6"><span class="chip" style="background:{{e.bg}};color:{{e.fg}}">{{e.n}} · {{e.label}}</span></sc-for></div>
+<div class="split" style="align-items:stretch">
+<div class="box" style="background:#F1EEE8;border:0">
+<div class="meta">replay frame (inert: buttons do nothing here)</div>
+<div style="background:#fff;border-radius:12px;padding:18px;margin-top:10px;display:flex;flex-direction:column;gap:8px">
+<b style="font:600 18px 'Space Grotesk',sans-serif">Your cart</b>
+<sc-for list="{{cart}}" as="c" hint-placeholder-count="2"><div style="display:flex;justify-content:space-between;font-size:15px"><span>{{c.name}}</span><span>{{c.price}}</span></div></sc-for>
+<div style="display:flex;justify-content:space-between;font-size:15px;color:#15803D"><span>{{discountLabel}}</span><span>{{discount}}</span></div>
+<div style="display:flex;justify-content:space-between;font-weight:700;border-top:1px solid #E4E0D8;padding-top:8px"><span>Total</span><span>{{total}}</span></div>
+<div style="font-size:14px;margin-top:6px"><span class="muted">Email:</span> <span class="mono">{{email}}</span></div>
+<div style="font-size:14px"><span class="muted">Status:</span> <b>{{status}}</b></div>
+</div>
+</div>
+<div class="box"><div class="meta">how this frame was rebuilt</div><p style="font-size:15px;margin-top:8px">{{how}}</p></div>
+</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Tooling · around the libraries</div>
+<h2 class="h2">Three repositories that aren't libraries</h2>
+<div class="cards">
+<div class="card"><span class="chip" style="background:#EDEFF3;color:#3B4452">start here</span><h3>Oversight</h3><p>The catalogue of every library and fourteen runnable applications that compose them, with scripted providers and a disposable PostgreSQL. Read an app before you build a similar one.</p><p style="margin-top:10px"><a href="https://github.com/gleam-dream/oversight">github.com/gleam-dream/oversight</a></p></div>
+<div class="card"><span class="chip" style="background:#EDEFF3;color:#3B4452">build</span><h3>Gleam Nix</h3><p>Builds each Gleam dependency as its own Nix derivation from manifest.toml. Projects share compiled packages; editing your app rebuilds only your app.</p><p style="margin-top:10px"><a href="https://github.com/gleam-dream/gleam-nix">github.com/gleam-dream/gleam-nix</a></p></div>
+<div class="card"><span class="chip" style="background:#EDEFF3;color:#3B4452">learn with AI</span><h3>Gleam Agent Tools</h3><p>Skills for AI coding agents that write Gleam: decision trees, red flags and primary sources, plus an optional language-server bridge.</p><p style="margin-top:10px"><a href="https://github.com/gleam-dream/gleam-agent-tools">github.com/gleam-dream/gleam-agent-tools</a></p></div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Reference · glossary</div>
+<h2 class="h2">Every term from the course</h2>
+<div class="lab">
+<label style="display:flex;flex-direction:column;gap:8px;max-width:480px"><span class="meta">Filter terms</span><input type="text" value="{{q}}" onChange="{{setQ}}" placeholder="try: lease, hold, codec" style="font:16px Inter,sans-serif;min-height:48px;padding:0 16px;border-radius:12px;border:1px solid #CFCBC2;background:#FAF8F4;color:#17162B"></label>
+<div class="row" style="gap:6px;margin:14px 0 18px"><sc-for list="{{gtags}}" as="t" hint-placeholder-count="6"><button type="button" class="{{t.cls}}" onClick="{{t.pick}}">{{t.label}}</button></sc-for></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px">
+<sc-for list="{{terms}}" as="t" hint-placeholder-count="8"><div class="box"><div style="display:flex;justify-content:space-between;gap:8px"><b>{{t.term}}</b><span class="chip" style="background:{{t.bg}};color:{{t.fg}};font-size:10px">{{t.tag}}</span></div><p style="font-size:14px;margin-top:4px" class="muted">{{t.def}}</p></div></sc-for>
+</div>
+<p class="meta" style="margin-top:12px">{{termCount}}</p>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Reference · cheat sheet</div>
+<h2 class="h2">Reach for it when…</h2>
+<div style="overflow-x:auto;margin-top:20px"><div style="min-width:760px;display:grid;grid-template-columns:160px 1fr 1fr;gap:1px;background:#E4E0D8;border-radius:14px;overflow:hidden;font-size:15px">
+<div style="background:#F1EEE8;padding:12px;font-weight:600">Package</div><div style="background:#F1EEE8;padding:12px;font-weight:600">Reach for it when you need to…</div><div style="background:#F1EEE8;padding:12px;font-weight:600">Remember</div>
+<sc-for list="{{sheet}}" as="r" hint-placeholder-count="12">
+<div style="background:{{r.bg}};padding:12px;font-weight:700;color:{{r.fg}}">{{r.name}}</div><div style="background:#fff;padding:12px">{{r.when}}</div><div style="background:#fff;padding:12px" class="muted">{{r.remember}}</div>
+</sc-for>
+</div></div>
+</section>
+
+<section class="wrap sec">
+<div class="dark" style="background:#17162B;color:#fff;border-radius:20px;padding:36px">
+<div class="k" style="color:#F9A8D4">The final check</div>
+<h2 style="font-size:34px;margin-top:10px">Eight scenarios, one per big idea</h2>
+<p style="color:#C9C6E0;margin-top:8px;max-width:720px">Below. Aim for 6 or more. If you miss one, the explanation names the module to revisit.</p>
+</div>
+</section>
+<!--QUIZ-->
+
+<section class="wrap sec">
+<div class="k">Where next</div>
+<h2 class="h2">A reading plan for your first week</h2>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:24px">
+<div class="card"><div class="meta">day 1</div><h3 style="font-size:19px;margin:8px 0">Oversight README and app catalogue</h3><p class="muted" style="font-size:15px">Pick the example closest to your work. Run its tests.</p></div>
+<div class="card"><div class="meta">day 2</div><h3 style="font-size:19px;margin:8px 0">That app's main package READMEs</h3><p class="muted" style="font-size:15px">Read "When to use", "Capabilities" and "Operational limits" first. That's the mental model in prose.</p></div>
+<div class="card"><div class="meta">day 3</div><h3 style="font-size:19px;margin:8px 0">The design documents</h3><p class="muted" style="font-size:15px">Each package keeps a design document under docs/design describing ownership and contracts.</p></div>
+<div class="card"><div class="meta">day 4+</div><h3 style="font-size:19px;margin:8px 0">The compiled examples</h3><p class="muted" style="font-size:15px">Every README excerpt comes from an examples folder that the build checks. Change one and run it.</p></div>
+</div>
+<div class="row" style="gap:8px;margin-top:20px"><span class="meta">Repositories</span>
+<a class="pill" href="https://github.com/gleam-dream/sinal">sinal</a><a class="pill" href="https://github.com/lostbean/json_blueprint">json_blueprint</a><a class="pill" href="https://github.com/gleam-dream/http_gun">http_gun</a><a class="pill" href="https://github.com/gleam-dream/llm_wire">llm_wire</a><a class="pill" href="https://github.com/gleam-dream/relay">relay</a><a class="pill" href="https://github.com/gleam-dream/hellhound">hellhound</a><a class="pill" href="https://github.com/gleam-dream/correio">correio</a><a class="pill" href="https://github.com/gleam-dream/grind">grind</a><a class="pill" href="https://github.com/gleam-dream/saga">saga</a><a class="pill" href="https://github.com/gleam-dream/fabric">fabric</a><a class="pill" href="https://github.com/gleam-dream/decisions">decisions</a><a class="pill" href="https://github.com/gleam-dream/retrace">retrace</a>
+</div>
+<div class="key"><div class="k">The one-sentence version, again</div><p>The BEAM gives you isolated processes, OTP turns failure into restarts, Gleam adds types, and gleam-dream adds twelve focused libraries that each own one mechanism while your application keeps every decision.</p></div>
+</section>

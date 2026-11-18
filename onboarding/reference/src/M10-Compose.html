@@ -1,0 +1,100 @@
+<header class="wrap" style="padding-top:72px;padding-bottom:48px">
+<div class="k">Module 10 · Phase 4: putting it together</div>
+<h1 style="font-size:clamp(38px,5.5vw,64px);margin-top:14px;max-width:940px">Composition studio</h1>
+<p class="lead" style="margin-top:20px;font-size:20px">You know the pieces. Now watch them combine. The systems below are the runnable applications in the Oversight repository, each one a few libraries joined by ordinary application code. Then design your own and see which packages it needs.</p>
+</header>
+
+<section class="wrap sec">
+<div class="lab" data-tour="systems" style="margin-top:0">
+<div class="labh"><div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Real systems, step by step</h2><p class="muted" style="margin-top:6px;max-width:680px">Pick a system. The lit chips are the packages it uses. Step through to see which package does what, and when.</p></div></div>
+<div class="split" style="align-items:flex-start;gap:20px">
+<div class="syslist" style="flex:1 1 240px;display:flex;flex-direction:column;gap:6px">
+<sc-for list="{{systems}}" as="s" hint-placeholder-count="9">
+<button type="button" onClick="{{s.pick}}" style="text-align:left;font:inherit;cursor:pointer;border-radius:12px;padding:10px 14px;min-height:56px;border:2px solid {{s.border}};background:{{s.bg}};color:{{s.fg}};display:flex;flex-direction:column"><b style="font-size:15px">{{s.name}}</b><span class="tour-hide" style="font-size:13px;opacity:.85">{{s.task}}</span></button>
+</sc-for>
+</div>
+<div style="flex:3 1 560px;min-width:0">
+<h3 style="font-size:28px">{{sys.name}}</h3>
+<p class="muted" style="margin-top:6px;font-size:16px">{{sys.blurb}}</p>
+<div class="row" style="gap:6px;margin-top:16px">
+<sc-for list="{{chips}}" as="c" hint-placeholder-count="12"><span class="chip" style="background:{{c.bg}};color:{{c.fg}};border:2px solid {{c.border}};opacity:{{c.op}}">{{c.name}}</span></sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;margin-top:20px">
+<sc-for list="{{flow}}" as="f" hint-placeholder-count="5">
+<div style="display:flex;gap:14px;align-items:flex-start;padding:12px 14px;border-radius:14px;background:{{f.bg}};border:2px solid {{f.border}};opacity:{{f.op}}">
+<span class="mono" style="font-weight:600;font-size:13px;min-width:22px;padding-top:2px">{{f.n}}</span>
+<span class="chip" style="background:{{f.cbg}};color:{{f.cfg}};flex:0 0 auto">{{f.pkg}}</span>
+<span style="font-size:15px">{{f.text}}</span>
+</div>
+</sc-for>
+</div>
+<div class="row" style="margin-top:16px;justify-content:space-between">
+<div class="row"><button type="button" class="btn" onClick="{{back}}" disabled="{{atStart}}">← Back</button><button type="button" class="btn pri" onClick="{{fwd}}" disabled="{{atEnd}}">Next step →</button><button type="button" class="btn sm" onClick="{{playAll}}">Play</button></div>
+<span class="meta">step {{cur}} of {{total}}</span>
+</div>
+<div class="split tour-hide" style="margin-top:16px;gap:12px">
+<div class="box" style="background:#FFF7FC;border-color:#F3C6E6"><div class="meta">why this shape</div><p style="font-size:15px;margin-top:4px">{{sys.why}}</p></div>
+<div class="box" style="background:#FDF0DC;border-color:#F3D9B1"><div class="meta">the app still owns</div><p style="font-size:15px;margin-top:4px">{{sys.owns}}</p></div>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="k">Read · recurring moves</div>
+<h2 class="h2">Six composition patterns</h2>
+<p class="lead">The same joints show up again and again. Recognise them and new systems stop looking new.</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:24px">
+<sc-for list="{{patterns}}" as="p" hint-placeholder-count="6">
+<div class="card" style="padding:20px">
+<h3 style="font-size:19px">{{p.name}}</h3>
+<div class="row" style="gap:4px;margin:12px 0"><sc-for list="{{p.chain}}" as="c" hint-placeholder-count="3"><span style="display:inline-flex;align-items:center;gap:4px"><span class="chip" style="background:{{c.bg}};color:{{c.fg}}">{{c.name}}</span><span class="muted" aria-hidden="true">{{c.arrow}}</span></span></sc-for></div>
+<p class="muted" style="font-size:15px">{{p.text}}</p>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section class="wrap sec">
+<div class="lab" data-tour="builder" style="margin-top:0">
+<div class="labh"><div><span class="tag">Playground</span><h2 style="font-size:28px;margin-top:10px">Design your own system</h2><p class="muted" style="margin-top:6px;max-width:680px">Tick what your system must do. You'll get the packages, the patterns that apply, the nearest example app to read, and what stays yours.</p></div><button type="button" class="btn sm" onClick="{{clearNeeds}}">Clear</button></div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:8px">
+<sc-for list="{{reqs}}" as="r" hint-placeholder-count="11"><button type="button" onClick="{{r.toggle}}" aria-pressed="{{r.on}}" style="text-align:left;font:inherit;cursor:pointer;border-radius:12px;padding:12px 14px;min-height:52px;border:2px solid {{r.border}};background:{{r.bg}};color:#17162B;display:flex;gap:10px;align-items:center"><span class="mono" style="font-weight:700;width:18px">{{r.mark}}</span><span style="font-size:15px">{{r.label}}</span></button></sc-for>
+</div>
+<div class="split" style="margin-top:24px;align-items:flex-start">
+<div style="flex:2 1 420px">
+<div class="meta" style="margin-bottom:8px">Packages</div>
+<div style="display:flex;flex-direction:column;gap:6px">
+<sc-for list="{{picked}}" as="p" hint-placeholder-count="3"><div style="display:flex;gap:12px;align-items:baseline;padding:10px 14px;border-radius:12px;background:{{p.bg}}"><b style="min-width:120px;color:{{p.fg}}">{{p.name}}</b><span style="font-size:14px">{{p.why}}</span></div></sc-for>
+<sc-if value="{{noneYet}}" hint-placeholder-val="{{false}}"><p class="muted">Tick a requirement to start.</p></sc-if>
+</div>
+</div>
+<div style="flex:1 1 300px;display:flex;flex-direction:column;gap:12px">
+<div class="box" style="background:#FFF7FC;border-color:#F3C6E6"><div class="meta">patterns that apply</div><sc-for list="{{applies}}" as="a" hint-placeholder-count="2"><p style="font-size:14px;margin-top:6px">→ {{a}}</p></sc-for><sc-if value="{{noPattern}}" hint-placeholder-val="{{false}}"><p class="muted" style="font-size:14px;margin-top:6px">None yet.</p></sc-if></div>
+<div class="box" style="background:#E2F4E7;border-color:#B9E2C4"><div class="meta">nearest example to read</div><b style="font-size:17px;display:block;margin-top:4px">{{nearest}}</b><span style="font-size:14px">{{nearestWhy}}</span></div>
+<div class="box" style="background:#FDF0DC;border-color:#F3D9B1"><div class="meta">still yours</div><p style="font-size:14px;margin-top:4px">{{yours}}</p></div>
+</div>
+</div>
+</div>
+<div style="margin-top:72px"><div class="k">Capstone · read a trace</div>
+<h2 class="h2">Watch checkout through its own telemetry</h2>
+<p class="lead">Every library you met reports what it is doing through Sinal. Here is the durable checkout told only through the events Grind, Saga and HTTP Gun emit, the way an operator reads a trace. Each column is a component; each arrow is an event, labelled with its real name.</p></div>
+<div class="lab" data-tour="trace">
+<div class="labh"><div><span class="tag">Trace</span><h2 style="font-size:24px;margin-top:10px" class="mono">POST /orders?mode=durable</h2></div>
+<div class="seg"><sc-for list="{{trOpts}}" as="o" hint-placeholder-count="2"><button type="button" class="{{o.cls}}" onClick="{{o.pick}}">{{o.label}}</button></sc-for></div></div>
+<!--MSC:traceChart-->
+<div class="box" style="margin-top:14px;border:2px solid #17162B">
+<div class="row" style="justify-content:space-between;gap:10px"><span class="mono" style="font-size:16px;font-weight:700">{{trEv.list}}</span><span class="chip" style="background:{{trEv.bg}};color:{{trEv.fg}}">emitted by {{trEv.by}}</span></div>
+<p style="font-size:15px;margin-top:8px">{{trEv.meaning}}</p>
+<sc-if value="{{trEv.hasFields}}"><p class="meta" style="margin-top:6px">fields: {{trEv.fields}}</p></sc-if>
+</div>
+<div class="row" style="margin-top:14px;justify-content:space-between;gap:12px">
+<div class="row"><button type="button" class="btn" onClick="{{trBack}}" disabled="{{trAtStart}}">← Back</button><button type="button" class="btn pri" onClick="{{trNext}}" disabled="{{trAtEnd}}">Next event →</button><button type="button" class="btn sm" onClick="{{trPlay}}">Play</button></div>
+<label style="display:flex;align-items:center;gap:10px;flex:1 1 260px;max-width:420px"><span class="meta">event {{trCur}} of {{trTotal}}</span><input type="range" min="1" max="{{trTotal}}" step="1" value="{{trCur}}" onChange="{{trSet}}" style="flex:1"></label>
+</div>
+<p class="muted tour-hide" style="font-size:13px;margin-top:12px">Event names and HTTP Gun's milestones are the real ones from each library's telemetry module. The order of events is reconstructed from the checkout example's design, not recorded from a live run, so treat timings as illustrative.</p>
+</div>
+<div class="key"><div class="k">Carry this forward</div><p>A gleam-dream system is a few focused libraries plus your application code in between. Pick by job, join with the patterns, and keep the decisions in your own code.</p></div>
+</section>
+<!--QUIZ-->
