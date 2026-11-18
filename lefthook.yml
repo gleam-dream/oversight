@@ -13,4 +13,6 @@ pre-commit:
       run: nix fmt -- {staged_files}
       stage_fixed: true
     design:
-      run: nix run .#design-gate-check -- docs/design
+      # Git sets GIT_DIR and GIT_INDEX_FILE for hooks; inside a worktree they
+      # make the gate resolve the wrong repository root, so drop them.
+      run: env -u GIT_DIR -u GIT_INDEX_FILE nix run .#design-gate-check -- docs/design
