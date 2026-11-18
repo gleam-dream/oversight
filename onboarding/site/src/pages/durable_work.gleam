@@ -712,57 +712,60 @@ fn lifecycle(model: Model) -> List(Element(Msg)) {
         )
       }),
     ),
-    html.div([class("split"), css("margin-top:20px;align-items:flex-start")], [
-      html.div([css("flex:1 1 380px")], [
-        html.div(
-          [class("box"), css("background:#FDF0DC;border-color:#F3D9B1")],
-          [
-            html.div([class("meta")], [html.text("now")]),
-            html.div(
-              [css("font:600 24px 'Space Grotesk',sans-serif;margin:4px 0")],
-              [
-                html.text(job.title(j.phase)),
-              ],
-            ),
-            html.p([css("font-size:15px")], [html.text(job.why(j.phase))]),
-            html.div([class("meta"), css("margin-top:8px")], [
-              html.text(
-                "attempts used: "
-                <> int.to_string(j.attempts)
-                <> " / "
-                <> int.to_string(job.max_attempts),
+    html.div(
+      [class("split with-log"), css("margin-top:20px;align-items:flex-start")],
+      [
+        html.div([css("flex:1 1 380px")], [
+          html.div(
+            [class("box"), css("background:#FDF0DC;border-color:#F3D9B1")],
+            [
+              html.div([class("meta")], [html.text("now")]),
+              html.div(
+                [css("font:600 24px 'Space Grotesk',sans-serif;margin:4px 0")],
+                [
+                  html.text(job.title(j.phase)),
+                ],
               ),
-            ]),
-          ],
-        ),
-        html.div([class("meta"), css("margin:16px 0 8px")], [
-          html.text("What happens next?"),
+              html.p([css("font-size:15px")], [html.text(job.why(j.phase))]),
+              html.div([class("meta"), css("margin-top:8px")], [
+                html.text(
+                  "attempts used: "
+                  <> int.to_string(j.attempts)
+                  <> " / "
+                  <> int.to_string(job.max_attempts),
+                ),
+              ]),
+            ],
+          ),
+          html.div([class("meta"), css("margin:16px 0 8px")], [
+            html.text("What happens next?"),
+          ]),
+          html.div(
+            [css("display:flex;flex-direction:column;gap:8px")],
+            list.map(job.choices(j), fn(choice) {
+              html.button(
+                [
+                  attribute.type_("button"),
+                  class(case choice.warn {
+                    True -> "btn warn"
+                    False -> "btn"
+                  }),
+                  event.on_click(ReaderDroveJob(choice.event)),
+                  css("justify-content:flex-start"),
+                ],
+                [html.text(choice.label)],
+              )
+            }),
+          ),
         ]),
-        html.div(
-          [css("display:flex;flex-direction:column;gap:8px")],
-          list.map(job.choices(j), fn(choice) {
-            html.button(
-              [
-                attribute.type_("button"),
-                class(case choice.warn {
-                  True -> "btn warn"
-                  False -> "btn"
-                }),
-                event.on_click(ReaderDroveJob(choice.event)),
-                css("justify-content:flex-start"),
-              ],
-              [html.text(choice.label)],
-            )
-          }),
-        ),
-      ]),
-      html.div([css("flex:1 1 320px")], [
-        html.div([class("meta"), css("margin-bottom:8px")], [
-          html.text("The job's history (kept in PostgreSQL)"),
+        html.div([class("log-col"), css("flex:1 1 320px")], [
+          html.div([class("meta"), css("margin-bottom:8px")], [
+            html.text("The job's history (kept in PostgreSQL)"),
+          ]),
+          log(j.history, "min-height:300px"),
         ]),
-        log(j.history, "min-height:300px"),
-      ]),
-    ]),
+      ],
+    ),
   ]
 }
 

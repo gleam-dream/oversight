@@ -386,7 +386,7 @@ fn process_playground(p: Processes) -> Element(Msg) {
         button("btn sm", ReaderResetProcesses, "Reset"),
       ]),
     ]),
-    html.div([class("split"), css("gap:16px;align-items:flex-start")], [
+    html.div([class("split with-log"), css("gap:16px;align-items:flex-start")], [
       html.div([css("flex:2 1 520px")], [
         html.div([class("row"), css("margin-bottom:14px;gap:16px")], [
           chooser("From", p, p.sender, ReaderPickedSender),
@@ -430,7 +430,7 @@ fn process_playground(p: Processes) -> Element(Msg) {
           ]),
         ]),
       ]),
-      html.div([css("flex:1 1 300px")], [
+      html.div([class("log-col"), css("flex:1 1 300px")], [
         html.div([class("meta"), css("margin-bottom:6px")], [
           html.text("What just happened"),
         ]),

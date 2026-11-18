@@ -948,7 +948,7 @@ fn point_lab(model: Point) -> List(Element(Msg)) {
         ])
       }),
     ),
-    html.div([class("split"), css("align-items:flex-start")], [
+    html.div([class("split with-log"), css("align-items:flex-start")], [
       html.div(
         [
           class("box"),
@@ -966,7 +966,7 @@ fn point_lab(model: Point) -> List(Element(Msg)) {
           ),
         ],
       ),
-      html.div([css("flex:1 1 280px")], [
+      html.div([class("log-col"), css("flex:1 1 280px")], [
         html.div([class("meta"), css("margin-bottom:8px")], [
           html.text("The record (append-only)"),
         ]),

@@ -795,3 +795,19 @@ input[type="range"] {
     padding: 24px;
   }
 }
+/* A log beside another column fills the height of that row. In free play it
+   still grows with its entries; while touring it fills the row but never makes
+   the card taller, and keeps the 140px cap when the columns stack. */
+.split.with-log > .log-col {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+.split.with-log > .log-col > .log {
+  flex: 1 1 auto;
+}
+.lab.touring .split.with-log > .log-col > .log {
+  flex: 1 1 0;
+  min-height: 140px !important;
+  max-height: none;
+}
