@@ -163,6 +163,22 @@ pub fn view(pages: Pages, route: Route, context: Context) -> Element(PageMsg) {
   }
 }
 
+/// The reader arrived on `route`, or turned motion back on while there. Only
+/// pages that animate on arrival do anything.
+pub fn enter(
+  pages: Pages,
+  route: Route,
+  context: Context,
+) -> #(Pages, Effect(PageMsg)) {
+  case route {
+    route.Module(route.Principles) -> {
+      let #(page, effect) = principles.enter(pages.principles, context)
+      #(Pages(..pages, principles: page), effect.map(effect, PrinciplesMsg))
+    }
+    _ -> #(pages, effect.none())
+  }
+}
+
 /// The reader left `route`: pause its tours.
 pub fn leave(pages: Pages, route: Route) -> Pages {
   case route {

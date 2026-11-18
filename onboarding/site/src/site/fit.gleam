@@ -2,11 +2,15 @@
 //// card fits under the app bar, from 100% down to a floor of 60% in steps of
 //// 5. The tour bar itself is never scaled.
 ////
-//// A fit belongs to a basis: the step's narration and the viewport size. On
-//// a new basis the fit starts settling one step above an estimate and
-//// shrinks by 5 per paint until the card fits, then it is settled at the
-//// height it fitted with. A settled fit shrinks again if the card outgrows
-//// the screen, and grows again only if the card's content clearly shrank.
+//// The fit walks down from 100% and stops at the first zoom at which the
+//// card fits, as the reference does. Card height is not monotonic in zoom
+//// (a narrower layout can wrap differently), so no shortcut finds the same
+//// answer. The shell measures before the browser paints and Lustre renders
+//// again within the same frame, so the walk is never visible.
+////
+//// A fit belongs to a basis: the step's narration and the viewport size. A
+//// settled card keeps walking down if it outgrows the screen, and walks
+//// again from 100% only if its content clearly shrank since it settled.
 
 import gleam/int
 
@@ -17,80 +21,67 @@ pub const full = 100
 /// Below this width the site never scales playgrounds.
 pub const narrow_width = 760
 
-/// A card padded and bordered while touring: 20px top and bottom, 1px border.
-const frame = 42
-
-/// How much a settled card must shrink before it is allowed to grow again.
+/// How much a settled card must shrink before it is fitted afresh.
 const slack = 90
 
 pub type Fit {
-  Settling(zoom: Int, basis: String)
+  /// Showing `zoom` to see whether the card fits there.
+  Trying(zoom: Int, basis: String)
   Settled(zoom: Int, basis: String, height: Int)
 }
 
 pub type Sample {
-  /// One touring card measured at the zoom it currently shows.
-  Sample(narration: String, height: Int, bar: Int)
+  /// One touring card measured at the zoom it showed, `shown`.
+  Sample(height: Int, shown: Int)
 }
 
 pub fn basis(narration: String, width: Int, height: Int) -> String {
   narration <> "|" <> int.to_string(width) <> "x" <> int.to_string(height)
 }
 
-/// Whether the fit still needs another measurement after the next paint.
+/// Whether the fit still needs another measurement.
 pub fn is_settling(fit: Fit) -> Bool {
   case fit {
-    Settling(..) -> True
+    Trying(..) -> True
     Settled(..) -> False
   }
 }
 
-/// The next fit for one card, given its previous fit (if any), a sample at
-/// the zoom it currently shows, and the height available under the app bar.
+/// The next fit for one card, given its previous fit (if any), a sample of
+/// the card as shown, and the height available under the app bar.
 pub fn next(
   previous: Result(Fit, Nil),
   sample: Sample,
   basis: String,
   available: Int,
 ) -> Fit {
-  let overflows = sample.height > available
   case previous {
-    Ok(Settling(zoom:, basis: old)) if old == basis ->
-      case overflows && zoom > floor {
-        True -> Settling(zoom - 5, basis)
-        False -> Settled(zoom, basis, sample.height)
+    // A measurement taken before the card showed the fit's zoom says nothing
+    // about that zoom: wait for the next one.
+    Ok(fit) if fit.basis == basis && sample.shown != fit.zoom -> fit
+    Ok(Trying(zoom:, ..) as fit) if fit.basis == basis ->
+      try(zoom, basis, sample, available)
+    Ok(Settled(zoom:, height:, ..) as fit) if fit.basis == basis ->
+      case sample.height > available && zoom > floor {
+        True -> Trying(zoom - 5, basis)
+        False ->
+          case zoom < full && sample.height < height - slack {
+            True -> Trying(full, basis)
+            False -> fit
+          }
       }
-    Ok(Settled(zoom:, basis: old, height:)) if old == basis ->
-      case
-        overflows && zoom > floor,
-        zoom < full && sample.height < height - slack
-      {
-        True, _ -> Settling(zoom - 5, basis)
-        False, True -> start(sample, zoom, basis, available)
-        False, False -> Settled(zoom:, basis:, height:)
+    _ ->
+      case sample.shown == full {
+        True -> try(full, basis, sample, available)
+        False -> Trying(full, basis)
       }
-    Ok(fit) -> start(sample, fit.zoom, basis, available)
-    Error(Nil) -> start(sample, full, basis, available)
   }
 }
 
-fn start(sample: Sample, shown_at: Int, basis: String, available: Int) -> Fit {
-  Settling(int.min(full, estimate(sample, shown_at, available) + 10), basis)
-}
-
-/// The largest zoom step at which the card would fit if its scaled content
-/// grew in proportion to the zoom. Scaled text wraps less, so the real
-/// answer is this or a little more.
-pub fn estimate(sample: Sample, shown_at: Int, available: Int) -> Int {
-  let content = int.max(sample.height - sample.bar - frame, 0)
-  let content_at_full = content * full / int.max(shown_at, 1)
-  let room = available - sample.bar - frame
-  largest_fitting(full, content_at_full, room)
-}
-
-fn largest_fitting(zoom: Int, content_at_full: Int, room: Int) -> Int {
-  case zoom <= floor || content_at_full * zoom / full <= room {
-    True -> zoom
-    False -> largest_fitting(zoom - 5, content_at_full, room)
+/// The card was measured at `zoom`: settle there or try the next step down.
+fn try(zoom: Int, basis: String, sample: Sample, available: Int) -> Fit {
+  case sample.height > available && zoom > floor {
+    True -> Trying(zoom - 5, basis)
+    False -> Settled(zoom, basis, sample.height)
   }
 }

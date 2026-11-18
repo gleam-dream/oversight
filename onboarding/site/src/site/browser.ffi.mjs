@@ -48,6 +48,27 @@ export function on_fonts_ready(callback) {
   }
 }
 
+// Report size changes of the page view, at most once per frame. Cards with
+// real-time widgets render inside their own components after the page has
+// painted, so their size settles later than the page's own render.
+export function on_view_resize(callback) {
+  const start = () => {
+    const view = document.getElementById("view");
+    if (!view || !window.ResizeObserver) return false;
+    let queued = false;
+    new ResizeObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        callback();
+      });
+    }).observe(view);
+    return true;
+  };
+  if (!start()) requestAnimationFrame(() => start());
+}
+
 export function set_timeout(ms, callback) {
   window.setTimeout(() => callback(), ms);
 }
@@ -100,22 +121,17 @@ export function scroll_under_app_bar(selector, smooth) {
 }
 
 // Measure every playground card that is touring: its tour id, the narration
-// it shows, its height and the tour bar's height including its margin.
+// it shows, its height and the zoom it shows.
 export function measure_labs() {
   const available = Math.floor(window.innerHeight - app_bar_height() - 16);
   const labs = Array.from(document.querySelectorAll("#view .lab.touring")).map(
     (lab) => {
-      const bar = lab.querySelector(".tourbar");
       const text = lab.querySelector(".tourtext");
-      const barHeight = bar
-        ? bar.getBoundingClientRect().height +
-          parseFloat(getComputedStyle(bar).marginBottom || "0")
-        : 0;
       return [
         lab.getAttribute("data-tid") || "",
         text ? text.textContent : "",
         Math.ceil(lab.getBoundingClientRect().height),
-        Math.ceil(barHeight),
+        Number(lab.getAttribute("data-rt-z") || "100"),
       ];
     },
   );

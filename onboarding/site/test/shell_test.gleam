@@ -90,57 +90,103 @@ pub fn a_remembered_motion_choice_wins_over_the_system_test() {
 
 // FIT TO SCREEN ---------------------------------------------------------------
 
-pub fn a_card_that_fits_settles_at_full_size_test() {
-  let sample = fit.Sample("step", height: 500, bar: 100)
-  let first = fit.next(Error(Nil), sample, "b", 700)
-  assert first == fit.Settling(100, "b")
-  assert fit.next(Ok(first), sample, "b", 700) == fit.Settled(100, "b", 500)
+/// Run the fit against a card whose height at each zoom is `height(zoom)`,
+/// one measurement per render, until it settles.
+fn settle(height: fn(Int) -> Int, available: Int) -> #(Int, Int) {
+  settle_loop(Error(Nil), height, available, 0)
 }
 
-pub fn a_tall_card_starts_one_step_above_its_estimate_test() {
-  // 1000 tall at 100%: 100 bar, 42 frame, 858 content. 800 available leaves
-  // 658 for content: 658 / 858 = 76.7%, an estimate of 75%, so start at 85%.
-  let sample = fit.Sample("step", height: 1000, bar: 100)
-  assert fit.next(Error(Nil), sample, "b", 800) == fit.Settling(85, "b")
-  // 600 available: the estimate is the 60% floor, so start at 70%.
-  assert fit.next(Error(Nil), sample, "b", 600) == fit.Settling(70, "b")
+fn settle_loop(
+  previous: Result(fit.Fit, Nil),
+  height: fn(Int) -> Int,
+  available: Int,
+  renders: Int,
+) -> #(Int, Int) {
+  let shown = case previous {
+    Ok(f) -> f.zoom
+    Error(Nil) -> 100
+  }
+  let sample = fit.Sample(height: height(shown), shown:)
+  let next = fit.next(previous, sample, "b", available)
+  case fit.is_settling(next) && renders < 20 {
+    True -> settle_loop(Ok(next), height, available, renders + 1)
+    False -> #(next.zoom, renders)
+  }
 }
 
-pub fn a_settling_card_shrinks_by_five_until_it_fits_test() {
-  let settling = fit.Settling(85, "b")
-  let over = fit.Sample("step", height: 830, bar: 100)
-  assert fit.next(Ok(settling), over, "b", 800) == fit.Settling(80, "b")
-  let fits = fit.Sample("step", height: 790, bar: 100)
-  assert fit.next(Ok(fit.Settling(80, "b")), fits, "b", 800)
-    == fit.Settled(80, "b", 790)
-  let floor = fit.Settling(60, "b")
-  assert fit.next(Ok(floor), over, "b", 800) == fit.Settled(60, "b", 830)
+/// The reference's answer: walk down from 100% until the card fits.
+fn top_down(height: fn(Int) -> Int, available: Int, zoom: Int) -> Int {
+  case height(zoom) > available && zoom > fit.floor {
+    True -> top_down(height, available, zoom - 5)
+    False -> zoom
+  }
+}
+
+pub fn the_fit_finds_the_first_zoom_that_fits_from_the_top_test() {
+  let cards = [
+    fn(z) { 142 + 858 * z / 100 },
+    fn(z) { 142 + 900 * z / 100 - { 100 - z } * 6 },
+    fn(z) { 142 + 1400 * z / 100 },
+    fn(z) { 142 + 400 * z / 100 },
+    // Not monotonic: at 85% the layout wraps and the card grows, as the
+    // BEAM process playground does at 1440x900.
+    fn(z) {
+      case z {
+        100 -> 908
+        95 -> 857
+        90 -> 804
+        85 -> 837
+        _ -> 736
+      }
+    },
+  ]
+  list.each(cards, fn(height) {
+    list.each([600, 700, 750, 800, 827, 900], fn(available) {
+      let #(zoom, renders) = settle(height, available)
+      assert zoom == top_down(height, available, 100)
+      assert renders <= 9
+    })
+  })
+}
+
+pub fn a_card_that_fits_at_full_size_settles_at_once_test() {
+  let sample = fit.Sample(height: 500, shown: 100)
+  assert fit.next(Error(Nil), sample, "b", 700) == fit.Settled(100, "b", 500)
+}
+
+pub fn a_new_step_walks_down_from_full_size_test() {
+  let settled = fit.Settled(80, "old", 790)
+  let sample = fit.Sample(height: 500, shown: 80)
+  assert fit.next(Ok(settled), sample, "new", 800) == fit.Trying(100, "new")
+}
+
+pub fn a_measurement_from_before_the_zoom_applied_is_ignored_test() {
+  let trying = fit.Trying(85, "b")
+  let stale = fit.Sample(height: 900, shown: 90)
+  assert fit.next(Ok(trying), stale, "b", 800) == trying
 }
 
 pub fn a_settled_card_holds_its_zoom_test() {
   let settled = fit.Settled(80, "b", 790)
-  let same = fit.Sample("step", height: 770, bar: 100)
-  assert fit.next(Ok(settled), same, "b", 800) == settled
+  assert fit.next(Ok(settled), fit.Sample(770, 80), "b", 800) == settled
 }
 
-pub fn a_settled_card_shrinks_when_it_outgrows_the_screen_test() {
+pub fn a_settled_card_keeps_walking_down_when_it_outgrows_the_screen_test() {
   let settled = fit.Settled(80, "b", 790)
-  let grown = fit.Sample("step", height: 860, bar: 100)
-  assert fit.next(Ok(settled), grown, "b", 800) == fit.Settling(75, "b")
+  assert fit.next(Ok(settled), fit.Sample(860, 80), "b", 800)
+    == fit.Trying(75, "b")
 }
 
-pub fn a_settled_card_grows_back_when_its_content_shrinks_test() {
+pub fn a_settled_card_walks_again_when_its_content_shrinks_test() {
   let settled = fit.Settled(70, "b", 790)
-  let shrunk = fit.Sample("step", height: 600, bar: 100)
-  // content 458 at 70% is 654 at full; room 658 fits at 100%.
-  assert fit.next(Ok(settled), shrunk, "b", 800) == fit.Settling(100, "b")
+  assert fit.next(Ok(settled), fit.Sample(600, 70), "b", 800)
+    == fit.Trying(100, "b")
 }
 
-pub fn a_new_step_starts_settling_again_test() {
-  let settled = fit.Settled(60, "old", 790)
-  let sample = fit.Sample("step", height: 542, bar: 100)
-  // content 400 at 60% is 666 at full; room 658 -> estimate 95%, start 100%.
-  assert fit.next(Ok(settled), sample, "new", 800) == fit.Settling(100, "new")
+pub fn the_floor_holds_test() {
+  let trying = fit.Trying(60, "b")
+  assert fit.next(Ok(trying), fit.Sample(900, 60), "b", 800)
+    == fit.Settled(60, "b", 900)
 }
 
 pub fn narrow_screens_are_never_scaled_test() {

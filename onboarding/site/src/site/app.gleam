@@ -56,6 +56,7 @@ pub type Msg {
   ReaderToggledMotion
   ReaderToggledDone(Module)
   ViewportResized
+  ViewResized
   FontsLoaded
   LayoutMeasured(Layout)
   PageMsg(PageMsg)
@@ -74,11 +75,14 @@ pub fn init(flags: Flags) -> #(Model, Effect(Msg)) {
       fits: dict.new(),
       pages: pages.init(),
     )
+  let #(model, entered) = enter(model)
   #(
     model,
     effect.batch([
+      entered,
       browser.listen_to_hash(ReaderChangedHash),
       browser.listen_to_resize(ViewportResized),
+      browser.listen_to_view_resize(ViewResized),
       browser.when_fonts_ready(FontsLoaded),
       browser.set_title(route.document_title(route)),
       measure(),
@@ -116,9 +120,13 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     ReaderToggledMotion -> {
       let motion = motion.toggle(model.motion)
+      let #(model, entered) =
+        Model(..model, motion:, pages: pages.leave(model.pages, model.route))
+        |> enter
       #(
-        Model(..model, motion:, pages: pages.leave(model.pages, model.route)),
+        model,
         effect.batch([
+          entered,
           browser.write(motion.storage_key, motion.encode(motion)),
           measure(),
         ]),
@@ -133,7 +141,7 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
 
-    ViewportResized -> #(model, measure())
+    ViewportResized | ViewResized -> #(model, measure())
 
     FontsLoaded -> #(Model(..model, fits: dict.new()), measure())
 
@@ -158,20 +166,30 @@ pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn navigate(model: Model, to: Route) -> #(Model, Effect(Msg)) {
-  #(
+  let #(model, entered) =
     Model(
       ..model,
       route: to,
       menu: MenuClosed,
       fits: dict.new(),
       pages: pages.leave(model.pages, model.route),
-    ),
+    )
+    |> enter
+  #(
+    model,
     effect.batch([
+      entered,
       browser.set_title(route.document_title(to)),
       browser.show_page_from_top("view"),
       measure(),
     ]),
   )
+}
+
+/// Let the current page react to the reader arriving.
+fn enter(model: Model) -> #(Model, Effect(Msg)) {
+  let #(pages, effect) = pages.enter(model.pages, model.route, context(model))
+  #(Model(..model, pages:), effect.map(effect, PageMsg))
 }
 
 fn measure() -> Effect(Msg) {
@@ -186,8 +204,7 @@ pub fn refit(fits: Dict(String, Fit), layout: Layout) -> Dict(String, Fit) {
     False ->
       list.fold(layout.labs, dict.new(), fn(next, lab) {
         let basis = fit.basis(lab.narration, layout.width, layout.height)
-        let sample =
-          fit.Sample(narration: lab.narration, height: lab.height, bar: lab.bar)
+        let sample = fit.Sample(height: lab.height, shown: lab.zoom)
         dict.insert(
           next,
           lab.tour,

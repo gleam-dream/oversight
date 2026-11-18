@@ -6,7 +6,13 @@ import lustre/effect.{type Effect}
 
 pub type Measured {
   /// A playground card that is touring, as laid out right now.
-  MeasuredLab(tour: String, narration: String, height: Int, bar: Int)
+  MeasuredLab(
+    tour: String,
+    narration: String,
+    height: Int,
+    /// The zoom the card showed when it was measured.
+    zoom: Int,
+  )
 }
 
 /// The viewport and every touring card, measured after a paint.
@@ -41,6 +47,9 @@ fn on_resize(callback: fn() -> Nil) -> Nil
 
 @external(javascript, "./browser.ffi.mjs", "on_fonts_ready")
 fn on_fonts_ready(callback: fn() -> Nil) -> Nil
+
+@external(javascript, "./browser.ffi.mjs", "on_view_resize")
+fn on_view_resize(callback: fn() -> Nil) -> Nil
 
 @external(javascript, "./browser.ffi.mjs", "set_timeout")
 fn set_timeout(ms: Int, callback: fn() -> Nil) -> Nil
@@ -82,6 +91,12 @@ pub fn listen_to_resize(msg: msg) -> Effect(msg) {
   on_resize(fn() { dispatch(msg) })
 }
 
+/// Deliver `msg` whenever the page view changes size, after it is painted.
+pub fn listen_to_view_resize(msg: msg) -> Effect(msg) {
+  use dispatch, _ <- effect.after_paint
+  on_view_resize(fn() { dispatch(msg) })
+}
+
 pub fn when_fonts_ready(msg: msg) -> Effect(msg) {
   use dispatch <- effect.from
   on_fonts_ready(fn() { dispatch(msg) })
@@ -121,13 +136,14 @@ pub fn bring_under_app_bar(tour: String, smooth: Bool) -> Effect(msg) {
   scroll_under_app_bar("#view [data-tid=\"" <> tour <> "\"]", smooth)
 }
 
-/// Measure the layout after the browser has painted the current view.
+/// Measure the layout of the rendered view before the browser paints it. A
+/// message dispatched here is rendered again within the same frame.
 pub fn measure(to_msg: fn(Layout) -> msg) -> Effect(msg) {
-  use dispatch, _ <- effect.after_paint
+  use dispatch, _ <- effect.before_paint
   let #(width, height, available, labs) = do_measure_labs()
   let labs = {
-    use #(tour, narration, height, bar) <- list.map(labs)
-    MeasuredLab(tour:, narration:, height:, bar:)
+    use #(tour, narration, height, zoom) <- list.map(labs)
+    MeasuredLab(tour:, narration:, height:, zoom:)
   }
   dispatch(to_msg(Layout(width:, height:, available:, labs:)))
 }
