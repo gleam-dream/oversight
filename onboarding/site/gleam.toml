@@ -1,0 +1,16 @@
+name = "onboarding_site"
+version = "1.0.0"
+description = "Interactive onboarding course for the gleam-dream ecosystem"
+target = "javascript"
+
+[javascript]
+typescript_declarations = false
+runtime = "node"
+
+[dependencies]
+gleam_stdlib = ">= 0.65.0 and < 2.0.0"
+lustre = ">= 5.7.1 and < 6.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.6.0 and < 2.0.0"

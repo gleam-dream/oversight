@@ -38,20 +38,20 @@ parity to the reference.
 Hash routes are plain names (claude.ai artifacts only pass `#name`; keep this
 on GitHub Pages too so links stay stable).
 
-| # | Route | Title | Min | Playgrounds (tour id) |
-|---|---|---|---|---|
-| 0 | `#start` | Course map | – | Six-layer stack (`stack`) |
-| 1 | `#beam` | The BEAM | 20 | Process playground + live sequence chart (`proc`); two-core scheduler, cooperative vs preemptive (`sched`) |
-| 2 | `#otp` | OTP | 20 | Actor stepper + call/reply chart (`actor`); **real-time** send vs call mailbox under load (`load`); supervision tree with strategies, restart intensity, escalation + chart (`tree`); where libraries plug into your tree (`plug`) |
-| 3 | `#gleam` | Gleam | 15 | Impossible states, loose record vs custom type, plus the "add Disputed" exhaustiveness demo (`types`); Result railway (`rail`); typed Subject vs untyped mailbox (`msgs`) |
-| 4 | `#principles` | How gleam-dream thinks | 20 | Seven habits explorer; ownership sorter, library vs your app (`sorter`); "did it happen?" break-the-network simulator with sequence chart and a provider-side idempotency ledger (`happen`); thundering-herd retry simulation (`herd`); define once, use everywhere (`defs`); LLM Wire timeouts (`bounds`) |
-| 5 | `#atlas` | The package atlas | 15 | Layered map with need filter, dependency highlighting and detail panel (`atlas`) |
-| 6 | `#foundations` | Foundations | 20 | **Real-time** Sinal pipeline, inline vs bounded forwarder (`sinal`); JSON Blueprint codec: encode, decode cases, schema (`codec`); HTTP Gun anatomy (`anatomy`); destination policy (`dest`) |
-| 7 | `#outside-world` | The outside world | 20 | Step-through sequence charts for LLM Wire, Relay, Hellhound and Correio with branch options (`flows`) |
-| 8 | `#durable-work` | Work that outlives a request | 20 | Grind job lifecycle state machine (`grind`); live Grind queue: skip-locked claims, leases, renewer heartbeat, killable workers (`lease`); transactional admission (`tx`); Saga checkout with parallel steps, compensation, hold, crash in local vs durable mode (`saga`); 200 checkouts at once (`sagax`) |
-| 9 | `#agents` | Agents & people in the loop | 25 | Fabric policy gate (`gate`); pull the plug: store backends and uncertain effects (`plug`); Decisions point state machine with policy versions v1–v4 (`point`); 400 recommendations scatter, linked back to the single case (`p400`) |
-| 10 | `#compose` | Composition studio | 25 | Ten Oversight apps step by step (`systems`); six composition patterns; system builder with nearest example (`builder`); capstone: the durable checkout as a telemetry trace (`trace`) |
-| 11 | `#field-guide` | Field guide | 15 | Retrace scrub with replay strategies and privacy (`retrace`); tooling; filterable glossary; cheat sheet; reading plan |
+| #   | Route            | Title                        | Min | Playgrounds (tour id)                                                                                                                                                                                                                                                                                      |
+| --- | ---------------- | ---------------------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | `#start`         | Course map                   | –   | Six-layer stack (`stack`)                                                                                                                                                                                                                                                                                  |
+| 1   | `#beam`          | The BEAM                     | 20  | Process playground + live sequence chart (`proc`); two-core scheduler, cooperative vs preemptive (`sched`)                                                                                                                                                                                                 |
+| 2   | `#otp`           | OTP                          | 20  | Actor stepper + call/reply chart (`actor`); **real-time** send vs call mailbox under load (`load`); supervision tree with strategies, restart intensity, escalation + chart (`tree`); where libraries plug into your tree (`plug`)                                                                         |
+| 3   | `#gleam`         | Gleam                        | 15  | Impossible states, loose record vs custom type, plus the "add Disputed" exhaustiveness demo (`types`); Result railway (`rail`); typed Subject vs untyped mailbox (`msgs`)                                                                                                                                  |
+| 4   | `#principles`    | How gleam-dream thinks       | 20  | Seven habits explorer; ownership sorter, library vs your app (`sorter`); "did it happen?" break-the-network simulator with sequence chart and a provider-side idempotency ledger (`happen`); thundering-herd retry simulation (`herd`); define once, use everywhere (`defs`); LLM Wire timeouts (`bounds`) |
+| 5   | `#atlas`         | The package atlas            | 15  | Layered map with need filter, dependency highlighting and detail panel (`atlas`)                                                                                                                                                                                                                           |
+| 6   | `#foundations`   | Foundations                  | 20  | **Real-time** Sinal pipeline, inline vs bounded forwarder (`sinal`); JSON Blueprint codec: encode, decode cases, schema (`codec`); HTTP Gun anatomy (`anatomy`); destination policy (`dest`)                                                                                                               |
+| 7   | `#outside-world` | The outside world            | 20  | Step-through sequence charts for LLM Wire, Relay, Hellhound and Correio with branch options (`flows`)                                                                                                                                                                                                      |
+| 8   | `#durable-work`  | Work that outlives a request | 20  | Grind job lifecycle state machine (`grind`); live Grind queue: skip-locked claims, leases, renewer heartbeat, killable workers (`lease`); transactional admission (`tx`); Saga checkout with parallel steps, compensation, hold, crash in local vs durable mode (`saga`); 200 checkouts at once (`sagax`)  |
+| 9   | `#agents`        | Agents & people in the loop  | 25  | Fabric policy gate (`gate`); pull the plug: store backends and uncertain effects (`plug`); Decisions point state machine with policy versions v1–v4 (`point`); 400 recommendations scatter, linked back to the single case (`p400`)                                                                        |
+| 10  | `#compose`       | Composition studio           | 25  | Ten Oversight apps step by step (`systems`); six composition patterns; system builder with nearest example (`builder`); capstone: the durable checkout as a telemetry trace (`trace`)                                                                                                                      |
+| 11  | `#field-guide`   | Field guide                  | 15  | Retrace scrub with replay strategies and privacy (`retrace`); tooling; filterable glossary; cheat sheet; reading plan                                                                                                                                                                                      |
 
 Every module ends with a "Carry this forward" sentence and a footer with a
 "Mark module N as done" toggle plus previous and next links.
@@ -202,18 +202,18 @@ markers in the module menu and on the course map, stored in `localStorage`
 
 ## Reference implementation map
 
-| Path | What it is |
-|---|---|
-| `onboarding/reference/site/index.html` | The built site; open it in a browser. The behaviour reference. |
-| `onboarding/reference/src/<Module>.html` | Module markup with `{{holes}}`, `<sc-for>`, `<sc-if>` and `onClick` bindings. |
-| `onboarding/reference/src/<Module>.js` | Module state and `renderVals()` (the original logic). |
-| `onboarding/reference/src/<Module>.x.js` | Additions: `tourDefs()`, real-time widgets (`liveFrame`), ladder views, `extraVals()`. |
-| `onboarding/reference/src/<Module>.json` | Module metadata (title, minutes). |
-| `onboarding/reference/project/Main.dc.html` | The course-map page source. |
-| `onboarding/reference/tools/site.py` | Assembler: wraps modules, inserts tour bars and chart SVG, writes `site/index.html`. |
-| `onboarding/reference/tools/shell.html` | App shell and runtime: template engine with DOM morphing, router, tours, fit-to-screen, sequence-chart layout, seeded RNG, motion toggle, live loop. |
-| `onboarding/reference/tools/build.py` | Shared CSS and font constants (originally a canvas builder). |
-| `onboarding/reference/check/*.py` | Playwright checks (see Validation). |
+| Path                                        | What it is                                                                                                                                           |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboarding/reference/site/index.html`      | The built site; open it in a browser. The behaviour reference.                                                                                       |
+| `onboarding/reference/src/<Module>.html`    | Module markup with `{{holes}}`, `<sc-for>`, `<sc-if>` and `onClick` bindings.                                                                        |
+| `onboarding/reference/src/<Module>.js`      | Module state and `renderVals()` (the original logic).                                                                                                |
+| `onboarding/reference/src/<Module>.x.js`    | Additions: `tourDefs()`, real-time widgets (`liveFrame`), ladder views, `extraVals()`.                                                               |
+| `onboarding/reference/src/<Module>.json`    | Module metadata (title, minutes).                                                                                                                    |
+| `onboarding/reference/project/Main.dc.html` | The course-map page source.                                                                                                                          |
+| `onboarding/reference/tools/site.py`        | Assembler: wraps modules, inserts tour bars and chart SVG, writes `site/index.html`.                                                                 |
+| `onboarding/reference/tools/shell.html`     | App shell and runtime: template engine with DOM morphing, router, tours, fit-to-screen, sequence-chart layout, seeded RNG, motion toggle, live loop. |
+| `onboarding/reference/tools/build.py`       | Shared CSS and font constants (originally a canvas builder).                                                                                         |
+| `onboarding/reference/check/*.py`           | Playwright checks (see Validation).                                                                                                                  |
 
 Rebuild: `python3 onboarding/reference/tools/site.py`.
 
