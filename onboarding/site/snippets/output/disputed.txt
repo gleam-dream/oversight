@@ -1,0 +1,17 @@
+error: Inexhaustive patterns
+   ┌─ src/shop/order.gleam:38:3
+   │  
+38 │ ╭   case order {
+39 │ │     Pending -> "Waiting for payment"
+40 │ │     Paid(receipt:) -> "Paid, receipt " <> receipt.id
+41 │ │     Refunded(refund:, ..) -> "Refunded, refund " <> refund.id
+42 │ │   }
+   │ ╰───^
+
+This case expression does not have a pattern for all possible values. If it
+is run on one of the values without a pattern then it will crash.
+
+The missing patterns are:
+
+    Disputed(receipt:, case_id:)
+

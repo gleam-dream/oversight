@@ -1,0 +1,19 @@
+error: Inexhaustive patterns
+   ┌─ src/shop/events.gleam:19:3
+   │  
+19 │ ╭   case event {
+20 │ │     Refunded(cents:, ..) if cents > 10_000 -> "Ask finance"
+21 │ │     Refunded(cents:, reason:) -> reason <> ", " <> int.to_string(cents)
+22 │ │     Paid(items: [only]) -> "One item: " <> only
+   · │
+25 │ │     Note(_) | Pending -> "Nothing to do"
+26 │ │   }
+   │ ╰───^
+
+This case expression does not have a pattern for all possible values. If it
+is run on one of the values without a pattern then it will crash.
+
+The missing patterns are:
+
+    Paid(items: [])
+

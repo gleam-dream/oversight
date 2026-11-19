@@ -3,7 +3,9 @@
 
 import gleam/int
 import gleam/list
+import gleam/result
 import gleam/set
+import gleam/string
 import lustre
 import lustre/attribute.{class}
 import lustre/effect.{type Effect}
@@ -11,11 +13,14 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import pages/gleam_lang/cart.{type Candidate, type Sent}
+import pages/gleam_lang/matching.{type Program, type Sample}
 import pages/gleam_lang/order.{
   type Business, type Field, type LooseOrder, type Status, DisputedAdded, Empty,
   LooseOrder, Paid, Refunded, Set, ThreeStates,
 }
 import pages/gleam_lang/railway.{type Failures}
+import pages/gleam_lang/snippets
+import site/code
 import site/context.{type Context}
 import site/tour
 import site/ui.{css}
@@ -24,6 +29,7 @@ import site/ui.{css}
 
 pub type TourId {
   TypesTour
+  MatchTour
   RailTour
   MessagesTour
 }
@@ -33,6 +39,10 @@ pub type Model {
     loose: LooseOrder,
     variant: Status,
     business: Business,
+    /// The value the pattern-matching playground matches.
+    sample: Sample,
+    /// The case expression it runs: whole, or with one arm deleted.
+    program: Program,
     failures: Failures,
     sent: Sent,
     tours: tour.Tours(TourId),
@@ -45,6 +55,9 @@ pub type Msg {
   ReaderToggledRefund
   ReaderPickedVariant(Status)
   ReaderToggledDisputed
+  ReaderPickedValue(Sample)
+  ReaderDeletedEmptyArm
+  ReaderRestoredEmptyArm
   ReaderToggledStep(railway.Step)
   ReaderClearedFailures
   ReaderSentToCart(Candidate)
@@ -57,6 +70,8 @@ pub fn init() -> Model {
     loose: LooseOrder(status: Refunded, receipt: Empty, refund: Set),
     variant: Paid,
     business: ThreeStates,
+    sample: matching.LargeRefund,
+    program: matching.Complete,
     failures: railway.none(),
     sent: [],
     tours: tour.new(),
@@ -90,6 +105,9 @@ pub fn update(
         ThreeStates -> DisputedAdded
         DisputedAdded -> ThreeStates
       })
+    ReaderPickedValue(sample) -> Model(..model, sample:)
+    ReaderDeletedEmptyArm -> Model(..model, program: matching.WithoutEmptyArm)
+    ReaderRestoredEmptyArm -> Model(..model, program: matching.Complete)
     ReaderToggledStep(step) ->
       Model(..model, failures: railway.toggle(model.failures, step))
     ReaderClearedFailures -> Model(..model, failures: railway.none())
@@ -121,6 +139,7 @@ fn driver(context: Context) -> tour.Driver(TourId, Model, Msg) {
     key: fn(id) {
       case id {
         TypesTour -> "types"
+        MatchTour -> "match"
         RailTour -> "rail"
         MessagesTour -> "msgs"
       }
@@ -199,6 +218,55 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           "Errors are values, and the function’s type lists them. Flip the steps yourself.",
         ),
       ])
+    MatchTour -> {
+      let pick = fn(sample) { fn(_) { [ReaderPickedValue(sample)] } }
+      tour.Script(
+        reset: fn(_) {
+          [ReaderRestoredEmptyArm, ReaderPickedValue(matching.LargeRefund)]
+        },
+        steps: [
+          tour.say(
+            "A case expression tries its arms from top to bottom and runs the first that fits. Pick a value on the left and watch which arm takes it.",
+          ),
+          tour.act(
+            "A refund of 25000 cents: the first arm's shape fits, it pulls out cents by its field name, and the guard cents > 10_000 holds. Ask finance.",
+            pick(matching.LargeRefund),
+          )
+            |> tour.lasting(5000),
+          tour.act(
+            "A refund of 2000: same shape, but the guard is false, so Gleam moves on. The next arm binds both fields and builds the answer from them.",
+            pick(matching.SmallRefund),
+          )
+            |> tour.lasting(5000),
+          tour.act(
+            "Lists match by shape: [] is empty, [only] is exactly one, [first, ..rest] is one or more. Three items reach the third list arm.",
+            pick(matching.PaidForThree),
+          )
+            |> tour.lasting(5000),
+          tour.act(
+            "Strings match by prefix: \"order-\" <> id fits any note that starts with order- and binds the rest.",
+            pick(matching.OrderNote),
+          ),
+          tour.act(
+            "Alternatives share an arm: Note(_) | Pending. The underscore matches anything and binds nothing.",
+            pick(matching.OtherNote),
+          ),
+          tour.act(
+            "Delete the Paid(items: []) arm. Now the program does not compile: the compiler names the exact value no arm would handle. That is exhaustiveness.",
+            fn(_) {
+              [
+                ReaderPickedValue(matching.PaidForNothing),
+                ReaderDeletedEmptyArm,
+              ]
+            },
+          )
+            |> tour.lasting(6000),
+          tour.say(
+            "Every value reaches exactly one arm, and the compiler proves it before the code runs. Put the arm back and try your own values.",
+          ),
+        ],
+      )
+    }
     MessagesTour ->
       tour.Script(reset: fn(_) { [ReaderClearedMailboxes] }, steps: [
         tour.say(
@@ -253,6 +321,16 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
     ideas(),
     html.section([class("wrap sec")], [
       lab(TypesTour, types_playground(model)),
+    ]),
+    html.section([class("wrap sec")], [
+      html.div([class("k")], [html.text("Read · pattern matching")]),
+      html.h2([class("h2")], [html.text("Patterns take values apart")]),
+      html.p([class("lead")], [
+        html.text(
+          "A case expression is how Gleam branches. Each arm is a pattern: a shape the value might have. It can reach inside the value, name the parts it needs, and add a guard. The compiler checks that the arms cover every possible value.",
+        ),
+      ]),
+      lab(MatchTour, matching_playground(model.sample, model.program)),
     ]),
     html.section([class("wrap sec")], [
       html.div([class("k")], [html.text("Read · errors are values")]),
@@ -466,6 +544,7 @@ fn types_playground(model: Model) -> List(Element(Msg)) {
             html.div([class("meta")], [
               html.text("12 possible combinations · only 3 make sense"),
             ]),
+            code.view(snippets.loose_order, "The loose order record in Gleam"),
           ],
         ),
       ]),
@@ -499,6 +578,11 @@ fn types_playground(model: Model) -> List(Element(Msg)) {
                 html.div([class("meta")], [
                   html.text("exactly 3 possible shapes · all 3 make sense"),
                 ]),
+                code.view_marked(
+                  snippets.order,
+                  "The Order custom type in Gleam",
+                  variant_line(model.variant),
+                ),
               ],
             ),
           ),
@@ -544,6 +628,22 @@ fn types_playground(model: Model) -> List(Element(Msg)) {
   ]
 }
 
+/// Light the selected variant's line in the Order type.
+fn variant_line(variant: Status) -> fn(Int) -> code.Mark {
+  let fragment = case variant {
+    order.Pending -> "  Pending"
+    order.Paid -> "  Paid("
+    order.Refunded -> "  Refunded("
+  }
+  let line = code.line_of(snippets.order, fragment)
+  fn(index) {
+    case line == Ok(index) {
+      True -> code.Matched
+      False -> code.Plain
+    }
+  }
+}
+
 fn variant_button(status: Status, selected: Status) -> Element(Msg) {
   let border = case status == selected {
     True -> "#B0186E"
@@ -571,26 +671,210 @@ fn variant_button(status: Status, selected: Status) -> Element(Msg) {
 
 fn disputed_outcome() -> Element(Msg) {
   let mono = fn(text) { html.span([class("mono")], [html.text(text)]) }
-  html.div([class("split"), css("margin-top:16px")], [
-    html.div([class("box"), css("background:#FBF3F2;border-color:#E9B8B2")], [
-      html.b([], [html.text("Loose record:")]),
-      html.text(" the compiler sees a new piece of text. "),
-      html.b([], [html.text("0 warnings.")]),
-      html.text(
-        " The receipt email, the refunds screen and the accounting export all quietly do the wrong thing. You find out in production.",
+  element.fragment([
+    html.div([class("split"), css("margin-top:16px")], [
+      html.div([class("box"), css("background:#FBF3F2;border-color:#E9B8B2")], [
+        html.b([], [html.text("Loose record:")]),
+        html.text(" the compiler sees a new piece of text. "),
+        html.b([], [html.text("0 warnings.")]),
+        html.text(
+          " The receipt email, the refunds screen and the accounting export all quietly do the wrong thing. You find out in production.",
+        ),
+      ]),
+      html.div([class("box"), css("background:#E2F4E7;border-color:#B9E2C4")], [
+        html.b([], [html.text("Custom type:")]),
+        html.text(" the build fails with "),
+        html.b([], [html.text("3 clear errors")]),
+        html.text(", one per place that matches on Order: "),
+        mono("emails"),
+        html.text(", "),
+        mono("refunds_screen"),
+        html.text(", "),
+        mono("accounting_export"),
+        html.text(". Fix them and ship."),
+      ]),
+    ]),
+    html.div([class("snippet-label")], [
+      html.text("What the compiler says about label(order)"),
+    ]),
+    code.compiler_output(
+      snippets.disputed_error,
+      "Gleam compiler error: inexhaustive patterns",
+    ),
+  ])
+}
+
+// PATTERN MATCHING ------------------------------------------------------------
+
+fn matching_playground(sample: Sample, program: Program) -> List(Element(Msg)) {
+  let event = matching.value(sample)
+  let run = matching.run(program, event)
+  let source = matching.source(program, snippets.describe)
+  let attempt_on = fn(line) {
+    case run {
+      matching.DoesNotCompile -> Error(Nil)
+      matching.Ran(attempts:, ..) ->
+        list.find_map(attempts, fn(pair) {
+          case code.line_of(source, matching.pattern(pair.0)) == Ok(line) {
+            True -> Ok(pair.1)
+            False -> Error(Nil)
+          }
+        })
+    }
+  }
+  let mark = fn(line) {
+    case attempt_on(line) {
+      Ok(matching.Matched(..)) -> code.Matched
+      Ok(matching.GuardFailed(..)) -> code.GuardFailed
+      Ok(matching.NoMatch) -> code.Passed
+      Ok(matching.NotTried) -> code.Faded
+      Error(Nil) -> code.Plain
+    }
+  }
+  [
+    html.div([class("labh")], [
+      labh(
+        "Pattern matching, arm by arm",
+        "One case expression with the main kinds of pattern. Pick a value: Gleam tries the arms from the top and runs the first that fits. Fields are pulled out by name, lists by shape, strings by prefix.",
+        "margin-top:6px;max-width:680px",
       ),
     ]),
+    html.div([class("split"), css("align-items:flex-start")], [
+      html.div([css("flex:1 1 300px")], [
+        html.div([class("meta"), css("margin-bottom:8px")], [
+          html.text("The value"),
+        ]),
+        html.div(
+          [css("display:flex;flex-direction:column;gap:6px")],
+          list.map(matching.samples, fn(option) {
+            let on = option == sample
+            html.button(
+              [
+                attribute.type_("button"),
+                ui.on_class("btn sm", on),
+                ui.pressed(on),
+                css(
+                  "justify-content:flex-start;font:500 12px 'JetBrains Mono',monospace",
+                ),
+                event.on_click(ReaderPickedValue(option)),
+              ],
+              [html.text(matching.literal(matching.value(option)))],
+            )
+          }),
+        ),
+        html.div([class("snippet-label")], [html.text("The type")]),
+        code.view(snippets.event, "The Event type in Gleam"),
+      ]),
+      html.div([css("flex:2 1 460px;min-width:0")], [
+        html.div([class("meta"), css("margin-bottom:8px")], [
+          html.text("The case expression"),
+        ]),
+        code.view_marked(
+          source,
+          "The describe function: a case expression with seven arms",
+          mark,
+        ),
+        html.div([class("row"), css("gap:14px;margin-top:8px;font-size:12px")], [
+          legend("#86EFAC", "matched"),
+          legend("#FCD34D", "fits, but the guard is false"),
+          legend("#A19FBA", "passed over"),
+          legend("#8A88A3", "not reached"),
+        ]),
+        case run {
+          matching.Ran(attempts:, result:) -> matching_outcome(attempts, result)
+          matching.DoesNotCompile ->
+            html.div([css("margin-top:14px")], [
+              html.div([class("snippet-label")], [
+                html.text("The compiler, with that arm deleted"),
+              ]),
+              code.compiler_output(
+                snippets.missing_empty_error,
+                "Gleam compiler error: inexhaustive patterns",
+              ),
+            ])
+        },
+      ]),
+    ]),
+    html.div([class("row"), css("margin-top:18px;gap:12px")], [
+      case program {
+        matching.Complete ->
+          html.button(
+            [
+              attribute.type_("button"),
+              class("btn warn"),
+              event.on_click(ReaderDeletedEmptyArm),
+            ],
+            [html.text("Delete the Paid(items: []) arm")],
+          )
+        matching.WithoutEmptyArm ->
+          html.button(
+            [
+              attribute.type_("button"),
+              class("btn"),
+              event.on_click(ReaderRestoredEmptyArm),
+            ],
+            [html.text("Put the arm back")],
+          )
+      },
+      html.span([class("muted"), css("font-size:14px")], [
+        html.text("Then see what the compiler makes of it."),
+      ]),
+    ]),
+  ]
+}
+
+fn legend(colour: String, label: String) -> Element(Msg) {
+  html.span([class("muted")], [
+    html.span(
+      [
+        css(
+          "display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;background:"
+          <> colour,
+        ),
+      ],
+      [],
+    ),
+    html.text(label),
+  ])
+}
+
+fn matching_outcome(
+  attempts: List(#(matching.Arm, matching.Attempt)),
+  result: String,
+) -> Element(Msg) {
+  let bindings =
+    list.find_map(attempts, fn(pair) {
+      case pair.1 {
+        matching.Matched(bindings:, ..) -> Ok(bindings)
+        _ -> Error(Nil)
+      }
+    })
+    |> result.unwrap([])
+  html.div([class("split"), css("margin-top:14px;gap:12px")], [
+    html.div([class("box")], [
+      html.div([class("meta")], [html.text("the arm binds")]),
+      case bindings {
+        [] ->
+          html.div([class("muted"), css("margin-top:4px;font-size:14px")], [
+            html.text("nothing: the pattern only checks the shape"),
+          ])
+        _ ->
+          html.div(
+            [class("mono"), css("margin-top:4px;font-size:14px")],
+            list.map(bindings, fn(binding) {
+              html.div([], [
+                html.text(binding.name <> " = " <> binding.value),
+              ])
+            }),
+          )
+      },
+    ]),
     html.div([class("box"), css("background:#E2F4E7;border-color:#B9E2C4")], [
-      html.b([], [html.text("Custom type:")]),
-      html.text(" the build fails with "),
-      html.b([], [html.text("3 clear errors")]),
-      html.text(", one per place that matches on Order: "),
-      mono("emails"),
-      html.text(", "),
-      mono("refunds_screen"),
-      html.text(", "),
-      mono("accounting_export"),
-      html.text(". Fix them and ship."),
+      html.div([class("meta")], [html.text("describe returns")]),
+      html.div(
+        [class("mono"), css("margin-top:4px;font-size:14px;color:#0E4D25")],
+        [html.text(string.inspect(result))],
+      ),
     ]),
   ])
 }
@@ -689,7 +973,36 @@ fn rail_playground(failures: Failures) -> List(Element(Msg)) {
     html.div([class("note"), css("margin-top:16px")], [
       html.text(railway.note(outcome)),
     ]),
+    html.div([class("snippet-label")], [html.text("The same checkout in Gleam")]),
+    code.view_marked(
+      snippets.checkout,
+      "The checkout function: five steps chained with use and result.try",
+      checkout_line(failures),
+    ),
   ]
+}
+
+/// The failing step's line in red, the steps it skipped faded.
+fn checkout_line(failures: Failures) -> fn(Int) -> code.Mark {
+  let marks =
+    list.filter_map(railway.tracks(failures), fn(entry) {
+      let #(step, track) = entry
+      let fragment = case step {
+        railway.ParseRequest -> "parse_request("
+        railway.ValidateAmount -> "validate_amount("
+        railway.ReserveStock -> "reserve_stock("
+        railway.ChargeCard -> "charge_card("
+        railway.SendReceipt -> "send_receipt("
+      }
+      let mark = case track {
+        railway.RanOk -> code.Plain
+        railway.Failed -> code.Failing
+        railway.Skipped -> code.Faded
+      }
+      code.line_of(snippets.checkout, fragment)
+      |> result.map(fn(line) { #(line, mark) })
+    })
+  fn(index) { list.key_find(marks, index) |> result.unwrap(code.Plain) }
 }
 
 fn rail_step(
@@ -815,6 +1128,37 @@ fn messages_playground(sent: Sent) -> List(Element(Msg)) {
         "Subject(CartMessage) in Gleam",
         cart.gleam,
       ),
+    ]),
+    html.div([class("split"), css("align-items:flex-start")], [
+      html.div([css("flex:1 1 320px;min-width:0")], [
+        html.div([class("snippet-label")], [
+          html.text("What the cart understands"),
+        ]),
+        code.view(snippets.cart_message, "The CartMessage type in Gleam"),
+      ]),
+      html.div([css("flex:1 1 320px;min-width:0")], [
+        case list.contains(sent, cart.Hello) {
+          True ->
+            element.fragment([
+              html.div([class("snippet-label")], [
+                html.text("Sending "),
+                html.code([], [html.text("\"hello\"")]),
+                html.text(" stops the build"),
+              ]),
+              code.compiler_output(
+                snippets.wrong_message_error,
+                "Gleam compiler error: type mismatch",
+              ),
+            ])
+          False ->
+            element.fragment([
+              html.div([class("snippet-label")], [
+                html.text("Sending and calling"),
+              ]),
+              code.view(snippets.cart_send, "Sending to the cart in Gleam"),
+            ])
+        },
+      ]),
     ]),
   ]
 }

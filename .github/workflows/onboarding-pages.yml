@@ -5,15 +5,20 @@ on:
     paths:
       - "onboarding/site/**"
       - ".github/workflows/onboarding-pages.yml"
+  # Pull requests run the checks and the build, never the deploy.
+  pull_request:
+    paths:
+      - "onboarding/site/**"
+      - ".github/workflows/onboarding-pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 # One deployment at a time; a newer push waits rather than cancelling a
-# deployment that is already publishing.
+# deployment that is already publishing. Each pull request checks apart.
 concurrency:
-  group: onboarding-pages
+  group: onboarding-pages-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: false
 
 jobs:
@@ -26,17 +31,27 @@ jobs:
           persist-credentials: false
       # Gleam, Erlang, Node and esbuild come from the flake lock, as in ci.yml.
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      - name: Snippets
+        working-directory: onboarding/site
+        # The snippets compile and pass their tests, the recorded compiler
+        # errors are current, and the generated module matches its sources.
+        run: |
+          nix develop --no-update-lock-file ../.. --command bash -c \
+            'cd snippets && gleam test && bash capture.sh && python3 -B generate.py'
+          git diff --exit-code -- snippets/output src/pages/gleam_lang/snippets.gleam
       - name: Test
         working-directory: onboarding/site
         run: nix develop --no-update-lock-file ../.. --command gleam test
       - name: Build
         working-directory: onboarding/site
         run: nix develop --no-update-lock-file ../.. --command bash build.sh
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: onboarding/site/dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10

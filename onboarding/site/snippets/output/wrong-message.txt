@@ -1,0 +1,14 @@
+error: Type mismatch
+   ┌─ src/shop/cart.gleam:18:22
+   │
+18 │   process.send(cart, "hello")
+   │                      ^^^^^^^
+
+Expected type:
+
+    CartMessage
+
+Found type:
+
+    String
+
