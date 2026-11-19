@@ -5,6 +5,9 @@
 # after changing a snippet or the Gleam version.
 set -euo pipefail
 cd "$(dirname "$0")"
+# Format the variants first: the pre-commit hook would, and the recorded
+# line numbers must match the files as committed.
+gleam format broken
 mkdir -p output
 for variant in broken/*/; do
   name=$(basename "$variant")

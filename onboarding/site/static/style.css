@@ -887,11 +887,18 @@ input[type="range"] {
   background: rgba(248, 113, 113, 0.18);
   border-left-color: #f87171;
 }
-.code .cl-passed {
-  opacity: 0.6;
+/* Passed-over and unreached lines are muted with solid colours, not
+   opacity, so their text keeps 4.5:1 or better against the ground. */
+.code .cl-passed,
+.code .cl-passed span {
+  color: #a19fba;
 }
-.code .cl-faded {
-  opacity: 0.35;
+.code .cl-passed {
+  border-left-color: #4b4a63;
+}
+.code .cl-faded,
+.code .cl-faded span {
+  color: #8a88a3;
 }
 .code.compiler {
   font-size: 13px;

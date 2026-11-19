@@ -777,8 +777,8 @@ fn matching_playground(sample: Sample, program: Program) -> List(Element(Msg)) {
         html.div([class("row"), css("gap:14px;margin-top:8px;font-size:12px")], [
           legend("#86EFAC", "matched"),
           legend("#FCD34D", "fits, but the guard is false"),
-          legend("#A5A3BD", "passed over"),
-          legend("#4B4A63", "not reached"),
+          legend("#A19FBA", "passed over"),
+          legend("#8A88A3", "not reached"),
         ]),
         case run {
           matching.Ran(attempts:, result:) -> matching_outcome(attempts, result)

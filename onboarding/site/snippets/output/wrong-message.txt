@@ -1,7 +1,7 @@
 error: Type mismatch
-   ┌─ src/shop/cart.gleam:17:22
+   ┌─ src/shop/cart.gleam:18:22
    │
-17 │   process.send(cart, "hello")
+18 │   process.send(cart, "hello")
    │                      ^^^^^^^
 
 Expected type:

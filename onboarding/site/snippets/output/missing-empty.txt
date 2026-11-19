@@ -1,13 +1,13 @@
 error: Inexhaustive patterns
-   ┌─ src/shop/events.gleam:18:3
+   ┌─ src/shop/events.gleam:19:3
    │  
-18 │ ╭   case event {
-19 │ │     Refunded(cents:, ..) if cents > 10_000 -> "Ask finance"
-20 │ │     Refunded(cents:, reason:) -> reason <> ", " <> int.to_string(cents)
-21 │ │     Paid(items: [only]) -> "One item: " <> only
+19 │ ╭   case event {
+20 │ │     Refunded(cents:, ..) if cents > 10_000 -> "Ask finance"
+21 │ │     Refunded(cents:, reason:) -> reason <> ", " <> int.to_string(cents)
+22 │ │     Paid(items: [only]) -> "One item: " <> only
    · │
-24 │ │     Note(_) | Pending -> "Nothing to do"
-25 │ │   }
+25 │ │     Note(_) | Pending -> "Nothing to do"
+26 │ │   }
    │ ╰───^
 
 This case expression does not have a pattern for all possible values. If it
