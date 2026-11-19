@@ -5,6 +5,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# The Gleam the course shows is compiled: a snippet that stops compiling
+# fails here, and the module the site reads its snippets from is regenerated.
+(cd snippets && gleam build)
+python3 -B snippets/generate.py
 gleam build --target javascript
 rm -rf dist
 mkdir -p dist
