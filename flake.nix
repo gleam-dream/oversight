@@ -96,6 +96,10 @@
             # Disposable clusters for the composition apps (Grind, Fabric, Saga storage).
             postgresql_16
             (python3.withPackages (pythonPackages: [ pythonPackages.jsonschema ]))
+            # JavaScript target of the onboarding site: tests run on Node and
+            # esbuild bundles the compiled modules into one script.
+            nodejs
+            esbuild
           ];
         };
 

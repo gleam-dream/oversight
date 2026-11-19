@@ -1,0 +1,827 @@
+/* Shared styles, carried over from the reference implementation. */
+body {
+  margin: 0;
+  background: #faf8f4;
+}
+a {
+  color: #b0186e;
+}
+a:hover {
+  color: #7e0f4e;
+}
+.pg {
+  font-family: Inter, system-ui, sans-serif;
+  color: #17162b;
+  background: #faf8f4;
+  line-height: 1.55;
+  font-size: 17px;
+}
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Space Grotesk", Inter, sans-serif;
+  margin: 0;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+p {
+  margin: 0;
+}
+.brand {
+  font:
+    600 15px "JetBrains Mono",
+    monospace;
+  color: #17162b;
+  text-decoration: none;
+}
+.meta {
+  font:
+    500 13px "JetBrains Mono",
+    monospace;
+  color: #5b5970;
+}
+.k {
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #b0186e;
+}
+.mono {
+  font-family: "JetBrains Mono", monospace;
+}
+.muted {
+  color: #5b5970;
+}
+.sec {
+  padding-bottom: 72px;
+}
+.h2 {
+  font-size: 34px;
+  margin: 10px 0 12px;
+}
+.lead {
+  font-size: 18px;
+  color: #5b5970;
+  max-width: 760px;
+}
+.card {
+  background: #fff;
+  border: 1px solid #e4e0d8;
+  border-radius: 16px;
+  padding: 24px;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 28px;
+}
+.cards h3 {
+  font-size: 20px;
+  margin: 12px 0 6px;
+}
+.cards p {
+  font-size: 15px;
+  color: #5b5970;
+}
+.ico {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lab {
+  background: #fff;
+  border: 1px solid #e4e0d8;
+  border-radius: 24px;
+  padding: 32px;
+  margin-top: 28px;
+  box-shadow: 0 1px 0 #e4e0d8;
+}
+.labh {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.tag {
+  display: inline-block;
+  font:
+    600 11px "JetBrains Mono",
+    monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #fce7f3;
+  color: #8a1056;
+}
+.chip {
+  display: inline-block;
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+.btn {
+  font:
+    600 14px Inter,
+    sans-serif;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid #17162b;
+  background: #fff;
+  color: #17162b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn:hover {
+  background: #f1eee8;
+}
+.btn.pri {
+  background: #17162b;
+  color: #fff;
+}
+.btn.pri:hover {
+  background: #2e2c4f;
+}
+.btn.on {
+  background: #17162b;
+  color: #fff;
+}
+.btn.sm {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.btn.warn {
+  border-color: #b42318;
+  color: #b42318;
+}
+.btn.warn:hover {
+  background: #fdecea;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  background: #f1eee8;
+}
+.seg button {
+  font:
+    600 13px Inter,
+    sans-serif;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: #17162b;
+  cursor: pointer;
+}
+.seg button.on {
+  background: #17162b;
+  color: #fff;
+}
+.log {
+  background: #17162b;
+  color: #e8e6f5;
+  border-radius: 14px;
+  padding: 16px 18px;
+  font:
+    13px/1.6 "JetBrains Mono",
+    monospace;
+  min-height: 120px;
+}
+.log .l {
+  padding: 2px 0;
+  border-bottom: 1px solid #2e2c4f;
+}
+.key {
+  background: #17162b;
+  color: #fff;
+  border-radius: 20px;
+  padding: 32px 36px;
+  margin-top: 28px;
+}
+.key .k {
+  color: #f9a8d4;
+}
+.key p {
+  font:
+    600 22px/1.4 "Space Grotesk",
+    sans-serif;
+  margin-top: 10px;
+  max-width: 880px;
+}
+.note {
+  background: #f1eee8;
+  border-radius: 14px;
+  padding: 16px 20px;
+  font-size: 15px;
+}
+.split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+.split > * {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #f1eee8;
+}
+.foot {
+  border-top: 1px solid #e4e0d8;
+  padding: 40px 0 64px;
+}
+.navc {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+  color: #17162b;
+  background: #fff;
+  border: 1px solid #e4e0d8;
+  border-radius: 16px;
+  padding: 20px 24px;
+  flex: 1 1 300px;
+}
+.navc:hover {
+  border-color: #17162b;
+  color: #17162b;
+}
+.box {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid #e4e0d8;
+  background: #fff;
+}
+.arrow {
+  font:
+    600 18px "JetBrains Mono",
+    monospace;
+  color: #8a8698;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btnl {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font:
+    600 15px Inter,
+    sans-serif;
+  text-decoration: none;
+  border: 1px solid #17162b;
+}
+.btnl.pri {
+  background: #17162b;
+  color: #fff;
+}
+.btnl.pri:hover {
+  background: #2e2c4f;
+  color: #fff;
+}
+.btnl.sec {
+  background: #fff;
+  color: #17162b;
+}
+.btnl.sec:hover {
+  background: #f1eee8;
+  color: #17162b;
+}
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 64px;
+  padding: 12px 20px;
+  border-radius: 14px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: transform 0.15s;
+}
+.layer:hover {
+  transform: translateX(4px);
+}
+.layer.on {
+  border-color: #17162b;
+  box-shadow: 0 6px 0 #17162b;
+}
+.ln {
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  opacity: 0.8;
+  width: 28px;
+}
+.lt {
+  font:
+    600 19px "Space Grotesk",
+    sans-serif;
+}
+.ls {
+  font-size: 14px;
+  opacity: 0.85;
+}
+.mod {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-decoration: none;
+  color: #17162b;
+  background: #fff;
+  border: 1px solid #e4e0d8;
+  border-radius: 16px;
+  padding: 20px;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+.mod:hover {
+  border-color: #17162b;
+  color: #17162b;
+  transform: translateY(-2px);
+}
+.mnum {
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  color: #5b5970;
+  display: flex;
+  justify-content: space-between;
+}
+.mt {
+  font:
+    600 19px "Space Grotesk",
+    sans-serif;
+}
+.dark {
+  background: #17162b;
+  color: #fff;
+  border-radius: 20px;
+  padding: 40px;
+}
+html {
+  scroll-behavior: smooth;
+}
+/* With motion off nothing scrolls smoothly, the page itself included. */
+html:has(.still) {
+  scroll-behavior: auto;
+}
+/* A playground's content. It adds no box of its own; while the guided tour
+   runs it is inert, so neither pointer nor keyboard can work the controls. */
+.lab-body {
+  display: contents;
+}
+/* Jump destinations take focus so Tab continues from there. */
+section[tabindex="-1"]:focus,
+.lab[tabindex="-1"]:focus {
+  outline: none;
+}
+.appbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(250, 248, 244, 0.94);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #e4e0d8;
+}
+.appin {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  align-items: center;
+  justify-content: space-between;
+}
+.prog {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+.progbar {
+  flex: 1;
+  height: 8px;
+  border-radius: 99px;
+  background: #e4e0d8;
+  overflow: hidden;
+}
+.progbar span {
+  display: block;
+  height: 8px;
+  background: #b0186e;
+  border-radius: 99px;
+  transition: width 0.3s;
+}
+.drawer {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 4px 24px 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px;
+}
+.drawer a {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  text-decoration: none;
+  color: #17162b;
+  background: #fff;
+  border: 1px solid #e4e0d8;
+  border-radius: 12px;
+  padding: 10px 14px;
+  min-height: 48px;
+  font-size: 15px;
+}
+.drawer a:hover {
+  border-color: #17162b;
+  color: #17162b;
+}
+.drawer a.cur {
+  border: 2px solid #17162b;
+}
+.drawer .dn {
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  color: #5b5970;
+  white-space: nowrap;
+}
+.drawer .ok {
+  color: #15803d;
+}
+.donebtn {
+  font:
+    600 15px Inter,
+    sans-serif;
+  min-height: 52px;
+  padding: 0 22px;
+  border-radius: 999px;
+  border: 2px solid #15803d;
+  background: #fff;
+  color: #0e4d25;
+  cursor: pointer;
+}
+.donebtn:hover {
+  background: #f1faf3;
+}
+.donebtn.on {
+  background: #15803d;
+  color: #fff;
+}
+#view:focus {
+  outline: none;
+}
+.drawer[hidden] {
+  display: none;
+}
+input[type="range"] {
+  accent-color: #b0186e;
+  min-height: 28px;
+}
+.still * {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+}
+.tourbar {
+  background: #17162b;
+  color: #fff;
+  border-radius: 14px;
+  padding: 12px 14px 10px;
+  margin-bottom: 16px;
+}
+.tourbar.freebar {
+  background: #f1faf3;
+  color: #0e4d25;
+  border: 1px solid #b9e2c4;
+  padding: 8px 12px;
+}
+.tb-top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.tourn {
+  font:
+    600 12px "JetBrains Mono",
+    monospace;
+  color: #f9a8d4;
+  white-space: nowrap;
+  min-width: 34px;
+}
+.tourtext {
+  font-size: 15px;
+  line-height: 1.45;
+  margin: 0;
+  flex: 1;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.tb-ctl {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.tbi {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: transparent;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.tbi:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.tbi:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.tbn {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 0;
+  background: #fff;
+  color: #17162b;
+  font:
+    600 14px Inter,
+    sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tbn:hover {
+  background: #fce7f3;
+}
+.tb-foot {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+}
+.tdots {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+.tdots span {
+  flex: 1;
+  height: 4px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+.tdots i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #f9a8d4;
+  border-radius: 9px;
+  transition: width 0.35s ease;
+}
+@keyframes tfA {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+@keyframes tfB {
+  from {
+    width: 0;
+  }
+  to {
+    width: 100%;
+  }
+}
+.tblink {
+  background: none;
+  border: 0;
+  color: #c9c6e0;
+  font:
+    500 12px Inter,
+    sans-serif;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.tblink:hover {
+  color: #fff;
+}
+.freebar .btn {
+  color: #0e4d25;
+  border-color: #15803d;
+}
+.freebar .btn:hover {
+  background: #e2f4e7;
+}
+.lab.touring .labh p {
+  display: none;
+}
+.lab.touring .labh {
+  margin-bottom: 12px;
+}
+.lab.touring .labh h2 {
+  font-size: 22px !important;
+  margin-top: 6px !important;
+}
+.lab.touring {
+  scroll-margin-top: 70px;
+  padding: 20px 24px;
+}
+.lab.touring .tour-hide {
+  display: none !important;
+}
+.lab.touring .log {
+  min-height: 0 !important;
+  max-height: 140px;
+  overflow: hidden;
+}
+.lab.touring .syslist button {
+  min-height: 38px !important;
+  padding: 6px 12px !important;
+}
+.lab.touring .note {
+  padding: 10px 14px;
+  font-size: 14px;
+}
+.lab[data-rt-z="60"] > .lab-body > * {
+  zoom: 0.6;
+}
+.lab[data-rt-z="65"] > .lab-body > * {
+  zoom: 0.65;
+}
+.lab[data-rt-z="70"] > .lab-body > * {
+  zoom: 0.7;
+}
+.lab[data-rt-z="75"] > .lab-body > * {
+  zoom: 0.75;
+}
+.lab[data-rt-z="80"] > .lab-body > * {
+  zoom: 0.8;
+}
+.lab[data-rt-z="85"] > .lab-body > * {
+  zoom: 0.85;
+}
+.lab[data-rt-z="90"] > .lab-body > * {
+  zoom: 0.9;
+}
+.lab[data-rt-z="95"] > .lab-body > * {
+  zoom: 0.95;
+}
+@keyframes mscin {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes mscdraw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.msc-new {
+  animation: mscin 0.45s ease-out;
+}
+.msc-new path.solid {
+  stroke-dasharray: 1;
+  animation: mscdraw 0.55s ease-out;
+}
+.live svg text {
+  font-family: Inter, system-ui, sans-serif;
+}
+.lab.touring button:not(.tb),
+.lab.touring input,
+.lab.touring select,
+.lab.touring label {
+  pointer-events: none;
+}
+.lab.touring .labh ~ *,
+.lab.touring > .lab-body > .split,
+.lab.touring > .lab-body > div:not(.labh) {
+  cursor: default;
+}
+.msc-h {
+  font:
+    600 13px Inter,
+    sans-serif;
+  fill: #17162b;
+}
+.msc-l {
+  font:
+    500 12px "JetBrains Mono",
+    monospace;
+}
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+.pulse {
+  animation: pulse 1s infinite;
+}
+@media (max-width: 640px) {
+  .tb-top {
+    flex-wrap: wrap;
+  }
+  .tourtext {
+    flex-basis: 100%;
+    order: 3;
+  }
+  .lab {
+    padding: 18px;
+  }
+  .tourbar {
+    padding: 14px;
+  }
+  .key {
+    padding: 24px;
+  }
+}
+/* A log beside another column fills the height of that row. In free play it
+   still grows with its entries; while touring it fills the row but never makes
+   the card taller, and keeps the 140px cap when the columns stack. */
+.split.with-log > .log-col {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+}
+.split.with-log > .log-col > .log {
+  flex: 1 1 auto;
+}
+.lab.touring .split.with-log > .log-col > .log {
+  flex: 1 1 0;
+  min-height: 140px !important;
+  max-height: none;
+}
