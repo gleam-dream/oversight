@@ -22,7 +22,7 @@ packages = [
 
 [requirements]
 correio = { version = ">= 0.1.0 and < 0.2.0" }
-correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "2b3a0ac58c1c6e4e1fac141eba4e32550c687511", path = "adapters/correio_mailbox" }
+correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "correio_mailbox-v0.1.1", path = "adapters/correio_mailbox" }
 envoy = { version = ">= 1.2.0 and < 2.0.0" }
 gleam_crypto = { version = ">= 1.6.0 and < 2.0.0" }
 gleam_erlang = { version = ">= 1.0.0 and < 2.0.0" }
