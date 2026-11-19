@@ -2,7 +2,7 @@
 
 <a id="adr-0040"></a>
 
-Supersedes the source selection in
+Recorded on 2026-11-19. Supersedes the source selection in
 [ADR 0038](0038-pin-the-decisions-packages-to-a-git-commit.md#adr-0038) and the
 ref form in
 [ADR 0031](0031-consume-published-ecosystem-packages-from-hex.md#adr-0031).
