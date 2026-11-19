@@ -403,6 +403,8 @@ pub fn refusal_response(refusal: Refusal) -> wisp.Response {
       error_response(409, "already_decided", detail)
     decisions.NotAwaiting -> error_response(410, "not_awaiting", detail)
     decisions.SupersededBefore(..) -> error_response(410, "superseded", detail)
+    decisions.DeadlinePassedBefore(..) ->
+      error_response(410, "deadline_passed", detail)
     decisions.NotEligible | decisions.NeverShown | decisions.NotTheDecider ->
       error_response(403, "not_yours", detail)
     decisions.VerdictNotAllowed

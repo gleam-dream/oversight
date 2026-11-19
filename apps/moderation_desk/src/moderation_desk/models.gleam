@@ -297,8 +297,11 @@ fn attempt(
     }
     // An edit superseded the expected recommendation: nothing is written,
     // and the edit's own trigger decides. `recommend` has no precondition,
-    // so it never skips; the branch is there for the exhaustive match.
-    Ok(isolated.Superseded(_)) | Ok(isolated.Skipped(_)) -> Ok(Nil)
+    // so it never skips, and no post is expected with a deadline of its own,
+    // so none lapses; those branches are there for the exhaustive match.
+    Ok(isolated.Superseded(_))
+    | Ok(isolated.Skipped(_))
+    | Ok(isolated.Lapsed(_)) -> Ok(Nil)
     Ok(isolated.Failed(failure:, ..)) ->
       Error(decisions.ApplicationFailed(model.describe(failure)))
     Error(refusal) -> Error(decisions.DeskRefused(refusal))

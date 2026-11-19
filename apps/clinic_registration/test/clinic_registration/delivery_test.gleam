@@ -169,7 +169,7 @@ pub fn an_older_model_call_finishing_late_leaves_no_waiting_card_test() {
     == []
   let assert Ok(decisions.NotBegun(pending)) =
     decisions.read_record(env.app.desk, env.app.db, key: domain.key(first.id))
-  assert pending.superseded == Some(Superseded(domain.newer_message))
+  assert pending.ended == Some(Superseded(domain.newer_message))
   let cards =
     support.call(env, http.Get, "/queue", support.felipe, "").body
     |> support.field(
@@ -181,7 +181,12 @@ pub fn an_older_model_call_finishing_late_leaves_no_waiting_card_test() {
   // its recommendation, none still waiting.
   let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
   assert coverage
-    == learning.Coverage(expected: 2, superseded_before: 1, still_expected: 0)
+    == learning.Coverage(
+      expected: 2,
+      superseded_before: 1,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
 }
 
 pub fn a_late_recommendation_is_refused_and_writes_nothing_test() {
@@ -269,7 +274,7 @@ pub fn two_messages_from_one_contact_at_once_leave_one_expected_test() {
     let superseded =
       list.filter(records, fn(record) {
         case record {
-          decisions.NotBegun(pending) -> pending.superseded != None
+          decisions.NotBegun(pending) -> pending.ended != None
           decisions.Begun(_) -> False
         }
       })
@@ -285,7 +290,7 @@ pub fn two_messages_from_one_contact_at_once_leave_one_expected_test() {
             key: domain.key(message.id),
           )
         {
-          Ok(decisions.NotBegun(pending)) -> pending.superseded == None
+          Ok(decisions.NotBegun(pending)) -> pending.ended == None
           Ok(decisions.Begun(_)) -> True
           Error(_) -> False
         }

@@ -85,7 +85,12 @@ pub fn a_suspension_before_the_agent_proposed_supersedes_the_expectation_test() 
     == worker.Succeeded("superseded before the agent proposed")
   let assert Ok(records) = review.records(running.db, app.payout_desk(running))
   assert review.summary(records).coverage
-    == learning.Coverage(expected: 1, superseded_before: 1, still_expected: 0)
+    == learning.Coverage(
+      expected: 1,
+      superseded_before: 1,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
 }
 
 pub fn a_suspension_while_the_agent_is_working_leaves_nothing_to_cancel_test() {
@@ -129,7 +134,7 @@ pub fn a_suspension_while_the_agent_is_working_leaves_nothing_to_cancel_test() {
     ))
   }
   let assert Ok(decisions.NotBegun(pending)) = read()
-  assert pending.superseded
+  assert pending.ended
     == Some(vocabulary.Superseded(event: domain.seller_suspended))
   // The run ended with its handover, before the suspension, and stays so:
   // nothing cancelled it, and no follow-on run continues it.

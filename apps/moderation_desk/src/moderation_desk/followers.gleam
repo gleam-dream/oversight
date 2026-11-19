@@ -1,5 +1,5 @@
 //// What follows a settlement. The runtime's dispatcher calls `settled`
-//// once per settled occurrence, in the transaction that marks the
+//// once per settled record, in the transaction that marks the
 //// settlement delivered, so the post's visibility, the author's strike,
 //// the safety case and the author's notification commit with that mark
 //// or not at all.
@@ -45,7 +45,20 @@ pub fn revision_of(known: Occurrence(Action)) -> Result(Int, Nil) {
 /// but not what is released: a release committed just before the edit
 /// can have its settlement delivered just after it, and that one must not
 /// overwrite the new revision's visibility.
+///
+/// A record that ended before it began recommended nothing, so nothing
+/// follows it: an edit superseded it, and the edit's own decision will.
 pub fn settled(
+  tx: Tx,
+  record: decisions.Record(Action),
+) -> Result(Nil, HandlerFailure) {
+  case record {
+    decisions.Begun(known) -> occurrence_settled(tx, known)
+    decisions.NotBegun(_) -> Ok(Nil)
+  }
+}
+
+fn occurrence_settled(
   tx: Tx,
   known: Occurrence(Action),
 ) -> Result(Nil, HandlerFailure) {

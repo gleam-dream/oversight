@@ -88,10 +88,15 @@ pub fn an_edit_before_the_answer_supersedes_the_expected_recommendation_test() {
       support.handle(a),
       key: wiring.key(first),
     )
-  assert pending.superseded == Some(Superseded(point.edited))
+  assert pending.ended == Some(Superseded(point.edited))
   let assert Ok([]) = store.backlog(s).undelivered(10)
   assert app.coverage(a)
-    == learning.Coverage(expected: 202, superseded_before: 1, still_expected: 0)
+    == learning.Coverage(
+      expected: 202,
+      superseded_before: 1,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
   support.check(a)
   app.stop(a)
 }
@@ -123,7 +128,12 @@ pub fn two_edits_at_once_run_one_after_the_other_test() {
   let assert Ok(Nil) = app.resume_runtime(a)
   support.settle(a, [latest], within: 5000)
   assert app.coverage(a)
-    == learning.Coverage(expected: 3, superseded_before: 2, still_expected: 0)
+    == learning.Coverage(
+      expected: 3,
+      superseded_before: 2,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
   assert support.notified(a) == [#(wiring.key(latest), 1)]
   support.check(a)
   app.stop(a)

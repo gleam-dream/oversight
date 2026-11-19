@@ -224,13 +224,20 @@ pub fn register(
     Error(error) -> worker.Failed(store.describe(error))
     Ok(None) -> worker.Discarded("no message " <> message_id)
     Ok(Some(message)) ->
-      // A delivery after the recommendation, or after a newer message
-      // superseded the key, has nothing to do; the record says which.
+      // A delivery after the recommendation, or after the record ended
+      // before it began, has nothing to do; the record says which.
       case decisions.read_record(env.desk, db, key:) {
         Ok(decisions.Begun(_)) ->
           worker.Succeeded("recommended by an earlier delivery")
-        Ok(decisions.NotBegun(occurrence.Pending(superseded: Some(_), ..))) ->
-          worker.Succeeded("a newer message superseded it")
+        Ok(decisions.NotBegun(occurrence.Pending(
+          ended: Some(vocabulary.Superseded(_)),
+          ..,
+        ))) -> worker.Succeeded("a newer message superseded it")
+        // No message is expected with a deadline of its own today.
+        Ok(decisions.NotBegun(occurrence.Pending(
+          ended: Some(vocabulary.DeadlinePassed),
+          ..,
+        ))) -> worker.Succeeded("its deadline passed before a recommendation")
         Ok(decisions.NotBegun(_)) | Error(decisions.UnknownOccurrence) ->
           attempt(env, db, message, key)
         Error(refusal) -> refused(refusal)
@@ -304,6 +311,10 @@ fn attempt(
       worker.Succeeded("superseded by " <> event)
     // Only `recommend_when` skips.
     Ok(isolated.Skipped(reason)) -> worker.Succeeded(reason)
+    // Only a key expected with `decisions.expect_until` lapses, and no
+    // message is. The record refused the failed attempt and wrote nothing.
+    Ok(isolated.Lapsed(_)) ->
+      worker.Succeeded("its deadline passed before a recommendation")
     Ok(isolated.Failed(failure:, attempts:)) -> {
       let retry =
         model.retryable(failure) && list.length(attempts) < env.max_attempts

@@ -228,7 +228,10 @@ pub fn propose(
     Error(error) -> worker.Discarded(db.describe(error))
     Ok(#(request, requested_by)) ->
       case prior(deps, conn, request.id) {
-        Superseded -> worker.Succeeded("superseded before the agent proposed")
+        Ended(vocabulary.Superseded(_)) ->
+          worker.Succeeded("superseded before the agent proposed")
+        Ended(vocabulary.DeadlinePassed) ->
+          worker.Succeeded("its deadline passed before the agent proposed")
         Attempts(failed) ->
           drive_and_admit(deps, conn, request, requested_by, failed)
       }
@@ -237,8 +240,10 @@ pub fn propose(
 
 /// What the request's record says before the agent is driven.
 type Prior {
-  /// A newer event superseded the payout before anything was proposed.
-  Superseded
+  /// The record ended before anything was proposed: a newer event superseded
+  /// the payout, or a deadline of its own passed. No payout is expected with
+  /// one today.
+  Ended(cause: vocabulary.ExpiryCause)
   /// So many of the request's agent runs failed before this one.
   Attempts(failed: Int)
 }
@@ -252,8 +257,8 @@ fn prior(deps: Deps, conn: pog.Connection, request: String) -> Prior {
     ))
   {
     Ok(decisions.NotBegun(pending)) ->
-      case pending.superseded {
-        Some(_) -> Superseded
+      case pending.ended {
+        Some(cause) -> Ended(cause)
         None -> Attempts(list.length(pending.attempts))
       }
     Ok(decisions.Begun(known)) -> Attempts(list.length(known.attempts))

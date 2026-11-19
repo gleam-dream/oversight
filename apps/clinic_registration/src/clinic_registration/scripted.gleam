@@ -196,7 +196,7 @@ fn answer(reply: Reply) -> Response(mist.ResponseData) {
 fn openai(reply: testing.Reply) -> Response(mist.ResponseData) {
   testing.http_response(
     message.OpenAI,
-    reply |> testing.with_usage(message.Usage(310, 90, 400)),
+    reply |> testing.with_usage(message.Usage(310, 90, 400, None)),
   )
   |> response.map(fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
 }

@@ -162,7 +162,12 @@ pub fn the_record_teaches_and_gates_version_2_test() {
   // Every message expected a registration, and none is still waiting.
   let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
   assert coverage
-    == learning.Coverage(expected: 7, superseded_before: 0, still_expected: 0)
+    == learning.Coverage(
+      expected: 7,
+      superseded_before: 0,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
 }
 
 fn unwrap_closed(
