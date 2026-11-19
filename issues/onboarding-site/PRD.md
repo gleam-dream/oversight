@@ -203,8 +203,8 @@ markers in the module menu and on the course map, stored in `localStorage`
 
 The single-page reference the port was built against lived in
 `onboarding/reference/` until parity was verified (issue 04) and was then
-removed; it remains in the Git history at commit `7b4d961`. Its Playwright
-checks moved to `onboarding/site/check/`.
+removed; it remains in the Git history at commit `7b4d961`, with the
+Playwright checks used to compare the two builds.
 
 ## Requirements for the Lustre port
 
@@ -238,18 +238,12 @@ checks moved to `onboarding/site/check/`.
 
 ## Validation
 
-- Browser checks (Python Playwright; `pip install playwright` and
-  `playwright install chromium`), in `onboarding/site/check/`, run against
-  the build in `onboarding/site/dist/`:
-  - `python3 tours.py start,beam,otp,gleam,principles,atlas,foundations,outside-world,durable-work,agents,compose,field-guide`
-    clicks every tour to the end, then every unlocked control; expects
-    no unresolved holes and zero page errors.
-  - `python3 zoom.py` reports the fit-to-screen zoom per playground at
-    1366×768 and 1440×900.
-  - `python3 still2.py` checks motion-off mode.
-  - `python3 play.py <route> <lab-index> <ms> <out.png> <w> <h>` plays a tour
-    and screenshots the viewport.
-- gleeunit tests for the pure simulation and tour logic.
+- gleeunit tests on the JavaScript target for the pure simulations, the tour
+  engine, fit to screen and every tour end to end
+  (`nix develop ../.. --command gleam test` in `onboarding/site/`).
+- The Pages workflow runs the tests and the build before every deploy.
+- Parity with the reference was verified once, with its Playwright checks,
+  before the reference was removed; issue 04 records the results.
 
 ## Decision history
 

@@ -151,3 +151,9 @@ tour bar's Next button (`.tbn`), since the selector it used never matched.
 treefmt no longer needs to exclude the reference. The PRD records the
 decision. Still open outside this issue: switching the repository's Pages
 source to "GitHub Actions" and the first deploy run.
+
+AI-assisted contribution. The Playwright checks were removed too: without the
+reference they had nothing to compare against, they never failed on their own,
+no gate ran them, and they needed a browser outside the Nix shell. They remain
+in the Git history with the reference (`7b4d961`). The PRD's validation now
+names the gleeunit tests and the deploy workflow.
