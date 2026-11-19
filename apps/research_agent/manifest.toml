@@ -11,8 +11,8 @@ packages = [
   { name = "cowlib", version = "2.21.0", build_tools = ["make", "rebar3"], requirements = [], otp_app = "cowlib", source = "hex", outer_checksum = "0960248773762A5319B3C17285028BC76F54F58EF0F9451367401BDF67B46274" },
   { name = "envoy", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "9C6FBB6BFA02A52798BEEC5977A738CAD6E4A057F4B67FD0C8061AD2502C191A" },
   { name = "exception", version = "2.1.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "exception", source = "hex", outer_checksum = "6BDEA95248093599391C3B5DF1835C5C6A86C353C2F99CE539B450E3432FE117" },
-  { name = "fabric", version = "0.3.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "llm_wire", "sinal"], otp_app = "fabric", source = "hex", outer_checksum = "F26A031C3C6FB7E8A4C137C33B9624E9FA9999F3097B48C8E9C9DDA3C528BEF5" },
-  { name = "fabric_postgres", version = "0.2.0", build_tools = ["gleam"], requirements = ["fabric", "gleam_erlang", "gleam_json", "gleam_stdlib", "gleam_time", "pgo", "pog"], source = "git", repo = "https://github.com/gleam-dream/fabric.git", commit = "b0cf82c6785309df0266648da53d5b76c90046ec", path = "integrations/fabric_postgres" },
+  { name = "fabric", version = "0.4.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "llm_wire", "sinal"], otp_app = "fabric", source = "hex", outer_checksum = "2A731C9A2232B13B1B7A64369746BACF2290618691C90F02B147514A65224379" },
+  { name = "fabric_postgres", version = "0.3.0", build_tools = ["gleam"], requirements = ["fabric", "gleam_erlang", "gleam_json", "gleam_stdlib", "gleam_time", "pgo", "pog"], source = "git", repo = "https://github.com/gleam-dream/fabric.git", commit = "4ca0dc17027d2ffa392cf0f1510b39f261ff2da1", path = "integrations/fabric_postgres" },
   { name = "file_streams", version = "1.7.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "file_streams", source = "hex", outer_checksum = "62757932B5FAC14FC9D0EE69BC4694DC6EA9F0FE6E198F695711C4FCAC1F7A26" },
   { name = "filepath", version = "1.1.2", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "filepath", source = "hex", outer_checksum = "B06A9AF0BF10E51401D64B98E4B627F1D2E48C154967DA7AF4D0914780A6D40A" },
   { name = "gleam_crypto", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_crypto", source = "hex", outer_checksum = "2DE9E4EF53CF6FEE049D4F765731F7178F7A11AEFAE00EEE63BF7536B354AD3F" },
@@ -28,9 +28,9 @@ packages = [
   { name = "grind", version = "0.1.1", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo", "pog", "sinal"], otp_app = "grind", source = "hex", outer_checksum = "47C6F78ACEF063FC59D00B54E78201CA02C63836F61BED45EE40688FFADD0E59" },
   { name = "gun", version = "2.6.0", build_tools = ["make", "rebar3"], requirements = ["cowlib"], otp_app = "gun", source = "hex", outer_checksum = "69BB957F4BD6C475B5714460FD65C26FC7EB85760AA64B74754DE36CE5CCED7D" },
   { name = "hpack_erl", version = "0.3.0", build_tools = ["rebar3"], requirements = [], otp_app = "hpack", source = "hex", outer_checksum = "D6137D7079169D8C485C6962DFE261AF5B9EF60FBC557344511C1E65E3D95FB0" },
-  { name = "http_gun", version = "0.1.1", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], otp_app = "http_gun", source = "hex", outer_checksum = "8123CC4AB403FB36BE8458845370D59F54267C4DC92A9F8B6ACB783AA850A7CB" },
-  { name = "json_blueprint", version = "2.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], otp_app = "json_blueprint", source = "hex", outer_checksum = "CFF98414EDD9A7F969F46FF6CAA17BAD1A5DAC4CB80D45938ED41239CEBC6E25" },
-  { name = "llm_wire", version = "0.1.1", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "sinal"], otp_app = "llm_wire", source = "hex", outer_checksum = "1B153FB16651A5F2DCBF09DA06245CE3BCD7CA7F0A7FB200353078B77F1A77FA" },
+  { name = "http_gun", version = "0.2.0", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], otp_app = "http_gun", source = "hex", outer_checksum = "EC1765351EA2DD6A329B1BF88B8EF7B01819E9C94E5D065C1A0C62A2D05FFC39" },
+  { name = "json_blueprint", version = "2.1.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], otp_app = "json_blueprint", source = "hex", outer_checksum = "5EA2604561F596B64116047B1F9ED86DBF44C414A7B1A588A6A40A33579C7DB1" },
+  { name = "llm_wire", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "sinal"], otp_app = "llm_wire", source = "hex", outer_checksum = "1B6CD7206BC93D6C66A20AF5968CBA167630707864651CCA20756060E26FB716" },
   { name = "logging", version = "1.5.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "logging", source = "hex", outer_checksum = "BC5F18CE5DD9686100229FE5409BDC3DD5C46D5A7DF2F804AD2D8F0DD6C5060E" },
   { name = "mist", version = "6.0.3", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_http", "gleam_otp", "gleam_stdlib", "glisten", "gramps", "hpack_erl", "logging"], otp_app = "mist", source = "hex", outer_checksum = "1B07F321D5FA0CB162D81496F2DE96AEB6EF8980F4F38230A4CC3F849497E020" },
   { name = "opentelemetry_api", version = "1.5.0", build_tools = ["rebar3", "mix"], requirements = [], otp_app = "opentelemetry_api", source = "hex", outer_checksum = "F53EC8A1337AE4A487D43AC89DA4BD3A3C99DDF576655D071DEED8B56A2D5DDA" },
@@ -48,8 +48,8 @@ packages = [
 
 [requirements]
 envoy = { version = ">= 1.0.0 and < 2.0.0" }
-fabric = { version = ">= 0.3.1 and < 0.4.0" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "b0cf82c6785309df0266648da53d5b76c90046ec", path = "integrations/fabric_postgres" }
+fabric = { version = ">= 0.4.0 and < 0.5.0" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "fabric_postgres-v0.3.0", path = "integrations/fabric_postgres" }
 gleam_erlang = { version = ">= 1.3.0 and < 2.0.0" }
 gleam_http = { version = ">= 4.4.0 and < 5.0.0" }
 gleam_json = { version = ">= 3.1.0 and < 4.0.0" }
@@ -58,11 +58,11 @@ gleam_stdlib = { version = ">= 0.70.0 and < 2.0.0" }
 gleam_time = { version = ">= 1.11.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 grind = { version = ">= 0.1.1 and < 0.2.0" }
-http_gun = { version = ">= 0.1.1 and < 0.2.0" }
+http_gun = { version = ">= 0.2.0 and < 0.3.0" }
 json_blueprint = { version = ">= 2.0.0 and < 3.0.0" }
-llm_wire = { version = ">= 0.1.1 and < 0.2.0" }
+llm_wire = { version = ">= 0.2.0 and < 0.3.0" }
 mist = { version = ">= 6.0.2 and < 7.0.0" }
 pog = { version = ">= 4.1.0 and < 4.2.0" }
 saga = { version = ">= 0.2.0 and < 0.3.0" }
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.1.0", path = "integrations/saga_postgres" }
 sinal = { version = ">= 0.1.0 and < 0.2.0" }

@@ -42,8 +42,8 @@ and removes its own local database:
 ```
 
 No existing database, provider account or sibling checkout is needed. Published
-libraries resolve from Hex; unpublished adapters and the `decisions` packages use
-Git+path pins. Each `manifest.toml` locks the resolved versions.
+libraries resolve from Hex; integration packages are Git+path dependencies at
+their release tags. Each `manifest.toml` locks the resolved versions and commits.
 
 The [ecosystem design](../docs/design/design-layer.pdf) describes each
 application's contract. Package designs describe each library's behavior.

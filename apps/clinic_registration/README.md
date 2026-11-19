@@ -31,10 +31,10 @@ The desk identifies the validator from one header,
 stands in for identity in this example: a real application puts its own
 sign-in there and resolves the decision sets a person holds from it.
 
-`decisions`, `decisions_otp` and `decisions_postgres` are unpublished. They
-resolve from one pinned commit of the
+`decisions` resolves from Hex. `decisions_otp` and `decisions_postgres` resolve
+from their release tags in the
 [decisions repository](https://github.com/gleam-dream/decisions)
-([ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)).
+([ADR 0040](../../docs/adr/0040-pin-integration-packages-to-their-release-tags.md)).
 
 ## Run
 

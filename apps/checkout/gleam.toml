@@ -16,9 +16,9 @@ wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 saga = ">= 0.2.0 and < 0.3.0"
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.1.0", path = "integrations/saga_postgres" }
 grind = ">= 0.1.1 and < 0.2.0"
-http_gun = ">= 0.1.1 and < 0.2.0"
+http_gun = ">= 0.2.0 and < 0.3.0"
 sinal = ">= 0.1.0 and < 0.2.0"
 
 [dev-dependencies]

@@ -55,8 +55,8 @@ payout desk. [ADR 0039](../../docs/adr/0039-hand-the-payout-call-over-and-tell-i
 records why the agent hands its call over and a follow-on run tells the outcome;
 [ADR 0035](../../docs/adr/0035-answer-a-gated-agent-call-from-the-decision-point.md)
 why the decision point, not Fabric's approval expiry, answers the agent's call;
-[ADR 0038](../../docs/adr/0038-pin-the-decisions-packages-to-a-git-commit.md)
-which commit of the `decisions` packages it uses, and
+[ADR 0040](../../docs/adr/0040-pin-integration-packages-to-their-release-tags.md)
+which releases of the `decisions` packages it uses, and
 [ADR 0037](../../docs/adr/0037-expect-recommendations-at-admission-and-key-payouts-by-request.md)
 why a payout is expected when its request is admitted and keyed by the request, why a
 failed agent run is retried in a fresh run, and how a suspension supersedes it.

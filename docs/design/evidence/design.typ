@@ -10,7 +10,7 @@
     #no-goal(title: "Historical reports as present contracts")[Assessment chronology and decision rationale belong to ADRs. Test transcripts, release plans and obsolete signatures do not define the current design.]
     #invariant(title: "Evidence claims name their actual boundary", enforcement: "convention")[Compilation, scripted exchanges, native runtime tests, database tests and upstream conformance establish different claims. An unexecuted scenario is not reported as passing.]
     #principle(title: "Use executable consumers to judge interfaces", lens: "composition")[An ordinary task, an advanced case, native values and recovery must be expressible from a #term("term-public-consumer"). Internal elegance does not replace that evidence.]
-    The evidence-scoping decision is recorded in #adr(9) and the source-resolution decision in #adr(31).
+    The evidence-scoping decision is recorded in #adr(9) and the source-resolution decision in #adr(31), with the release-tag form of an integration package in #adr(40).
   ])
 
   #pending-ledger(
@@ -44,7 +44,7 @@ nix develop --command bash scripts/test-experiments.sh")
 
   #section(title: "Source qualification", lead: "A consumer's runtime code comes from its locked package sources. Local-source experiments use explicit snapshots.", body: [
     #points(
-      [Composition consumers use Hex requirements for published libraries and verified Git commits with package paths for unpublished adapters. Matching lockfiles record the #term("term-locked-source"). Historical readers and oracle packages keep their explicit versions. Editing a sibling working tree does not change consumer runtime code.],
+      [Composition consumers use Hex requirements for published libraries and Git release tags with package paths for integration packages, which are not published. Matching lockfiles record the #term("term-locked-source"). Historical readers and oracle packages keep their explicit versions. Editing a sibling working tree does not change consumer runtime code.],
       [The runner streams command output and propagates failures. Database logs survive cluster cleanup when a log directory is supplied. Missing services and failed tests remain failures; a custom provenance receipt is not required.],
       [All tracked library repositories are public, so dependency resolution needs no credential, and continuous integration persists none and passes none to test commands. Fresh dependency resolution verifies that the locked sources are available.],
       [Updating a library is a deliberate act: moving a lockfile reruns the affected consumers, and no scheduled job moves one. Inconsistent source requirements between libraries fail dependency resolution.],

@@ -33,7 +33,12 @@ pub fn finance_decisions_are_tallied_and_replayed_test() {
   assert summary.tally.rejected == 1
   // Every request expected its payout, and each became one.
   assert summary.coverage
-    == learning.Coverage(expected: 3, superseded_before: 0, still_expected: 0)
+    == learning.Coverage(
+      expected: 3,
+      superseded_before: 0,
+      lapsed_before: 0,
+      still_expected: 0,
+    )
 
   let #(examples, missing) = review.export(running.db, known)
   assert missing == []

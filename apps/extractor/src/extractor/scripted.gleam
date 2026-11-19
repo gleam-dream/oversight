@@ -13,6 +13,7 @@ import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
+import gleam/option
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -234,7 +235,8 @@ fn rate_limited(
 }
 
 fn text_reply(output: String) -> testing.Reply {
-  testing.text(output) |> testing.with_usage(message.Usage(120, 80, 200))
+  testing.text(output)
+  |> testing.with_usage(message.Usage(120, 80, 200, option.None))
 }
 
 /// A reply in `wire`'s own format, lowered by llm_wire's testing module:

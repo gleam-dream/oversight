@@ -14,6 +14,7 @@ import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/option
 import gleam/otp/actor
 import gleam/result
 import gleam/string
@@ -332,7 +333,7 @@ fn item_decoder() -> decode.Decoder(Item) {
 /// The scripted reply as the OpenAI Responses stream llm_wire's own
 /// `testing.http_response` writes, with the usage the old fixture reported.
 fn sse(reply: testing.Reply) -> Response(mist.ResponseData) {
-  testing.with_usage(reply, message.Usage(150, 40, 190))
+  testing.with_usage(reply, message.Usage(150, 40, 190, option.None))
   |> testing.http_response(message.OpenAI, _)
   |> response.map(fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
 }

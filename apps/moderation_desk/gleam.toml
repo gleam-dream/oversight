@@ -5,10 +5,10 @@ gleam = ">= 1.18.0"
 description = "Composition app: moderation at volume on the BEAM with no database, built from decisions, decisions_otp and sinal."
 
 [dependencies]
-# decisions and decisions_otp are unpublished: Git+path pins to one verified
-# commit of gleam-dream/decisions.
-decisions = { git = "https://github.com/gleam-dream/decisions.git", ref = "4691bcec7ef899a00819ea4bed462cb6311268d6" }
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "4691bcec7ef899a00819ea4bed462cb6311268d6", path = "integrations/decisions_otp" }
+# decisions is on Hex. decisions_otp is released as a Git tag of
+# gleam-dream/decisions.
+decisions = ">= 0.1.0 and < 0.2.0"
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.1.0", path = "integrations/decisions_otp" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_otp = ">= 1.3.0 and < 2.0.0"
