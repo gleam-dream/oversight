@@ -717,7 +717,7 @@ fn count(haystack: String, needle: String) -> Int {
 fn reply(scripted: testing.Reply) -> String {
   testing.http_response(
     message.OpenAI,
-    scripted |> testing.with_usage(message.Usage(120, 40, 160)),
+    scripted |> testing.with_usage(message.Usage(120, 40, 160, None)),
   ).body
 }
 
