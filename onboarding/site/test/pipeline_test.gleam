@@ -1,3 +1,5 @@
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import pages/foundations/pipeline.{
@@ -45,8 +47,102 @@ pub fn a_routed_handler_never_waits_and_a_full_forwarder_drops_test() {
   assert sim.emitted == 50
   assert list.length(pipeline.queue(sim)) == pipeline.capacity
   assert sim.dropped > 0
-  // Every event is accounted for: delivered, dropped or still in flight.
-  assert sim.delivered + sim.dropped + list.length(sim.events) >= sim.emitted
+  assert accounted(sim)
+}
+
+/// Events not yet delivered or dropped. Delivered and dropped dots stay in
+/// `sim.events` while they fade, so they are left out here.
+fn in_flight(sim: pipeline.Sim) -> Int {
+  list.count(sim.events, fn(event) {
+    case event.stage {
+      pipeline.Delivered(_) | pipeline.Dropped(_) -> False
+      _ -> True
+    }
+  })
+}
+
+/// Every event emitted is counted exactly once: delivered, dropped or still
+/// in flight.
+fn accounted(sim: pipeline.Sim) -> Bool {
+  sim.delivered + sim.dropped + in_flight(sim) == sim.emitted
+}
+
+pub fn every_event_is_counted_once_on_every_step_test() {
+  let settings = [inline_fast, inline_slow, routed_slow, routed_fast]
+  list.each(settings, fn(settings) {
+    let sim = pipeline.run(pipeline.new(), Issued(1, settings, Burst))
+    list.fold(list.repeat(Nil, 200), sim, fn(sim, _) {
+      let sim = pipeline.step(sim, settings, 0.05)
+      assert accounted(sim)
+      sim
+    })
+  })
+}
+
+pub fn switching_to_inline_lets_the_forwarder_finish_its_queue_test() {
+  let sim =
+    pipeline.run(pipeline.new(), Issued(1, routed_fast, Burst))
+    |> run_for(routed_fast, 1)
+  assert list.length(pipeline.queue(sim)) == pipeline.capacity
+  // New events now run inline; the twelve already queued still reach the
+  // observer instead of waiting in the bypassed forwarder for ever.
+  let sim = run_for(sim, inline_fast, 20)
+  assert pipeline.queue(sim) == []
+  assert accounted(sim)
+  assert in_flight(sim) <= 1
+}
+
+/// The forwarder keeps up exactly when this model says it does: at a rate it
+/// drains, nothing drops; above it, the queue fills and drops.
+pub fn the_forwarder_drops_only_when_requests_outpace_it_test() {
+  list.each([FastObservers, SlowObserver], fn(observer) {
+    list.each(int.range(from: 1, to: 21, with: [], run: list.prepend), fn(rate) {
+      let settings = Settings(ViaForwarder, observer, rate, Flowing)
+      list.each([0.05, 1.0 /. 60.0], fn(dt) {
+        let sim =
+          list.fold(
+            list.repeat(Nil, float_steps(60.0, dt)),
+            pipeline.new(),
+            fn(sim, _) { pipeline.step(sim, settings, dt) },
+          )
+        case pipeline.forwarder_keeps_up(settings) {
+          True -> {
+            assert sim.dropped == 0
+            assert list.length(pipeline.queue(sim)) <= 1
+          }
+          False -> {
+            assert sim.dropped > 0
+          }
+        }
+      })
+    })
+  })
+  assert pipeline.forwarder_keeps_up(Settings(..routed_fast, rate: 2))
+  assert !pipeline.forwarder_keeps_up(Settings(..routed_fast, rate: 3))
+  assert pipeline.forwarder_keeps_up(Settings(..routed_slow, rate: 1))
+  assert !pipeline.forwarder_keeps_up(routed_fast)
+}
+
+fn float_steps(seconds: Float, dt: Float) -> Int {
+  float.round(seconds /. dt)
+}
+
+pub fn a_redraw_never_moves_the_pipeline_test() {
+  // A reset with motion off redraws an empty pipeline: no event is emitted
+  // until the reader advances it.
+  let sim =
+    run_for(pipeline.new(), routed_fast, 3)
+    |> pipeline.run(Issued(1, routed_fast, Clear))
+  assert pipeline.redraw(sim).emitted == 0
+  assert pipeline.redraw(sim).events == []
+  // A zero-length frame is not a redraw: it steps, and emits the event due.
+  assert pipeline.frame(sim, routed_fast, 0.0).emitted == 1
+  let sim = run_for(pipeline.new(), routed_slow, 3)
+  let drawn = pipeline.redraw(sim)
+  assert drawn.clock == sim.clock
+  assert drawn.emitted == sim.emitted
+  assert list.map(drawn.events, fn(event) { event.stage })
+    == list.map(sim.events, fn(event) { event.stage })
 }
 
 pub fn the_forwarder_sends_one_event_at_a_time_test() {

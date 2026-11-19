@@ -165,6 +165,29 @@ pub fn y(confidence: Float) -> Float {
   20.0 +. { 100.0 -. confidence } /. 50.0 *. 260.0
 }
 
+// Dots sit at their drawn values, and the policy reads the rounded ones. So
+// each policy threshold is drawn where rounding reaches it, and every dot
+// sits on the side of a line that its route is on: a €498.21 draw rounds to
+// €500, needs two approvals, and sits right of the dashed line.
+
+/// The right edge of the zone that can proceed alone: drawn amounts below
+/// €102.50 round to at most €100.
+pub fn alone_right() -> Float {
+  x(102.5)
+}
+
+/// The bottom edge of the zone that can proceed alone: drawn confidences
+/// from 89.5% round to at least 90%.
+pub fn alone_bottom() -> Float {
+  y(89.5)
+}
+
+/// The dashed line from which v4 asks two people: drawn amounts from
+/// €497.50 round to at least €500.
+pub fn two_approvals_x() -> Float {
+  x(497.5)
+}
+
 const ln_10 = 2.302585092994046
 
 fn log10(x: Float) -> Float {

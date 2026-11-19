@@ -89,6 +89,9 @@ pub type Msg {
   /// A tour step moves the queue on by this many ticks when motion is off;
   /// with motion on the queue is already running.
   TourHurriedQueue(Int)
+  /// A tour step that says a lease expired moves the queue on until every
+  /// abandoned lease has, with or without motion.
+  TourAwaitedLeaseExpiry
   ReaderPickedAdmission(Admission)
   ReaderChoseStock(Stock)
   ReaderChoseScreening(Screening)
@@ -160,6 +163,7 @@ pub fn update(
         True -> none(model)
         False -> issue(queue_widget.Advance(ticks))
       }
+    TourAwaitedLeaseExpiry -> issue(queue_widget.AdvanceUntilExpired)
     ReaderPickedAdmission(admission) -> none(Model(..model, admission:))
     ReaderChoseStock(stock) ->
       none(replan(model, checkout.Plan(..model.checkout.plan, stock:)))
@@ -205,6 +209,10 @@ pub fn update(
       case list.drop(model.runs, index) {
         [] -> none(model)
         [picked, ..] -> {
+          // The replay is the reader's own run: the checkout above leaves its
+          // guided tour, which drops any advance it had scheduled.
+          let #(model, unlocked) =
+            tour.update(driver(context), model, Saga, tour.Skip, context.motion)
           let model =
             Model(
               ..model,
@@ -219,6 +227,7 @@ pub fn update(
           #(
             model,
             effect.batch([
+              unlocked,
               effect,
               browser.jump_to("saga", context.animates(context)),
             ]),
@@ -392,7 +401,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           |> tour.lasting(4500),
         tour.act(
           "The lease expires with no result. By default Grind holds the job as Uncertain instead of guessing whether the email went out.",
-          send([TourHurriedQueue(12)]),
+          send([TourHurriedQueue(12), TourAwaitedLeaseExpiry]),
         )
           |> tour.lasting(4500),
         tour.act(
@@ -928,6 +937,18 @@ fn upto(run: Run) -> Int {
   }
 }
 
+/// What the outcome box says about the run on screen. An unfinished run that
+/// was frozen (motion turned off, or the reader left) is paused: no more
+/// events are coming.
+pub fn outcome_label(c: Checkout) -> String {
+  case checkout.snapshot(events(c), upto(c.run)).progress, c.run {
+    checkout.NotStarted, _ -> "Not started"
+    checkout.InFlight, Replaying(..) -> "Running…"
+    checkout.InFlight, _ -> "Paused"
+    checkout.Finished(outcome), _ -> checkout.outcome_text(outcome)
+  }
+}
+
 fn saga(c: Checkout) -> List(Element(Msg)) {
   let snap = checkout.snapshot(events(c), upto(c.run))
   let plan = c.plan
@@ -944,17 +965,15 @@ fn saga(c: Checkout) -> List(Element(Msg)) {
   }
   let crash_on = c.crash == CrashAfterCharge
   let durable = c.durability == Durable
-  let #(outcome, out_bg, out_fg) = case snap.progress {
-    checkout.NotStarted -> #("Not started", "#F1EEE8", "#17162B")
-    checkout.InFlight -> #("Running…", "#F1EEE8", "#17162B")
-    checkout.Finished(outcome) -> {
-      let #(bg, fg) = case outcome {
-        checkout.Completed -> #("#E2F4E7", "#0E4D25")
-        checkout.Aborted(_) | checkout.Lost -> #("#FDECEA", "#7A1A12")
-        checkout.HeldForReconciliation -> #("#FFF1C2", "#5C4300")
-      }
-      #(checkout.outcome_text(outcome), bg, fg)
-    }
+  let outcome = outcome_label(c)
+  let #(out_bg, out_fg) = case snap.progress {
+    checkout.NotStarted | checkout.InFlight -> #("#F1EEE8", "#17162B")
+    checkout.Finished(checkout.Completed) -> #("#E2F4E7", "#0E4D25")
+    checkout.Finished(checkout.Aborted(_)) | checkout.Finished(checkout.Lost) -> #(
+      "#FDECEA",
+      "#7A1A12",
+    )
+    checkout.Finished(checkout.HeldForReconciliation) -> #("#FFF1C2", "#5C4300")
   }
   let arrow =
     html.div(
@@ -1398,7 +1417,7 @@ fn which() -> Element(Msg) {
             stage(
               "#E2F4E7",
               "4 · Crash? Resume.",
-              "Grind redelivers the job; the saga reconnects and continues.",
+              "Grind redelivers the job if replay is enabled for it or an operator authorizes it; the saga reconnects and continues.",
             ),
           ],
         ),

@@ -243,6 +243,6 @@ pub fn note(schedule: Schedule) -> String {
     Exponential ->
       "Exponential backoff spaces the waves out, but clients that failed together stay in lockstep: still waves, now further apart."
     Jittered ->
-      "Backoff plus random jitter breaks the lockstep. Retries spread out under the capacity line and far fewer are turned away."
+      "Backoff plus random jitter breaks the lockstep. Retries spread out over time and far fewer are turned away. The first retries after the outage still exceed the capacity line."
   }
 }

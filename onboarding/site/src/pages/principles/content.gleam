@@ -48,7 +48,7 @@ pub fn habit(habit: Habit) -> HabitInfo {
         n: 2,
         title: "Your app owns decisions",
         short: "Libraries own one mechanism. You own policy and lifetimes.",
-        long: "Libraries do the fiddly mechanical work: pooling, leasing, encoding, refreshing, recording. Your application keeps every decision: who may do what, when to retry, which database pool to use, when things start and stop. Credentials and context stay live in your app instead of being stored by a library.",
+        long: "Libraries do the fiddly mechanical work: pooling, leasing, encoding, refreshing, recording. Your application keeps every decision: who may do what, when to retry, which database pool to use, when things start and stop. Accounts, credential policy and context stay with your app. A library keeps only the state its mechanism needs, such as the tokens Hellhound refreshes.",
         seen: [
           "Fabric policy", "LLM Wire history", "Hellhound accounts",
           "Grind pools",
@@ -143,7 +143,7 @@ pub const jobs = [
     "Grind, Saga and Decisions adapters borrow your pool; they never own it.",
   ),
   Job(
-    "Leasing a job so two nodes never run it at once",
+    "Leasing a job so one node holds it at a time",
     Library,
     "Grind claims work with database leases and renews them on a reserved connection.",
   ),

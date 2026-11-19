@@ -53,7 +53,8 @@ pub type Outcome {
   Denied(reason: String)
   /// This call was handed over: the run ended here.
   HandedOver
-  /// A later call of the same reply that had not started when the run ended.
+  /// Another call of the handed-over reply that had not started when the run
+  /// ended, including one that was waiting for a person.
   Withdrawn
   WaitingForPerson
   ApprovedThenRan
@@ -127,8 +128,26 @@ pub fn set_rule(gate: Gate, rule: Rule, decision: Decision) -> Gate {
   Gate(policy:, answers: dict.new())
 }
 
-pub fn answer(gate: Gate, call: CallId, answer: Answer) -> Gate {
-  Gate(..gate, answers: dict.insert(gate.answers, call, answer))
+/// Why an answer was not taken.
+pub type Refusal {
+  /// The run ended as HandedOver, which voided every approval request.
+  RunEnded
+  /// The call is not waiting for a person.
+  NotAwaitingApproval
+}
+
+/// A person answers a call that is waiting for one.
+pub fn answer(
+  gate: Gate,
+  call: CallId,
+  answer: Answer,
+) -> Result(Gate, Refusal) {
+  case run(gate), list.key_find(outcomes(gate), call) {
+    FinishedHandedOver, _ -> Error(RunEnded)
+    _, Ok(WaitingForPerson) ->
+      Ok(Gate(..gate, answers: dict.insert(gate.answers, call, answer)))
+    _, _ -> Error(NotAwaitingApproval)
+  }
 }
 
 pub fn reset_approvals(gate: Gate) -> Gate {
@@ -161,19 +180,33 @@ pub fn guard(call: CallId) -> Result(Rule, Nil) {
   }
 }
 
-/// Each call with what happened to it, in proposal order. Once a call is
-/// handed over, the calls after it in the same reply are withdrawn.
+/// Each call with what happened to it, in proposal order. A handover ends the
+/// run in the commit that admits its reply: the reply's other calls that had
+/// not started, allowed or waiting for a person, are withdrawn, refusals keep
+/// their states, and the calls after it never reach the policy.
 pub fn outcomes(gate: Gate) -> List(#(CallId, Outcome)) {
-  let #(_, outcomes) =
-    list.fold(calls, #(False, []), fn(acc, call) {
-      let #(handed_over, done) = acc
-      let outcome = case handed_over {
-        True -> Withdrawn
-        False -> judge(gate, call)
-      }
-      #(handed_over || outcome == HandedOver, [#(call, outcome), ..done])
-    })
-  list.reverse(outcomes)
+  let judged = list.map(calls, fn(call) { #(call, judge(gate, call)) })
+  case list.find(judged, fn(pair) { pair.1 == HandedOver }) {
+    Error(Nil) -> judged
+    Ok(#(handed, _)) -> {
+      let #(_, outcomes) =
+        list.fold(judged, #(False, []), fn(acc, pair) {
+          let #(after, done) = acc
+          let #(call, outcome) = pair
+          let outcome = case turn(call) == turn(handed), after, outcome {
+            False, _, _ -> outcome
+            True, True, _ -> Withdrawn
+            True, False, HandedOver
+            | True, False, Denied(_)
+            | True, False, RejectedByPerson
+            -> outcome
+            True, False, _ -> Withdrawn
+          }
+          #(after || outcome == HandedOver, [#(call, outcome), ..done])
+        })
+      list.reverse(outcomes)
+    }
+  }
 }
 
 fn judge(gate: Gate, call: CallId) -> Outcome {

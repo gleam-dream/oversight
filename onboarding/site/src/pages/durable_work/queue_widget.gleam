@@ -2,10 +2,11 @@
 //// ticks it every 220 ms of animation frames and redraws only itself.
 ////
 //// The page owns the reader's setting (what happens when a lease expires)
-//// and one-off commands: reset, six more jobs, advance some ticks, kill a
-//// worker. They arrive as one ordered command list with increasing ids, so
-//// the widget applies each exactly once and in the order the page issued
-//// them, even when a tour issues several in one update.
+//// and one-off commands: reset, six more jobs, advance some ticks or until
+//// abandoned leases expire, kill a worker. They arrive as one ordered
+//// command list with increasing ids, so the widget applies each exactly once
+//// and in the order the page issued them, even when a tour issues several in
+//// one update.
 
 import gleam/float
 import gleam/int
@@ -39,6 +40,8 @@ pub type Command {
   Reset
   AddJobs
   Advance(ticks: Int)
+  /// Advance until every lease nobody renews has expired.
+  AdvanceUntilExpired
   Kill(worker: Int)
   Expire(Abandonment)
 }
@@ -49,6 +52,7 @@ pub fn apply(queue: Queue, command: Command) -> Queue {
     Reset -> queue.new()
     AddJobs -> queue.add_jobs(queue)
     Advance(ticks) -> queue.advance(queue, ticks)
+    AdvanceUntilExpired -> queue.advance_until_expired(queue)
     Kill(worker) -> queue.kill_worker(queue, worker)
     Expire(expiry) -> queue.set_expiry(queue, expiry)
   }
@@ -102,6 +106,7 @@ fn command_code(command: Command) -> String {
     Reset -> "reset"
     AddJobs -> "add"
     Advance(ticks) -> "tick:" <> int.to_string(ticks)
+    AdvanceUntilExpired -> "drain"
     Kill(worker) -> "kill:" <> int.to_string(worker)
     Expire(expiry) -> expiry_code(expiry)
   }
@@ -138,6 +143,7 @@ fn decode_entry(entry: String) -> Result(#(Int, Command), Nil) {
   use command <- result.try(case code {
     "reset" -> Ok(Reset)
     "add" -> Ok(AddJobs)
+    "drain" -> Ok(AdvanceUntilExpired)
     "hold" | "replay" -> decode_expiry(code) |> result.map(Expire)
     _ ->
       case string.split_once(code, ":") {

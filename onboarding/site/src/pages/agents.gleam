@@ -95,10 +95,9 @@ pub fn update(
   case msg {
     ReaderSetRule(rule, decision) ->
       none(Model(..model, gate: gate.set_rule(model.gate, rule, decision)))
-    ReaderApprovedCall(call) ->
-      none(Model(..model, gate: gate.answer(model.gate, call, gate.Approved)))
-    ReaderRejectedCall(call) ->
-      none(Model(..model, gate: gate.answer(model.gate, call, gate.Rejected)))
+    // An answer the run no longer takes changes nothing.
+    ReaderApprovedCall(call) -> none(answer(model, call, gate.Approved))
+    ReaderRejectedCall(call) -> none(answer(model, call, gate.Rejected))
     ReaderResetApprovals ->
       none(Model(..model, gate: gate.reset_approvals(model.gate)))
     ReaderPickedStore(store) ->
@@ -151,6 +150,13 @@ pub fn update(
     )
     Tour(id, command) ->
       tour.update(driver(context), model, id, command, context.motion)
+  }
+}
+
+fn answer(model: Model, call: gate.CallId, answer: gate.Answer) -> Model {
+  case gate.answer(model.gate, call, answer) {
+    Ok(gate) -> Model(..model, gate:)
+    Error(_) -> model
   }
 }
 
@@ -911,7 +917,7 @@ fn point_lab(model: Point) -> List(Element(Msg)) {
           fn(v) { " €" <> v },
           "10",
           "1000",
-          "10",
+          "1",
           ReaderSetAmount,
         ),
         slider(
@@ -1133,8 +1139,8 @@ fn ladder_lab(
             svg.rect([
               attribute("x", "60"),
               attribute("y", "20"),
-              attribute("width", one(ladder.x(100.0) -. 60.0)),
-              attribute("height", one(ladder.y(90.0) -. 20.0)),
+              attribute("width", one(ladder.alone_right() -. 60.0)),
+              attribute("height", one(ladder.alone_bottom() -. 20.0)),
               attribute("fill", "#E2F4E7"),
               attribute("opacity", case v >= 2 {
                 True -> "0.9"
@@ -1142,8 +1148,8 @@ fn ladder_lab(
               }),
             ]),
             svg.line([
-              attribute("x1", one(ladder.x(500.0))),
-              attribute("x2", one(ladder.x(500.0))),
+              attribute("x1", one(ladder.two_approvals_x())),
+              attribute("x2", one(ladder.two_approvals_x())),
               attribute("y1", "20"),
               attribute("y2", "280"),
               attribute("stroke", "#5E0B3A"),

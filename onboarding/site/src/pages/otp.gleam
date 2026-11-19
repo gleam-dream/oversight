@@ -3,6 +3,7 @@
 
 import gleam/int
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/result
 import lustre
 import lustre/attribute.{attribute, class}
@@ -14,7 +15,7 @@ import pages/otp/cart.{type Cart}
 import pages/otp/libraries.{type Library}
 import pages/otp/mailbox.{type Mode, Call, Send}
 import pages/otp/mailbox_widget.{type Commands, Commands}
-import pages/otp/supervision.{type Child, type Strategy, type Tree}
+import pages/otp/supervision.{type Child, type Restart, type Strategy, type Tree}
 import site/browser
 import site/context.{type Context}
 import site/motion.{type Motion}
@@ -59,7 +60,7 @@ pub type Msg {
   ReaderPickedStrategy(Strategy)
   ReaderCrashedChild(Child)
   /// The supervisor's restart, scheduled when a child crashed.
-  SupervisorRestarted(epoch: Int, children: List(Child))
+  SupervisorRestarted(Restart)
   ReaderLetFiveSecondsPass
   ReaderResetTree
   ReaderPickedLibrary(Library)
@@ -150,19 +151,16 @@ pub fn update(
       effect.none(),
     )
     ReaderCrashedChild(child) -> {
-      let #(tree, restarting) = supervision.crash(model.tree, child)
-      let restart = case restarting {
-        [] -> effect.none()
-        _ ->
-          browser.after(
-            supervision.restart_ms,
-            SupervisorRestarted(tree.epoch, restarting),
-          )
+      let #(tree, restart) = supervision.crash(model.tree, child)
+      let restart = case restart {
+        None -> effect.none()
+        Some(restart) ->
+          browser.after(supervision.restart_ms, SupervisorRestarted(restart))
       }
       #(Model(..model, tree:), restart)
     }
-    SupervisorRestarted(epoch:, children:) -> #(
-      Model(..model, tree: supervision.restart(model.tree, epoch, children)),
+    SupervisorRestarted(restart) -> #(
+      Model(..model, tree: supervision.restart(model.tree, restart)),
       effect.none(),
     )
     ReaderLetFiveSecondsPass -> #(
@@ -273,7 +271,7 @@ pub fn script(id: TourId, motion: Motion) -> tour.Script(Model, Msg) {
         )
           |> tour.lasting(4200),
         tour.act(
-          "Crash the database pool: that is a 4th crash within 5 seconds. Restarting clearly isn’t helping, so the supervisor stops every child, crashes itself and escalates to its parent.",
+          "Crash the database pool: a 4th crash inside the 5-second window. The window runs on simulated time, so real seconds never clear it. Restarting clearly isn’t helping, so the supervisor stops every child, crashes itself and escalates to its parent.",
           send([ReaderCrashedChild(supervision.DatabasePool)]),
         )
           |> tour.lasting(4200),
@@ -305,7 +303,15 @@ pub fn script(id: TourId, motion: Motion) -> tour.Script(Model, Msg) {
           |> tour.lasting(5000),
         tour.act(
           "Switch to call: each request process now waits for its reply (green) before sending again. New sends slow to the actor’s pace and the backlog drains.",
-          send([ReaderPickedMode(Call)]),
+          // Without motion, two simulated seconds show replies coming back.
+          send(case motion {
+            motion.Off -> [
+              ReaderPickedMode(Call),
+              ReaderAdvancedOneSecond,
+              ReaderAdvancedOneSecond,
+            ]
+            motion.On -> [ReaderPickedMode(Call)]
+          }),
         )
           |> tour.lasting(8000),
         tour.say(
@@ -519,7 +525,7 @@ fn actor(shop: Cart) -> List(Element(Msg)) {
         button(
           "btn",
           ReaderSentTwoRequestsAtOnce,
-          [],
+          [attribute.disabled(!cart.can_burst(shop))],
           "Two requests at the same instant",
         ),
         button("btn sm", ReaderResetCart, [], "Reset"),
@@ -803,7 +809,7 @@ fn tree(tree: Tree) -> List(Element(Msg)) {
     lab_head(
       "Playground",
       "Supervision tree simulator",
-      "A small shop service. Pick a restart strategy, then crash a child. Crash things quickly, more than 3 times in 5 seconds, to see the supervisor give up and escalate.",
+      "A small shop service. Pick a restart strategy, then crash a child. Crash things more than 3 times in 5 seconds to see the supervisor give up and escalate. Those 5 seconds are simulated: real time never clears the window, only \"Let 5 seconds pass\" or Reset does.",
       "660px",
       button("btn sm", ReaderResetTree, [], "Reset"),
     ),
@@ -927,8 +933,13 @@ fn child(
 ) -> Element(Msg) {
   let #(status_bg, status_fg, border, bg) = case state.status {
     supervision.Running -> #("#E2F4E7", "#0E4D25", "#B9E2C4", "#FFFFFF")
-    supervision.Crashed -> #("#FDECEA", "#7A1A12", "#E9B8B2", "#FBF3F2")
-    supervision.Restarting -> #("#FDF0DC", "#6B3404", "#F3D9B1", "#FFFBF4")
+    supervision.Crashed(..) | supervision.CrashedForGood -> #(
+      "#FDECEA",
+      "#7A1A12",
+      "#E9B8B2",
+      "#FBF3F2",
+    )
+    supervision.Restarting(..) -> #("#FDF0DC", "#6B3404", "#F3D9B1", "#FFFBF4")
     supervision.Stopped -> #("#EDEFF3", "#3B4452", "#D5D9E0", "#F6F7F9")
   }
   let order = case index {

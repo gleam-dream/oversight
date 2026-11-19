@@ -33,8 +33,11 @@ pub type Abandonment {
   ReplayAfterLeaseExpiry
 }
 
+/// `attempts` counts the business attempts used, the current one included.
+/// A snooze or a replayed lease gives its attempt back: the next claim runs
+/// the same attempt number again. `replays` counts lease replays so far.
 pub type Job {
-  Job(phase: Phase, attempts: Int, history: List(String))
+  Job(phase: Phase, attempts: Int, replays: Int, history: List(String))
 }
 
 /// What can happen to the job next.
@@ -57,10 +60,14 @@ pub type Event {
 
 pub const max_attempts = 3
 
+/// With `ReplayAfterLeaseExpiry`, how many abandoned attempts are replayed
+/// before the job is held as Uncertain after all.
+pub const max_replays = 2
+
 const nothing_yet = "Nothing submitted yet."
 
 pub fn new() -> Job {
-  Job(phase: NotSubmitted, attempts: 0, history: [nothing_yet])
+  Job(phase: NotSubmitted, attempts: 0, replays: 0, history: [nothing_yet])
 }
 
 /// The tiles of the state machine, as the playground shows them.
@@ -213,20 +220,36 @@ pub fn apply(job: Job, event: Event, abandonment: Abandonment) -> Job {
           )
       }
     Stored(Executing), HandlerSnoozes ->
-      go(Scheduled, attempt <> ": snooze 5m → Scheduled")
+      record(
+        job,
+        Stored(Scheduled),
+        n - 1,
+        attempt <> ": snooze 5m → Scheduled (the attempt is not used)",
+      )
     Stored(Executing), HandlerDiscards ->
       go(Discarded, attempt <> ": discard → Discarded")
     Stored(Executing), NodeDies ->
-      case abandonment {
-        HoldUncertain ->
+      case abandonment, job.replays < max_replays {
+        ReplayAfterLeaseExpiry, True ->
+          record(
+            Job(..job, replays: job.replays + 1),
+            Stored(Queued),
+            n - 1,
+            "node lost; lease expired → replay "
+              <> int.to_string(job.replays + 1)
+              <> " of "
+              <> int.to_string(max_replays)
+              <> ", same attempt (you declared replay safe) → Queued",
+          )
+        ReplayAfterLeaseExpiry, False ->
+          go(
+            Uncertain,
+            "node lost; lease expired, no replays left → held as Uncertain (did the email go out?)",
+          )
+        HoldUncertain, _ ->
           go(
             Uncertain,
             "node lost; lease expired → held as Uncertain (did the email go out?)",
-          )
-        ReplayAfterLeaseExpiry ->
-          go(
-            Queued,
-            "node lost; lease expired → replayed (you declared replay safe, up to a max) → Queued",
           )
       }
     Stored(Uncertain), AuditSent ->
@@ -248,5 +271,5 @@ fn record(job: Job, phase: Phase, attempts: Int, line: String) -> Job {
   let history =
     [line, ..list.filter(job.history, fn(l) { l != nothing_yet })]
     |> list.take(10)
-  Job(phase:, attempts:, history:)
+  Job(..job, phase:, attempts:, history:)
 }

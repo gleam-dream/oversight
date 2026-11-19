@@ -233,7 +233,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           )
             |> tour.lasting(6000),
           tour.act(
-            "But the slow observer still drains only 2 per second. The forwarder fills to its limit, then new events fall off and are counted. Watch the red drops.",
+            "But with the slow observer the forwarder drains only about 1 per second. Its queue fills to the limit, then new events fall off and are counted. Watch the red drops.",
             send([TourSkippedAhead]),
           )
             |> tour.lasting(6000),
@@ -243,8 +243,8 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           )
             |> tour.lasting(5000),
           tour.act(
-            "Remove the slow observer and the queue drains in moments. Telemetry informs; it never decides. Your turn.",
-            send([ReaderRemovedSlowObserver, TourSkippedAhead]),
+            "Remove the slow observer and turn the rate down to 1 per second. The forwarder now drains faster than requests arrive, so the queue empties. Telemetry informs; it never decides. Your turn.",
+            send([ReaderRemovedSlowObserver, ReaderSetRate(1), TourSkippedAhead]),
           ),
         ],
       )
@@ -502,7 +502,7 @@ fn sinal_section(model: Model, context: Context) -> Element(Msg) {
             [
               html.text(case slow {
                 True -> "Remove the slow observer"
-                False -> "Attach a slow observer (50 ms)"
+                False -> "Attach a slow observer (500 ms)"
               }),
             ],
           ),
@@ -584,17 +584,24 @@ fn sinal_section(model: Model, context: Context) -> Element(Msg) {
 
 /// What the reader's settings mean, under the widget.
 pub fn note(settings: Settings) -> String {
-  case settings.delivery, settings.observer {
-    Inline, SlowObserver ->
+  let keeps_up = pipeline.forwarder_keeps_up(settings)
+  case settings.delivery, settings.observer, keeps_up {
+    Inline, SlowObserver, _ ->
       "Inline with a slow observer: the handler can’t serve the next request until telemetry finishes. Requests asked for "
       <> int.to_string(settings.rate)
       <> "/s; the handler now manages about 1 per second."
-    Inline, FastObservers ->
+    Inline, FastObservers, _ ->
       "Inline with fast observers: they run inside the handler before emit returns. Simple, and the right default when observers are cheap."
-    ViaForwarder, SlowObserver ->
+    ViaForwarder, SlowObserver, False ->
       "Routed: the handler hands events to the forwarder and carries on at full speed. The forwarder can’t keep up with a slow observer either, so once it holds 12 it drops new events and counts them. Best effort, by design."
-    ViaForwarder, FastObservers ->
-      "Routed with fast observers: the forwarder drains as fast as events arrive. Nothing waits and nothing drops."
+    ViaForwarder, SlowObserver, True ->
+      "Routed with a slow observer at 1 request per second: the forwarder just keeps up. Ask for more and it fills, then drops new events and counts them."
+    ViaForwarder, FastObservers, True ->
+      "Routed with fast observers: the forwarder drains faster than events arrive. Nothing waits and nothing drops."
+    ViaForwarder, FastObservers, False ->
+      "Routed with fast observers: the handler never waits, but this forwarder hands the observer one event at a time, under 3 per second. At "
+      <> int.to_string(settings.rate)
+      <> "/s requests arrive faster, so it still fills and drops. At 2/s or less it drains."
   }
 }
 

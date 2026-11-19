@@ -1,4 +1,6 @@
 import gleam/list
+import gleam/string
+import lustre/element
 import pages/atlas
 import pages/atlas/packages.{
   BuildsOn, Everything, Fabric, HttpGun, IsSelected, JsonBlueprint, LlmWire,
@@ -107,4 +109,24 @@ pub fn going_back_resets_the_map_test() {
 
 pub fn the_atlas_tour_has_six_steps_test() {
   assert list.length(atlas.script(atlas.Map).steps) == 6
+}
+
+pub fn foundations_is_the_bottom_row_test() {
+  let page =
+    atlas.view(atlas.init(), context.new(motion.On, progress.empty()))
+    |> element.to_string
+  let position = fn(name) {
+    let assert [before, _] = string.split(page, ">" <> name <> "</span>")
+    string.length(before)
+  }
+  assert position("Tooling") < position("Inspection")
+  assert position("Durable work") < position("Transport")
+  assert position("Transport") < position("Foundations")
+}
+
+pub fn the_llm_step_names_what_the_filter_keeps_test() {
+  let assert Ok(step) =
+    atlas.script(atlas.Map).steps |> list.drop(3) |> list.first
+  assert string.contains(step.text, "JSON Blueprint and LLM Wire")
+  assert string.contains(step.text, "selects JSON Blueprint")
 }

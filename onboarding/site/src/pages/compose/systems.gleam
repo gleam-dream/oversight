@@ -385,7 +385,7 @@ pub const patterns = [
   Pattern(
     name: "A job drives a saga",
     chain: [Uses(Grind), Uses(Saga)],
-    text: "Grind redelivers after a crash; the saga reconnects by id and resumes from its checkpoint.",
+    text: "With ReplayAfterLeaseExpiry opted in, Grind redelivers after a crash (by default it holds the job as Uncertain); the saga reconnects by its stable id and resumes from its checkpoint.",
   ),
   Pattern(
     name: "Typed model call",

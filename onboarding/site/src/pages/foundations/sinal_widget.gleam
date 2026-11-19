@@ -116,7 +116,7 @@ fn wants_frames(widget: Widget) -> Bool {
 }
 
 /// Subscribe to frames when attached with motion on; otherwise stop and draw
-/// the current state, as the reference does on every repaint without motion.
+/// the current state.
 fn follow(widget: Widget) -> #(Widget, Effect(Msg)) {
   case wants_frames(widget), widget.frames {
     True, live.Unsubscribed -> #(widget, live.subscribe(Frame, Subscribed))
@@ -135,11 +135,11 @@ fn stop(widget: Widget) -> #(Widget, Effect(Msg)) {
   )
 }
 
-/// Without motion, every change redraws with a zero-length frame.
+/// Without motion, every change redraws the current state without stepping
+/// it: only commands such as Advance move the simulation.
 fn settle(widget: Widget) -> Widget {
   case widget.motion, widget.presence {
-    motion.Off, Attached ->
-      Widget(..widget, sim: pipeline.frame(widget.sim, widget.settings, 0.0))
+    motion.Off, Attached -> Widget(..widget, sim: pipeline.redraw(widget.sim))
     _, _ -> widget
   }
 }

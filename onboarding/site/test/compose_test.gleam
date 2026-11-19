@@ -1,6 +1,7 @@
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/set
+import gleam/string
 import pages/compose
 import pages/compose/builder
 import pages/compose/package
@@ -351,4 +352,12 @@ pub fn the_trace_tour_scrubs_to_its_events_test() {
   assert back.outcome == trace.Succeeds
   assert stepper.at(back.trace) == 16
   assert phase(go(model), compose.Trace) == Free
+}
+
+pub fn a_job_drives_a_saga_only_with_replay_opted_in_test() {
+  let assert Ok(pattern) =
+    list.find(systems.patterns, fn(p) { p.name == "A job drives a saga" })
+  assert string.contains(pattern.text, "ReplayAfterLeaseExpiry opted in")
+  assert string.contains(pattern.text, "holds the job as Uncertain")
+  assert string.contains(pattern.text, "stable id")
 }

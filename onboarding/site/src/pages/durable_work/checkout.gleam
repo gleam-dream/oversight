@@ -245,7 +245,7 @@ fn after_charge(
     CrashAfterCharge, Durable -> [
       ev(
         [#(Ship, Idle)],
-        "NODE CRASHED. The checkpoint says reserve, fraud and charge are complete. On restart, Grind redelivers the job driving this saga; it reconnects by execution id and resumes. The charge is not repeated.",
+        "NODE CRASHED. The checkpoint says reserve, fraud and charge are complete. On restart, if replay is enabled for the job driving this saga or an operator authorizes it, Grind redelivers that job; the saga reconnects by execution id and resumes. The charge is not repeated.",
       ),
       ..shipping
     ]

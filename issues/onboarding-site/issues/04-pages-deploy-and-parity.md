@@ -157,3 +157,35 @@ reference they had nothing to compare against, they never failed on their own,
 no gate ran them, and they needed a browser outside the Nix shell. They remain
 in the Git history with the reference (`7b4d961`). The PRD's validation now
 names the gleeunit tests and the deploy workflow.
+
+AI-assisted contribution. Code review (CodeRabbit) found 56 issues in the
+port; the maintainer decided to fix every valid one, so the site now departs
+from the reference wherever the reference was wrong. The three "reference
+issues kept for parity" above are fixed: the slow observer says 500 ms, the
+Sinal notes and tour say when a forwarder keeps up (the last step lowers the
+rate to 1/s), and the atlas tour names both packages the LLM filter keeps.
+
+Other behaviour that changed, by module:
+
+- 2 OTP: a caller waiting for a reply sends nothing else; supervisors stop a
+  group in reverse start order; a later crash supersedes a pending restart;
+  the restart window is said to run on simulated time; with motion off the
+  Call step shows replies.
+- 4 Principles: notes, ledger and chart come from one list of retry outcomes;
+  the keyed replay is a separate run; the timing sliders describe a possible
+  call; the jitter note and two habit texts promise only what holds.
+- 5 Atlas: Foundations is the bottom row.
+- 6 Foundations: a switch to Inline lets the forwarder finish its queue;
+  Reset with motion off no longer emits an event.
+- 7 Outside world: the API checks tokens on its own lane; the comparison is a
+  table with headers.
+- 8 Durable work: adding jobs keeps unfinished rows; a restarted worker
+  leaves its old lease to drain; a snooze does not use an attempt and lease
+  replays reuse the attempt, bounded by their own limit (as Grind's
+  `worker.gleam` states); redelivery after a crash names its prerequisite;
+  a ladder pick unlocks the saga playground; a frozen run says Paused.
+- 9 Agents: each occurrence has its own key; an unsure or refused release
+  keeps earlier approvals; a refusal with nobody waiting settles as Refused;
+  a handover withdraws the not-yet-started calls of its reply; the chart's
+  thresholds sit where the rounded values reach them.
+- 10 Compose: crash replay names the opt-in replay policy.

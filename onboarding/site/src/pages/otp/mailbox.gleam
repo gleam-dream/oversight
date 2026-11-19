@@ -1,7 +1,8 @@
 //// The "send or call" mailbox under load, as a pure simulation. Four request
 //// processes talk to one actor that handles a message in 250 ms. Messages
 //// and replies travel for 0.4 s. Sends go out at the reader's rate whatever
-//// the actor does; a call blocks its caller until the reply is back.
+//// the actor does; a call blocks its caller until the reply is back, even
+//// if the reader switches to sends meanwhile.
 ////
 //// Time is in seconds. The arithmetic follows the reference widget step for
 //// step, so the same frames give the same picture.
@@ -9,7 +10,6 @@
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 
 pub type Mode {
   /// Fire and forget.
@@ -92,10 +92,10 @@ fn emit(sim: Sim, mode: Mode, rate: Int) -> Sim {
   case sim.clock >=. sim.next_send {
     False -> sim
     True ->
-      case mode, first_free(sim) {
-        Call, Error(Nil) -> Sim(..sim, next_send: sim.clock)
-        Call, Ok(caller) -> launch(sim, caller, Call, rate)
-        Send, _ -> launch(sim, sim.sent % callers, Send, rate)
+      case mode, next_free(sim, mode) {
+        // Every caller waits for a reply: the launch waits too.
+        _, Error(Nil) -> Sim(..sim, next_send: sim.clock)
+        _, Ok(caller) -> launch(sim, caller, mode, rate)
       }
   }
 }
@@ -232,9 +232,17 @@ pub fn blocked(sim: Sim) -> List(Bool) {
   })
 }
 
-fn first_free(sim: Sim) -> Result(Int, Nil) {
-  blocked(sim)
-  |> list.index_map(fn(blocked, caller) { #(caller, blocked) })
-  |> list.find(fn(pair) { !pair.1 })
-  |> result.map(fn(pair) { pair.0 })
+/// The caller that sends next, skipping callers blocked on a call. Calls
+/// go from the first free caller; sends take turns, starting from the
+/// caller whose turn it is.
+fn next_free(sim: Sim, mode: Mode) -> Result(Int, Nil) {
+  let first = case mode {
+    Call -> 0
+    Send -> sim.sent % callers
+  }
+  let blocked = blocked(sim)
+  list.map([0, 1, 2, 3], fn(turn) { { first + turn } % callers })
+  |> list.find(fn(caller) {
+    list.drop(blocked, caller) |> list.first != Ok(True)
+  })
 }

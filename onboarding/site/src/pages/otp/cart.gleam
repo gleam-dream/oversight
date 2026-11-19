@@ -11,7 +11,8 @@ pub type Caller {
 }
 
 /// What a request asks the actor to do. Only `Total` is a call: its caller
-/// waits for the reply. The others are sends.
+/// waits for the reply and sends nothing else until it arrives. The others
+/// are sends.
 pub type Op {
   Add(name: String, price: Int)
   Remove(name: String)
@@ -61,7 +62,7 @@ pub fn new() -> Cart {
     Request(Add("Book", 12), RequestA),
     Request(Add("Mug", 8), RequestA),
     Request(Total, RequestA),
-    Request(Remove("Book"), RequestA),
+    Request(Remove("Book"), RequestB),
   ]
   Cart(
     mailbox:,
@@ -136,15 +137,30 @@ pub fn handle_next(cart: Cart) -> Cart {
   }
 }
 
-/// Two requests arrive at the very same instant, from two callers.
+/// Two requests arrive at the very same instant, from two callers. A caller
+/// still waiting for a reply cannot send, so the burst only happens while
+/// neither caller has a call in the mailbox.
 pub fn burst(cart: Cart) -> Cart {
-  let arrived = [Request(Add("Pen", 3), RequestA), Request(Total, RequestB)]
-  Cart(
-    ..cart,
-    mailbox: list.append(cart.mailbox, arrived),
-    events: cap(list.append(cart.events, list.map(arrived, arrival))),
-    last: BurstArrived,
-  )
+  case can_burst(cart) {
+    False -> cart
+    True -> {
+      let arrived = [
+        Request(Add("Pen", 3), RequestA),
+        Request(Total, RequestB),
+      ]
+      Cart(
+        ..cart,
+        mailbox: list.append(cart.mailbox, arrived),
+        events: cap(list.append(cart.events, list.map(arrived, arrival))),
+        last: BurstArrived,
+      )
+    }
+  }
+}
+
+/// Whether both callers are free to send: neither waits for a reply.
+pub fn can_burst(cart: Cart) -> Bool {
+  !list.any(cart.mailbox, is_call)
 }
 
 pub fn last_step(last: Last) -> String {

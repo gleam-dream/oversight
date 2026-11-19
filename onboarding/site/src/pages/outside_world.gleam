@@ -394,13 +394,15 @@ const shape = [
 ]
 
 fn shared_shape() -> Element(Msg) {
+  let cell = "padding:12px;text-align:left;vertical-align:top;"
   let head = fn(text) {
-    html.div([css("background:#F1EEE8;padding:12px;font-weight:600")], [
-      html.text(text),
-    ])
-  }
-  let cell = fn(text) {
-    html.div([css("background:#fff;padding:12px")], [html.text(text)])
+    html.th(
+      [
+        attribute.scope("col"),
+        css(cell <> "background:#F1EEE8;font-weight:600"),
+      ],
+      [html.text(text)],
+    )
   }
   html.section([class("wrap sec")], [
     html.div([class("k")], [html.text("Read · the shape they share")]),
@@ -409,24 +411,48 @@ fn shared_shape() -> Element(Msg) {
       html.div(
         [
           css(
-            "min-width:760px;display:grid;grid-template-columns:1.1fr repeat(4,minmax(0,1fr));gap:1px;background:#E4E0D8;border-radius:14px;overflow:hidden;font-size:14px",
+            "min-width:760px;background:#E4E0D8;border-radius:14px;overflow:hidden;font-size:14px",
           ),
         ],
-        list.flatten([
-          [
-            html.div([css("background:#F1EEE8;padding:12px")], []),
-            ..list.map(flows.flows, fn(flow) { head(flows.flow_label(flow)) })
-          ],
-          ..list.map(shape, fn(row) {
-            let #(trait, cells) = row
+        [
+          html.table(
             [
-              html.div([css("background:#fff;padding:12px;font-weight:600")], [
-                html.text(trait),
+              css(
+                "width:100%;border-collapse:separate;border-spacing:1px;table-layout:fixed",
+              ),
+            ],
+            [
+              html.thead([], [
+                html.tr([], [
+                  html.td([css(cell <> "background:#F1EEE8;width:21.5%")], []),
+                  ..list.map(flows.flows, fn(flow) {
+                    head(flows.flow_label(flow))
+                  })
+                ]),
               ]),
-              ..list.map(cells, cell)
-            ]
-          })
-        ]),
+              html.tbody(
+                [],
+                list.map(shape, fn(row) {
+                  let #(trait, cells) = row
+                  html.tr([], [
+                    html.th(
+                      [
+                        attribute.scope("row"),
+                        css(cell <> "background:#fff;font-weight:600"),
+                      ],
+                      [html.text(trait)],
+                    ),
+                    ..list.map(cells, fn(text) {
+                      html.td([css(cell <> "background:#fff")], [
+                        html.text(text),
+                      ])
+                    })
+                  ])
+                }),
+              ),
+            ],
+          ),
+        ],
       ),
     ]),
     html.div([class("note"), css("margin-top:16px")], [

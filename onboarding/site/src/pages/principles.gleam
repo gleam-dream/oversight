@@ -73,7 +73,7 @@ pub type Msg {
   HerdTicked(run: Int)
   ReaderPickedDefinition(Definition)
   ReaderSetFirstToken(Int)
-  ReaderSetLongestGap(Int)
+  ReaderSetFirstGap(Int)
   ReaderSetWholeCall(Int)
   ProviderBehaved(Provider)
   Tour(TourId, tour.Command)
@@ -140,15 +140,15 @@ pub fn update(
     )
 
     ReaderSetFirstToken(seconds) -> #(
-      Model(..model, provider: Provider(..model.provider, first_token: seconds)),
+      Model(..model, provider: bounds.set_first_token(model.provider, seconds)),
       effect.none(),
     )
-    ReaderSetLongestGap(seconds) -> #(
-      Model(..model, provider: Provider(..model.provider, longest_gap: seconds)),
+    ReaderSetFirstGap(seconds) -> #(
+      Model(..model, provider: bounds.set_first_gap(model.provider, seconds)),
       effect.none(),
     )
     ReaderSetWholeCall(seconds) -> #(
-      Model(..model, provider: Provider(..model.provider, whole_call: seconds)),
+      Model(..model, provider: bounds.set_whole_call(model.provider, seconds)),
       effect.none(),
     )
     ProviderBehaved(provider) -> #(Model(..model, provider:), effect.none())
@@ -263,13 +263,14 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           send([ReaderRetriedCharge]),
         ),
         tour.act(
-          "Now turn the key on and retry. The provider has seen this key, replays the stored answer, and charges nothing new.",
-          fn(model: Model) {
-            case model.happen.key {
-              happen.WithKey -> [ReaderRetriedCharge]
-              happen.WithoutKey -> [ReaderToggledKey, ReaderRetriedCharge]
-            }
-          },
+          "Now a separate run, with the key on from the first request. The retry reuses the key, so the provider replays the stored answer: one charge, not two.",
+          send([
+            ChargeReset,
+            ReaderBrokeConnection(happen.WhileProviderWorks),
+            ReaderPeekedBehindCurtain,
+            ReaderToggledKey,
+            ReaderRetriedCharge,
+          ]),
         ),
         tour.act(
           "Losing the reply looks exactly the same to your code. That’s why MaybeSent exists. Break the network yourself now.",
@@ -292,7 +293,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
         )
           |> tour.lasting(5200),
         tour.act(
-          "Backoff with random jitter: the waves dissolve and retries fit under the capacity line.",
+          "Backoff with random jitter: the waves dissolve and far fewer retries are turned away, though the first ones still top the capacity line.",
           send([ReaderPickedSchedule(herd.Jittered)]),
         )
           |> tour.lasting(5200),
@@ -842,7 +843,7 @@ fn did_it_happen(state: happen.Happen) -> List(Element(Msg)) {
             ),
           ]),
           html.span([css("font-size:15px;max-width:520px")], [
-            html.text(happen.note_text(state.note)),
+            html.text(happen.note_text(happen.note(state))),
           ]),
         ]),
       ],
@@ -1258,16 +1259,16 @@ fn bounded(provider: Provider) -> List(Element(Msg)) {
           ReaderSetFirstToken,
         ),
         slider(
-          "Longest gap between chunks:",
-          provider.longest_gap,
+          "Gap after the first token:",
+          provider.first_gap,
           #(0, 120, 5),
           "limit 60 s",
-          ReaderSetLongestGap,
+          ReaderSetFirstGap,
         ),
         slider(
           "Whole call:",
           provider.whole_call,
-          #(10, 900, 10),
+          #(bounds.whole_call_step, 900, bounds.whole_call_step),
           "limit 600 s",
           ReaderSetWholeCall,
         ),

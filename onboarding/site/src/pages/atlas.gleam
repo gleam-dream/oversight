@@ -111,7 +111,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
             fn(_) { [ReaderPickedPackage(packages.Fabric)] },
           ),
           tour.act(
-            "Or start from the job. \"Call an LLM\" lights up LLM Wire, and everything else fades.",
+            "Or start from the job. \"Call an LLM\" lights up JSON Blueprint and LLM Wire and selects JSON Blueprint. Everything else fades.",
             fn(_) { [ReaderPickedNeed(packages.CallModel)] },
           ),
           tour.act("\"Let a person decide\" leads to Decisions.", fn(_) {
@@ -166,7 +166,9 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
                   "flex:3 1 560px;display:flex;flex-direction:column;gap:10px",
                 ),
               ],
-              list.map(packages.layers, row(_, model)),
+              // The catalog lists layers bottom to top; the page draws the
+              // top row first.
+              list.map(list.reverse(packages.layers), row(_, model)),
             ),
             html.div([css("flex:2 1 340px;min-width:0")], [
               detail(model.selected),

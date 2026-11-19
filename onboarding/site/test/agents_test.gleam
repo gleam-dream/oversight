@@ -1,4 +1,5 @@
 import gleam/list
+import lustre/dev/query
 import pages/agents
 import pages/agents/gate
 import pages/agents/ladder
@@ -28,24 +29,74 @@ pub fn the_default_policy_runs_waits_and_denies_test() {
 }
 
 pub fn an_approval_lets_the_run_finish_test() {
-  let g = gate.answer(gate.new(), gate.RefundSetupCharge, gate.Approved)
+  let assert Ok(g) =
+    gate.answer(gate.new(), gate.RefundSetupCharge, gate.Approved)
   assert list.contains(outcomes(g), gate.ApprovedThenRan)
   assert gate.run(g) == gate.FinishedWithAnswer
-  let g = gate.answer(gate.new(), gate.RefundSetupCharge, gate.Rejected)
+  let assert Ok(g) =
+    gate.answer(gate.new(), gate.RefundSetupCharge, gate.Rejected)
   assert list.contains(outcomes(g), gate.RejectedByPerson)
   assert gate.run(g) == gate.FinishedWithAnswer
+  // A call that is not waiting for a person takes no answer.
+  assert gate.answer(g, gate.RefundSetupCharge, gate.Approved)
+    == Error(gate.NotAwaitingApproval)
+  assert gate.answer(g, gate.RefundLateFee, gate.Approved)
+    == Error(gate.NotAwaitingApproval)
 }
 
 pub fn handing_over_withdraws_the_rest_of_the_reply_test() {
-  let g =
-    gate.new()
-    |> gate.answer(gate.RefundSetupCharge, gate.Approved)
-    |> gate.set_rule(gate.SmallRefunds, gate.refund_desk)
+  let assert Ok(g) =
+    gate.answer(gate.new(), gate.RefundSetupCharge, gate.Approved)
+  let g = gate.set_rule(g, gate.SmallRefunds, gate.refund_desk)
   assert outcomes(g)
     == [gate.Ran(True), gate.HandedOver, gate.Withdrawn, gate.Withdrawn]
   assert gate.run(g) == gate.FinishedHandedOver
   // Rewriting a rule withdraws earlier answers.
   assert gate.reset_approvals(g).answers == g.answers
+}
+
+pub fn a_handover_voids_the_approvals_of_its_reply_test() {
+  // Small refunds wait for a person; large ones are handed over.
+  let g =
+    gate.new()
+    |> gate.set_rule(gate.SmallRefunds, gate.finance_approves)
+    |> gate.set_rule(gate.LargeRefunds, gate.refund_desk)
+  assert outcomes(g)
+    == [gate.Ran(True), gate.Withdrawn, gate.HandedOver, gate.Withdrawn]
+  assert gate.run(g) == gate.FinishedHandedOver
+  assert gate.answer(g, gate.RefundLateFee, gate.Approved)
+    == Error(gate.RunEnded)
+  assert gate.answer(g, gate.RefundLateFee, gate.Rejected)
+    == Error(gate.RunEnded)
+  // An allowed call of the same reply had not started either.
+  let g = gate.set_rule(g, gate.SmallRefunds, gate.Allow)
+  assert outcomes(g)
+    == [gate.Ran(True), gate.Withdrawn, gate.HandedOver, gate.Withdrawn]
+  // A denial earlier in the reply keeps its state.
+  let g = gate.set_rule(g, gate.SmallRefunds, gate.Deny("not today"))
+  assert outcomes(g)
+    == [
+      gate.Ran(True),
+      gate.Denied("not today"),
+      gate.HandedOver,
+      gate.Withdrawn,
+    ]
+  // The page: while the run is suspended, the answer is taken; once it is
+  // handed over, an answer changes nothing.
+  let model =
+    agents.init()
+    |> send(agents.ReaderSetRule(gate.SmallRefunds, gate.finance_approves))
+    |> send(agents.ReaderApprovedCall(gate.RefundLateFee))
+  assert list.key_find(gate.outcomes(model.gate), gate.RefundLateFee)
+    == Ok(gate.ApprovedThenRan)
+  let model =
+    model
+    |> send(agents.ReaderSetRule(gate.LargeRefunds, gate.refund_desk))
+  let handed_over = model.gate
+  let model = send(model, agents.ReaderApprovedCall(gate.RefundLateFee))
+  assert model.gate == handed_over
+  assert list.key_find(gate.outcomes(model.gate), gate.RefundLateFee)
+    == Ok(gate.Withdrawn)
 }
 
 pub fn a_denied_large_refund_carries_its_own_reason_test() {
@@ -143,9 +194,18 @@ pub fn the_gated_tool_can_refuse_or_be_unsure_test() {
   let unsure =
     point.set_tool(accepted, point.IsUnsure) |> point.perform(point.Release)
   assert unsure.occurrence.phase == point.Accepted
+  // Refused with nobody waiting: the occurrence settles, and finance is not
+  // asked for an approval the policy never required.
   let refused =
     point.set_tool(accepted, point.Refuses) |> point.perform(point.Release)
-  assert refused.occurrence.phase == point.Awaiting(0)
+  assert refused.occurrence.phase == point.Settled(point.Refused)
+  assert point.verbs(refused) == [point.StartAgain]
+  assert stages(refused) == ["recommended", "accepted", "refused"]
+  assert list.take(refused.occurrence.entries, 2)
+    == [
+      "refused",
+      "release check: Refuse (balance too low), with nobody waiting",
+    ]
   let held =
     point.new()
     |> point.publish(point.V3)
@@ -153,6 +213,88 @@ pub fn the_gated_tool_can_refuse_or_be_unsure_test() {
     |> point.perform(point.ReadPolicy)
     |> point.perform(point.EndHold)
   assert held.occurrence.phase == point.Settled(point.Refused)
+  assert list.first(held.occurrence.entries) == Ok("refused")
+  assert list.contains(
+    held.occurrence.entries,
+    "hold ended → release check: Refuse (balance too low)",
+  )
+}
+
+pub fn an_unsure_release_keeps_the_earlier_approval_test() {
+  let bia_approved =
+    point.new()
+    |> point.load(600, 95, point.V4)
+    |> point.perform(point.ReadPolicy)
+    |> point.perform(point.Approve)
+  assert bia_approved.occurrence.phase == point.Awaiting(1)
+  // Caio's approval would complete the verdict, but the tool cannot tell.
+  let unsure =
+    bia_approved
+    |> point.set_tool(point.IsUnsure)
+    |> point.perform(point.Approve)
+  assert unsure.occurrence.phase == point.Awaiting(1)
+  assert point.verb_label(unsure, point.Approve) == "Caio approves"
+  assert point.title(unsure) == "Awaiting finance (1 of 2)"
+  assert list.take(unsure.occurrence.entries, 2)
+    == [
+      "release attempt: tool Unsure (lost connection) → verb fails with ToolUnsure; nothing recorded as refused, try again",
+      "approve by Caio (2/2): attempted, not counted",
+    ]
+  // A retry that goes through settles it, on Bia's approval and Caio's.
+  let retried =
+    unsure |> point.set_tool(point.Allows) |> point.perform(point.Approve)
+  assert retried.occurrence.phase == point.Settled(point.Released)
+  assert list.contains(retried.occurrence.entries, "approve by Caio (2/2)")
+  // A refused verdict changes no status either.
+  let refused =
+    bia_approved
+    |> point.set_tool(point.Refuses)
+    |> point.perform(point.Approve)
+  assert refused.occurrence.phase == point.Awaiting(1)
+  assert point.verb_label(refused, point.Approve) == "Caio approves"
+}
+
+pub fn each_new_occurrence_has_its_own_key_test() {
+  let released =
+    point.new()
+    |> point.perform(point.ReadPolicy)
+    |> point.perform(point.Approve)
+  assert released.occurrence.phase == point.Settled(point.Released)
+  // Steps within one occurrence keep its key.
+  assert released.occurrence.key == point.first_key
+  let next = point.perform(released, point.StartAgain)
+  assert next.occurrence.key == point.first_key + 1
+  assert next.occurrence.entries
+    == ["recommend: refund €40 · confidence 95% · key msg-4472"]
+  // The page's "New occurrence" button does the same.
+  let model =
+    agents.init()
+    |> send(agents.ReaderPerformed(point.ReadPolicy))
+    |> send(agents.ReaderPerformed(point.Approve))
+    |> send(agents.ReaderStartedOccurrence)
+  assert model.point.occurrence.key == point.first_key + 1
+  let model = send(model, agents.ReaderStartedOccurrence)
+  assert model.point.occurrence.key == point.first_key + 2
+  // Every other fresh occurrence gets a new key too.
+  assert point.set_amount(released, 50).occurrence.key == point.first_key + 1
+  assert point.set_confidence(released, 80).occurrence.key
+    == point.first_key + 1
+  assert point.publish(released, point.V2).occurrence.key == point.first_key + 1
+  assert point.load(released, 43, 81, point.V4).occurrence.key
+    == point.first_key + 1
+}
+
+pub fn the_amount_slider_holds_any_whole_amount_test() {
+  let context = context.new(motion.On, progress.empty())
+  let model = send(agents.init(), agents.CaseLoaded(43, 81, point.V4))
+  let slider =
+    query.element(
+      query.attribute("type", "range")
+      |> query.and(query.attribute("max", "1000")),
+    )
+  let assert Ok(input) = query.find(agents.view(model, context), slider)
+  assert query.matches(input, query.attribute("value", "43"))
+  assert query.matches(input, query.attribute("step", "1"))
 }
 
 pub fn verbs_not_on_offer_change_nothing_test() {
@@ -166,7 +308,7 @@ pub fn changing_the_case_starts_a_new_occurrence_test() {
     point.new()
     |> point.perform(point.ReadPolicy)
     |> point.set_amount(120)
-  assert p.occurrence == point.recommend(120, 95)
+  assert p.occurrence == point.recommend(120, 95, point.first_key + 1)
 }
 
 pub fn each_version_reaches_its_share_of_recent_cases_test() {
@@ -188,6 +330,24 @@ pub fn the_cases_match_the_reference_draws_test() {
   assert ladder.fixed(ladder.x(first.drawn_amount), 1) == "232.5"
   assert ladder.fixed(ladder.y(first.drawn_confidence), 1) == "81.0"
   assert ladder.fixed(ladder.x(500.0), 1) == "620.7"
+}
+
+pub fn every_dot_sits_on_the_side_of_its_route_test() {
+  list.each(ladder.cases(), fn(c) {
+    let x = ladder.x(c.drawn_amount)
+    let y = ladder.y(c.drawn_confidence)
+    // Right of the dashed line is exactly what v4 sends to two people.
+    assert { x >=. ladder.two_approvals_x() }
+      == { ladder.route(point.V4, c) == ladder.AsksTwo }
+    // Inside the green zone is exactly what v2 lets proceed alone.
+    assert { x <. ladder.alone_right() && y <=. ladder.alone_bottom() }
+      == { ladder.route(point.V2, c) == ladder.ProceedsAlone }
+  })
+  // The seeded case the reviewer found: drawn at €498.21, read as €500.
+  let assert Ok(c) = list.find(ladder.cases(), fn(c) { c.amount == 500 })
+  assert ladder.fixed(c.drawn_amount, 2) == "498.21"
+  assert ladder.route(point.V4, c) == ladder.AsksTwo
+  assert ladder.x(c.drawn_amount) >. ladder.two_approvals_x()
 }
 
 pub fn the_tallies_match_the_reference_test() {
@@ -295,7 +455,7 @@ pub fn the_ladder_tour_and_a_dot_sent_up_test() {
   assert model.point.amount == 33
   assert model.point.confidence == 88
   assert model.point.version == point.V4
-  assert model.point.occurrence == point.recommend(33, 88)
+  assert model.point.occurrence == point.recommend(33, 88, point.first_key + 1)
 }
 
 pub fn a_keyboard_reader_can_send_any_case_up_test() {

@@ -97,15 +97,29 @@ pub fn set_expiry(queue: Queue, expiry: Abandonment) -> Queue {
   Queue(..queue, expiry:)
 }
 
-/// Six more rows, keeping the newest 21.
+/// The table keeps to this many rows while finished rows can make room.
+const kept_rows = 21
+
+/// Six more rows. Finished rows make room, oldest first, so the table keeps
+/// to 21 rows when it can; unfinished rows always stay.
 pub fn add_jobs(queue: Queue) -> Queue {
   let added =
     list.map(int_range(queue.next_id, queue.next_id + 5), fn(id) {
       Row(id:, state: Available, attempts: 0)
     })
   let rows = list.append(queue.rows, added)
-  let rows = list.drop(rows, int.max(0, list.length(rows) - 21))
+  let rows = prune_done(rows, list.length(rows) - kept_rows)
   Queue(..queue, rows:, next_id: queue.next_id + 6)
+}
+
+/// Drop up to `excess` finished rows, oldest first.
+fn prune_done(rows: List(Row), excess: Int) -> List(Row) {
+  case rows {
+    _ if excess <= 0 -> rows
+    [] -> []
+    [Row(state: Done, ..), ..rest] -> prune_done(rest, excess - 1)
+    [row, ..rest] -> [row, ..prune_done(rest, excess)]
+  }
 }
 
 /// Kill a live worker, or restart a dead one empty-handed.
@@ -154,17 +168,19 @@ fn put_worker(queue: Queue, index: Int, worker: Worker) -> Queue {
   )
 }
 
-fn alive(queue: Queue, index: Int) -> Bool {
-  case worker_at(queue, index) {
-    Some(Worker(Alive, _)) -> True
-    _ -> False
-  }
+/// Whether the worker is alive and its current claim is this row. A worker
+/// restarted empty-handed no longer holds the rows it claimed before.
+fn holds(queue: Queue, index: Int, id: Int) -> Bool {
+  worker_at(queue, index) == Some(Worker(Alive, Some(id)))
 }
 
-fn release(queue: Queue, index: Int) -> Queue {
+/// The row finished or its lease expired: its owner lets go of it, unless
+/// the owner has claimed another row since.
+fn release(queue: Queue, index: Int, id: Int) -> Queue {
   case worker_at(queue, index) {
-    Some(Worker(life, _)) -> put_worker(queue, index, Worker(life, None))
-    None -> queue
+    Some(Worker(life, Some(job))) if job == id ->
+      put_worker(queue, index, Worker(life, None))
+    _ -> queue
   }
 }
 
@@ -174,6 +190,19 @@ pub fn advance(queue: Queue, ticks: Int) -> Queue {
   case ticks <= 0 {
     True -> queue
     False -> advance(tick(queue), ticks - 1)
+  }
+}
+
+/// Let time pass until no lease is draining: every lease nobody renews has
+/// expired. A draining lease only shrinks, so this takes at most a full lease.
+pub fn advance_until_expired(queue: Queue) -> Queue {
+  wait_for_expiry(queue, lease_ticks)
+}
+
+fn wait_for_expiry(queue: Queue, budget: Int) -> Queue {
+  case budget > 0 && list.any(queue.rows, draining(queue, _)) {
+    True -> wait_for_expiry(tick(queue), budget - 1)
+    False -> queue
   }
 }
 
@@ -194,7 +223,7 @@ fn renew(queue: Queue) -> Queue {
         list.map_fold(queue.rows, 0, fn(renewed, row) {
           case row.state {
             Running(owner:, ..) as running ->
-              case alive(queue, owner) {
+              case holds(queue, owner, row.id) {
                 True -> #(
                   renewed + 1,
                   Row(..row, state: Running(..running, lease: lease_ticks)),
@@ -298,7 +327,7 @@ fn work_row(queue: Queue, id: Int) -> Queue {
             False -> put_row(queue, Row(..row, state: RetryLater(wait - 1)))
           }
         Running(owner:, lease:, work:, work0:) ->
-          case alive(queue, owner) {
+          case holds(queue, owner, row.id) {
             True ->
               case work - 1 <= 0 {
                 False ->
@@ -309,7 +338,7 @@ fn work_row(queue: Queue, id: Int) -> Queue {
                       state: Running(owner:, lease:, work: work - 1, work0:),
                     ),
                   )
-                True -> finish(release(queue, owner), row)
+                True -> finish(release(queue, owner, row.id), row)
               }
             False ->
               case lease - 1 <= 0 {
@@ -321,7 +350,7 @@ fn work_row(queue: Queue, id: Int) -> Queue {
                       state: Running(owner:, lease: lease - 1, work:, work0:),
                     ),
                   )
-                True -> expire(release(queue, owner), row)
+                True -> expire(release(queue, owner, row.id), row)
               }
           }
         Available | Done | HeldUncertain -> queue
@@ -387,10 +416,11 @@ fn put_row(queue: Queue, row: Row) -> Queue {
 
 // READING ---------------------------------------------------------------------
 
-/// Whether a running row's owner is dead, so its lease drains.
+/// Whether a running row's owner no longer holds it, because it died or was
+/// restarted, so nobody renews the lease and it drains.
 pub fn draining(queue: Queue, row: Row) -> Bool {
   case row.state {
-    Running(owner:, ..) -> !alive(queue, owner)
+    Running(owner:, ..) -> !holds(queue, owner, row.id)
     _ -> False
   }
 }

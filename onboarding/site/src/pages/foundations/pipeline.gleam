@@ -57,6 +57,18 @@ pub fn observer_seconds(observer: Observer) -> Float {
   }
 }
 
+/// Events per second the forwarder hands to the observer in this model: one
+/// at a time, each a hop to the observer and then the observer's run.
+pub fn forwarder_drain(observer: Observer) -> Float {
+  1.0 /. { hop +. observer_seconds(observer) }
+}
+
+/// Whether a routed forwarder drains faster than the requests asked for
+/// arrive. When it does not, its queue fills and it drops new events.
+pub fn forwarder_keeps_up(settings: Settings) -> Bool {
+  int.to_float(settings.rate) <. forwarder_drain(settings.observer)
+}
+
 // SIMULATION ------------------------------------------------------------------
 
 /// Where one event is. Stages that move carry the time they started.
@@ -148,7 +160,7 @@ pub fn step(sim: Sim, settings: Settings, dt: Float) -> Sim {
   let sim = Sim(..sim, clock: t)
   let sim = emit_due(sim, settings, inline, dt)
   let sim = travel(sim)
-  let sim = pick_up(sim, inline)
+  let sim = pick_up(sim)
   let sim = finish(sim, observer_seconds(settings.observer))
   Sim(
     ..sim,
@@ -245,9 +257,11 @@ fn travel(sim: Sim) -> Sim {
   Sim(..sim, events: list.reverse(events), dropped: sim.dropped + dropped)
 }
 
-/// A free observer takes the first waiting event; otherwise a routed
-/// forwarder sends its oldest queued event on, one at a time.
-fn pick_up(sim: Sim, inline: Bool) -> Sim {
+/// A free observer takes the first waiting event; otherwise the forwarder
+/// sends its oldest queued event on, one at a time. It finishes the events it
+/// already holds even after the reader switches to inline, so every event
+/// ends delivered or dropped.
+fn pick_up(sim: Sim) -> Sim {
   let t = sim.clock
   case observing(sim) {
     Some(_) -> sim
@@ -262,7 +276,7 @@ fn pick_up(sim: Sim, inline: Bool) -> Sim {
                 _ -> False
               }
             })
-          case inline || sending {
+          case sending {
             True -> sim
             False ->
               case
@@ -335,6 +349,13 @@ pub fn ease(sim: Sim) -> Sim {
       }
     })
   Sim(..sim, events: list.reverse(events))
+}
+
+/// Draw the current state again without moving it: what the widget does with
+/// motion off. Unlike a zero-length frame, it never emits an event that is
+/// due, so a reset pipeline stays empty until it is advanced.
+pub fn redraw(sim: Sim) -> Sim {
+  ease(sim)
 }
 
 /// One drawn frame: step unless paused, then ease the queue into place.

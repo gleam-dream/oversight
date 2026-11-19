@@ -1,5 +1,7 @@
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
+import lustre/element
 import pages/otp
 import pages/otp/cart
 import pages/otp/libraries
@@ -55,23 +57,52 @@ pub fn the_actor_chart_keeps_its_latest_nine_events_test() {
   assert list.length(shop.events) == 9
 }
 
+pub fn a_caller_waiting_for_a_reply_sends_nothing_else_test() {
+  // A's "get total" is a call, so the removal behind it comes from B.
+  let assert [_, _, total, removal] = cart.new().mailbox
+  assert total == cart.Request(cart.Total, cart.RequestA)
+  assert removal == cart.Request(cart.Remove("Book"), cart.RequestB)
+  assert list.drop(cart.new().events, 3)
+    == [msc.send(1, 2, "remove Book", msc.Ink)]
+  // While A's call waits in the mailbox, neither caller may burst.
+  assert !cart.can_burst(cart.new())
+  assert cart.burst(cart.new()) == cart.new()
+  let answered =
+    cart.new() |> cart.handle_next |> cart.handle_next |> cart.handle_next
+  assert cart.can_burst(answered)
+  let burst = cart.burst(answered)
+  assert list.length(burst.mailbox) == 3
+  // B's call is now queued: a second burst would send from a waiting caller.
+  assert !cart.can_burst(burst)
+  assert cart.burst(burst) == burst
+}
+
 // THE SUPERVISION TREE --------------------------------------------------------
 
 fn statuses(tree: supervision.Tree) -> List(supervision.Status) {
   list.map(tree.children, fn(c) { c.status })
 }
 
+/// The restart a crash scheduled.
+fn scheduled(
+  crashed: #(supervision.Tree, option.Option(supervision.Restart)),
+) -> #(supervision.Tree, supervision.Restart) {
+  let assert #(tree, Some(restart)) = crashed
+  #(tree, restart)
+}
+
 pub fn one_for_one_restarts_only_the_crashed_child_test() {
-  let #(tree, restarting) = supervision.crash(supervision.new(0), HttpClient)
-  assert restarting == [HttpClient]
+  let #(tree, restart) =
+    supervision.crash(supervision.new(0), HttpClient) |> scheduled
+  assert supervision.waiting_for(tree, restart) == [HttpClient]
   assert statuses(tree)
     == [
       supervision.Running,
-      supervision.Crashed,
+      supervision.Crashed(restart.id),
       supervision.Running,
       supervision.Running,
     ]
-  let tree = supervision.restart(tree, tree.epoch, restarting)
+  let tree = supervision.restart(tree, restart)
   assert list.all(statuses(tree), fn(s) { s == supervision.Running })
   assert list.map(tree.children, fn(c) { c.pid }) == [201, 211, 203, 204]
   assert supervision.news_text(tree.news)
@@ -84,37 +115,109 @@ pub fn strategies_pick_who_restarts_test() {
   assert supervision.affected(OneForAll, WebServer)
     == [DatabasePool, HttpClient, JobRuntime, WebServer]
   let tree = supervision.pick(supervision.new(0), RestForOne)
-  let #(tree, _) = supervision.crash(tree, JobRuntime)
+  let #(tree, restart) = supervision.crash(tree, JobRuntime) |> scheduled
   assert statuses(tree)
     == [
       supervision.Running,
       supervision.Running,
-      supervision.Crashed,
-      supervision.Restarting,
+      supervision.Crashed(restart.id),
+      supervision.Restarting(restart.id),
     ]
 }
 
+pub fn a_group_stops_in_reverse_start_order_and_starts_in_start_order_test() {
+  let tree = supervision.pick(supervision.new(0), RestForOne)
+  let #(tree, restart) = supervision.crash(tree, HttpClient) |> scheduled
+  assert list.drop(tree.events, 2)
+    == [
+      msc.send(0, 4, "stop", msc.Amber),
+      msc.send(0, 3, "stop", msc.Amber),
+    ]
+  let before = list.length(tree.events)
+  let tree = supervision.restart(tree, restart)
+  assert list.drop(tree.events, before)
+    == [
+      msc.send(0, 2, "start", msc.Green),
+      msc.send(0, 3, "start", msc.Green),
+      msc.send(0, 4, "start", msc.Green),
+    ]
+  let tree = supervision.pick(tree, OneForAll)
+  let #(tree, _) = supervision.crash(tree, JobRuntime) |> scheduled
+  assert list.reverse(tree.events) |> list.take(3)
+    == [
+      msc.send(0, 1, "stop", msc.Amber),
+      msc.send(0, 2, "stop", msc.Amber),
+      msc.send(0, 4, "stop", msc.Amber),
+    ]
+}
+
+pub fn a_later_crash_supersedes_a_pending_restart_test() {
+  // HTTP crashes under one-for-one; before its restart, the database pool
+  // crashes under one-for-all and takes HTTP into the group restart.
+  let #(tree, first) =
+    supervision.crash(supervision.new(0), HttpClient) |> scheduled
+  let tree = supervision.pick(tree, OneForAll)
+  let #(tree, group) = supervision.crash(tree, DatabasePool) |> scheduled
+  assert supervision.waiting_for(tree, first) == []
+  assert supervision.waiting_for(tree, group)
+    == [DatabasePool, HttpClient, JobRuntime, WebServer]
+  // The older restart fires first and starts nobody.
+  let early = supervision.restart(tree, first)
+  assert early == tree
+  // The group restart starts each child once, in start order.
+  let tree = supervision.restart(early, group)
+  assert list.all(statuses(tree), fn(s) { s == supervision.Running })
+  assert list.map(tree.children, fn(c) { c.pid }) == [211, 212, 213, 214]
+  assert list.map(tree.children, fn(c) { c.restarts }) == [1, 1, 1, 1]
+  assert list.reverse(tree.events) |> list.take(4) |> list.reverse
+    == [
+      msc.send(0, 1, "start", msc.Green),
+      msc.send(0, 2, "start", msc.Green),
+      msc.send(0, 3, "start", msc.Green),
+      msc.send(0, 4, "start", msc.Green),
+    ]
+  // Firing again changes nothing.
+  assert supervision.restart(tree, group) == tree
+}
+
+pub fn independent_restarts_each_start_their_own_children_test() {
+  let #(tree, http) =
+    supervision.crash(supervision.new(0), HttpClient) |> scheduled
+  let #(tree, web) = supervision.crash(tree, WebServer) |> scheduled
+  let tree = supervision.restart(tree, http)
+  assert statuses(tree)
+    == [
+      supervision.Running,
+      supervision.Running,
+      supervision.Running,
+      supervision.Crashed(web.id),
+    ]
+  let tree = supervision.restart(tree, web)
+  assert list.all(statuses(tree), fn(s) { s == supervision.Running })
+}
+
 pub fn a_fourth_crash_in_the_window_escalates_test() {
-  let tree =
+  let #(tree, pending) =
     list.fold(
       [HttpClient, HttpClient, JobRuntime],
-      supervision.new(0),
-      fn(t, c) { supervision.crash(t, c).0 },
+      #(supervision.new(0), None),
+      fn(acc, c) { supervision.crash(acc.0, c) },
     )
   assert supervision.shown_window(tree) == 3
-  let #(tree, restarting) = supervision.crash(tree, DatabasePool)
-  assert restarting == []
+  let #(tree, restart) = supervision.crash(tree, DatabasePool)
+  assert restart == None
   assert tree.supervisor == supervision.GaveUp
   assert supervision.shown_window(tree) == 3
   assert statuses(tree)
     == [
-      supervision.Crashed,
+      supervision.CrashedForGood,
       supervision.Stopped,
       supervision.Stopped,
       supervision.Stopped,
     ]
   // A restart that was still pending changes nothing once the supervisor gave up.
-  assert supervision.restart(tree, tree.epoch, [HttpClient]) == tree
+  let assert Some(pending) = pending
+  assert supervision.restart(tree, pending) == tree
   // Further crashes are ignored and waiting does not revive it.
   assert supervision.crash(tree, WebServer).0 == tree
   let waited = supervision.wait(tree)
@@ -130,10 +233,13 @@ pub fn waiting_clears_the_restart_window_test() {
 }
 
 pub fn a_restart_scheduled_before_a_reset_is_ignored_test() {
-  let #(tree, restarting) = supervision.crash(supervision.new(0), HttpClient)
-  let stale = tree.epoch
+  let #(tree, restart) =
+    supervision.crash(supervision.new(0), HttpClient) |> scheduled
   let tree = supervision.reset(tree)
-  assert supervision.restart(tree, stale, restarting) == tree
+  assert supervision.restart(tree, restart) == tree
+  // The first restart of the new epoch has the same number, not the same epoch.
+  let #(tree, _) = supervision.crash(tree, WebServer)
+  assert supervision.restart(tree, restart) == tree
 }
 
 // THE MAILBOX SIMULATION ------------------------------------------------------
@@ -204,6 +310,34 @@ pub fn queued_messages_settle_into_their_slots_test() {
   assert list.length(shown) <= mailbox.visible_slots + 1
 }
 
+fn steps(sim: mailbox.Sim, n: Int, mode: mailbox.Mode, rate: Int) {
+  list.fold(list.repeat(Nil, n), sim, fn(sim, _) {
+    mailbox.step(sim, 0.05, mode, rate)
+  })
+}
+
+pub fn callers_stay_blocked_after_switching_to_send_test() {
+  // At 12 calls a second all four callers launch before any reply is back.
+  let sim = mailbox.new() |> mailbox.step(0.0, Call, 12) |> steps(6, Call, 12)
+  assert sim.sent == 4
+  assert mailbox.blocked(sim) == [True, True, True, True]
+  // Switching to send launches nothing until a reply frees a caller.
+  let sim = steps(sim, 6, Send, 12)
+  assert sim.sent == 4
+  assert mailbox.blocked(sim) == [True, True, True, True]
+  // Once replies are back, sends go out again.
+  let sim = steps(sim, 40, Send, 12)
+  assert sim.sent > 4
+}
+
+pub fn sends_skip_a_caller_waiting_for_its_reply_test() {
+  // Caller 0 makes a call, then the reader switches to sends.
+  let sim = mailbox.new() |> mailbox.step(0.0, Call, 12) |> steps(10, Send, 12)
+  assert sim.sent >= 5
+  assert list.first(mailbox.blocked(sim)) == Ok(True)
+  assert list.all(sim.tokens, fn(t) { t.kind == Call || t.caller != 0 })
+}
+
 // THE WIDGET'S ATTRIBUTES -----------------------------------------------------
 
 pub fn commands_survive_their_attribute_test() {
@@ -264,13 +398,14 @@ pub fn the_tree_tour_ends_in_escalation_test() {
   let model = next(otp.init(), otp.TreeTour, 1)
   assert model.tree.strategy == OneForOne
   // Let the supervisor restart in between, as a playing tour would.
-  let restart = fn(model: otp.Model, children) {
-    run(model, otp.SupervisorRestarted(model.tree.epoch, children), motion.On)
+  let restart = fn(model: otp.Model) {
+    let latest = supervision.Restart(model.tree.epoch, model.tree.last_restart)
+    run(model, otp.SupervisorRestarted(latest), motion.On)
   }
-  let model = restart(model, [HttpClient])
+  let model = restart(model)
   let model = next(model, otp.TreeTour, 1)
   assert model.tree.strategy == RestForOne
-  let model = restart(model, [HttpClient, JobRuntime, WebServer])
+  let model = restart(model)
   let model = next(model, otp.TreeTour, 1)
   assert model.tree.strategy == OneForAll
   assert model.tree.window == 3
@@ -302,6 +437,43 @@ pub fn without_motion_the_load_tour_advances_the_widget_test() {
   assert model.load.commands.advances == 1
   assert model.load.commands.advance_mode == Send
   assert model.load.commands.advance_rate == 8
+  // The call step runs two simulated seconds under call, so replies return.
+  let model = still(model, tour.Next)
+  assert model.load.mode == Call
+  assert model.load.commands.advances == 3
+  assert model.load.commands.advance_mode == Call
+}
+
+pub fn the_call_step_without_motion_shows_replies_test() {
+  // The widget's simulation as the motion-off tour drives it.
+  let sim =
+    mailbox.new()
+    |> mailbox.step(0.0, Send, 3)
+    |> mailbox.step(0.0, Send, 8)
+    |> mailbox.advance_second(Send, 8)
+    |> mailbox.step(0.0, Call, 8)
+    |> mailbox.advance_second(Call, 8)
+    |> mailbox.advance_second(Call, 8)
+  assert list.any(sim.tokens, fn(t) {
+    case t.state {
+      mailbox.Replying(_) -> True
+      _ -> False
+    }
+  })
+  assert mailbox.waiting(sim) == 0
+}
+
+pub fn the_restart_window_says_it_runs_on_simulated_time_test() {
+  let assert Ok(escalation) =
+    otp.script(otp.TreeTour, motion.On).steps |> list.drop(4) |> list.first
+  assert string.contains(escalation.text, "simulated time")
+  let page =
+    otp.view(otp.init(), context.new(motion.On, progress.empty()))
+    |> element.to_string
+  assert string.contains(
+    page,
+    "Those 5 seconds are simulated: real time never clears the window",
+  )
 }
 
 pub fn the_plug_tour_visits_three_libraries_test() {

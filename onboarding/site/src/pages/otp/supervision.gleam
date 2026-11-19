@@ -3,12 +3,15 @@
 //// A fourth crash inside the window makes the supervisor give up and
 //// escalate.
 ////
-//// Restarts happen a moment after a crash. `crash` reports which children
-//// the supervisor will restart; the page schedules `restart` for them under
-//// the tree's epoch, so a restart scheduled before a reset is ignored.
+//// Restarts happen a moment after a crash. `crash` reports the restart the
+//// supervisor scheduled; the page runs `restart` with it later. Each child
+//// waiting to start again names the restart that will start it, so a later
+//// crash that takes a child into a newer restart supersedes the older one
+//// for that child, and a restart scheduled before a reset is ignored.
 
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import site/msc
 
@@ -33,11 +36,20 @@ pub const children = [DatabasePool, HttpClient, JobRuntime, WebServer]
 
 pub type Status {
   Running
-  Crashed
-  /// Stopped by the supervisor, about to start again.
-  Restarting
+  /// Crashed; restart number `restart` will start it again.
+  Crashed(restart: Int)
+  /// Stopped by the supervisor; restart number `restart` will start it again.
+  Restarting(restart: Int)
+  /// Crashed, and nothing will start it again: the supervisor gave up.
+  CrashedForGood
   /// Stopped for good: the supervisor gave up.
   Stopped
+}
+
+/// A restart the supervisor scheduled: the tree's epoch when it was
+/// scheduled, and its number within that epoch.
+pub type Restart {
+  Restart(epoch: Int, id: Int)
 }
 
 pub type ChildState {
@@ -71,6 +83,8 @@ pub type Tree {
     events: List(msc.Event),
     /// Bumped on every reset; a restart carries the epoch it was scheduled in.
     epoch: Int,
+    /// The number of the latest restart scheduled in this epoch.
+    last_restart: Int,
   )
 }
 
@@ -92,6 +106,7 @@ pub fn new(epoch: Int) -> Tree {
     news: AllRunning,
     events: [],
     epoch:,
+    last_restart: 0,
   )
 }
 
@@ -104,11 +119,11 @@ pub fn pick(tree: Tree, strategy: Strategy) -> Tree {
   Tree(..tree, strategy:)
 }
 
-/// A child crashes. Returns the next tree and the children the supervisor
-/// will restart, if any.
-pub fn crash(tree: Tree, child: Child) -> #(Tree, List(Child)) {
+/// A child crashes. Returns the next tree and the restart the supervisor
+/// scheduled, if any.
+pub fn crash(tree: Tree, child: Child) -> #(Tree, Option(Restart)) {
   case tree.supervisor {
-    GaveUp -> #(tree, [])
+    GaveUp -> #(tree, None)
     Watching -> {
       let window = tree.window + 1
       let at = lane(child)
@@ -120,7 +135,7 @@ pub fn crash(tree: Tree, child: Child) -> #(Tree, List(Child)) {
             supervisor: GaveUp,
             children: list.map(tree.children, fn(c) {
               ChildState(..c, status: case c.child == child {
-                True -> Crashed
+                True -> CrashedForGood
                 False -> Stopped
               })
             }),
@@ -133,22 +148,26 @@ pub fn crash(tree: Tree, child: Child) -> #(Tree, List(Child)) {
             ),
             news: Escalated(child),
           ),
-          [],
+          None,
         )
         False -> {
           let affected = affected(tree.strategy, child)
+          let id = tree.last_restart + 1
+          // The supervisor stops the others in reverse start order.
           let stops =
             affected
             |> list.filter(fn(c) { c != child })
+            |> list.reverse
             |> list.map(fn(c) { msc.send(0, lane(c), "stop", msc.Amber) })
           #(
             Tree(
               ..tree,
               window:,
+              last_restart: id,
               children: list.map(tree.children, fn(c) {
                 case c.child == child, list.contains(affected, c.child) {
-                  True, _ -> ChildState(..c, status: Crashed)
-                  False, True -> ChildState(..c, status: Restarting)
+                  True, _ -> ChildState(..c, status: Crashed(id))
+                  False, True -> ChildState(..c, status: Restarting(id))
                   False, False -> c
                 }
               }),
@@ -164,7 +183,7 @@ pub fn crash(tree: Tree, child: Child) -> #(Tree, List(Child)) {
                 ]),
               ),
             ),
-            affected,
+            Some(Restart(epoch: tree.epoch, id:)),
           )
         }
       }
@@ -181,15 +200,16 @@ pub fn affected(strategy: Strategy, crashed: Child) -> List(Child) {
   }
 }
 
-/// The supervisor restarts children from a clean state, in start order. A
-/// restart scheduled before a reset, or after the supervisor gave up, does
-/// nothing.
-pub fn restart(tree: Tree, epoch: Int, affected: List(Child)) -> Tree {
-  case epoch == tree.epoch, tree.supervisor {
+/// The supervisor restarts children from a clean state, in start order. It
+/// starts only the children still waiting for this restart: a child a later
+/// crash took into a newer restart waits for that one instead. A restart
+/// scheduled before a reset, or after the supervisor gave up, does nothing.
+pub fn restart(tree: Tree, restart: Restart) -> Tree {
+  case restart.epoch == tree.epoch, tree.supervisor {
     True, Watching -> {
       let #(last_pid, children) =
         list.map_fold(tree.children, tree.last_pid, fn(pid, c) {
-          case list.contains(affected, c.child) {
+          case pending(c.status) == Some(restart.id) {
             True -> #(
               pid + 1,
               ChildState(
@@ -202,18 +222,46 @@ pub fn restart(tree: Tree, epoch: Int, affected: List(Child)) -> Tree {
             False -> #(pid, c)
           }
         })
-      Tree(
-        ..tree,
-        children:,
-        last_pid:,
-        news: RestartedFresh(affected),
-        events: cap(list.append(
-          tree.events,
-          list.map(affected, fn(c) { msc.send(0, lane(c), "start", msc.Green) }),
-        )),
-      )
+      case waiting_for(tree, restart) {
+        [] -> tree
+        started ->
+          Tree(
+            ..tree,
+            children:,
+            last_pid:,
+            news: RestartedFresh(started),
+            events: cap(list.append(
+              tree.events,
+              list.map(started, fn(c) {
+                msc.send(0, lane(c), "start", msc.Green)
+              }),
+            )),
+          )
+      }
     }
     _, _ -> tree
+  }
+}
+
+/// The children still waiting for a restart, in start order.
+pub fn waiting_for(tree: Tree, restart: Restart) -> List(Child) {
+  case restart.epoch == tree.epoch {
+    False -> []
+    True ->
+      list.filter_map(tree.children, fn(c) {
+        case pending(c.status) == Some(restart.id) {
+          True -> Ok(c.child)
+          False -> Error(Nil)
+        }
+      })
+  }
+}
+
+/// The restart a child is waiting for, if any.
+fn pending(status: Status) -> Option(Int) {
+  case status {
+    Crashed(restart:) | Restarting(restart:) -> Some(restart)
+    Running | CrashedForGood | Stopped -> None
   }
 }
 
@@ -290,8 +338,8 @@ pub fn child_what(child: Child) -> String {
 pub fn status_label(status: Status) -> String {
   case status {
     Running -> "running"
-    Crashed -> "crashed"
-    Restarting -> "restarting"
+    Crashed(..) | CrashedForGood -> "crashed"
+    Restarting(..) -> "restarting"
     Stopped -> "stopped"
   }
 }

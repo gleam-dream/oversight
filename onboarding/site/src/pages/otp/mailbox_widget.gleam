@@ -259,9 +259,11 @@ fn run(model: Model, commands: Commands) -> Model {
 fn view(model: Model) -> Element(Msg) {
   let sim = model.sim
   let call = model.mode == Call
+  // A caller stays blocked until its reply is back, in either mode.
   let blocked = mailbox.blocked(sim)
+  let replies_due = list.any(blocked, fn(b) { b })
   let waiting = mailbox.waiting(sim)
-  let lane_opacity = case call {
+  let lane_opacity = case call || replies_due {
     True -> "1"
     False -> "0.15"
   }
@@ -287,7 +289,7 @@ fn view(model: Model) -> Element(Msg) {
             attribute("cx", int.to_string(50 + i * 30)),
             attribute("cy", "96"),
             attribute("r", "10"),
-            attribute("fill", case call && blocked {
+            attribute("fill", case blocked {
               True -> "#7C4DCC"
               False -> "#FFFFFF"
             }),
@@ -303,10 +305,11 @@ fn view(model: Model) -> Element(Msg) {
         11,
         "",
         "#5B5970",
-        case call, list.all(blocked, fn(b) { b }) {
-          True, True -> "all 4 waiting for replies"
-          True, False -> "calling, then waiting"
-          False, _ -> "sending, never waiting"
+        case call, list.all(blocked, fn(b) { b }), replies_due {
+          True, True, _ -> "all 4 waiting for replies"
+          True, False, _ -> "calling, then waiting"
+          False, _, True -> "sending, some awaiting replies"
+          False, _, False -> "sending, never waiting"
         },
       ),
       dashed_line(172, 96, 420, "#D5D1C8", "1"),

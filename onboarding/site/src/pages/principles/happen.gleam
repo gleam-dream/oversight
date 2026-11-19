@@ -4,6 +4,7 @@
 
 import gleam/int
 import gleam/list
+import gleam/pair
 import gleam/string
 import site/msc
 
@@ -50,7 +51,13 @@ pub type Retries {
   Retried(at: Break, key: Key, count: Int)
 }
 
-/// The sentence beside the retry button.
+/// What the note asks of the reader while no retry is shown.
+pub type Prompt {
+  AskForAMoment
+  AskForARetry
+}
+
+/// The sentence beside the retry button, derived from the state by `note`.
 pub type Note {
   ChooseAMoment
   ConnectionDrops(Break)
@@ -60,17 +67,34 @@ pub type Note {
 pub type Verdict {
   /// A definite answer was already in hand; a keyless retry is a new charge.
   AlreadyAnswered
-  /// A definite answer was in hand, and the key made the retry harmless.
+  /// The key matched a stored answer, so the retry charged nothing new.
   SameKeyReplaysAnswer
   SafeBecauseNotSent
   KeyReplayedOriginal
   KeyChargedNow
-  ChargedTwice
+  /// A keyless retry charged the card again: `times` charges in all.
+  ChargedAgain(times: Int)
   GotLucky
 }
 
+/// What one retry did at the provider.
+pub type Outcome {
+  /// The key matched a stored result, which the provider replayed.
+  Replayed
+  /// The card was charged for the first time.
+  ChargedFirst
+  /// The card was charged once more: `times` charges in all.
+  ChargedExtra(times: Int)
+}
+
 pub type Happen {
-  Happen(at: Break, curtain: Curtain, key: Key, retries: Retries, note: Note)
+  Happen(
+    at: Break,
+    curtain: Curtain,
+    key: Key,
+    retries: Retries,
+    prompt: Prompt,
+  )
 }
 
 pub fn initial() -> Happen {
@@ -79,14 +103,14 @@ pub fn initial() -> Happen {
     curtain: Hidden,
     key: WithoutKey,
     retries: NoRetries,
-    note: ChooseAMoment,
+    prompt: AskForAMoment,
   )
 }
 
 // TRANSITIONS -----------------------------------------------------------------
 
 pub fn break_at(happen: Happen, at: Break) -> Happen {
-  Happen(..happen, at:, curtain: Hidden, note: ConnectionDrops(at))
+  Happen(..happen, at:, curtain: Hidden, prompt: AskForARetry)
 }
 
 pub fn peek(happen: Happen) -> Happen {
@@ -101,16 +125,6 @@ pub fn toggle_key(happen: Happen) -> Happen {
 }
 
 pub fn retry(happen: Happen) -> Happen {
-  let charged = charged_before_retry(happen.at)
-  let verdict = case evidence(happen.at), happen.key, charged {
-    Answered, WithKey, _ -> SameKeyReplaysAnswer
-    Answered, WithoutKey, _ -> AlreadyAnswered
-    NotSent, _, _ -> SafeBecauseNotSent
-    MaybeSent, WithKey, True -> KeyReplayedOriginal
-    MaybeSent, WithKey, False -> KeyChargedNow
-    MaybeSent, WithoutKey, True -> ChargedTwice
-    MaybeSent, WithoutKey, False -> GotLucky
-  }
   Happen(
     ..happen,
     retries: Retried(
@@ -118,7 +132,7 @@ pub fn retry(happen: Happen) -> Happen {
       key: happen.key,
       count: retries_shown(happen) + 1,
     ),
-    note: Retry(verdict),
+    prompt: AskForARetry,
   )
 }
 
@@ -127,6 +141,43 @@ pub fn retries_shown(happen: Happen) -> Int {
   case happen.retries {
     Retried(at:, key:, count:) if at == happen.at && key == happen.key -> count
     _ -> 0
+  }
+}
+
+/// What each retry shown did at the provider, oldest first. The ledger and
+/// the note both read it, so they always agree.
+pub fn outcomes(happen: Happen) -> List(Outcome) {
+  let keyed = happen.key == WithKey
+  list.repeat(Nil, retries_shown(happen))
+  |> list.map_fold(charges_before_retry(happen.at), fn(charges, _) {
+    case keyed && charges > 0, charges + 1 {
+      True, _ -> #(charges, Replayed)
+      False, 1 -> #(1, ChargedFirst)
+      False, times -> #(times, ChargedExtra(times))
+    }
+  })
+  |> pair.second
+}
+
+/// The note for the latest retry shown, or a prompt when none is shown.
+pub fn note(happen: Happen) -> Note {
+  case list.last(outcomes(happen)), happen.prompt {
+    Ok(outcome), _ -> Retry(verdict(happen, outcome))
+    Error(Nil), AskForAMoment -> ChooseAMoment
+    Error(Nil), AskForARetry -> ConnectionDrops(happen.at)
+  }
+}
+
+fn verdict(happen: Happen, outcome: Outcome) -> Verdict {
+  case outcome, happen.at, happen.key {
+    Replayed, WhileProviderWorks, _ | Replayed, WhileReplyTravels, _ ->
+      KeyReplayedOriginal
+    Replayed, _, _ -> SameKeyReplaysAnswer
+    ChargedFirst, WhileConnecting, _ -> SafeBecauseNotSent
+    ChargedFirst, _, WithKey -> KeyChargedNow
+    ChargedFirst, _, WithoutKey -> GotLucky
+    ChargedExtra(times: 2), Never, _ -> AlreadyAnswered
+    ChargedExtra(times:), _, _ -> ChargedAgain(times:)
   }
 }
 
@@ -194,11 +245,11 @@ pub fn safe_move(at: Break) -> String {
   }
 }
 
-/// Whether the provider charged the card before any retry.
-pub fn charged_before_retry(at: Break) -> Bool {
+/// How many times the provider charged the card before any retry.
+pub fn charges_before_retry(at: Break) -> Int {
   case at {
-    Never | WhileProviderWorks | WhileReplyTravels -> True
-    WhileConnecting | WhileSending -> False
+    Never | WhileProviderWorks | WhileReplyTravels -> 1
+    WhileConnecting | WhileSending -> 0
   }
 }
 
@@ -217,8 +268,12 @@ pub fn note_text(note: Note) -> String {
       "Retried with the same key. The provider recognised it and returned the original result: charged exactly once."
     Retry(KeyChargedNow) ->
       "Retried with the key. The provider had nothing under that key, so it charged now: exactly once."
-    Retry(ChargedTwice) ->
+    Retry(ChargedAgain(times: 2)) ->
       "Retried without a key. The provider saw a brand-new request: the customer is now charged TWICE."
+    Retry(ChargedAgain(times:)) ->
+      "Retried without a key. The provider saw a brand-new request: the customer is now charged "
+      <> int.to_string(times)
+      <> " times."
     Retry(GotLucky) ->
       "Retried without a key and got lucky: charged once. Next time you might not be."
   }
@@ -290,15 +345,12 @@ pub fn picture(happen: Happen) -> Picture {
     True -> "order-o1"
     False -> "(none)"
   }
-  let charges = case charged_before_retry(happen.at) {
-    True -> 1
-    False -> 0
-  }
+  let charged = charges_before_retry(happen.at)
   let first =
     Row(
       request: "#1",
       key:,
-      tone: case charges {
+      tone: case charged {
         0 -> Quiet
         _ -> Charged
       },
@@ -319,38 +371,37 @@ pub fn picture(happen: Happen) -> Picture {
   }
   let ok = msc.Message(2, 0, "200 OK", msc.Green, msc.Dashed)
   let maybe = msc.Note(0, "MaybeSent", msc.Amber)
+  let arrives = [
+    msc.send(0, 2, "POST /charges" <> with_key, msc.Ink),
+    msc.Note(2, "charges the card", msc.Pink),
+  ]
   let events = case happen.at {
     WhileConnecting -> [
       msc.Lost(0, 1, "connect", msc.Grey),
       msc.Note(0, "NotSent", msc.Blue),
     ]
     WhileSending -> [msc.Lost(0, 2, "POST /charges", msc.Ink), maybe]
-    Never -> [
-      msc.send(0, 2, "POST /charges" <> with_key, msc.Ink),
-      msc.Note(2, "charges the card", msc.Pink),
-      ok,
-    ]
-    WhileProviderWorks | WhileReplyTravels -> [
-      msc.send(0, 2, "POST /charges" <> with_key, msc.Ink),
-      msc.Note(2, "charges the card", msc.Pink),
-      msc.Lost(2, 0, "reply", msc.Grey),
-      maybe,
-    ]
+    Never -> list.append(arrives, [ok])
+    // The line dies at the provider, mid-work: no reply is ever sent.
+    WhileProviderWorks ->
+      list.append(arrives, [msc.Lost(2, 2, "connection lost", msc.Grey), maybe])
+    WhileReplyTravels ->
+      list.append(arrives, [msc.Lost(2, 0, "reply", msc.Grey), maybe])
   }
   let retry_label = case keyed {
     True -> "retry + same key"
     False -> "retry"
   }
-  let #(rows, events, charges) =
-    list.fold(
-      range(1, retries_shown(happen)),
-      #([first], list.reverse(events), charges),
-      fn(acc, i) {
-        let #(rows, events, charges) = acc
-        let request = "#" <> int.to_string(i + 1)
-        let events = [msc.send(0, 2, retry_label, msc.Ink), ..events]
-        let #(row, note, charges) = case keyed && charges > 0 {
-          True -> #(
+  let outcomes = outcomes(happen)
+  let #(rows, events) =
+    list.index_fold(
+      outcomes,
+      #([first], list.reverse(events)),
+      fn(acc, outcome, i) {
+        let #(rows, events) = acc
+        let request = "#" <> int.to_string(i + 2)
+        let #(row, note) = case outcome {
+          Replayed -> #(
             Row(
               request:,
               key:,
@@ -358,37 +409,33 @@ pub fn picture(happen: Happen) -> Picture {
               result: "key seen before → stored response replayed, no new charge",
             ),
             msc.Note(2, "replays stored result", msc.Green),
-            charges,
           )
-          False -> {
-            let charges = charges + 1
-            case charges > 1 {
-              True -> #(
-                Row(
-                  request:,
-                  key:,
-                  tone: Double,
-                  result: "NEW charge · ch_" <> int.to_string(charges),
-                ),
-                msc.Note(2, "charges AGAIN", msc.Red),
-                charges,
-              )
-              False -> #(
-                Row(
-                  request:,
-                  key:,
-                  tone: Charged,
-                  result: "card charged · ch_1",
-                ),
-                msc.Note(2, "charges the card", msc.Pink),
-                charges,
-              )
-            }
-          }
+          ChargedFirst -> #(
+            Row(request:, key:, tone: Charged, result: "card charged · ch_1"),
+            msc.Note(2, "charges the card", msc.Pink),
+          )
+          ChargedExtra(times:) -> #(
+            Row(
+              request:,
+              key:,
+              tone: Double,
+              result: "NEW charge · ch_" <> int.to_string(times),
+            ),
+            msc.Note(2, "charges AGAIN", msc.Red),
+          )
         }
-        #([row, ..rows], [ok, note, ..events], charges)
+        let events = [msc.send(0, 2, retry_label, msc.Ink), ..events]
+        #([row, ..rows], [ok, note, ..events])
       },
     )
+  let charges =
+    list.fold(outcomes, charged, fn(charges, outcome) {
+      case outcome {
+        Replayed -> charges
+        ChargedFirst -> 1
+        ChargedExtra(times:) -> times
+      }
+    })
   Picture(ledger: list.reverse(rows), events: list.reverse(events), charges:)
 }
 
@@ -398,13 +445,5 @@ pub fn charged_text(charges: Int) -> String {
   <> case charges == 1 {
     True -> " time"
     False -> " times"
-  }
-}
-
-/// The integers from `low` to `high` inclusive; empty when `high < low`.
-fn range(low: Int, high: Int) -> List(Int) {
-  case low > high {
-    True -> []
-    False -> [low, ..range(low + 1, high)]
   }
 }

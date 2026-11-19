@@ -45,9 +45,10 @@ pub type Phase {
 }
 
 pub type Occurrence {
+  /// `key` is the trigger's key, the same for every step of this occurrence;
   /// `path` lists the phases visited, oldest first; `entries` is the record,
   /// newest first.
-  Occurrence(phase: Phase, path: List(Phase), entries: List(String))
+  Occurrence(key: Int, phase: Phase, path: List(Phase), entries: List(String))
 }
 
 pub type Point {
@@ -79,36 +80,54 @@ pub fn new() -> Point {
     confidence: 95,
     version: V1,
     tool: Allows,
-    occurrence: recommend(40, 95),
+    occurrence: recommend(40, 95, first_key),
   )
 }
 
+/// The key of the first simulated message.
+pub const first_key = 4471
+
 /// A fresh occurrence: the model's recommendation, admitted under its key.
-pub fn recommend(amount: Int, confidence: Int) -> Occurrence {
-  Occurrence(phase: Recommended, path: [Recommended], entries: [
+pub fn recommend(amount: Int, confidence: Int, key: Int) -> Occurrence {
+  Occurrence(key:, phase: Recommended, path: [Recommended], entries: [
     "recommend: refund €"
     <> int.to_string(amount)
     <> " · confidence "
     <> int.to_string(confidence)
-    <> "% · key msg-4471",
+    <> "% · key "
+    <> key_name(key),
   ])
+}
+
+fn key_name(key: Int) -> String {
+  "msg-" <> int.to_string(key)
+}
+
+/// A new occurrence comes from a new message, so it gets the next key; only
+/// a duplicate delivery of the same message lands on an existing occurrence.
+fn fresh(point: Point, amount: Int, confidence: Int) -> Occurrence {
+  recommend(amount, confidence, point.occurrence.key + 1)
 }
 
 // SETTINGS --------------------------------------------------------------------
 
 pub fn set_amount(point: Point, amount: Int) -> Point {
-  Point(..point, amount:, occurrence: recommend(amount, point.confidence))
+  Point(..point, amount:, occurrence: fresh(point, amount, point.confidence))
 }
 
 pub fn set_confidence(point: Point, confidence: Int) -> Point {
-  Point(..point, confidence:, occurrence: recommend(point.amount, confidence))
+  Point(
+    ..point,
+    confidence:,
+    occurrence: fresh(point, point.amount, confidence),
+  )
 }
 
 pub fn publish(point: Point, version: Version) -> Point {
   Point(
     ..point,
     version:,
-    occurrence: recommend(point.amount, point.confidence),
+    occurrence: fresh(point, point.amount, point.confidence),
   )
 }
 
@@ -124,7 +143,7 @@ pub fn load(
     amount:,
     confidence:,
     version:,
-    occurrence: recommend(amount, confidence),
+    occurrence: fresh(point, amount, confidence),
   )
 }
 
@@ -133,7 +152,7 @@ pub fn set_tool(point: Point, tool: GatedTool) -> Point {
 }
 
 pub fn start_again(point: Point) -> Point {
-  Point(..point, occurrence: recommend(point.amount, point.confidence))
+  Point(..point, occurrence: fresh(point, point.amount, point.confidence))
 }
 
 // POLICY ----------------------------------------------------------------------
@@ -332,26 +351,17 @@ pub fn perform(point: Point, verb: Verb) -> Point {
       }
     Recommended, Supersede ->
       add(point, ["superseded by a newer event → expired"], Settled(Expired))
-    Accepted, Release -> release(point, Accepted, [])
-    Awaiting(approvals), Approve -> {
-      let n = approvals + 1
-      let line =
-        "approve by "
-        <> approver(approvals)
-        <> " ("
-        <> int.to_string(n)
-        <> "/"
-        <> int.to_string(need)
-        <> ")"
-      case n >= need {
-        True -> release(point, Awaiting(approvals), [line])
-        False -> add(point, [line], Awaiting(n))
+    Accepted, Release -> release(point, PolicyProceeded)
+    Awaiting(approvals), Approve ->
+      case approvals + 1 >= need {
+        True -> release(point, VerdictCompleted(approvals))
+        False ->
+          add(point, [approval(approvals, need)], Awaiting(approvals + 1))
       }
-    }
     Awaiting(_), Reject -> add(point, ["reject by Bia"], Settled(Rejected))
     Awaiting(_), PassDeadline ->
       add(point, ["deadline reached → expired"], Settled(Expired))
-    Held, EndHold -> release(point, Held, [])
+    Held, EndHold -> release(point, HoldEnded)
     Held, WithdrawInHold ->
       add(point, ["withdrawn by Dani during the hold"], Settled(Withdrawn))
     Settled(_), StartAgain -> start_again(point)
@@ -359,46 +369,90 @@ pub fn perform(point: Point, verb: Verb) -> Point {
   }
 }
 
-/// Try to release through the gated tool, from the phase the release left.
-fn release(point: Point, from: Phase, before: List(String)) -> Point {
-  case point.tool, from {
+/// The record line for the next approval, the `approvals + 1`th of `need`.
+fn approval(approvals: Int, need: Int) -> String {
+  "approve by "
+  <> approver(approvals)
+  <> " ("
+  <> int.to_string(approvals + 1)
+  <> "/"
+  <> int.to_string(need)
+  <> ")"
+}
+
+/// What a release attempt follows.
+type Attempt {
+  /// The policy let the refund proceed alone, with nobody waiting on it.
+  PolicyProceeded
+  /// The undo window closed.
+  HoldEnded
+  /// This approval, after `approvals` earlier ones, completes the verdict.
+  VerdictCompleted(approvals: Int)
+}
+
+/// Where the occurrence stays when the attempt does not settle it.
+fn before(attempt: Attempt) -> Phase {
+  case attempt {
+    PolicyProceeded -> Accepted
+    HoldEnded -> Held
+    VerdictCompleted(approvals) -> Awaiting(approvals)
+  }
+}
+
+/// Try to release through the gated tool.
+fn release(point: Point, attempt: Attempt) -> Point {
+  let need = needed(point.version, point.amount, point.confidence)
+  let verdict = case attempt {
+    VerdictCompleted(approvals) -> [approval(approvals, need)]
+    PolicyProceeded | HoldEnded -> []
+  }
+  case point.tool, attempt {
     Allows, _ ->
       add(
         point,
-        list.append(before, [
+        list.append(verdict, [
           "accepted → release check passed",
           "released: refund sent to the gated tool, once, in this transaction",
         ]),
         Settled(Released),
       )
+    // Nothing is recorded, so an approval this attempt carried is not
+    // counted, and the earlier ones stand.
     IsUnsure, _ ->
       add(
         point,
-        list.append(before, [
-          "release attempt: tool Unsure (lost connection) → verb fails with ToolUnsure; nothing recorded as refused, try again",
-        ]),
-        case from {
-          Awaiting(_) -> Awaiting(0)
-          other -> other
-        },
+        list.append(
+          list.map(verdict, fn(line) { line <> ": attempted, not counted" }),
+          [
+            "release attempt: tool Unsure (lost connection) → verb fails with ToolUnsure; nothing recorded as refused, try again",
+          ],
+        ),
+        before(attempt),
       )
-    Refuses, Held ->
+    Refuses, PolicyProceeded ->
       add(
         point,
-        list.append(before, [
-          "hold ended → release check: Refuse (balance too low)",
+        [
+          "release check: Refuse (balance too low), with nobody waiting",
           "refused",
-        ]),
+        ],
         Settled(Refused),
       )
-    Refuses, _ ->
+    Refuses, HoldEnded ->
       add(
         point,
-        list.append(before, [
+        ["hold ended → release check: Refuse (balance too low)", "refused"],
+        Settled(Refused),
+      )
+    // The refused verdict changes no status: the earlier approvals stand.
+    Refuses, VerdictCompleted(_) ->
+      add(
+        point,
+        list.append(verdict, [
           "verdict completed, but the tool refused → ToolRefused: transaction rolled back",
           "record_refusal (second transaction): refused verdict kept on the record; occurrence still waits",
         ]),
-        Awaiting(0),
+        before(attempt),
       )
   }
 }
@@ -406,7 +460,7 @@ fn release(point: Point, from: Phase, before: List(String)) -> Point {
 /// Append lines to the record and move to `phase`, extending the path unless
 /// the occurrence stays in the same stage.
 fn add(point: Point, lines: List(String), phase: Phase) -> Point {
-  let Occurrence(path:, entries:, ..) = point.occurrence
+  let Occurrence(key:, path:, entries:, ..) = point.occurrence
   let path = case list.last(path) {
     Ok(last) ->
       case stage(last) == stage(phase) {
@@ -417,7 +471,7 @@ fn add(point: Point, lines: List(String), phase: Phase) -> Point {
   }
   let entries =
     list.fold(lines, entries, fn(entries, line) { [line, ..entries] })
-  Point(..point, occurrence: Occurrence(phase:, path:, entries:))
+  Point(..point, occurrence: Occurrence(key:, phase:, path:, entries:))
 }
 
 /// The stage name of a phase, as the path shows it.
@@ -505,9 +559,7 @@ pub fn why(point: Point) -> String {
     Settled(Withdrawn) ->
       settled("Taken back during the undo window. Nothing was released.")
     Settled(Refused) ->
-      settled(
-        "The hold ended but the release check refused. On the record, nothing released.",
-      )
+      settled("The release check refused. On the record, nothing released.")
   }
 }
 

@@ -1,5 +1,7 @@
 import gleam/list
 import gleam/option.{Some}
+import gleam/string
+import lustre/element
 import pages/outside_world
 import pages/outside_world/flows.{
   type Walk, AnswersDirectly, AsksForInput, ChooseHandler, ChooseMail,
@@ -177,4 +179,40 @@ pub fn replay_resets_the_playground_test() {
 
 pub fn the_flows_tour_has_seven_steps_test() {
   assert list.length(outside_world.script(outside_world.Flows).steps) == 7
+}
+
+pub fn the_api_checks_the_token_on_its_own_lane_test() {
+  let hell = flows.pick_flow(flows.start, HellhoundFlow) |> flows.show_all
+  let script = flows.script(HellhoundFlow, hell.choices)
+  assert script.actors
+    == [
+      "Browser",
+      "Your app",
+      "Hellhound",
+      "Identity provider",
+      "Downstream API",
+    ]
+  let assert Ok(check) = flows.current_step(hell)
+  assert check.title == "API checks the token"
+  assert check.lane == 4
+  assert flows.chart(hell).active == Some(4)
+  assert list.last(flows.events(flows.steps(hell)))
+    == Ok(msc.send(2, 4, "API checks the token", msc.Pink))
+  // Sign-in alone keeps the four sign-in lanes.
+  let signed_in = flows.flip(hell, flows.ChooseLater(flows.StopsAtSignIn))
+  assert list.length(flows.script(HellhoundFlow, signed_in.choices).actors) == 4
+}
+
+pub fn the_comparison_is_a_table_with_headers_test() {
+  let page =
+    outside_world.view(
+      outside_world.init(),
+      context.new(motion.On, progress.empty()),
+    )
+    |> element.to_string
+  assert string.contains(page, "<table")
+  assert list.length(string.split(page, "scope=\"col\"")) == 5
+  assert list.length(string.split(page, "scope=\"row\"")) == 6
+  let assert [_, bounded] = string.split(page, ">Bounded</th>")
+  assert string.contains(bounded, "bounded SMTP, bounded capture")
 }

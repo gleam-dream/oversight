@@ -437,9 +437,9 @@ fn relay(choices: Choices) -> Script {
 }
 
 fn hellhound(choices: Choices) -> Script {
-  let later = case choices.later {
-    StopsAtSignIn -> []
-    CallsApi -> [
+  let #(api, later) = case choices.later {
+    StopsAtSignIn -> #([], [])
+    CallsApi -> #(["Downstream API"], [
       Step(
         1,
         "Later: call an API",
@@ -453,15 +453,18 @@ fn hellhound(choices: Choices) -> Script {
         Library,
       ),
       Step(
-        3,
+        4,
         "API checks the token",
         "On the API side, Hellhound validates the JWT locally with audience and scope policy.",
         Library,
       ),
-    ]
+    ])
   }
   Script(
-    actors: ["Browser", "Your app", "Hellhound", "Identity provider"],
+    actors: list.append(
+      ["Browser", "Your app", "Hellhound", "Identity provider"],
+      api,
+    ),
     steps: list.append(
       [
         Step(0, "Click \"Sign in\"", "The user wants in.", Outside),

@@ -1,4 +1,6 @@
 import gleam/list
+import gleam/string
+import lustre/element
 import pages/foundations.{
   AnatomyTour, CodecTour, DestinationTour, SinalTour, Tour,
 }
@@ -43,6 +45,10 @@ pub fn the_sinal_tour_moves_from_inline_to_the_forwarder_test() {
   let m = next(m, SinalTour, motion.On) |> next(SinalTour, motion.On)
   let m = next(m, SinalTour, motion.On)
   assert m.pipeline.observer == FastObservers
+  // The last step lowers the rate below what the forwarder drains, so the
+  // queue it promises to empty does empty.
+  assert m.pipeline.rate == 1
+  assert pipeline.forwarder_keeps_up(m.pipeline)
   // With motion on, nothing fast-forwards: only the burst is a command.
   assert commands(m) == [Burst]
   assert tour.phase(tour.get(m.tours, SinalTour)) == Guided(5, TourPaused)
@@ -62,6 +68,32 @@ pub fn without_motion_every_sinal_step_fast_forwards_test() {
   assert slow_inline.settings.delivery == Inline
   assert slow_inline.settings.observer == SlowObserver
   assert slow_routed.settings.delivery == ViaForwarder
+}
+
+pub fn the_queue_empties_after_the_last_sinal_step_test() {
+  let m =
+    list.fold([1, 2, 3, 4, 5], foundations.init(), fn(m, _) {
+      next(m, SinalTour, motion.Off)
+    })
+  let sim = list.fold(list.reverse(m.issued), pipeline.new(), pipeline.run)
+  let dropped = sim.dropped
+  let sim =
+    list.fold(list.repeat(Nil, 15 * 20), sim, fn(sim, _) {
+      pipeline.step(sim, m.pipeline, 0.05)
+    })
+  assert pipeline.queue(sim) == []
+  assert sim.dropped == dropped
+}
+
+pub fn the_slow_observer_button_says_500_ms_test() {
+  let html =
+    foundations.view(
+      foundations.init(),
+      context.new(motion.On, progress.empty()),
+    )
+    |> element.to_string
+  assert string.contains(html, "Attach a slow observer (500 ms)")
+  assert !string.contains(html, "(50 ms)")
 }
 
 pub fn going_back_clears_and_replays_the_sinal_steps_test() {
@@ -111,6 +143,23 @@ pub fn the_note_follows_the_settings_test() {
     foundations.note(pipeline.Settings(Inline, SlowObserver, 9, Flowing))
   assert note
     == "Inline with a slow observer: the handler can’t serve the next request until telemetry finishes. Requests asked for 9/s; the handler now manages about 1 per second."
+}
+
+pub fn the_note_says_when_fast_observers_still_drop_test() {
+  let routed_fast = pipeline.Settings(ViaForwarder, FastObservers, 6, Flowing)
+  assert foundations.note(routed_fast)
+    == "Routed with fast observers: the handler never waits, but this forwarder hands the observer one event at a time, under 3 per second. At 6/s requests arrive faster, so it still fills and drops. At 2/s or less it drains."
+  assert foundations.note(pipeline.Settings(..routed_fast, rate: 2))
+    == "Routed with fast observers: the forwarder drains faster than events arrive. Nothing waits and nothing drops."
+  let routed_slow = pipeline.Settings(..routed_fast, observer: SlowObserver)
+  assert string.starts_with(
+    foundations.note(pipeline.Settings(..routed_slow, rate: 1)),
+    "Routed with a slow observer at 1 request per second: the forwarder just keeps up.",
+  )
+  assert string.starts_with(
+    foundations.note(routed_slow),
+    "Routed: the handler hands events to the forwarder",
+  )
 }
 
 // JSON BLUEPRINT --------------------------------------------------------------
@@ -201,4 +250,15 @@ pub fn tour_keys_match_the_reference_test() {
       foundations.key,
     )
     == ["sinal", "codec", "anatomy", "dest"]
+}
+
+pub fn the_tour_quotes_the_slow_drain_rate_of_the_model_test() {
+  // One hop plus a slow observer run: a little over one event a second.
+  let drain = pipeline.forwarder_drain(pipeline.SlowObserver)
+  assert drain >. 1.0 && drain <. 1.5
+  let narration =
+    foundations.script(foundations.SinalTour).steps
+    |> list.map(fn(step) { step.text })
+    |> string.join(" ")
+  assert string.contains(narration, "drains only about 1 per second")
 }

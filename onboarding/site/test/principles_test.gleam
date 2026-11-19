@@ -2,6 +2,8 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
+import lustre/element
 import pages/principles.{Model}
 import pages/principles/bounds.{Provider}
 import pages/principles/content
@@ -67,6 +69,23 @@ pub fn jitter_spreads_the_retries_test() {
   assert herd.done_label(run) == "4.3 s"
 }
 
+pub fn jitter_still_tops_the_capacity_line_after_the_outage_test() {
+  // The seeded run: the first retries after the outage exceed capacity, so
+  // the note and the tour must not say that retries fit under the line.
+  let arrivals =
+    herd.simulate(herd.Jittered).ticks
+    |> list.drop(herd.outage)
+    |> list.map(fn(t) { t.served + t.rejected })
+  assert list.first(arrivals) == Ok(14)
+  assert list.count(arrivals, fn(n) { n > herd.capacity }) == 6
+  let note = herd.note(herd.Jittered)
+  assert !string.contains(note, "under the capacity line")
+  assert string.contains(note, "still exceed the capacity line")
+  let assert [_, _, _, jitter, _] = principles.script(principles.Herd).steps
+  assert !string.contains(jitter.text, "under the capacity line")
+  assert jitter.ms == 5200
+}
+
 // DID IT HAPPEN? --------------------------------------------------------------
 
 fn kinds(events: List(msc.Event)) -> List(String) {
@@ -85,7 +104,7 @@ pub fn a_keyless_retry_after_a_charge_charges_twice_test() {
     happen.initial()
     |> happen.break_at(happen.WhileProviderWorks)
     |> happen.retry
-  assert state.note == happen.Retry(happen.ChargedTwice)
+  assert happen.note(state) == happen.Retry(happen.ChargedAgain(times: 2))
   let picture = happen.picture(state)
   assert picture.charges == 2
   assert list.map(picture.ledger, fn(r) { r.tone })
@@ -104,7 +123,7 @@ pub fn the_same_key_replays_the_stored_result_test() {
     |> happen.toggle_key
     |> happen.retry
     |> happen.retry
-  assert state.note == happen.Retry(happen.KeyReplayedOriginal)
+  assert happen.note(state) == happen.Retry(happen.KeyReplayedOriginal)
   let picture = happen.picture(state)
   assert picture.charges == 1
   assert list.length(picture.ledger) == 3
@@ -135,7 +154,7 @@ pub fn not_sent_makes_a_retry_safe_test() {
     |> happen.break_at(happen.WhileConnecting)
     |> happen.retry
   assert happen.evidence(state.at) == happen.NotSent
-  assert state.note == happen.Retry(happen.SafeBecauseNotSent)
+  assert happen.note(state) == happen.Retry(happen.SafeBecauseNotSent)
   assert happen.picture(state).charges == 1
 }
 
@@ -145,8 +164,88 @@ pub fn an_answered_call_with_a_key_stays_charged_once_test() {
     |> happen.break_at(happen.Never)
     |> happen.toggle_key
     |> happen.retry
-  assert state.note == happen.Retry(happen.SameKeyReplaysAnswer)
+  assert happen.note(state) == happen.Retry(happen.SameKeyReplaysAnswer)
   assert happen.picture(state).charges == 1
+}
+
+fn retried(at: happen.Break, key: happen.Key, times: Int) -> happen.Happen {
+  let state = happen.break_at(happen.initial(), at)
+  let state = case key {
+    happen.WithKey -> happen.toggle_key(state)
+    happen.WithoutKey -> state
+  }
+  list.fold(list.repeat(Nil, times), state, fn(s, _) { happen.retry(s) })
+}
+
+pub fn a_second_keyless_retry_after_not_sent_charges_twice_test() {
+  let state = retried(happen.WhileConnecting, happen.WithoutKey, 2)
+  assert happen.note(state) == happen.Retry(happen.ChargedAgain(times: 2))
+  let picture = happen.picture(state)
+  assert picture.charges == 2
+  assert list.map(picture.ledger, fn(r) { r.tone })
+    == [happen.Quiet, happen.Charged, happen.Double]
+  // A third charge is counted, not called "twice".
+  let state = happen.retry(state)
+  assert happen.note(state) == happen.Retry(happen.ChargedAgain(times: 3))
+  assert happen.note_text(happen.note(state))
+    |> string.contains("charged 3 times")
+}
+
+pub fn a_second_keyed_retry_replays_the_first_retry_test() {
+  let state = retried(happen.WhileSending, happen.WithKey, 1)
+  assert happen.note(state) == happen.Retry(happen.KeyChargedNow)
+  let state = happen.retry(state)
+  assert happen.note(state) == happen.Retry(happen.SameKeyReplaysAnswer)
+  let picture = happen.picture(state)
+  assert picture.charges == 1
+  assert list.map(picture.ledger, fn(r) { r.tone })
+    == [happen.Quiet, happen.Charged, happen.Charged]
+}
+
+pub fn the_note_agrees_with_the_ledger_test() {
+  let keys = [happen.WithoutKey, happen.WithKey]
+  use at <- list.each(happen.breaks)
+  use key <- list.each(keys)
+  use times <- list.each([1, 2, 3])
+  let state = retried(at, key, times)
+  let picture = happen.picture(state)
+  let assert Ok(last) = list.last(picture.ledger)
+  let #(charges, tone) = case happen.note(state) {
+    happen.Retry(happen.ChargedAgain(times:)) -> #(times, happen.Double)
+    happen.Retry(happen.AlreadyAnswered) -> #(2, happen.Double)
+    happen.Retry(_) -> #(1, happen.Charged)
+    _ -> #(-1, happen.Quiet)
+  }
+  assert picture.charges == charges
+  assert last.tone == tone
+}
+
+pub fn the_note_follows_the_key_test() {
+  let keyed = retried(happen.WhileProviderWorks, happen.WithKey, 1)
+  assert happen.note(keyed) == happen.Retry(happen.KeyReplayedOriginal)
+  // Turning the key off hides the keyed retry, and its note with it.
+  let keyless = happen.toggle_key(keyed)
+  assert happen.note(keyless)
+    == happen.ConnectionDrops(happen.WhileProviderWorks)
+  // Turning it back on shows the recorded retry and its note again.
+  assert happen.note(happen.toggle_key(keyless))
+    == happen.Retry(happen.KeyReplayedOriginal)
+  assert happen.note(happen.initial()) == happen.ChooseAMoment
+}
+
+pub fn the_chart_loses_the_line_where_it_broke_test() {
+  let lost = fn(at) {
+    happen.picture(happen.break_at(happen.initial(), at)).events
+    |> list.filter_map(fn(e) {
+      case e {
+        msc.Lost(from:, to:, label:, ..) -> Ok(#(from, to, label))
+        _ -> Error(Nil)
+      }
+    })
+  }
+  // At the provider, mid-work: no reply is drawn.
+  assert lost(happen.WhileProviderWorks) == [#(2, 2, "connection lost")]
+  assert lost(happen.WhileReplyTravels) == [#(2, 0, "reply")]
 }
 
 pub fn the_journey_marks_the_break_test() {
@@ -159,6 +258,44 @@ pub fn the_journey_marks_the_break_test() {
 }
 
 // BOUNDS ----------------------------------------------------------------------
+
+fn fits(provider: bounds.Provider) -> Bool {
+  provider.first_token + provider.first_gap <= provider.whole_call
+}
+
+pub fn the_sliders_keep_one_possible_call_test() {
+  let set = fn(model, msg) { principles.update(model, msg, context()).0 }
+  // A whole call of 10 s brings the first token forward with it.
+  let model = set(principles.init(), principles.ReaderSetWholeCall(10))
+  assert model.provider == Provider(10, 0, 10)
+  // A late first token or a long gap lengthens the call to hold them.
+  let model = set(principles.init(), principles.ReaderSetFirstToken(250))
+  assert model.provider == Provider(250, 10, 260)
+  let model = set(model, principles.ReaderSetFirstGap(115))
+  assert model.provider == Provider(250, 115, 370)
+  let model = set(model, principles.ReaderSetWholeCall(300))
+  assert model.provider == Provider(250, 50, 300)
+  assert fits(bounds.healthy)
+  assert list.all(principles.script(principles.Bounds).steps, fn(step) {
+    case step.action {
+      tour.Send(messages) ->
+        list.all(messages(principles.init()), fn(msg) {
+          case msg {
+            principles.ProviderBehaved(provider) -> fits(provider)
+            _ -> True
+          }
+        })
+      tour.Narrate -> True
+    }
+  })
+}
+
+pub fn the_gap_slider_names_the_gap_it_times_test() {
+  // The idle gap is timed from the first token, so the slider says so.
+  let page = element.to_string(principles.view(principles.init(), context()))
+  assert string.contains(page, "Gap after the first token:")
+  assert !string.contains(page, "Longest gap between chunks")
+}
 
 pub fn the_first_bound_to_trip_wins_test() {
   assert bounds.tripped(bounds.healthy) == None
@@ -205,9 +342,15 @@ pub fn the_happen_tour_charges_twice_then_replays_with_the_key_test() {
   assert model.happen.curtain == happen.Revealed
   let model = walk(model, principles.DidItHappen, 1)
   assert happen.picture(model.happen).charges == 2
+  // The keyed run is a separate run, reset before the key goes on.
+  let assert [_, _, _, _, keyed, _] =
+    principles.script(principles.DidItHappen).steps
+  let assert tour.Send(messages) = keyed.action
+  assert list.first(messages(model)) == Ok(principles.ChargeReset)
   let model = walk(model, principles.DidItHappen, 1)
   assert model.happen.key == happen.WithKey
-  assert model.happen.note == happen.Retry(happen.KeyReplayedOriginal)
+  assert model.happen.curtain == happen.Revealed
+  assert happen.note(model.happen) == happen.Retry(happen.KeyReplayedOriginal)
   assert happen.picture(model.happen).charges == 1
   let model = walk(model, principles.DidItHappen, 1)
   assert model.happen.at == happen.WhileReplyTravels
@@ -291,4 +434,21 @@ pub fn the_tours_have_the_reference_lengths_test() {
     == [5, 6, 5, 6, 5]
   assert list.map(principles.script(principles.Herd).steps, fn(s) { s.ms })
     == [3600, 5200, 5200, 5200, 3600]
+}
+
+// CONTENT ---------------------------------------------------------------------
+
+pub fn habit_two_separates_credential_policy_from_token_state_test() {
+  // Hellhound keeps and refreshes tokens, so the habit must not say that no
+  // library stores credentials.
+  let long = content.habit(content.AppOwnsDecisions).long
+  assert !string.contains(long, "instead of being stored by a library")
+  assert string.contains(long, "credential policy")
+  assert string.contains(long, "the tokens Hellhound refreshes")
+}
+
+pub fn the_lease_job_promises_only_what_a_lease_gives_test() {
+  let tasks = list.map(content.jobs, fn(job) { job.task })
+  assert list.contains(tasks, "Leasing a job so one node holds it at a time")
+  assert !list.any(tasks, string.contains(_, "never run it at once"))
 }

@@ -1,6 +1,7 @@
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import lustre/element
 import pages/durable_work.{
   Grind, Lease, Model, Saga, Sagax, SameTransactionCommits,
   SameTransactionRollsBack, SeparateWritesWithCrash, Showing, Tour, Tx,
@@ -188,6 +189,7 @@ pub fn queue_commands_survive_their_encoding_test() {
     queue_widget.controls()
     |> queue_widget.issue(queue_widget.Reset)
     |> queue_widget.issue(queue_widget.Advance(8))
+    |> queue_widget.issue(queue_widget.AdvanceUntilExpired)
     |> queue_widget.issue(queue_widget.Expire(ReplayAfterLeaseExpiry))
     |> queue_widget.issue(queue_widget.Kill(2))
     |> queue_widget.issue(queue_widget.AddJobs)
@@ -210,14 +212,6 @@ pub fn a_new_widget_takes_earlier_commands_as_its_baseline_test() {
     )
   assert seen == Some(3)
   assert q.ticks == 2
-}
-
-pub fn more_jobs_keep_the_newest_twenty_one_rows_test() {
-  let q = queue.new() |> queue.add_jobs |> queue.add_jobs
-  assert list.length(q.rows) == 21
-  assert list.first(q.rows) |> option.from_result |> option.map(fn(r) { r.id })
-    == Some(6)
-  assert q.next_id == 27
 }
 
 // TRANSACTIONAL ADMISSION -----------------------------------------------------
@@ -371,4 +365,193 @@ pub fn clicking_a_square_replays_that_run_above_test() {
 
 fn checkout_with_crash(model: durable_work.Model) -> durable_work.Checkout {
   durable_work.Checkout(..model.checkout, crash: CrashAfterCharge)
+}
+
+// REVIEW FINDINGS -------------------------------------------------------------
+
+pub fn more_jobs_keep_every_unfinished_row_test() {
+  // Before any worker claims, nothing is dropped.
+  let q = queue.new() |> queue.add_jobs |> queue.add_jobs
+  assert list.map(q.rows, fn(r) { r.id }) == int_range(1, 26)
+  assert q.next_id == 27
+  // Running rows stay too.
+  let q = queue.advance(queue.new(), 1) |> queue.add_jobs |> queue.add_jobs
+  assert list.map(q.rows, fn(r) { r.id }) == int_range(1, 26)
+  // Only finished rows make room, oldest first.
+  let later = queue.advance(queue.new(), 40)
+  let q = later |> queue.add_jobs |> queue.add_jobs
+  assert list.length(q.rows) == 21
+  let kept = list.map(q.rows, fn(r) { r.id })
+  assert list.all(later.rows, fn(r) {
+    r.state == queue.Done || list.contains(kept, r.id)
+  })
+}
+
+fn int_range(low: Int, high: Int) -> List(Int) {
+  case low > high {
+    True -> []
+    False -> [low, ..int_range(low + 1, high)]
+  }
+}
+
+/// Every live worker that names a row runs it, and every running row is
+/// either draining or run by the live worker that names it.
+fn claims_agree(q: queue.Queue) -> Bool {
+  let workers_agree =
+    list.index_fold(q.workers, True, fn(ok, worker, index) {
+      ok
+      && case worker {
+        Worker(queue.Alive, Some(id)) ->
+          case queue.row(q, id) {
+            Some(queue.Row(state: queue.Running(owner:, ..), ..)) ->
+              owner == index
+            _ -> False
+          }
+        _ -> True
+      }
+    })
+  let rows_agree =
+    list.all(q.rows, fn(row) {
+      case row.state {
+        queue.Running(owner:, ..) ->
+          queue.draining(q, row)
+          || queue.worker_at(q, owner)
+          == Some(Worker(queue.Alive, Some(row.id)))
+        _ -> True
+      }
+    })
+  workers_agree && rows_agree
+}
+
+pub fn a_restarted_worker_leaves_its_old_lease_to_drain_test() {
+  let first = queue.advance(queue.new(), 1)
+  let assert Some(queue.Row(state: queue.Running(work: before, ..), ..)) =
+    queue.row(first, 1)
+  let q =
+    first
+    |> queue.toggle_worker(0)
+    |> queue.toggle_worker(0)
+    |> queue.tick
+  assert queue.worker_at(q, 0) == Some(Worker(queue.Alive, Some(4)))
+  let assert Some(old) = queue.row(q, 1)
+  // Nobody works or renews the old claim: its lease drains.
+  assert queue.draining(q, old)
+  let assert queue.Running(work:, lease:, ..) = old.state
+  assert work == before
+  assert lease == queue.lease_ticks - 1
+  // Through the old lease's expiry and beyond, claims stay consistent.
+  let q =
+    list.fold(int_range(1, 40), q, fn(q, _) {
+      let q = queue.tick(q)
+      assert claims_agree(q)
+      q
+    })
+  assert queue.row(q, 1) |> option.map(fn(r) { r.state }) == Some(HeldUncertain)
+}
+
+pub fn with_motion_and_quick_clicks_the_lease_still_expires_test() {
+  let model =
+    durable_work.update(durable_work.init(), Tour(Lease, tour.Replay), moving()).0
+  let model = steps(model, Lease, 3, moving())
+  let assert [queue_widget.Reset, ..rest] =
+    list.map(model.queue.commands, fn(entry) { entry.1 })
+  // The live queue ran a second before the reader clicked through.
+  let q = queue.advance(queue.new(), 5)
+  let q = list.fold(rest, q, queue_widget.apply)
+  assert queue.row(q, 2) |> option.map(fn(r) { r.state }) == Some(HeldUncertain)
+  assert q.uncertain == 1
+}
+
+pub fn picking_a_ladder_run_unlocks_the_saga_playground_test() {
+  let model = durable_work.init()
+  let model = durable_work.update(model, Tour(Sagax, tour.Skip), moving()).0
+  let model = durable_work.update(model, Tour(Saga, tour.Play), moving()).0
+  let pending = tour.epoch(tour.get(model.tours, Saga))
+  let model =
+    durable_work.update(model, durable_work.ReaderPickedCheckout(6), still()).0
+  assert tour.phase(tour.get(model.tours, Saga)) == Free
+  assert model.checkout.plan
+    == checkout.Plan(..checkout.happy, payment: checkout.Declined)
+  // The advance the playing tour had scheduled is stale now.
+  assert durable_work.update(model, Tour(Saga, tour.Advance(pending)), moving()).0
+    == model
+  let model = durable_work.update(model, Tour(Saga, tour.Replay), still()).0
+  assert model.checkout.plan == checkout.happy
+  let model = next(model, Saga, still())
+  assert outcome(model) == Finished(Completed)
+}
+
+pub fn a_frozen_checkout_says_paused_test() {
+  let model = next(durable_work.init(), Saga, moving())
+  let assert durable_work.Replaying(0, epoch) = model.checkout.run
+  assert durable_work.outcome_label(model.checkout) == "Running…"
+  let model =
+    durable_work.update(model, durable_work.CheckoutTicked(epoch), moving()).0
+  let frozen = durable_work.leave(model)
+  assert frozen.checkout.run == Showing(1)
+  assert durable_work.outcome_label(frozen.checkout) == "Paused"
+  let done = next(durable_work.init(), Saga, still())
+  assert durable_work.outcome_label(done.checkout) == "Completed"
+  assert durable_work.outcome_label(durable_work.init().checkout)
+    == "Not started"
+}
+
+pub fn redelivery_after_a_crash_names_its_prerequisite_test() {
+  let events = checkout.events(checkout.happy, CrashAfterCharge, Durable)
+  let assert Ok(crash) =
+    list.find(events, fn(e) { string.starts_with(e.log, "NODE CRASHED") })
+  assert string.contains(crash.log, "replay is enabled for the job")
+  assert string.contains(crash.log, "an operator authorizes it")
+  let page = element.to_string(durable_work.view(durable_work.init(), still()))
+  assert !string.contains(page, "Grind redelivers the job;")
+  assert string.contains(
+    page,
+    "Grind redelivers the job if replay is enabled for it or an operator authorizes it; the saga reconnects and continues.",
+  )
+}
+
+fn drive(events: List(job.Event), abandonment: job.Abandonment) -> job.Job {
+  list.fold(events, job.new(), fn(j, e) { job.apply(j, e, abandonment) })
+}
+
+pub fn a_snooze_does_not_use_an_attempt_test() {
+  let third = [
+    job.SubmitNow,
+    job.Claim,
+    job.HandlerFails,
+    job.BackoffPasses,
+    job.Claim,
+    job.HandlerFails,
+    job.BackoffPasses,
+    job.Claim,
+  ]
+  let j =
+    drive(
+      list.append(third, [job.HandlerSnoozes, job.TimeArrives, job.Claim]),
+      HoldUncertain,
+    )
+  assert j.phase == Stored(Executing)
+  assert j.attempts == 3
+  assert list.first(j.history)
+    == Ok("claimed with a lease → Executing (attempt 3)")
+  // The attempt counts once it runs: a failure now is the last.
+  assert job.apply(j, job.HandlerFails, HoldUncertain).phase
+    == Stored(BusinessFailed)
+}
+
+pub fn lease_replays_are_bounded_and_reuse_the_attempt_test() {
+  let die = [job.Claim, job.NodeDies]
+  let j =
+    drive(
+      [job.SubmitNow, ..list.flatten(list.repeat(die, job.max_replays))],
+      ReplayAfterLeaseExpiry,
+    )
+  assert j.phase == Stored(Queued)
+  assert j.attempts == 0
+  let j = job.apply(j, job.Claim, ReplayAfterLeaseExpiry)
+  assert j.attempts == 1
+  // Out of replays: the next abandonment is held for an audited decision.
+  let j = job.apply(j, job.NodeDies, ReplayAfterLeaseExpiry)
+  assert j.phase == Stored(Uncertain)
+  assert j.attempts == 1
 }
