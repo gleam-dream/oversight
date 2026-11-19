@@ -23,7 +23,7 @@ packages = [
   { name = "gleeunit", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "EC31ABA74256AEA531EDF8169931D775BBB384FED0A8A1BDC4DD9354E3E21826" },
   { name = "grind", version = "0.1.1", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo", "pog", "sinal"], otp_app = "grind", source = "hex", outer_checksum = "47C6F78ACEF063FC59D00B54E78201CA02C63836F61BED45EE40688FFADD0E59" },
   { name = "gun", version = "2.6.0", build_tools = ["make", "rebar3"], requirements = ["cowlib"], otp_app = "gun", source = "hex", outer_checksum = "69BB957F4BD6C475B5714460FD65C26FC7EB85760AA64B74754DE36CE5CCED7D" },
-  { name = "http_gun", version = "0.1.1", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], otp_app = "http_gun", source = "hex", outer_checksum = "8123CC4AB403FB36BE8458845370D59F54267C4DC92A9F8B6ACB783AA850A7CB" },
+  { name = "http_gun", version = "0.2.0", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], otp_app = "http_gun", source = "hex", outer_checksum = "EC1765351EA2DD6A329B1BF88B8EF7B01819E9C94E5D065C1A0C62A2D05FFC39" },
   { name = "opentelemetry_api", version = "1.5.0", build_tools = ["rebar3", "mix"], requirements = [], otp_app = "opentelemetry_api", source = "hex", outer_checksum = "F53EC8A1337AE4A487D43AC89DA4BD3A3C99DDF576655D071DEED8B56A2D5DDA" },
   { name = "pg_types", version = "0.6.0", build_tools = ["rebar3"], requirements = [], otp_app = "pg_types", source = "hex", outer_checksum = "9949A4849DD13408FA249AB7B745E0D2DFDB9532AEE2B9722326E33CD082A778" },
   { name = "pgo", version = "0.20.0", build_tools = ["rebar3"], requirements = ["backoff", "opentelemetry_api", "pg_types"], otp_app = "pgo", source = "hex", outer_checksum = "2F11E6649CEB38E569EF56B16BE1D04874AE5B11A02867080A2817CE423C683B" },
@@ -47,7 +47,7 @@ gleam_stdlib = { version = ">= 0.70.0 and < 2.0.0" }
 gleam_time = { version = ">= 1.11.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 grind = { version = ">= 0.1.1 and < 0.2.0" }
-http_gun = { version = ">= 0.1.1 and < 0.2.0" }
+http_gun = { version = ">= 0.2.0 and < 0.3.0" }
 pog = { version = ">= 4.1.0 and < 4.2.0" }
 saga = { version = ">= 0.2.0 and < 0.3.0" }
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" }
