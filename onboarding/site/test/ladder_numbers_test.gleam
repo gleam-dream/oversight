@@ -21,8 +21,10 @@ pub fn every_dot_sits_where_the_reference_drew_it_test() {
   list.each(ladder.cases(), fn(c) {
     assert ladder.fixed(ladder.x(c.drawn_amount), 1)
       == js_fixed(js_x(c.drawn_amount), 1)
+    // The reference's vertical scale: 100% at the top (20), 50% at 280.
+    let expected_y = 20.0 +. { 100.0 -. c.drawn_confidence } /. 50.0 *. 260.0
     assert ladder.fixed(ladder.y(c.drawn_confidence), 1)
-      == js_fixed(ladder.y(c.drawn_confidence), 1)
+      == js_fixed(expected_y, 1)
   })
 }
 

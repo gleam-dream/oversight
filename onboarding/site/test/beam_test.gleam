@@ -269,16 +269,40 @@ pub fn the_timelines_keep_the_last_sixteen_slices_test() {
 }
 
 pub fn the_widget_controls_survive_their_attribute_test() {
-  let controls =
+  let calm =
     scheduler_widget.Controls(
       scheduling: Cooperative,
       workload: WithGreedy,
       resets: 3,
-      advances: 12,
+      advanced: 0,
+      recent: [],
     )
-  assert scheduler_widget.decode(scheduler_widget.encode(controls))
-    == option.Some(controls)
-  assert scheduler_widget.decode("sideways greedy 1 2") == option.None
+  assert scheduler_widget.decode(scheduler_widget.encode(calm))
+    == option.Some(calm)
+  let asked =
+    calm
+    |> scheduler_widget.ask_advance(8)
+    |> fn(c) { scheduler_widget.Controls(..c, scheduling: Preemptive) }
+    |> scheduler_widget.ask_advance(6)
+  assert asked.recent
+    == [
+      scheduler_widget.Advance(Cooperative, WithGreedy, 8),
+      scheduler_widget.Advance(Preemptive, WithGreedy, 6),
+    ]
+  assert scheduler_widget.decode(scheduler_widget.encode(asked))
+    == option.Some(asked)
+  assert scheduler_widget.decode("sideways greedy 1 2 -") == option.None
+}
+
+pub fn the_widget_keeps_only_recent_advances_test() {
+  let controls =
+    list.fold(
+      list.repeat(Nil, 20),
+      scheduler_widget.Controls(Preemptive, WellBehaved, 0, 0, []),
+      fn(c, _) { scheduler_widget.ask_advance(c, 1) },
+    )
+  assert controls.advanced == 20
+  assert list.length(controls.recent) == scheduler_widget.recent_advances
 }
 
 // TOURS -----------------------------------------------------------------------
@@ -361,12 +385,16 @@ pub fn without_motion_the_scheduler_tour_runs_the_widget_ahead_test() {
   }
   let model = beam.init() |> next
   // Step 2 adds G cooperatively and runs eight seconds ahead.
-  assert model.scheduler_advances == 8
+  assert model.scheduler_recent
+    == [scheduler_widget.Advance(Cooperative, WithGreedy, 8)]
   let model = next(model)
-  assert model.scheduler_advances == 14
+  assert model.scheduler_advanced == 2
   // Back resets the widget and replays step 2.
   let model =
     beam.update(model, beam.Tour(beam.SchedulerTour, tour.Back), still).0
   assert model.scheduler_resets == 1
   assert model.workload == WithGreedy
+  assert list.reverse(model.scheduler_recent)
+    |> list.first
+    == Ok(scheduler_widget.Advance(Cooperative, WithGreedy, 8))
 }

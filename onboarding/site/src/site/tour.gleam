@@ -355,7 +355,19 @@ pub fn lab(
       zoom_attribute,
       ..attributes
     ],
-    [bar(tour, script, context.motion, to_msg), ..children],
+    [
+      bar(tour, script, context.motion, to_msg),
+      html.div(
+        [
+          class("lab-body"),
+          case is_touring(tour) {
+            True -> attribute("inert", "")
+            False -> attribute.none()
+          },
+        ],
+        children,
+      ),
+    ],
   )
 }
 

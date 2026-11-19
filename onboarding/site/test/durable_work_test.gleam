@@ -1,5 +1,6 @@
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import pages/durable_work.{
   Grind, Lease, Model, Saga, Sagax, SameTransactionCommits,
   SameTransactionRollsBack, SeparateWritesWithCrash, Showing, Tour, Tx,
@@ -287,13 +288,38 @@ pub fn an_animated_run_reveals_one_event_per_tick_test() {
 
 pub fn a_durable_crash_resumes_without_charging_again_test() {
   let events = checkout.events(checkout.happy, CrashAfterCharge, Durable)
+  let calm = checkout.events(checkout.happy, NoCrash, Durable)
   let snap = checkout.snapshot(events, list.length(events) - 1)
   assert snap.charge == checkout.Done
   assert snap.ship == checkout.Done
-  assert list.length(events)
-    == checkout.events(checkout.happy, NoCrash, Durable)
-    |> list.length
-    |> fn(n) { n + 1 }
+  // The charge goes through exactly the same states as without a crash.
+  assert states_of(events, checkout.Charge) == states_of(calm, checkout.Charge)
+  // The crash comes before shipping starts; shipping then runs once.
+  let ship_starts =
+    list.take_while(events, fn(e) {
+      !list.contains(e.set, #(checkout.Ship, checkout.Running))
+    })
+  assert list.any(ship_starts, fn(e) {
+    string.starts_with(e.log, "NODE CRASHED")
+  })
+  assert list.count(events, fn(e) {
+      list.contains(e.set, #(checkout.Ship, checkout.Running))
+    })
+    == 1
+}
+
+fn states_of(
+  events: List(checkout.Event),
+  step: checkout.Step,
+) -> List(checkout.StepState) {
+  list.flat_map(events, fn(e) {
+    list.filter_map(e.set, fn(change) {
+      case change.0 == step {
+        True -> Ok(change.1)
+        False -> Error(Nil)
+      }
+    })
+  })
 }
 
 pub fn a_flagged_order_releases_its_stock_test() {

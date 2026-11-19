@@ -423,158 +423,163 @@ fn sinal_section(model: Model, context: Context) -> Element(Msg) {
   let slow = settings.observer == SlowObserver
   let paused = settings.flow == Paused
   let rate = int.to_string(settings.rate)
-  html.section([class("wrap sec"), attribute.id("sinal")], [
-    html.div([class("k")], [html.text("Sinal · typed telemetry")]),
-    html.h2([class("h2")], [html.text("Report facts without slowing the work")]),
-    html.p([class("lead")], [
-      html.text(
-        "You define an event once, with typed fields. Code emits it; observers react to it. Underneath, it's the same :telemetry registry Erlang and Elixir libraries already share, so their handlers can listen too. Observers normally run inside the emitting process. If they're slow, route them through a bounded ",
-      ),
-      html.b([], [html.text("forwarder")]),
-      html.text("."),
-    ]),
-    lab(model, SinalTour, context, [
-      html.div([class("labh")], [
-        lab_heading("Real time", "Emit request.finished, live", [
-          html.p([class("muted"), css("margin-top:6px;max-width:700px")], [
-            html.text(
-              "A request handler emits an event for every request it finishes. Attach a slow observer, then compare running observers inline against routing them through a bounded forwarder. To make it visible, this forwarder holds 12 events; the real default is 1,024.",
-            ),
+  html.section(
+    [class("wrap sec"), attribute.id("sinal"), attribute("tabindex", "-1")],
+    [
+      html.div([class("k")], [html.text("Sinal · typed telemetry")]),
+      html.h2([class("h2")], [
+        html.text("Report facts without slowing the work"),
+      ]),
+      html.p([class("lead")], [
+        html.text(
+          "You define an event once, with typed fields. Code emits it; observers react to it. Underneath, it's the same :telemetry registry Erlang and Elixir libraries already share, so their handlers can listen too. Observers normally run inside the emitting process. If they're slow, route them through a bounded ",
+        ),
+        html.b([], [html.text("forwarder")]),
+        html.text("."),
+      ]),
+      lab(model, SinalTour, context, [
+        html.div([class("labh")], [
+          lab_heading("Real time", "Emit request.finished, live", [
+            html.p([class("muted"), css("margin-top:6px;max-width:700px")], [
+              html.text(
+                "A request handler emits an event for every request it finishes. Attach a slow observer, then compare running observers inline against routing them through a bounded forwarder. To make it visible, this forwarder holds 12 events; the real default is 1,024.",
+              ),
+            ]),
           ]),
-        ]),
-        html.div([class("row")], [
-          html.button(
-            [
-              attribute.type_("button"),
-              class("btn sm"),
-              event.on_click(case paused {
-                True -> ReaderResumedPipeline
-                False -> ReaderPausedPipeline
-              }),
-            ],
-            [
-              html.text(case paused {
-                True -> "Resume"
-                False -> "Pause"
-              }),
-            ],
-          ),
-          html.button(
-            [
-              attribute.type_("button"),
-              class("btn sm"),
-              event.on_click(ReaderResetPipeline),
-            ],
-            [html.text("Reset")],
-          ),
-        ]),
-      ]),
-      html.div([class("row"), css("gap:14px;margin-bottom:10px")], [
-        html.div([class("seg")], [
-          segment(
-            "Inline (no route)",
-            settings.delivery == Inline,
-            ReaderPickedDelivery(Inline),
-          ),
-          segment(
-            "Routed via forwarder",
-            settings.delivery == ViaForwarder,
-            ReaderPickedDelivery(ViaForwarder),
-          ),
-        ]),
-        html.button(
-          [
-            attribute.type_("button"),
-            class(case slow {
-              True -> "btn warn"
-              False -> "btn"
-            }),
-            ui.pressed(slow),
-            event.on_click(case slow {
-              True -> ReaderRemovedSlowObserver
-              False -> ReaderAttachedSlowObserver
-            }),
-          ],
-          [
-            html.text(case slow {
-              True -> "Remove the slow observer"
-              False -> "Attach a slow observer (50 ms)"
-            }),
-          ],
-        ),
-        html.label(
-          [
-            css(
-              "display:flex;align-items:center;gap:10px;flex:1 1 220px;max-width:340px",
-            ),
-          ],
-          [
-            html.span([css("white-space:nowrap")], [
-              html.b([], [html.text(rate)]),
-              html.text(" requests/s"),
-            ]),
-            html.input([
-              attribute.type_("range"),
-              attribute("min", "1"),
-              attribute("max", "20"),
-              attribute("step", "1"),
-              attribute.value(rate),
-              event.on_input(fn(value) {
-                ReaderSetRate(result.unwrap(int.parse(value), settings.rate))
-              }),
-              css("flex:1"),
-            ]),
-          ],
-        ),
-      ]),
-      element.element(
-        sinal_widget.tag,
-        [
-          class("live"),
-          attribute("data-live", "sinal"),
-          css("display:block;width:100%"),
-          live.motion_attribute(context.motion),
-          sinal_widget.pipeline_attribute(pipeline.Wire(
-            settings:,
-            latest: model.latest,
-            recent: model.issued,
-          )),
-        ],
-        [],
-      ),
-      html.div([class("row"), css("margin-top:8px;gap:10px")], [
-        html.button(
-          [
-            attribute.type_("button"),
-            class("btn sm"),
-            event.on_click(ReaderSentBurst),
-          ],
-          [html.text("Burst of 30 events")],
-        ),
-        case context.motion {
-          motion.Off ->
+          html.div([class("row")], [
             html.button(
               [
                 attribute.type_("button"),
                 class("btn sm"),
-                event.on_click(ReaderAdvancedOneSecond),
+                event.on_click(case paused {
+                  True -> ReaderResumedPipeline
+                  False -> ReaderPausedPipeline
+                }),
               ],
-              [html.text("Advance 1 second")],
-            )
-          motion.On -> element.none()
-        },
+              [
+                html.text(case paused {
+                  True -> "Resume"
+                  False -> "Pause"
+                }),
+              ],
+            ),
+            html.button(
+              [
+                attribute.type_("button"),
+                class("btn sm"),
+                event.on_click(ReaderResetPipeline),
+              ],
+              [html.text("Reset")],
+            ),
+          ]),
+        ]),
+        html.div([class("row"), css("gap:14px;margin-bottom:10px")], [
+          html.div([class("seg")], [
+            segment(
+              "Inline (no route)",
+              settings.delivery == Inline,
+              ReaderPickedDelivery(Inline),
+            ),
+            segment(
+              "Routed via forwarder",
+              settings.delivery == ViaForwarder,
+              ReaderPickedDelivery(ViaForwarder),
+            ),
+          ]),
+          html.button(
+            [
+              attribute.type_("button"),
+              class(case slow {
+                True -> "btn warn"
+                False -> "btn"
+              }),
+              ui.pressed(slow),
+              event.on_click(case slow {
+                True -> ReaderRemovedSlowObserver
+                False -> ReaderAttachedSlowObserver
+              }),
+            ],
+            [
+              html.text(case slow {
+                True -> "Remove the slow observer"
+                False -> "Attach a slow observer (50 ms)"
+              }),
+            ],
+          ),
+          html.label(
+            [
+              css(
+                "display:flex;align-items:center;gap:10px;flex:1 1 220px;max-width:340px",
+              ),
+            ],
+            [
+              html.span([css("white-space:nowrap")], [
+                html.b([], [html.text(rate)]),
+                html.text(" requests/s"),
+              ]),
+              html.input([
+                attribute.type_("range"),
+                attribute("min", "1"),
+                attribute("max", "20"),
+                attribute("step", "1"),
+                attribute.value(rate),
+                event.on_input(fn(value) {
+                  ReaderSetRate(result.unwrap(int.parse(value), settings.rate))
+                }),
+                css("flex:1"),
+              ]),
+            ],
+          ),
+        ]),
+        element.element(
+          sinal_widget.tag,
+          [
+            class("live"),
+            attribute("data-live", "sinal"),
+            css("display:block;width:100%"),
+            live.motion_attribute(context.motion),
+            sinal_widget.pipeline_attribute(pipeline.Wire(
+              settings:,
+              latest: model.latest,
+              recent: model.issued,
+            )),
+          ],
+          [],
+        ),
+        html.div([class("row"), css("margin-top:8px;gap:10px")], [
+          html.button(
+            [
+              attribute.type_("button"),
+              class("btn sm"),
+              event.on_click(ReaderSentBurst),
+            ],
+            [html.text("Burst of 30 events")],
+          ),
+          case context.motion {
+            motion.Off ->
+              html.button(
+                [
+                  attribute.type_("button"),
+                  class("btn sm"),
+                  event.on_click(ReaderAdvancedOneSecond),
+                ],
+                [html.text("Advance 1 second")],
+              )
+            motion.On -> element.none()
+          },
+        ]),
+        html.div([class("note"), css("margin-top:10px")], [
+          html.text(note(settings)),
+        ]),
       ]),
-      html.div([class("note"), css("margin-top:10px")], [
-        html.text(note(settings)),
+      html.div([class("note"), css("margin-top:16px;background:#FFF7E0")], [
+        html.b([], [html.text("Two rules from the README:")]),
+        html.text(
+          " event names become permanent BEAM atoms, so write them in source code and never build them from input. And forwarding is best effort: never use a telemetry event as proof that something happened. That's what durable records are for.",
+        ),
       ]),
-    ]),
-    html.div([class("note"), css("margin-top:16px;background:#FFF7E0")], [
-      html.b([], [html.text("Two rules from the README:")]),
-      html.text(
-        " event names become permanent BEAM atoms, so write them in source code and never build them from input. And forwarding is best effort: never use a telemetry event as proof that something happened. That's what durable records are for.",
-      ),
-    ]),
-  ])
+    ],
+  )
 }
 
 /// What the reader's settings mean, under the widget.
@@ -596,49 +601,52 @@ pub fn note(settings: Settings) -> String {
 // JSON BLUEPRINT --------------------------------------------------------------
 
 fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
-  html.section([class("wrap sec"), attribute.id("blueprint")], [
-    html.div([class("k")], [html.text("JSON Blueprint · data shapes")]),
-    html.h2([class("h2")], [html.text("One codec, three faces")]),
-    html.p([class("lead")], [
-      html.text(
-        "A codec describes a Gleam type's JSON shape: which fields exist, which are optional, which values are allowed. From that one definition you get an ",
-      ),
-      html.b([], [html.text("encoder")]),
-      html.text(", a strict "),
-      html.b([], [html.text("decoder")]),
-      html.text(" and a "),
-      html.b([], [html.text("JSON Schema")]),
-      html.text(
-        ". LLM Wire, Relay, Fabric and Decisions all accept codecs, which is why the schema a model sees always matches the decoder that checks its answer.",
-      ),
-    ]),
-    lab(model, CodecTour, context, [
-      html.div([class("labh")], [
-        lab_heading("Playground", "The User codec", [
-          html.p([class("muted"), css("margin-top:6px")], [
-            html.text(
-              "name (text) · age (whole number from 0 to 150) · email (optional) · role (admin or member)",
-            ),
+  html.section(
+    [class("wrap sec"), attribute.id("blueprint"), attribute("tabindex", "-1")],
+    [
+      html.div([class("k")], [html.text("JSON Blueprint · data shapes")]),
+      html.h2([class("h2")], [html.text("One codec, three faces")]),
+      html.p([class("lead")], [
+        html.text(
+          "A codec describes a Gleam type's JSON shape: which fields exist, which are optional, which values are allowed. From that one definition you get an ",
+        ),
+        html.b([], [html.text("encoder")]),
+        html.text(", a strict "),
+        html.b([], [html.text("decoder")]),
+        html.text(" and a "),
+        html.b([], [html.text("JSON Schema")]),
+        html.text(
+          ". LLM Wire, Relay, Fabric and Decisions all accept codecs, which is why the schema a model sees always matches the decoder that checks its answer.",
+        ),
+      ]),
+      lab(model, CodecTour, context, [
+        html.div([class("labh")], [
+          lab_heading("Playground", "The User codec", [
+            html.p([class("muted"), css("margin-top:6px")], [
+              html.text(
+                "name (text) · age (whole number from 0 to 150) · email (optional) · role (admin or member)",
+              ),
+            ]),
           ]),
         ]),
+        html.div(
+          [class("seg"), css("margin-bottom:20px")],
+          list.map(codec.faces, fn(face) {
+            segment(
+              codec.face_label(face),
+              face == model.face,
+              ReaderPickedFace(face),
+            )
+          }),
+        ),
+        case model.face {
+          codec.Encode -> encode_face()
+          codec.Decode -> decode_face(model.incoming)
+          codec.Schema -> schema_face()
+        },
       ]),
-      html.div(
-        [class("seg"), css("margin-bottom:20px")],
-        list.map(codec.faces, fn(face) {
-          segment(
-            codec.face_label(face),
-            face == model.face,
-            ReaderPickedFace(face),
-          )
-        }),
-      ),
-      case model.face {
-        codec.Encode -> encode_face()
-        codec.Decode -> decode_face(model.incoming)
-        codec.Schema -> schema_face()
-      },
-    ]),
-  ])
+    ],
+  )
 }
 
 fn lines(texts: List(String)) -> List(Element(Msg)) {
@@ -667,11 +675,17 @@ fn encode_face() -> Element(Msg) {
     html.div([class("box"), css("background:#17162B;color:#E8E6F5;border:0")], [
       html.div([class("meta"), css("color:#C9C6E0")], [html.text("JSON out")]),
       html.div(
-        [class("mono"), css("font-size:15px;margin-top:8px;line-height:1.7")],
+        [
+          class("mono"),
+          // Ordinary spaces kept by pre-wrap, so a copied sample is valid JSON.
+          css(
+            "font-size:15px;margin-top:8px;line-height:1.7;white-space:pre-wrap",
+          ),
+        ],
         lines([
           "{ \"name\": \"Ada\",",
-          "\u{00A0}\u{00A0}\"age\": 36,",
-          "\u{00A0}\u{00A0}\"role\": \"admin\" }",
+          "  \"age\": 36,",
+          "  \"role\": \"admin\" }",
         ]),
       ),
       html.p([css("font-size:13px;margin-top:8px;color:#C9C6E0")], [
@@ -797,78 +811,81 @@ fn schema_face() -> Element(Msg) {
 
 fn gun_section(model: Model, context: Context) -> Element(Msg) {
   let selected = gun.part_info(model.part)
-  html.section([class("wrap sec"), attribute.id("gun")], [
-    html.div([class("k")], [html.text("HTTP Gun · the network")]),
-    html.h2([class("h2")], [html.text("A client that tells the truth")]),
-    html.p([class("lead")], [
-      html.text(
-        "HTTP Gun moves bytes, enforces limits and reports exactly what happened. It deliberately doesn't interpret statuses, retry, follow redirects or speak protocols like SSE: those belong to adapters such as LLM Wire, or to your app. Click a part of the client to see its job.",
-      ),
-    ]),
-    lab(model, AnatomyTour, context, [
-      html.div([class("labh")], [
-        lab_heading("Explore", "Anatomy of a request", []),
+  html.section(
+    [class("wrap sec"), attribute.id("gun"), attribute("tabindex", "-1")],
+    [
+      html.div([class("k")], [html.text("HTTP Gun · the network")]),
+      html.h2([class("h2")], [html.text("A client that tells the truth")]),
+      html.p([class("lead")], [
+        html.text(
+          "HTTP Gun moves bytes, enforces limits and reports exactly what happened. It deliberately doesn't interpret statuses, retry, follow redirects or speak protocols like SSE: those belong to adapters such as LLM Wire, or to your app. Click a part of the client to see its job.",
+        ),
       ]),
-      html.div(
-        [
-          css(
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:stretch",
-          ),
-        ],
-        list.index_map(gun.parts, fn(part, i) {
-          part_button(part, i, part == model.part)
-        }),
-      ),
-      html.div(
-        [
-          class("box"),
-          css(
-            "margin-top:12px;background:#F6F4FF;border-color:#DCD9FF;font-size:16px",
-          ),
-        ],
-        [
-          html.b([], [html.text(selected.name <> ".")]),
-          html.text(" " <> selected.long),
-        ],
-      ),
-    ]),
-    lab(model, DestinationTour, context, [
-      html.div([class("labh")], [
-        lab_heading("Playground", "Destination policy", [
-          html.p([class("muted"), css("margin-top:6px;max-width:680px")], [
-            html.text(
-              "Before connecting, HTTP Gun checks where an address really resolves. When a model or a user chooses the URL, this is what keeps them out of your private network.",
-            ),
-          ]),
+      lab(model, AnatomyTour, context, [
+        html.div([class("labh")], [
+          lab_heading("Explore", "Anatomy of a request", []),
         ]),
-      ]),
-      html.div([class("row"), css("gap:16px;margin-bottom:16px")], [
-        html.span([class("meta")], [html.text("Policy")]),
         html.div(
-          [class("seg")],
-          list.map(gun.policies, fn(policy) {
-            segment(
-              gun.policy_label(policy),
-              policy == model.policy,
-              ReaderPickedPolicy(policy),
-            )
+          [
+            css(
+              "display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;align-items:stretch",
+            ),
+          ],
+          list.index_map(gun.parts, fn(part, i) {
+            part_button(part, i, part == model.part)
           }),
         ),
-      ]),
-      html.div(
-        [css("display:flex;flex-direction:column;gap:8px")],
-        list.map(gun.destinations, destination_row(_, model.policy)),
-      ),
-      html.p([class("muted"), css("font-size:14px;margin-top:12px")], [
-        html.text(
-          "The research-agent example goes one step further: its tool policy parses every URL the model picks and only admits one host and path prefix.",
+        html.div(
+          [
+            class("box"),
+            css(
+              "margin-top:12px;background:#F6F4FF;border-color:#DCD9FF;font-size:16px",
+            ),
+          ],
+          [
+            html.b([], [html.text(selected.name <> ".")]),
+            html.text(" " <> selected.long),
+          ],
         ),
       ]),
-    ]),
-    ui.carry_forward(
-      "Sinal reports, Blueprint describes, Gun reaches. Each is bounded, each is typed, and each leaves the decisions to your application.",
-    ),
-  ])
+      lab(model, DestinationTour, context, [
+        html.div([class("labh")], [
+          lab_heading("Playground", "Destination policy", [
+            html.p([class("muted"), css("margin-top:6px;max-width:680px")], [
+              html.text(
+                "Before connecting, HTTP Gun checks where an address really resolves. When a model or a user chooses the URL, this is what keeps them out of your private network.",
+              ),
+            ]),
+          ]),
+        ]),
+        html.div([class("row"), css("gap:16px;margin-bottom:16px")], [
+          html.span([class("meta")], [html.text("Policy")]),
+          html.div(
+            [class("seg")],
+            list.map(gun.policies, fn(policy) {
+              segment(
+                gun.policy_label(policy),
+                policy == model.policy,
+                ReaderPickedPolicy(policy),
+              )
+            }),
+          ),
+        ]),
+        html.div(
+          [css("display:flex;flex-direction:column;gap:8px")],
+          list.map(gun.destinations, destination_row(_, model.policy)),
+        ),
+        html.p([class("muted"), css("font-size:14px;margin-top:12px")], [
+          html.text(
+            "The research-agent example goes one step further: its tool policy parses every URL the model picks and only admits one host and path prefix.",
+          ),
+        ]),
+      ]),
+      ui.carry_forward(
+        "Sinal reports, Blueprint describes, Gun reaches. Each is bounded, each is typed, and each leaves the decisions to your application.",
+      ),
+    ],
+  )
 }
 
 fn part_button(part: Part, index: Int, on: Bool) -> Element(Msg) {

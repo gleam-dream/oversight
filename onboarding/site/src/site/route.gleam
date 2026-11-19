@@ -107,21 +107,10 @@ pub fn module_title(module: Module) -> String {
   }
 }
 
-/// The module's position in the course, from 1 to 11.
+/// The module's position in the course, from 1 to 11, derived from the
+/// course order so a reorder needs one edit.
 pub fn number(module: Module) -> Int {
-  case module {
-    Beam -> 1
-    Otp -> 2
-    Gleam -> 3
-    Principles -> 4
-    Atlas -> 5
-    Foundations -> 6
-    OutsideWorld -> 7
-    DurableWork -> 8
-    Agents -> 9
-    Compose -> 10
-    FieldGuide -> 11
-  }
+  list.take_while(modules, fn(m) { m != module }) |> list.length |> int.add(1)
 }
 
 pub fn minutes(module: Module) -> Int {

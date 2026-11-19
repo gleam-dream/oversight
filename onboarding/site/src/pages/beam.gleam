@@ -37,7 +37,9 @@ pub type Model {
     workload: Workload,
     /// Commands sent to the live scheduler, as counters that only grow.
     scheduler_resets: Int,
-    scheduler_advances: Int,
+    scheduler_advanced: Int,
+    /// The latest advances asked of the scheduler, each with its settings.
+    scheduler_recent: List(scheduler_widget.Advance),
     tours: tour.Tours(TourId),
   )
 }
@@ -68,7 +70,8 @@ pub fn init() -> Model {
     scheduling: Preemptive,
     workload: WellBehaved,
     scheduler_resets: 0,
-    scheduler_advances: 0,
+    scheduler_advanced: 0,
+    scheduler_recent: [],
     tours: tour.new(),
   )
 }
@@ -104,17 +107,11 @@ pub fn update(
       }),
       effect.none(),
     )
-    ReaderAdvancedScheduler -> #(
-      Model(..model, scheduler_advances: model.scheduler_advances + 1),
-      effect.none(),
-    )
+    ReaderAdvancedScheduler -> #(advance_scheduler(model, 1), effect.none())
     TourHurriedScheduler(seconds) ->
       case context.animates(context) {
         True -> #(model, effect.none())
-        False -> #(
-          Model(..model, scheduler_advances: model.scheduler_advances + seconds),
-          effect.none(),
-        )
+        False -> #(advance_scheduler(model, seconds), effect.none())
       }
     TourResetScheduler -> #(
       Model(..model, scheduler_resets: model.scheduler_resets + 1),
@@ -123,6 +120,27 @@ pub fn update(
     Tour(id, command) ->
       tour.update(driver(context), model, id, command, context.motion)
   }
+}
+
+fn scheduler_controls(model: Model) -> scheduler_widget.Controls {
+  scheduler_widget.Controls(
+    scheduling: model.scheduling,
+    workload: model.workload,
+    resets: model.scheduler_resets,
+    advanced: model.scheduler_advanced,
+    recent: model.scheduler_recent,
+  )
+}
+
+/// Ask the live scheduler to run ahead under the current settings.
+fn advance_scheduler(model: Model, seconds: Int) -> Model {
+  let controls =
+    scheduler_widget.ask_advance(scheduler_controls(model), seconds)
+  Model(
+    ..model,
+    scheduler_advanced: controls.advanced,
+    scheduler_recent: controls.recent,
+  )
 }
 
 /// Leaving the page pauses any playing tour.
@@ -454,6 +472,7 @@ fn process_playground(p: Processes) -> Element(Msg) {
             [
               attribute.type_("button"),
               ui.on_class("btn", p.link == processes.Linked),
+              ui.pressed(p.link == processes.Linked),
               event.on_click(ReaderToggledLink),
             ],
             [
@@ -510,6 +529,7 @@ fn chooser(
           [
             attribute.type_("button"),
             ui.on_class("", process.id == selected),
+            ui.pressed(process.id == selected),
             event.on_click(pick(process.id)),
           ],
           [html.text(process.name)],
@@ -700,13 +720,7 @@ fn scheduler_playground(model: Model, context: Context) -> Element(Msg) {
   let scheduling = model.scheduling
   let workload = model.workload
   let greedy = workload == WithGreedy
-  let controls =
-    scheduler_widget.Controls(
-      scheduling:,
-      workload:,
-      resets: model.scheduler_resets,
-      advances: model.scheduler_advances,
-    )
+  let controls = scheduler_controls(model)
   element.fragment([
     html.div([class("labh")], [
       html.div([], [
@@ -781,6 +795,7 @@ fn style_button(
     [
       attribute.type_("button"),
       ui.on_class("", style == current),
+      ui.pressed(style == current),
       event.on_click(ReaderPickedScheduling(style)),
     ],
     [html.text(label)],

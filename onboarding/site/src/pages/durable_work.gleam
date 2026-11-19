@@ -518,49 +518,55 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
   let d = driver(context)
   element.fragment([
     hero(),
-    html.section([class("wrap sec"), attribute.id("grind")], [
-      html.div([class("k")], [html.text("Grind · durable jobs")]),
-      html.h2([class("h2")], [
-        html.text("A job is a row first, a process second"),
-      ]),
-      html.p([class("lead")], [
-        html.text(
-          "When you submit a job, Grind writes a row. A per-queue coordinator claims rows into local capacity under a database ",
-        ),
-        html.b([], [html.text("lease")]),
-        html.text(
-          " and starts a short-lived attempt process to run your handler. The row, not the process, is the truth: if the node dies, the lease runs out and the job is still there.",
-        ),
-      ]),
-      tour.lab(model.tours, Grind, d, context, [], lifecycle(model)),
-      tour.lab(model.tours, Lease, d, context, [], lease(model, context)),
-      tour.lab(model.tours, Tx, d, context, [], admission(model.admission)),
-    ]),
-    html.section([class("wrap sec"), attribute.id("saga")], [
-      html.div([class("k")], [html.text("Saga · workflows with undo")]),
-      html.h2([class("h2")], [
-        html.text(
-          "Steps that depend on each other, and a plan for when they fail",
-        ),
-      ]),
-      html.p([class("lead")], [
-        html.text(
-          "You describe a workflow in Gleam: typed steps, what each needs, how to undo it, and what to do if its effect is uncertain. One coordinator process per run starts ready steps concurrently, records evidence, and on failure undoes the steps it knows succeeded, newest first.",
-        ),
-      ]),
-      tour.lab(model.tours, Saga, d, context, [], saga(model.checkout)),
-      tour.lab(model.tours, Sagax, d, context, [], ladder(model)),
-      html.div([class("note"), css("margin-top:16px")], [
-        html.b([], [html.text("What Saga can't do:")]),
-        html.text(
-          " make a provider's charge and your database commit one transaction. It only undoes steps it ",
-        ),
-        html.i([], [html.text("knows")]),
-        html.text(
-          " succeeded, gives every attempt of an effect the same idempotency key, and holds what it can't prove for your application to reconcile.",
-        ),
-      ]),
-    ]),
+    html.section(
+      [class("wrap sec"), attribute.id("grind"), attribute("tabindex", "-1")],
+      [
+        html.div([class("k")], [html.text("Grind · durable jobs")]),
+        html.h2([class("h2")], [
+          html.text("A job is a row first, a process second"),
+        ]),
+        html.p([class("lead")], [
+          html.text(
+            "When you submit a job, Grind writes a row. A per-queue coordinator claims rows into local capacity under a database ",
+          ),
+          html.b([], [html.text("lease")]),
+          html.text(
+            " and starts a short-lived attempt process to run your handler. The row, not the process, is the truth: if the node dies, the lease runs out and the job is still there.",
+          ),
+        ]),
+        tour.lab(model.tours, Grind, d, context, [], lifecycle(model)),
+        tour.lab(model.tours, Lease, d, context, [], lease(model, context)),
+        tour.lab(model.tours, Tx, d, context, [], admission(model.admission)),
+      ],
+    ),
+    html.section(
+      [class("wrap sec"), attribute.id("saga"), attribute("tabindex", "-1")],
+      [
+        html.div([class("k")], [html.text("Saga · workflows with undo")]),
+        html.h2([class("h2")], [
+          html.text(
+            "Steps that depend on each other, and a plan for when they fail",
+          ),
+        ]),
+        html.p([class("lead")], [
+          html.text(
+            "You describe a workflow in Gleam: typed steps, what each needs, how to undo it, and what to do if its effect is uncertain. One coordinator process per run starts ready steps concurrently, records evidence, and on failure undoes the steps it knows succeeded, newest first.",
+          ),
+        ]),
+        tour.lab(model.tours, Saga, d, context, [], saga(model.checkout)),
+        tour.lab(model.tours, Sagax, d, context, [], ladder(model)),
+        html.div([class("note"), css("margin-top:16px")], [
+          html.b([], [html.text("What Saga can't do:")]),
+          html.text(
+            " make a provider's charge and your database commit one transaction. It only undoes steps it ",
+          ),
+          html.i([], [html.text("knows")]),
+          html.text(
+            " succeeded, gives every attempt of an effect the same idempotency key, and holds what it can't prove for your application to reconcile.",
+          ),
+        ]),
+      ],
+    ),
     which(),
   ])
 }
@@ -1290,7 +1296,7 @@ fn ladder(model: Model) -> List(Element(Msg)) {
         <> " of these runs lost the answer to a charge and retried it, always with the same idempotency key, so no customer paid twice. The held ones wait for a human or a reconciliation job, not a guess.",
       ),
     ]),
-    html.p([class("muted tour-hide"), css("font-size:13px;margin-top:10px")], [
+    html.p([class("muted"), css("font-size:13px;margin-top:10px")], [
       html.text(
         "An illustrative model: every square is a seeded random draw against the rates above, not a recorded checkout.",
       ),
@@ -1316,92 +1322,95 @@ fn which() -> Element(Msg) {
   }
   let amber = "background:#FDF0DC;color:#6B3404"
   let pink = "background:#FCE7F3;color:#5E0B3A"
-  html.section([class("wrap sec"), attribute.id("which")], [
-    html.div([class("k")], [html.text("Read · choosing a coordinator")]),
-    html.h2([class("h2")], [html.text("Which one coordinates this work?")]),
-    html.p([class("lead")], [
-      html.text(
-        "Four packages coordinate work over time. They don't compete; each answers a different question, and real systems often stack two.",
-      ),
-    ]),
-    html.div(
-      [
-        css(
-          "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:24px",
+  html.section(
+    [class("wrap sec"), attribute.id("which"), attribute("tabindex", "-1")],
+    [
+      html.div([class("k")], [html.text("Read · choosing a coordinator")]),
+      html.h2([class("h2")], [html.text("Which one coordinates this work?")]),
+      html.p([class("lead")], [
+        html.text(
+          "Four packages coordinate work over time. They don't compete; each answers a different question, and real systems often stack two.",
         ),
-      ],
-      [
-        coordinator(
-          "#FFFBF4",
-          amber,
-          "Grind",
-          "\"Do this one thing, durably.\"",
-          "One unit of work that must survive restarts, with retries and scheduling. Email, webhook delivery, a provider callback.",
-        ),
-        coordinator(
-          "#FFFBF4",
-          amber,
-          "Saga",
-          "\"Do these steps, in order, or undo.\"",
-          "Known steps with dependencies, concurrency and compensation. Reserve, charge, ship.",
-        ),
-        coordinator(
-          "#FFF7FC",
-          pink,
-          "Fabric",
-          "\"Let a model choose the next move.\"",
-          "An agent loop, or a graph that routes on typed results and waits for signals. Module 9.",
-        ),
-        coordinator(
-          "#FFF7FC",
-          pink,
-          "Decisions",
-          "\"Should this output be released?\"",
-          "One recommendation, a policy, maybe a person, and a release at most once. Module 9.",
-        ),
-      ],
-    ),
-    html.div([class("card"), css("margin-top:16px")], [
-      html.h3([css("font-size:20px;margin-bottom:12px")], [
-        html.text("The classic stack: a job drives a saga"),
       ]),
       html.div(
         [
           css(
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;align-items:stretch",
+            "display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:24px",
           ),
         ],
         [
-          stage(
-            "#F6F4FF",
-            "1 · Request",
-            "Insert the order and submit a Grind job in one transaction.",
+          coordinator(
+            "#FFFBF4",
+            amber,
+            "Grind",
+            "\"Do this one thing, durably.\"",
+            "One unit of work that must survive restarts, with retries and scheduling. Email, webhook delivery, a provider callback.",
           ),
-          stage(
-            "#FDF0DC",
-            "2 · Job runs",
-            "The handler drives a durable saga by a stable execution id.",
+          coordinator(
+            "#FFFBF4",
+            amber,
+            "Saga",
+            "\"Do these steps, in order, or undo.\"",
+            "Known steps with dependencies, concurrency and compensation. Reserve, charge, ship.",
           ),
-          stage(
-            "#FDF0DC",
-            "3 · Saga checkpoints",
-            "Each completed step is saved; uncertain ones get a resolver.",
+          coordinator(
+            "#FFF7FC",
+            pink,
+            "Fabric",
+            "\"Let a model choose the next move.\"",
+            "An agent loop, or a graph that routes on typed results and waits for signals. Module 9.",
           ),
-          stage(
-            "#E2F4E7",
-            "4 · Crash? Resume.",
-            "Grind redelivers the job; the saga reconnects and continues.",
+          coordinator(
+            "#FFF7FC",
+            pink,
+            "Decisions",
+            "\"Should this output be released?\"",
+            "One recommendation, a policy, maybe a person, and a release at most once. Module 9.",
           ),
         ],
       ),
-      html.p([class("muted"), css("font-size:14px;margin-top:12px")], [
-        html.text(
-          "This is the checkout and financial-recovery examples in Oversight. The research agent adds Fabric in the middle.",
+      html.div([class("card"), css("margin-top:16px")], [
+        html.h3([css("font-size:20px;margin-bottom:12px")], [
+          html.text("The classic stack: a job drives a saga"),
+        ]),
+        html.div(
+          [
+            css(
+              "display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;align-items:stretch",
+            ),
+          ],
+          [
+            stage(
+              "#F6F4FF",
+              "1 · Request",
+              "Insert the order and submit a Grind job in one transaction.",
+            ),
+            stage(
+              "#FDF0DC",
+              "2 · Job runs",
+              "The handler drives a durable saga by a stable execution id.",
+            ),
+            stage(
+              "#FDF0DC",
+              "3 · Saga checkpoints",
+              "Each completed step is saved; uncertain ones get a resolver.",
+            ),
+            stage(
+              "#E2F4E7",
+              "4 · Crash? Resume.",
+              "Grind redelivers the job; the saga reconnects and continues.",
+            ),
+          ],
         ),
+        html.p([class("muted"), css("font-size:14px;margin-top:12px")], [
+          html.text(
+            "This is the checkout and financial-recovery examples in Oversight. The research agent adds Fabric in the middle.",
+          ),
+        ]),
       ]),
-    ]),
-    ui.carry_forward(
-      "Durable work is a record you can resume, not a process you hope survives. Grind keeps single jobs; Saga keeps dependent steps and their undo; both hold what they can't prove.",
-    ),
-  ])
+      ui.carry_forward(
+        "Durable work is a record you can resume, not a process you hope survives. Grind keeps single jobs; Saga keeps dependent steps and their undo; both hold what they can't prove.",
+      ),
+    ],
+  )
 }

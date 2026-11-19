@@ -98,6 +98,8 @@ export function scroll_into_view(id, smooth) {
       behavior: smooth ? "smooth" : "auto",
       block: "start",
     });
+    // Keyboard focus follows the jump without a second scroll.
+    element.focus({ preventScroll: true });
   }
 }
 

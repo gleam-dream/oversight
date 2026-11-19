@@ -103,7 +103,14 @@ pub fn context(model: Model) -> Context {
 pub fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     ReaderChangedHash(hash) ->
+      // Back to a URL without a fragment means the course map; any other
+      // fragment that is not a route is ignored.
       case route.parse(hash) {
+        Error(Nil) if hash == "" || hash == "#" ->
+          case model.route {
+            route.CourseMap -> #(model, effect.none())
+            _ -> navigate(model, route.CourseMap)
+          }
         Ok(route) if route != model.route -> navigate(model, route)
         _ -> #(model, effect.none())
       }

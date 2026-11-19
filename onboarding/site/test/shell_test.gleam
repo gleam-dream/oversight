@@ -107,9 +107,11 @@ fn settle_loop(
     Error(Nil) -> 100
   }
   let sample = fit.Sample(height: height(shown), shown:)
+  // Every sample is one render of the card, the one that settles included.
+  let renders = renders + 1
   let next = fit.next(previous, sample, "b", available)
   case fit.is_settling(next) && renders < 20 {
-    True -> settle_loop(Ok(next), height, available, renders + 1)
+    True -> settle_loop(Ok(next), height, available, renders)
     False -> #(next.zoom, renders)
   }
 }
@@ -205,4 +207,23 @@ pub fn playgrounds_that_stop_touring_drop_their_fit_test() {
   let fits = app.refit(dict.new(), touring)
   let free = browser.Layout(..touring, labs: [])
   assert app.refit(fits, free) == dict.new()
+}
+
+// HISTORY ---------------------------------------------------------------------
+
+pub fn going_back_to_a_url_without_a_fragment_shows_the_course_map_test() {
+  let flags =
+    app.Flags(
+      hash: "#beam",
+      stored_progress: Error(Nil),
+      stored_motion: Error(Nil),
+      system_reduces_motion: False,
+    )
+  let #(model, _) = app.init(flags)
+  assert model.route == route.Module(route.Beam)
+  let #(back, _) = app.update(model, app.ReaderChangedHash(""))
+  assert back.route == route.CourseMap
+  // A fragment that is not a route, such as an in-page anchor, changes nothing.
+  let #(anchor, _) = app.update(model, app.ReaderChangedHash("#sinal"))
+  assert anchor.route == route.Module(route.Beam)
 }

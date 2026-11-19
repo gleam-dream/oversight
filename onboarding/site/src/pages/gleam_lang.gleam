@@ -371,7 +371,12 @@ fn labh(title: String, body: String, body_style: String) -> Element(Msg) {
 
 fn toggle_button(on: Bool, msg: Msg, label: String) -> Element(Msg) {
   html.button(
-    [attribute.type_("button"), ui.on_class("btn", on), event.on_click(msg)],
+    [
+      attribute.type_("button"),
+      ui.on_class("btn", on),
+      ui.pressed(on),
+      event.on_click(msg),
+    ],
     [html.text(label)],
   )
 }
@@ -422,6 +427,7 @@ fn types_playground(model: Model) -> List(Element(Msg)) {
                     [
                       attribute.type_("button"),
                       ui.on_class("", loose.status == status),
+                      ui.pressed(loose.status == status),
                       event.on_click(ReaderPickedLooseStatus(status)),
                     ],
                     [html.text(order.status_label(status))],

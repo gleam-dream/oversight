@@ -2,9 +2,10 @@
 //// simulation and redraws only its own SVG on every frame.
 ////
 //// The page passes one `controls` attribute: the scheduling style, whether
-//// the greedy process is in, and two counters for one-off commands (reset,
-//// advance one second). Settings and commands travel together so an advance
-//// always runs under the settings the page had when it asked for it.
+//// the greedy process is in, a reset counter, and the latest advances, each
+//// with the settings it was asked under and a running count. A tour replay
+//// that asks for cooperative seconds and then preemptive ones in a single
+//// update therefore runs them in that order, each under its own settings.
 
 import gleam/dict.{type Dict}
 import gleam/float
@@ -45,29 +46,88 @@ pub fn register() -> Result(Nil, lustre.Error) {
 
 // ATTRIBUTES ------------------------------------------------------------------
 
-/// What the page asks of the widget: settings, and counters that only grow.
+/// Run the simulation ahead, under the settings in force when asked.
+pub type Advance {
+  Advance(scheduling: Scheduling, workload: Workload, seconds: Int)
+}
+
+/// How many recent advances the page keeps for the widget.
+pub const recent_advances = 16
+
+/// What the page asks of the widget: settings, a reset counter, and the
+/// latest advances with the count of all advances ever asked for.
 pub type Controls {
   Controls(
     scheduling: Scheduling,
     workload: Workload,
     resets: Int,
-    advances: Int,
+    advanced: Int,
+    recent: List(Advance),
   )
 }
 
+/// Record one more advance under the given settings.
+pub fn ask_advance(controls: Controls, seconds: Int) -> Controls {
+  let advance = Advance(controls.scheduling, controls.workload, seconds)
+  let recent = list.append(controls.recent, [advance])
+  Controls(
+    ..controls,
+    advanced: controls.advanced + 1,
+    recent: list.drop(recent, int.max(0, list.length(recent) - recent_advances)),
+  )
+}
+
+fn encode_scheduling(scheduling: Scheduling) -> String {
+  case scheduling {
+    Cooperative -> "cooperative"
+    Preemptive -> "preemptive"
+  }
+}
+
+fn decode_scheduling(value: String) -> Result(Scheduling, Nil) {
+  case value {
+    "cooperative" -> Ok(Cooperative)
+    "preemptive" -> Ok(Preemptive)
+    _ -> Error(Nil)
+  }
+}
+
+fn encode_workload(workload: Workload) -> String {
+  case workload {
+    WellBehaved -> "calm"
+    WithGreedy -> "greedy"
+  }
+}
+
+fn decode_workload(value: String) -> Result(Workload, Nil) {
+  case value {
+    "calm" -> Ok(WellBehaved)
+    "greedy" -> Ok(WithGreedy)
+    _ -> Error(Nil)
+  }
+}
+
 pub fn encode(controls: Controls) -> String {
+  let recent = case controls.recent {
+    [] -> "-"
+    advances ->
+      advances
+      |> list.map(fn(a) {
+        encode_scheduling(a.scheduling)
+        <> ":"
+        <> encode_workload(a.workload)
+        <> ":"
+        <> int.to_string(a.seconds)
+      })
+      |> string.join(",")
+  }
   string.join(
     [
-      case controls.scheduling {
-        Cooperative -> "cooperative"
-        Preemptive -> "preemptive"
-      },
-      case controls.workload {
-        WellBehaved -> "calm"
-        WithGreedy -> "greedy"
-      },
+      encode_scheduling(controls.scheduling),
+      encode_workload(controls.workload),
       int.to_string(controls.resets),
-      int.to_string(controls.advances),
+      int.to_string(controls.advanced),
+      recent,
     ],
     " ",
   )
@@ -75,21 +135,33 @@ pub fn encode(controls: Controls) -> String {
 
 pub fn decode(value: String) -> Option(Controls) {
   case string.split(value, " ") {
-    [scheduling, workload, resets, advances] -> {
-      let scheduling = case scheduling {
-        "cooperative" -> Ok(Cooperative)
-        "preemptive" -> Ok(Preemptive)
-        _ -> Error(Nil)
+    [scheduling, workload, resets, advanced, recent] -> {
+      let recent = case recent {
+        "-" -> Ok([])
+        _ ->
+          string.split(recent, ",")
+          |> list.try_map(fn(entry) {
+            case string.split(entry, ":") {
+              [scheduling, workload, seconds] -> {
+                use scheduling <- result.try(decode_scheduling(scheduling))
+                use workload <- result.try(decode_workload(workload))
+                use seconds <- result.map(int.parse(seconds))
+                Advance(scheduling:, workload:, seconds:)
+              }
+              _ -> Error(Nil)
+            }
+          })
       }
-      let workload = case workload {
-        "calm" -> Ok(WellBehaved)
-        "greedy" -> Ok(WithGreedy)
-        _ -> Error(Nil)
-      }
-      case scheduling, workload, int.parse(resets), int.parse(advances) {
-        Ok(scheduling), Ok(workload), Ok(resets), Ok(advances) ->
-          Some(Controls(scheduling:, workload:, resets:, advances:))
-        _, _, _, _ -> None
+      case
+        decode_scheduling(scheduling),
+        decode_workload(workload),
+        int.parse(resets),
+        int.parse(advanced),
+        recent
+      {
+        Ok(scheduling), Ok(workload), Ok(resets), Ok(advanced), Ok(recent) ->
+          Some(Controls(scheduling:, workload:, resets:, advanced:, recent:))
+        _, _, _, _, _ -> None
       }
     }
     _ -> None
@@ -186,22 +258,27 @@ fn follow_frames(model: Model) -> #(Model, Effect(Msg)) {
   }
 }
 
-/// Apply new controls: a reset first, then the settings, then any advances
-/// under those settings.
+/// Apply new controls: a reset first, then each new advance in order under
+/// its own settings, then the current settings.
 fn apply(model: Model, controls: Controls) -> Model {
   let #(reset, seen_resets) = live.is_new(model.seen_resets, controls.resets)
-  let advances = case model.seen_advances {
-    Some(previous) -> int.max(0, controls.advances - previous)
+  let fresh = case model.seen_advances {
+    Some(previous) -> int.max(0, controls.advanced - previous)
     None -> 0
   }
-  let #(_, seen_advances) = live.is_new(model.seen_advances, controls.advances)
+  let #(_, seen_advances) = live.is_new(model.seen_advances, controls.advanced)
   let sim = case reset {
     True -> scheduler.new()
     False -> model.sim
   }
+  let pending =
+    list.drop(controls.recent, int.max(0, list.length(controls.recent) - fresh))
   let sim =
-    scheduler.set_workload(sim, controls.workload)
-    |> scheduler.run(int.to_float(advances), controls.scheduling)
+    list.fold(pending, sim, fn(sim, advance) {
+      scheduler.set_workload(sim, advance.workload)
+      |> scheduler.run(int.to_float(advance.seconds), advance.scheduling)
+    })
+    |> scheduler.set_workload(controls.workload)
   Model(
     ..model,
     sim:,

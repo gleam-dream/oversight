@@ -297,3 +297,17 @@ pub fn the_ladder_tour_and_a_dot_sent_up_test() {
   assert model.point.version == point.V4
   assert model.point.occurrence == point.recommend(33, 88)
 }
+
+pub fn a_keyboard_reader_can_send_any_case_up_test() {
+  let context = context.new(motion.On, progress.empty())
+  let update = fn(model, msg) { agents.update(model, msg, context).0 }
+  let model = update(agents.init(), agents.ReaderPickedLadderCase(37))
+  assert model.ladder_case == 37
+  // Out-of-range numbers stay within the four hundred cases.
+  assert update(model, agents.ReaderPickedLadderCase(9000)).ladder_case == 400
+  assert update(model, agents.ReaderPickedLadderCase(-3)).ladder_case == 1
+  let assert [case_, ..] = list.drop(model.cases, 36)
+  let sent = update(model, agents.ReaderSentCaseUp(case_))
+  assert sent.point
+    == point.load(model.point, case_.amount, case_.confidence, model.ladder)
+}

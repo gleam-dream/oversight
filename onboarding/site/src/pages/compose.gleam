@@ -898,7 +898,7 @@ fn trace_lab(model: Model) -> List(Element(Msg)) {
         ),
       ],
     ),
-    html.p([class("muted tour-hide"), css("font-size:13px;margin-top:12px")], [
+    html.p([class("muted"), css("font-size:13px;margin-top:12px")], [
       html.text(
         "Event names and HTTP Gun's milestones are the real ones from each library's telemetry module. The order of events is reconstructed from the checkout example's design, not recorded from a live run, so treat timings as illustrative.",
       ),

@@ -409,6 +409,20 @@ p {
 html {
   scroll-behavior: smooth;
 }
+/* With motion off nothing scrolls smoothly, the page itself included. */
+html:has(.still) {
+  scroll-behavior: auto;
+}
+/* A playground's content. It adds no box of its own; while the guided tour
+   runs it is inert, so neither pointer nor keyboard can work the controls. */
+.lab-body {
+  display: contents;
+}
+/* Jump destinations take focus so Tab continues from there. */
+section[tabindex="-1"]:focus,
+.lab[tabindex="-1"]:focus {
+  outline: none;
+}
 .appbar {
   position: sticky;
   top: 0;
@@ -691,28 +705,28 @@ input[type="range"] {
   padding: 10px 14px;
   font-size: 14px;
 }
-.lab[data-rt-z="60"] > :not(.tourbar) {
+.lab[data-rt-z="60"] > .lab-body > * {
   zoom: 0.6;
 }
-.lab[data-rt-z="65"] > :not(.tourbar) {
+.lab[data-rt-z="65"] > .lab-body > * {
   zoom: 0.65;
 }
-.lab[data-rt-z="70"] > :not(.tourbar) {
+.lab[data-rt-z="70"] > .lab-body > * {
   zoom: 0.7;
 }
-.lab[data-rt-z="75"] > :not(.tourbar) {
+.lab[data-rt-z="75"] > .lab-body > * {
   zoom: 0.75;
 }
-.lab[data-rt-z="80"] > :not(.tourbar) {
+.lab[data-rt-z="80"] > .lab-body > * {
   zoom: 0.8;
 }
-.lab[data-rt-z="85"] > :not(.tourbar) {
+.lab[data-rt-z="85"] > .lab-body > * {
   zoom: 0.85;
 }
-.lab[data-rt-z="90"] > :not(.tourbar) {
+.lab[data-rt-z="90"] > .lab-body > * {
   zoom: 0.9;
 }
-.lab[data-rt-z="95"] > :not(.tourbar) {
+.lab[data-rt-z="95"] > .lab-body > * {
   zoom: 0.95;
 }
 @keyframes mscin {
@@ -748,8 +762,8 @@ input[type="range"] {
   pointer-events: none;
 }
 .lab.touring .labh ~ *,
-.lab.touring > .split,
-.lab.touring > div:not(.tourbar):not(.labh) {
+.lab.touring > .lab-body > .split,
+.lab.touring > .lab-body > div:not(.labh) {
   cursor: default;
 }
 .msc-h {

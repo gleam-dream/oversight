@@ -253,7 +253,11 @@ fn init(_: Nil) -> #(Model, Effect(Msg)) {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     Connected -> start(Model(..model, presence: Attached))
-    Disconnected -> stop(Model(..model, presence: Detached))
+    // Unsubscribe with the handle we still hold, then forget it.
+    Disconnected -> {
+      let #(model, effect) = stop(model)
+      #(Model(..model, presence: Detached), effect)
+    }
     MotionChanged(motion) -> {
       let model = Model(..model, motion:)
       case motion {

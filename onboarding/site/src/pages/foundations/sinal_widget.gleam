@@ -324,6 +324,16 @@ fn forwarder(inline: Bool, queued: Int) -> Element(Msg) {
         "#0B4A45",
         "forwarder · holds " <> int.to_string(pipeline.capacity),
       ),
+      // The honesty label stays visible while touring, when the playground's
+      // description is hidden.
+      label(
+        455,
+        42,
+        10,
+        False,
+        "#5B5970",
+        "12 slots here for visibility · the real default is 1,024",
+      ),
       element.fragment(
         int.range(
           from: pipeline.capacity - 1,

@@ -38,6 +38,8 @@ pub type Model {
     /// The policy version the 400-recommendation view shows.
     ladder: Version,
     cases: List(Case),
+    /// The case a keyboard reader has picked to send up, from 1.
+    ladder_case: Int,
     tours: tour.Tours(TourId),
   )
 }
@@ -63,6 +65,7 @@ pub type Msg {
   CaseLoaded(amount: Int, confidence: Int, version: Version)
   // Up the ladder.
   ReaderPickedLadderVersion(Version)
+  ReaderPickedLadderCase(Int)
   /// A dot was clicked: replay that case in the decision point above.
   ReaderSentCaseUp(Case)
   ReaderJumpedTo(String)
@@ -76,6 +79,7 @@ pub fn init() -> Model {
     point: point.new(),
     ladder: point.V1,
     cases: ladder.cases(),
+    ladder_case: 1,
     tours: tour.new(),
   )
 }
@@ -122,6 +126,13 @@ pub fn update(
         ),
       )
     ReaderPickedLadderVersion(version) -> none(Model(..model, ladder: version))
+    ReaderPickedLadderCase(number) ->
+      none(
+        Model(
+          ..model,
+          ladder_case: int.clamp(number, 1, list.length(model.cases)),
+        ),
+      )
     ReaderSentCaseUp(case_) -> #(
       Model(
         ..model,
@@ -327,92 +338,106 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
   }
   element.fragment([
     hero(),
-    html.section([class("wrap sec"), attribute.id("fabric")], [
-      html.div([class("k")], [html.text("Fabric · bounded agents")]),
-      html.h2([class("h2")], [
-        html.text("An agent is a model, tools, a policy and limits"),
-      ]),
-      html.p([class("lead")], [
-        html.text(
-          "You build a checked agent from four things, then start runs in a ",
+    html.section(
+      [class("wrap sec"), attribute.id("fabric"), attribute("tabindex", "-1")],
+      [
+        html.div([class("k")], [html.text("Fabric · bounded agents")]),
+        html.h2([class("h2")], [
+          html.text("An agent is a model, tools, a policy and limits"),
+        ]),
+        html.p([class("lead")], [
+          html.text(
+            "You build a checked agent from four things, then start runs in a ",
+          ),
+          html.b([], [html.text("store")]),
+          html.text(
+            ". The store keeps each run's record and supervises the runner doing the work. A handle only addresses a run: dropping it cancels nothing, and a run can be reopened by its id after a restart.",
+          ),
+        ]),
+        cards([
+          #(
+            "model",
+            "Proposes",
+            "An LLM Wire provider or any custom model function. It suggests the next tool calls or a final answer.",
+          ),
+          #(
+            "tools",
+            "Act",
+            "Typed tools with codecs. Each classifies its result: done, failed, or uncertain if it may have reached the world.",
+          ),
+          #(
+            "policy",
+            "Decides",
+            "Your function sees every proposed action and answers Allow, Deny, RequireApproval or HandOver.",
+          ),
+          #(
+            "limits",
+            "Bound",
+            "Max turns, model and tool timeouts, concurrent tool bodies, optional token and family budgets.",
+          ),
+        ]),
+        lab(GateTour, [], gate_lab(model.gate)),
+        lab(PlugTour, [], plug_lab(model.plug)),
+        html.div([class("note"), css("margin-top:16px")], [
+          html.b([], [html.text("Also in Fabric: graphs.")]),
+          html.text(
+            " Besides free-form agents, you can build conditional graphs with typed state: nodes route on typed results, wait for human signals, watch external jobs, start child runs and fork structured work, all durably recorded. A graph waits for another system as a signal instead of handing over.",
+          ),
+        ]),
+      ],
+    ),
+    html.section(
+      [
+        class("wrap sec"),
+        attribute.id("decisions"),
+        attribute("tabindex", "-1"),
+      ],
+      [
+        html.div([class("k")], [html.text("Decisions · decision points")]),
+        html.h2([class("h2")], [
+          html.text("Recommend, decide, release once, remember everything"),
+        ]),
+        html.p([class("lead")], [
+          html.text("A "),
+          html.b([], [html.text("decision point")]),
+          html.text(
+            " is a place where an output must not reach the world unchecked. A model (or a rule, or a person) recommends; a versioned policy either proceeds or asks a person; the final output is released at most once to a gated tool, inside your transaction. Every step is appended to a record, and that record is what you learn from.",
+          ),
+        ]),
+        cards([
+          #(
+            "point",
+            "The declaration",
+            "The output type and codec, and the facts a policy may read. No thresholds live here.",
+          ),
+          #(
+            "occurrence",
+            "One case",
+            "One recommendation about one subject, as append-only entries. Keyed, so a trigger delivered twice is one occurrence.",
+          ),
+          #(
+            "policy",
+            "Versioned data",
+            "Rules over the facts. Publishing a stricter or looser version changes behaviour without a deploy.",
+          ),
+          #(
+            "gated tool",
+            "Released once",
+            "The only path to the effect. It accepts nothing but a released output, at most once.",
+          ),
+        ]),
+        lab(
+          PointTour,
+          [attribute.id("refund-point"), attribute("tabindex", "-1")],
+          point_lab(model.point),
         ),
-        html.b([], [html.text("store")]),
-        html.text(
-          ". The store keeps each run's record and supervises the runner doing the work. A handle only addresses a run: dropping it cancels nothing, and a run can be reopened by its id after a restart.",
-        ),
-      ]),
-      cards([
-        #(
-          "model",
-          "Proposes",
-          "An LLM Wire provider or any custom model function. It suggests the next tool calls or a final answer.",
-        ),
-        #(
-          "tools",
-          "Act",
-          "Typed tools with codecs. Each classifies its result: done, failed, or uncertain if it may have reached the world.",
-        ),
-        #(
-          "policy",
-          "Decides",
-          "Your function sees every proposed action and answers Allow, Deny, RequireApproval or HandOver.",
-        ),
-        #(
-          "limits",
-          "Bound",
-          "Max turns, model and tool timeouts, concurrent tool bodies, optional token and family budgets.",
-        ),
-      ]),
-      lab(GateTour, [], gate_lab(model.gate)),
-      lab(PlugTour, [], plug_lab(model.plug)),
-      html.div([class("note"), css("margin-top:16px")], [
-        html.b([], [html.text("Also in Fabric: graphs.")]),
-        html.text(
-          " Besides free-form agents, you can build conditional graphs with typed state: nodes route on typed results, wait for human signals, watch external jobs, start child runs and fork structured work, all durably recorded. A graph waits for another system as a signal instead of handing over.",
-        ),
-      ]),
-    ]),
-    html.section([class("wrap sec"), attribute.id("decisions")], [
-      html.div([class("k")], [html.text("Decisions · decision points")]),
-      html.h2([class("h2")], [
-        html.text("Recommend, decide, release once, remember everything"),
-      ]),
-      html.p([class("lead")], [
-        html.text("A "),
-        html.b([], [html.text("decision point")]),
-        html.text(
-          " is a place where an output must not reach the world unchecked. A model (or a rule, or a person) recommends; a versioned policy either proceeds or asks a person; the final output is released at most once to a gated tool, inside your transaction. Every step is appended to a record, and that record is what you learn from.",
-        ),
-      ]),
-      cards([
-        #(
-          "point",
-          "The declaration",
-          "The output type and codec, and the facts a policy may read. No thresholds live here.",
-        ),
-        #(
-          "occurrence",
-          "One case",
-          "One recommendation about one subject, as append-only entries. Keyed, so a trigger delivered twice is one occurrence.",
-        ),
-        #(
-          "policy",
-          "Versioned data",
-          "Rules over the facts. Publishing a stricter or looser version changes behaviour without a deploy.",
-        ),
-        #(
-          "gated tool",
-          "Released once",
-          "The only path to the effect. It accepts nothing but a released output, at most once.",
-        ),
-      ]),
-      lab(PointTour, [attribute.id("refund-point")], point_lab(model.point)),
-    ]),
+      ],
+    ),
     html.section([class("wrap sec")], [
       lab(
         LadderTour,
         [css("margin-top:0")],
-        ladder_lab(model.ladder, model.cases),
+        ladder_lab(model.ladder, model.cases, model.ladder_case),
       ),
     ]),
     together(),
@@ -1019,7 +1044,11 @@ fn version_button(version: Version, current: Version) -> Element(Msg) {
 
 // UP THE LADDER ---------------------------------------------------------------
 
-fn ladder_lab(version: Version, cases: List(Case)) -> List(Element(Msg)) {
+fn ladder_lab(
+  version: Version,
+  cases: List(Case),
+  picked: Int,
+) -> List(Element(Msg)) {
   let tally = ladder.tally(version, cases)
   let v = point.number(version)
   let one = fn(x) { ladder.fixed(x, 1) }
@@ -1067,7 +1096,7 @@ fn ladder_lab(version: Version, cases: List(Case)) -> List(Element(Msg)) {
       "740px",
       [
         html.text(
-          "Above, you walked one refund through the point. Here are four hundred at once: each dot is a recommendation, placed by amount and model confidence. Pick a policy version and see who decides what. Click any dot to send that case to the single-refund playground above.",
+          "Above, you walked one refund through the point. Here are four hundred at once: each dot is a recommendation, placed by amount and model confidence. Pick a policy version and see who decides what. Click any dot, or pick a case by number, to send that case to the single-refund playground above.",
         ),
       ],
       element.none(),
@@ -1154,6 +1183,7 @@ fn ladder_lab(version: Version, cases: List(Case)) -> List(Element(Msg)) {
           key("background:#3B1785", " asks two"),
           key("border:2px solid #B42318", " model was wrong"),
         ]),
+        case_picker(version, cases, picked),
       ]),
       html.div(
         [css("flex:2 1 280px;display:flex;flex-direction:column;gap:10px")],
@@ -1201,6 +1231,61 @@ fn ladder_lab(version: Version, cases: List(Case)) -> List(Element(Msg)) {
       ),
     ]),
   ]
+}
+
+/// Send a case up by number: the keyboard way to do what clicking a dot does,
+/// without four hundred tab stops.
+fn case_picker(
+  version: Version,
+  cases: List(Case),
+  picked: Int,
+) -> Element(Msg) {
+  case list.drop(cases, picked - 1) {
+    [case_, ..] ->
+      html.div([class("row"), css("gap:10px;margin-top:12px;font-size:14px")], [
+        html.label([attribute.for("ladder-case"), class("meta")], [
+          html.text("Case"),
+        ]),
+        html.input([
+          attribute.id("ladder-case"),
+          attribute.type_("number"),
+          attribute.min("1"),
+          attribute.max(int.to_string(list.length(cases))),
+          attribute.value(int.to_string(picked)),
+          css("width:72px;min-height:36px;font:inherit"),
+          event.on_input(fn(value) {
+            ReaderPickedLadderCase(int.parse(value) |> result.unwrap(picked))
+          }),
+        ]),
+        html.span([class("muted")], [
+          html.text(
+            "€"
+            <> int.to_string(case_.amount)
+            <> " at "
+            <> int.to_string(case_.confidence)
+            <> "% · "
+            <> route_words(ladder.route(version, case_)),
+          ),
+        ]),
+        html.button(
+          [
+            attribute.type_("button"),
+            class("btn sm"),
+            event.on_click(ReaderSentCaseUp(case_)),
+          ],
+          [html.text("Send this case up")],
+        ),
+      ])
+    [] -> element.none()
+  }
+}
+
+fn route_words(route: ladder.Route) -> String {
+  case route {
+    ladder.ProceedsAlone -> "proceeds alone"
+    ladder.AsksOne -> "asks one person"
+    ladder.AsksTwo -> "asks two"
+  }
 }
 
 /// `Math.round(n / d)` for non-negative integers.
@@ -1265,55 +1350,58 @@ fn together() -> Element(Msg) {
       html.p([css("font-size:14px;margin-top:4px")], [html.text(body)]),
     ])
   }
-  html.section([class("wrap sec"), attribute.id("together")], [
-    html.div([class("k")], [html.text("Read · Fabric + Decisions + Saga")]),
-    html.h2([class("h2")], [html.text("The payout desk, in five moves")]),
-    html.p([class("lead")], [
-      html.text(
-        "The richest example in Oversight combines everything in this module. A marketplace pays its sellers, and nobody wants an agent moving money on its own say-so.",
+  html.section(
+    [class("wrap sec"), attribute.id("together"), attribute("tabindex", "-1")],
+    [
+      html.div([class("k")], [html.text("Read · Fabric + Decisions + Saga")]),
+      html.h2([class("h2")], [html.text("The payout desk, in five moves")]),
+      html.p([class("lead")], [
+        html.text(
+          "The richest example in Oversight combines everything in this module. A marketplace pays its sellers, and nobody wants an agent moving money on its own say-so.",
+        ),
+      ]),
+      html.div(
+        [
+          css(
+            "display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:24px",
+          ),
+        ],
+        [
+          move(
+            "background:#FCE7F3;border-color:#F3C6E6",
+            "1 · Fabric",
+            "Investigate",
+            "A support agent reads the dispute and proposes propose_payout.",
+          ),
+          move(
+            "background:#FCE7F3;border-color:#F3C6E6",
+            "2 · Fabric policy",
+            "Hand over",
+            "The policy hands the call over. The run ends; nothing is paid.",
+          ),
+          move(
+            "background:#FFF7FC;border-color:#F3C6E6",
+            "3 · Decisions",
+            "Decide",
+            "The payout point applies a versioned policy: small won disputes proceed after an undo window; large ones need two from finance.",
+          ),
+          move(
+            "background:#FDF0DC;border-color:#F3D9B1",
+            "4 · Saga",
+            "Pay",
+            "The released payout runs as a saga with an idempotency key; Grind delivers the wake-ups.",
+          ),
+          move(
+            "background:#E2F4E7;border-color:#B9E2C4",
+            "5 · Fabric again",
+            "Tell the seller",
+            "A follow-on run can continue the conversation from the decision.",
+          ),
+        ],
       ),
-    ]),
-    html.div(
-      [
-        css(
-          "display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:24px",
-        ),
-      ],
-      [
-        move(
-          "background:#FCE7F3;border-color:#F3C6E6",
-          "1 · Fabric",
-          "Investigate",
-          "A support agent reads the dispute and proposes propose_payout.",
-        ),
-        move(
-          "background:#FCE7F3;border-color:#F3C6E6",
-          "2 · Fabric policy",
-          "Hand over",
-          "The policy hands the call over. The run ends; nothing is paid.",
-        ),
-        move(
-          "background:#FFF7FC;border-color:#F3C6E6",
-          "3 · Decisions",
-          "Decide",
-          "The payout point applies a versioned policy: small won disputes proceed after an undo window; large ones need two from finance.",
-        ),
-        move(
-          "background:#FDF0DC;border-color:#F3D9B1",
-          "4 · Saga",
-          "Pay",
-          "The released payout runs as a saga with an idempotency key; Grind delivers the wake-ups.",
-        ),
-        move(
-          "background:#E2F4E7;border-color:#B9E2C4",
-          "5 · Fabric again",
-          "Tell the seller",
-          "A follow-on run can continue the conversation from the decision.",
-        ),
-      ],
-    ),
-    ui.carry_forward(
-      "Models propose; policy decides; people step in where policy says; effects happen once; everything is on the record. Fabric runs the agent, Decisions owns the decision.",
-    ),
-  ])
+      ui.carry_forward(
+        "Models propose; policy decides; people step in where policy says; effects happen once; everything is on the record. Fabric runs the agent, Decisions owns the decision.",
+      ),
+    ],
+  )
 }

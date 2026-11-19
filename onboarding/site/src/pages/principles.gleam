@@ -1125,7 +1125,7 @@ fn herd_lab(schedule: Schedule, drawing: Drawing) -> List(Element(Msg)) {
     html.div([class("note"), css("margin-top:14px")], [
       html.text(herd.note(schedule)),
     ]),
-    html.p([class("muted tour-hide"), css("font-size:13px;margin-top:10px")], [
+    html.p([class("muted"), css("font-size:13px;margin-top:10px")], [
       html.text(
         "An illustrative model with seeded randomness: every visit draws the same picture.",
       ),
