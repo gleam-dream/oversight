@@ -41,6 +41,14 @@
 - [docs/ORACLE.md](docs/ORACLE.md) pins each external reference the experiments compare against (the pinned MCP schema, published JSON Blueprint releases, the older Fabric reader and the recorded Relay baseline), states what each comparison covers and how to run it, and states the limits of each claim.
 - This repository has no `BENCHMARKS.md`: it owns no benchmark workload ([ADR 0019](docs/adr/0019-qualify-composition-through-validation-profiles.md)). Benchmarks belong to the library that owns each workload; find the libraries in the [README](README.md#libraries).
 
+## Onboarding course
+
+- [`onboarding/site/`](onboarding/site/) is the onboarding course for the ecosystem, published to GitHub Pages; its requirements are in [issues/onboarding-site/PRD.md](issues/onboarding-site/PRD.md). It must describe the ecosystem as it is now.
+- Keep the course in sync in the same change that alters what it teaches. That covers a library added, removed or renamed, a change of release status, and a changed default, state name, outcome or telemetry name. It also covers an application added under `apps/` or a change to an application's package set. Update the atlas (module 5), the course map's layers, the module that teaches that job, module 10's systems and the PRD's "Content facts and sources". A new library gets an atlas tile and a place in the module for its job.
+- State only what the libraries do today, checked against their repositories. Mark anything planned or pre-production as such, and update it when it ships.
+- Code the course shows comes from [`onboarding/site/snippets/`](onboarding/site/snippets/) and must compile. Rerun `snippets/capture.sh` after changing a snippet or the Gleam version.
+- Validate from `onboarding/site/` with `nix develop ../.. --command gleam test` and `nix develop ../.. --command bash build.sh`.
+
 <!-- agent-skills:begin -->
 <!-- framework-commit: cab7c0590036edaa66d8430cc5016399a9fd2c71 origin: git@github.com:lostbean/skills.git -->
 
