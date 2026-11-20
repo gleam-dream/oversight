@@ -46,6 +46,24 @@ packages owned by their respective libraries.
 The [application catalogue](apps/README.md) lists every runnable composition and
 its boundaries. These are examples to read and adapt, rather than a shared framework.
 
+## Codecs that cross processes
+
+A BEAM copy does not keep sharing, so a codec costs its flat size each time
+Grind, Fabric or Relay hands it to another process. The applications require
+JSON Blueprint 2.1.1 or later and follow its
+[codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
+
+- **Generated codec:** [extractor](apps/extractor/README.md) generates its Grind
+  job payload codec from a typed definition, commits the output and checks it for
+  drift in `gleam test`.
+- **Combinators, children built inside the field:** the extractor invoice (custom
+  checks and a total that depends on the decoded lines), the
+  [clinic registration](apps/clinic_registration/README.md) extraction and card
+  codecs, and the [research agent](apps/research_agent/README.md) answer union.
+- **Copy-cost tests:** `copy_cost_test` in extractor, clinic_registration,
+  research_agent, payout_desk, secure_mcp and tool_hub bounds the flat size of
+  what each hands to another process.
+
 ## Run an example
 
 From the Oversight checkout:

@@ -22,5 +22,15 @@ once, an unknown currency, a total that contradicts its lines, a PDF and an
 oversized stream) and prints each job's outcome and the telemetry for the rate
 limited job.
 
+The job payload codec in `src/extractor/generated/` is generated from the typed
+definition in `test/document_job_definition.gleam`. After changing the definition
+or the `DocumentJob` type, regenerate it from this directory; `gleam test` fails
+while the committed module differs from the definition:
+
+```sh
+gleam run -m generate_codecs
+gleam format src/extractor/generated
+```
+
 The [composition contract](../../docs/design/design-layer.pdf)
 describes the bounds, codec reuse and outcome mapping.

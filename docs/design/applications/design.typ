@@ -170,11 +170,11 @@
       #answers(title: "Typed document extraction",
         responsibility: [Fetch bounded documents, obtain a typed invoice from a provider and persist the result.],
         interface: [Batch job submission and native Invoice/LineItem/Currency values with semantic validation.],
-        interactions: [Separate HTTP clients carry document and provider policies. LLM Wire uses one Blueprint codec for structured output; small adapters reuse the codec for Grind and database values.],
+        interactions: [Separate HTTP clients carry document and provider policies. LLM Wire uses one Blueprint codec for structured output; small adapters reuse the codec for the Grind output and database values. The Grind job payload uses a codec generated from a typed definition, checked against it by the tests (#adr(41)).],
         invariants: [Document content, declared length and collected bytes are bounded before model input. Unsupported content and invalid invoices do not become successful stored outputs.],
         failure: [The application translates fetch, provider, validation and storage failures into retry, snooze or discard. Provider advice does not directly own job policy.],
       )
-      Source owners: `apps/extractor/src/extractor/invoice.gleam`, `document.gleam`, `llm.gleam`, `outcome.gleam`, and `jobs.gleam`.
+      Source owners: `apps/extractor/src/extractor/invoice.gleam`, `document.gleam`, `document_job.gleam`, `generated/document_job_codec.gleam`, `llm.gleam`, `outcome.gleam`, and `jobs.gleam`.
     ]
     #subsection(title: "Support desk")[
       #answers(title: "Approved compensating refunds",
