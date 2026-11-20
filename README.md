@@ -75,7 +75,10 @@ The applications require JSON Blueprint 2.1.1 or later and follow its
 
 The guide's third rule is to send inputs rather than built codecs. The
 applications still hand Fabric a built agent, which copies in 26 to 63 kB per run
-on 2.1.1; that is an accepted cost of Fabric's current entry point.
+on 2.1.1. Fabric's
+[builder entry point](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)
+removes that copy; the applications adopt it once it is released
+([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build-with.md)).
 
 ## Run an example
 

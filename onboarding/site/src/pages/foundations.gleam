@@ -652,6 +652,21 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
           codec.Schema -> schema_face()
         },
       ]),
+      html.div([class("note"), css("margin-top:16px")], [
+        html.b([], [html.text("Mind the copy:")]),
+        html.text(
+          " a codec is a value built from functions, and sending a value to another process copies it whole, without the sharing it had in the process that built it. A Grind worker, a Fabric agent or a Relay tool list that holds codecs is copied that way each time it moves. Build each child codec in the field that uses it, as JSON Blueprint's ",
+        ),
+        html.a(
+          [
+            attribute.href(
+              "https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md",
+            ),
+          ],
+          [html.text("codec practice guide")],
+        ),
+        html.text(" explains, and measure what crosses."),
+      ]),
     ],
   )
 }

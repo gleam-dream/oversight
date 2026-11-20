@@ -1,6 +1,7 @@
 //// The Grind job payload: which document to fetch and which provider
-//// extracts it. Its shape is fixed at build time and crosses processes with
-//// every job, so its codec is generated (`extractor/generated/document_job_codec`)
+//// extracts it. Its shape is fixed at build time and its codec is held by
+//// the worker that Grind copies into every job's process, so the codec is
+//// generated (`extractor/generated/document_job_codec`)
 //// rather than built from combinators. `test/document_job_definition.gleam`
 //// holds the typed definition; regenerate with
 //// `gleam run -m generate_codecs && gleam format src/extractor/generated`.

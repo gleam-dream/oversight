@@ -114,7 +114,7 @@ fn grind_codec(blueprint: codec.Codec(a)) -> worker.Codec(a) {
 }
 
 /// The job payload's codec is generated: its shape is fixed at build time
-/// and it crosses processes with every job. Its specialized functions are
+/// and the worker holding it is copied into every job's process. Its specialized functions are
 /// module references, so it copies at a fixed small size.
 pub fn input_codec() -> worker.Codec(DocumentJob) {
   grind_codec(document_job_codec.document_job_codec())

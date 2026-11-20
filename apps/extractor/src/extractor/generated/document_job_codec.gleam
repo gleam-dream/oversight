@@ -249,6 +249,7 @@ fn document_job_compiled_inner_properties_right_value_encode(
     llm.OpenAi -> Ok(value.String("openai"))
     llm.Anthropic -> Ok(value.String("anthropic"))
     llm.Google -> Ok(value.String("google"))
+    _ -> generated.unknown_enum_value()
   }
 }
 
@@ -274,6 +275,7 @@ fn document_job_compiled_inner_properties_right_value_native_encode(
     llm.OpenAi -> Ok(json.string("openai"))
     llm.Anthropic -> Ok(json.string("anthropic"))
     llm.Google -> Ok(json.string("google"))
+    _ -> generated.unknown_enum_value()
   }
 }
 

@@ -28,8 +28,6 @@ pub fn crossing() -> List(#(String, Int, Int)) {
     // `decisions/view.codec`, whose later fields capture the payout codec.
     // Relay copies it with the tool list. Owned upstream:
     // https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md
-    // and decisions' copy-cost issue 31:
-    // https://github.com/gleam-dream/decisions/blob/main/issues/first-applications-findings/issues/31-an-isolated-model-is-copied-into-every-call.md
     #(
       "relay desk tools",
       flat_size_bytes(desk_tools.tools(running.tools)),

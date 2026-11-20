@@ -13,15 +13,14 @@ Recorded on 2026-11-19.
 - The applications follow the
   [codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
   of JSON Blueprint rather than restating it:
-  - A child codec is built inside its field, through `of:` or a top-level
-    function, never bound with `let` above a record whose later fields would
-    capture it. The extractor invoice and the clinic registration extraction
+  - Each child codec is built in the field that uses it (the guide's first
+    rule). The extractor invoice and the clinic registration extraction
     and card codecs captured a child codec that way and were changed. The
     extractor job error codec and the research agent answer union used their
     `let`-bound child only in the first field or variant, where nothing
     captures it; they were rewritten in the same form for consistency.
-  - A shape fixed at build time that crosses processes may use a codec
-    generated from a typed definition. The extractor's Grind job payload,
+  - A shape fixed at build time whose codec is hot, long-lived or held by
+    other processes may use a codec generated from a typed definition. The extractor's Grind job payload,
     `DocumentJob`, is the generated example: the definition and the generation
     task are development modules under `test/`, the generated module is
     committed under `src/extractor/generated/`, and `gleam test` fails when the
@@ -58,14 +57,15 @@ Recorded on 2026-11-19.
 - The payout desk's tool list stays at about 210 kB because its `open_payout`
   output codec, `decisions/view.codec`, captures the payout codec in later
   fields. That is owned by json_blueprint's
-  [record continuation issue](https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md)
-  and decisions'
-  [copy-cost issue 31](https://github.com/gleam-dream/decisions/blob/main/issues/first-applications-findings/issues/31-an-isolated-model-is-copied-into-every-call.md).
+  [record continuation issue](https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md).
 - JSON Blueprint 2.1.1 ends each generated enum encoder with a catch-all arm
   that an exhaustive enum makes unreachable, and the application gate compiles
-  with warnings as errors. The extractor's generation task removes that arm
-  until the generator stops emitting it; a definition that omitted a
-  constructor would then fail to compile instead of passing silently.
+  with warnings as errors. Following the guide, the generated module is
+  committed exactly as the generator emits it, formatted, and the gate accepts
+  that one warning in modules under `src/**/generated/` while failing on any
+  other. The release with lostbean/json_blueprint#7's guarded arms ends the
+  exception
+  ([issue](../../issues/codec-copy-cost/issues/02-build-generated-codecs-with-warnings-as-errors.md)).
 - The generated codec's functions are module references, so its copied size
   does not grow with the shape. Generation is a development step: changing the
   definition or the payload type requires running the task and formatting its

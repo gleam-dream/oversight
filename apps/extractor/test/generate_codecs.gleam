@@ -5,8 +5,9 @@
 //// gleam format src/extractor/generated
 //// ```
 ////
-//// `generated_codec_test` fails when the committed module drifts from the
-//// definition.
+//// The module is written exactly as the generator returns it, then
+//// formatted. `generated_codec_test` compares its fingerprint with a fresh
+//// compilation of the definition.
 
 import document_job_definition
 import gleam/io
@@ -26,18 +27,9 @@ pub fn main() -> Nil {
   {
     Error(error) -> panic as { "generation failed: " <> string.inspect(error) }
     Ok(codegen.GeneratedModule(path:, content:, fingerprint: _)) ->
-      case write_file("src/" <> path, without_unreachable_enum_arms(content)) {
+      case write_file("src/" <> path, content) {
         Ok(Nil) -> io.println("Generated src/" <> path)
         Error(reason) -> panic as { "write failed: " <> reason }
       }
   }
-}
-
-/// json_blueprint 2.1.1 ends each generated enum encoder with a catch-all arm
-/// that an exhaustive enum makes unreachable, and this repository compiles
-/// with warnings as errors. The arm is dropped until the generator stops
-/// emitting it. A definition that leaves out a constructor then fails to
-/// compile as an inexhaustive match instead of passing unnoticed.
-fn without_unreachable_enum_arms(content: String) -> String {
-  string.replace(content, "\n    _ -> generated.unknown_enum_value()", "")
 }
