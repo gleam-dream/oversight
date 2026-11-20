@@ -352,8 +352,12 @@ pub fn registration_codec() -> Codec(Registration) {
 /// The structured output the model is asked for. Every field is present;
 /// an unknown one is `null`, so the schema stays within what providers
 /// accept for strict structured output.
+///
+/// Each child codec is built inside its field: a codec bound with `let`
+/// above the record would be captured by every later field's continuation
+/// and copied once per callback that holds it. See the codec practice guide:
+/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
 pub fn extraction_codec() -> Codec(Extraction) {
-  let text = codec.nullable(codec.string())
   use name <- codec.field("name", codec.string(), get: fn(e: Extraction) {
     e.name
   })
@@ -362,11 +366,17 @@ pub fn extraction_codec() -> Codec(Extraction) {
     codec.nullable(date()),
     get: fn(e: Extraction) { e.birth_date },
   )
-  use phone <- codec.field("phone", text, get: fn(e: Extraction) { e.phone })
-  use insurer <- codec.field("insurer", text, get: fn(e: Extraction) {
-    e.insurer
+  use phone <- codec.field("phone", unknown_or_text(), get: fn(e: Extraction) {
+    e.phone
   })
-  use plan <- codec.field("plan", text, get: fn(e: Extraction) { e.plan })
+  use insurer <- codec.field(
+    "insurer",
+    unknown_or_text(),
+    get: fn(e: Extraction) { e.insurer },
+  )
+  use plan <- codec.field("plan", unknown_or_text(), get: fn(e: Extraction) {
+    e.plan
+  })
   use consent <- codec.field("consent", codec.bool(), get: fn(e: Extraction) {
     e.consent
   })
@@ -390,6 +400,11 @@ pub fn extraction_codec() -> Codec(Extraction) {
     confidence:,
     missing:,
   ))
+}
+
+/// Text the model may not know: `null` when the conversation does not say.
+fn unknown_or_text() -> Codec(Option(String)) {
+  codec.nullable(codec.string())
 }
 
 fn line_codec() -> Codec(Line) {

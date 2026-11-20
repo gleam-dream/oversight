@@ -3,6 +3,8 @@
 
 import extractor/clients.{type Clients}
 import extractor/document
+import extractor/document_job.{type DocumentJob}
+import extractor/generated/document_job_codec
 import extractor/invoice.{type Invoice}
 import extractor/llm
 import extractor/outcome
@@ -20,10 +22,6 @@ import grind/worker
 import http_gun
 import json/blueprint/codec
 import pog
-
-pub type DocumentJob {
-  DocumentJob(document_id: String, url: String, provider: llm.Provider)
-}
 
 pub type Extracted {
   Extracted(row_id: Int, invoice: Invoice)
@@ -115,20 +113,18 @@ fn grind_codec(blueprint: codec.Codec(a)) -> worker.Codec(a) {
   )
 }
 
-fn input_codec() -> worker.Codec(DocumentJob) {
-  grind_codec({
-    use document_id <- codec.field("document_id", codec.string(), get: fn(job) {
-      job.document_id
-    })
-    use url <- codec.field("url", codec.string(), get: fn(job) { job.url })
-    use provider <- codec.field("provider", llm.provider_codec(), get: fn(job) {
-      job.provider
-    })
-    codec.success(DocumentJob(document_id:, url:, provider:))
-  })
+/// The job payload's codec is generated: its shape is fixed at build time
+/// and it crosses processes with every job. Its specialized functions are
+/// module references, so it copies at a fixed small size.
+pub fn input_codec() -> worker.Codec(DocumentJob) {
+  grind_codec(document_job_codec.document_job_codec())
 }
 
-fn output_codec() -> worker.Codec(Extracted) {
+/// The output and error codecs stay combinators: the invoice checks its date
+/// and its total against the decoded lines, which the generator does not
+/// express. See the codec practice guide:
+/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+pub fn output_codec() -> worker.Codec(Extracted) {
   grind_codec({
     use row_id <- codec.field("row_id", codec.int(), get: fn(e) { e.row_id })
     use invoice <- codec.field("invoice", invoice.codec(), get: fn(e) {
@@ -138,18 +134,20 @@ fn output_codec() -> worker.Codec(Extracted) {
   })
 }
 
-fn error_codec() -> worker.Codec(outcome.JobError) {
-  let stage =
-    codec.string_enum([
-      #("fetch", outcome.Fetch),
-      #("extract", outcome.Extract),
-      #("store", outcome.Store),
-    ])
+pub fn error_codec() -> worker.Codec(outcome.JobError) {
   grind_codec({
-    use stage <- codec.field("stage", stage, get: fn(e) { e.stage })
+    use stage <- codec.field("stage", stage_codec(), get: fn(e) { e.stage })
     use detail <- codec.field("detail", codec.string(), get: fn(e) { e.detail })
     codec.success(outcome.Transient(stage:, detail:))
   })
+}
+
+fn stage_codec() -> codec.Codec(outcome.Stage) {
+  codec.string_enum([
+    #("fetch", outcome.Fetch),
+    #("extract", outcome.Extract),
+    #("store", outcome.Store),
+  ])
 }
 
 // Pipeline ----------------------------------------------------------------
