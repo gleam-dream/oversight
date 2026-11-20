@@ -24,8 +24,9 @@ limited job.
 
 The job payload codec in `src/extractor/generated/` is generated from the typed
 definition in `test/document_job_definition.gleam`. After changing the definition
-or the `DocumentJob` type, regenerate it from this directory; `gleam test` fails
-while the committed module differs from the definition:
+or the `DocumentJob` type, regenerate it from this directory. `gleam test` compares
+the committed module's fingerprint with a fresh compilation of the definition,
+so it fails when the definition changes and the module was not regenerated:
 
 ```sh
 gleam run -m generate_codecs

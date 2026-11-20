@@ -48,21 +48,34 @@ its boundaries. These are examples to read and adapt, rather than a shared frame
 
 ## Codecs that cross processes
 
-A BEAM copy does not keep sharing, so a codec costs its flat size each time
-Grind, Fabric or Relay hands it to another process. The applications require
-JSON Blueprint 2.1.1 or later and follow its
+A BEAM copy does not keep sharing, so a term costs its flat size each time
+Grind, Fabric or Relay hands it to another process: a worker with the
+dependencies its handler captures, an agent with its tool codecs, a tool list.
+The applications require JSON Blueprint 2.1.1 or later and follow its
 [codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
 
-- **Generated codec:** [extractor](apps/extractor/README.md) generates its Grind
-  job payload codec from a typed definition, commits the output and checks it for
-  drift in `gleam test`.
-- **Combinators, children built inside the field:** the extractor invoice (custom
-  checks and a total that depends on the decoded lines), the
-  [clinic registration](apps/clinic_registration/README.md) extraction and card
-  codecs, and the [research agent](apps/research_agent/README.md) answer union.
-- **Copy-cost tests:** `copy_cost_test` in extractor, clinic_registration,
-  research_agent, payout_desk, secure_mcp and tool_hub bounds the flat size of
-  what each hands to another process.
+- **Generated codec:** the extractor's Grind job payload codec,
+  [`document_job_codec`](apps/extractor/src/extractor/generated/document_job_codec.gleam),
+  is generated from the typed definition in
+  [`document_job_definition.gleam`](apps/extractor/test/document_job_definition.gleam);
+  `gleam test` fails when the definition changes and the committed module was not
+  regenerated.
+- **Combinators, each child codec built inside its field:** the extractor
+  [invoice](apps/extractor/src/extractor/invoice.gleam#L54) (a custom date check
+  and a total that depends on the decoded lines), the clinic registration
+  [extraction](apps/clinic_registration/src/clinic_registration/domain.gleam#L360)
+  and [card](apps/clinic_registration/src/clinic_registration/desk.gleam#L200)
+  codecs, and the research agent
+  [answer union](apps/research_agent/src/research_agent/domain.gleam#L135).
+- **Copy-cost tests:** each high-risk application bounds the terms it hands to
+  another process, as in the
+  [payout desk's](apps/payout_desk/test/payout_desk/copy_cost_test.gleam); where
+  a codec was fixed, a codec-size guard fails if the capture returns, as in the
+  [extractor's](apps/extractor/test/copy_cost_test.gleam).
+
+The guide's third rule is to send inputs rather than built codecs. The
+applications still hand Fabric a built agent, which copies in 26 to 63 kB per run
+on 2.1.1; that is an accepted cost of Fabric's current entry point.
 
 ## Run an example
 

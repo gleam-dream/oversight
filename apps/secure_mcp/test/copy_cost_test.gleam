@@ -1,35 +1,38 @@
-//// A BEAM copy does not keep sharing, so a value costs its flat size every
-//// time it crosses a process. Grind copies the report worker and its codecs
-//// into the processes that run each job, and Relay copies tool definitions
-//// into the processes that serve each request. These bounds hold what this
-//// application hands over; a nested combinator codec that multiplies its
-//// size, or a child codec captured by a later field, fails them. See the
-//// codec practice guide:
+//// A BEAM copy does not keep sharing, so a term costs its flat size every
+//// time it crosses a process. Grind copies the report worker into the
+//// processes that run each job, and Relay holds the tool list that serves
+//// each request. These bounds hold those terms. See the codec practice
+//// guide:
 //// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
 
+import envoy
 import gleam/list
+import secure_mcp/app
 import secure_mcp/tools
 
 @external(erlang, "copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
-/// Each value handed over: its name, its copied size in bytes and its
-/// budget in bytes.
-pub fn handed_off() -> List(#(String, Int, Int)) {
-  [
-    #("report worker", flat_size_bytes(tools.report_worker()), 16_384),
+/// Each term handed to another process: its name, its copied size in bytes
+/// and its budget in bytes.
+pub fn crossing() -> List(#(String, Int, Int)) {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(running) = app.start(app.options(url))
+  let measured = [
+    #("report worker", flat_size_bytes(running.report_worker), 12_288),
     #(
-      "generate definition",
-      flat_size_bytes(tools.generate_definition()),
-      16_384,
+      "relay tools",
+      flat_size_bytes(tools.tools(running.jobs, running.report_worker)),
+      45_056,
     ),
-    #("status definition", flat_size_bytes(tools.status_definition()), 24_576),
   ]
+  app.stop(running)
+  measured
 }
 
-pub fn values_handed_over_stay_within_their_copy_budget_test() {
+pub fn terms_handed_to_other_processes_stay_within_their_copy_budget_test() {
   let over =
-    list.filter(handed_off(), fn(entry) {
+    list.filter(crossing(), fn(entry) {
       let #(_, bytes, budget) = entry
       bytes > budget
     })
