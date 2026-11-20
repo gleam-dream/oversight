@@ -2,12 +2,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
-# Build with every warning as an error, except one. JSON Blueprint 2.1.1's
-# typed generator ends each enum encoder with a catch-all arm that an
-# exhaustive enum makes unreachable; until a release emits guarded arms, an
-# `Unreachable pattern` warning in a module under `src/**/generated/` is
-# accepted and any other warning fails. Restore `gleam build
-# --warnings-as-errors` with that release:
+# Build with every warning in the application's own modules as an error, as
+# `gleam build --warnings-as-errors` does; dependencies' warnings do not count.
+# One exception: JSON Blueprint 2.1.1's typed generator ends each enum encoder
+# with a catch-all arm that an exhaustive enum makes unreachable, so until a
+# release emits guarded arms an `Unreachable pattern` warning in a module
+# under the application's `src/**/generated/` is accepted. Restore
+# `gleam build --warnings-as-errors` with that release:
 # issues/codec-copy-cost/issues/02-build-generated-codecs-with-warnings-as-errors.md
 strict_build() {
   local log
@@ -15,9 +16,17 @@ strict_build() {
   gleam build 2>&1 | tee "$log"
   local status=${PIPESTATUS[0]}
   local other
-  other=$(awk '
-    /^warning: / { title = $0; getline location
-      if (!(title == "warning: Unreachable pattern" && location ~ /\/src\/.*\/generated\//)) print title }
+  other=$(awk -v root="$(pwd -P)" '
+    /^warning: / {
+      title = $0
+      if ((getline location) <= 0 || location !~ /┌─/) { print title; next }
+      own = index(location, root "/src/") || index(location, root "/test/") \
+        || index(location, root "/dev/")
+      if (!own) next
+      start = index(location, root "/src/")
+      generated = start && substr(location, start + length(root "/src/")) ~ /(^|\/)generated\//
+      if (!(title == "warning: Unreachable pattern" && generated)) print title " " location
+    }
   ' "$log")
   rm -f "$log"
   [ "$status" -eq 0 ] || return "$status"
