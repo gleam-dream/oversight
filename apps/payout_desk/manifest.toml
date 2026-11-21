@@ -34,7 +34,7 @@ packages = [
   { name = "hellhound", version = "0.2.2", build_tools = ["gleam"], requirements = ["exception", "gleam_crypto", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gose", "http_gun", "kryptos", "sinal", "telemetry"], otp_app = "hellhound", source = "hex", outer_checksum = "386219B5F730A0A9B150E6523E32A6B22DB431F364D1DD725E492921784CD2C9" },
   { name = "hpack_erl", version = "0.3.0", build_tools = ["rebar3"], requirements = [], otp_app = "hpack", source = "hex", outer_checksum = "D6137D7079169D8C485C6962DFE261AF5B9EF60FBC557344511C1E65E3D95FB0" },
   { name = "http_gun", version = "0.2.0", build_tools = ["gleam"], requirements = ["cowlib", "file_streams", "gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "gun", "simplifile", "sinal", "youid"], otp_app = "http_gun", source = "hex", outer_checksum = "EC1765351EA2DD6A329B1BF88B8EF7B01819E9C94E5D065C1A0C62A2D05FFC39" },
-  { name = "json_blueprint", version = "2.1.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], otp_app = "json_blueprint", source = "hex", outer_checksum = "6726C43158582C2414DD41F49A1CA3CE52B20643339075DF7DE14C65A5E49729" },
+  { name = "json_blueprint", version = "2.2.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], otp_app = "json_blueprint", source = "hex", outer_checksum = "83D33F1E5413FDB17CA70B9202DCAD23396AEB5A3C2247F15A22D4D5249968E1" },
   { name = "kryptos", version = "1.6.0", build_tools = ["gleam"], requirements = ["bigi", "gleam_stdlib", "gleam_time"], otp_app = "kryptos", source = "hex", outer_checksum = "5288D42D5413497C60EEF0D9E268ED77E2619B294DACC3BC7D71FB26E94626D8" },
   { name = "llm_wire", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "sinal"], otp_app = "llm_wire", source = "hex", outer_checksum = "1B6CD7206BC93D6C66A20AF5968CBA167630707864651CCA20756060E26FB716" },
   { name = "logging", version = "1.5.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "logging", source = "hex", outer_checksum = "BC5F18CE5DD9686100229FE5409BDC3DD5C46D5A7DF2F804AD2D8F0DD6C5060E" },
@@ -43,7 +43,7 @@ packages = [
   { name = "pg_types", version = "0.6.0", build_tools = ["rebar3"], requirements = [], otp_app = "pg_types", source = "hex", outer_checksum = "9949A4849DD13408FA249AB7B745E0D2DFDB9532AEE2B9722326E33CD082A778" },
   { name = "pgo", version = "0.20.0", build_tools = ["rebar3"], requirements = ["backoff", "opentelemetry_api", "pg_types"], otp_app = "pgo", source = "hex", outer_checksum = "2F11E6649CEB38E569EF56B16BE1D04874AE5B11A02867080A2817CE423C683B" },
   { name = "pog", version = "4.1.0", build_tools = ["gleam"], requirements = ["exception", "gleam_erlang", "gleam_otp", "gleam_stdlib", "gleam_time", "pgo"], otp_app = "pog", source = "hex", outer_checksum = "E4AFBA39A5FAA2E77291836C9683ADE882E65A06AB28CA7D61AE7A3AD61EBBD5" },
-  { name = "relay", version = "0.2.1", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "mist", "sinal"], otp_app = "relay", source = "hex", outer_checksum = "F61E2056601DBCA97B9265C4BEC53ABB0A3CB0AE7A16391F13A7484E5A4C284E" },
+  { name = "relay", version = "0.2.2", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_http", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "mist", "sinal"], otp_app = "relay", source = "hex", outer_checksum = "A8970CD1DCD4A542A63E93137F32EC54012A45B4A19E1164E26EA752F2E151B3" },
   { name = "saga", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "sinal"], otp_app = "saga", source = "hex", outer_checksum = "EE48DB94E6D192C5330149C94282412693C6A17DD7EFA6148053CE90ECE167E0" },
   { name = "saga_postgres", version = "0.1.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_stdlib", "gleam_time", "pgo", "pog", "saga", "sinal"], source = "git", repo = "https://github.com/gleam-dream/saga.git", commit = "0d345cacf777515f2c9401d1ad90f5d67b07f38e", path = "integrations/saga_postgres" },
   { name = "simplifile", version = "2.7.0", build_tools = ["gleam"], requirements = ["filepath", "gleam_stdlib"], otp_app = "simplifile", source = "hex", outer_checksum = "A2727627B063E87351934C7F7F008F2D1FDB16F6DE0B8C79F9E46459CFC9C164" },
@@ -68,7 +68,7 @@ gleam_time = { version = ">= 1.11.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
 grind = { version = ">= 0.1.1 and < 0.2.0" }
 hellhound = { version = ">= 0.2.2 and < 0.3.0" }
-json_blueprint = { version = ">= 2.1.1 and < 3.0.0" }
+json_blueprint = { version = ">= 2.2.0 and < 3.0.0" }
 mist = { version = ">= 6.0.2 and < 7.0.0" }
 pgo = { version = ">= 0.20.0 and < 0.21.0" }
 pog = { version = ">= 4.1.0 and < 4.2.0" }

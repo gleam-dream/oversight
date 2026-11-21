@@ -11,7 +11,7 @@ import json/blueprint/internal/schema_tree
 import json/blueprint/value
 
 pub const generated_fingerprint: String =
-  "56E5F45CCEC31019A146DB99D60A7882E8D3D89F"
+  "1BB8174FCA261CF69414D5EADC1369997B1C9BF9"
 
 const document_job_schema_value: schema_tree.Tree =
   schema_tree.ObjectSchema(
@@ -246,9 +246,9 @@ fn document_job_compiled_inner_properties_right_value_encode(
   item: llm.Provider,
 ) -> Result(value.Value, codec.EncodeError) {
   case item {
-    llm.OpenAi -> Ok(value.String("openai"))
-    llm.Anthropic -> Ok(value.String("anthropic"))
-    llm.Google -> Ok(value.String("google"))
+    _ if item == llm.OpenAi -> Ok(value.String("openai"))
+    _ if item == llm.Anthropic -> Ok(value.String("anthropic"))
+    _ if item == llm.Google -> Ok(value.String("google"))
     _ -> generated.unknown_enum_value()
   }
 }
@@ -272,9 +272,9 @@ fn document_job_compiled_inner_properties_right_value_native_encode(
   item: llm.Provider,
 ) -> Result(json.Json, codec.EncodeError) {
   case item {
-    llm.OpenAi -> Ok(json.string("openai"))
-    llm.Anthropic -> Ok(json.string("anthropic"))
-    llm.Google -> Ok(json.string("google"))
+    _ if item == llm.OpenAi -> Ok(json.string("openai"))
+    _ if item == llm.Anthropic -> Ok(json.string("anthropic"))
+    _ if item == llm.Google -> Ok(json.string("google"))
     _ -> generated.unknown_enum_value()
   }
 }

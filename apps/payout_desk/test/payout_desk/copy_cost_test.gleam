@@ -2,8 +2,9 @@
 //// time it crosses a process. Grind copies each worker, with the `Deps` it
 //// captures, into the processes that run each job; Relay holds the desk's
 //// tool list and Fabric copies the agent into each run. These bounds hold
-//// those terms. See the codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// those terms; they are set from json_blueprint 2.2.0 measurements and fail
+//// on 2.1.1. See the codec practice guide, rule 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import gleam/list
 import payout_desk/desk_tools
@@ -19,19 +20,18 @@ pub fn crossing() -> List(#(String, Int, Int)) {
   use running <- support.with_app("copy_cost", fn(settings) { settings })
   let deps = running.deps
   [
-    #("fabric agent", flat_size_bytes(deps.agent), 49_152),
-    #("agent worker", flat_size_bytes(jobs.agent_worker(deps)), 57_344),
-    #("pay worker", flat_size_bytes(jobs.pay_worker(deps)), 57_344),
-    #("reconcile worker", flat_size_bytes(jobs.reconcile_worker(deps)), 57_344),
-    #("tell worker", flat_size_bytes(jobs.tell_worker(deps)), 57_344),
-    // Most of this is the `open_payout` definition's output codec,
-    // `decisions/view.codec`, whose later fields capture the payout codec.
-    // Relay copies it with the tool list. Owned upstream:
-    // https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md
+    #("fabric agent", flat_size_bytes(deps.agent), 12_288),
+    #("agent worker", flat_size_bytes(jobs.agent_worker(deps)), 24_576),
+    #("pay worker", flat_size_bytes(jobs.pay_worker(deps)), 24_576),
+    #("reconcile worker", flat_size_bytes(jobs.reconcile_worker(deps)), 24_576),
+    #("tell worker", flat_size_bytes(jobs.tell_worker(deps)), 24_576),
+    // About 66 kB of this is the `open_payout` definition, whose output codec
+    // is `decisions/view.codec`: it holds the payout schema parsed into a
+    // JSON value. Relay holds the tool list for every request.
     #(
       "relay desk tools",
       flat_size_bytes(desk_tools.tools(running.tools)),
-      229_376,
+      106_496,
     ),
   ]
 }

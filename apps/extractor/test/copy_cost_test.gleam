@@ -1,10 +1,11 @@
 //// A BEAM copy does not keep sharing, so a term costs its flat size every
-//// time it crosses a process. See the codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// time it crosses a process. This bound holds the term the application
+//// hands to Grind; it is set from a json_blueprint 2.2.0 measurement and
+//// fails on 2.1.1. See the codec practice guide, rule 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import extractor/clients
 import extractor/document
-import extractor/invoice
 import extractor/jobs
 import extractor/llm
 import gleam/list
@@ -15,8 +16,7 @@ fn flat_size_bytes(term: a) -> Int
 
 /// The term Grind copies into the processes that run each job: the worker,
 /// with its codecs and the `Env` its handler captures. Its name, its copied
-/// size in bytes and its budget in bytes. The bound fails with the job input
-/// codec built from combinators instead of generated (16,552 bytes).
+/// size in bytes and its budget in bytes.
 pub fn crossing() -> List(#(String, Int, Int)) {
   let assert Ok(http) = clients.start(clients.Loopback([], 9), None)
   let env =
@@ -27,14 +27,7 @@ pub fn crossing() -> List(#(String, Int, Int)) {
     )
   let worker = jobs.define(env, "extract_copy_cost")
   clients.stop(http)
-  [#("worker", flat_size_bytes(worker), 15_360)]
-}
-
-/// A codec-size guard. The invoice codec is built where it is used and never
-/// crosses a process; the bound fails if a child codec is bound with `let`
-/// above the record again and captured by a later field (163,400 bytes).
-pub fn codec_guards() -> List(#(String, Int, Int)) {
-  [#("invoice codec", flat_size_bytes(invoice.codec()), 4096)]
+  [#("worker", flat_size_bytes(worker), 5120)]
 }
 
 fn over(entries: List(#(String, Int, Int))) -> List(#(String, Int, Int)) {
@@ -46,8 +39,4 @@ fn over(entries: List(#(String, Int, Int))) -> List(#(String, Int, Int)) {
 
 pub fn worker_handed_to_grind_stays_within_its_copy_budget_test() {
   assert over(crossing()) == []
-}
-
-pub fn invoice_codec_captures_no_child_codec_test() {
-  assert over(codec_guards()) == []
 }

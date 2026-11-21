@@ -51,7 +51,10 @@ its boundaries. These are examples to read and adapt, rather than a shared frame
 A BEAM copy does not keep sharing, so a term costs its flat size each time
 Grind, Fabric or Relay hands it to another process: a worker with the
 dependencies its handler captures, an agent with its tool codecs, a tool list.
-The applications require JSON Blueprint 2.1.1 or later and follow its
+The `gleam-otp` agent skill states that rule for process design in general
+([source](https://github.com/gleam-dream/gleam-agent-tools/blob/main/skills/gleam-otp/SKILL.md)).
+The applications require JSON Blueprint 2.2.0 or later, where each combinator
+holds its inputs once, and follow its
 [codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
 
 - **Generated codec:** the extractor's Grind job payload codec,
@@ -60,24 +63,20 @@ The applications require JSON Blueprint 2.1.1 or later and follow its
   [`document_job_definition.gleam`](apps/extractor/test/document_job_definition.gleam);
   `gleam test` fails when the definition changes and the committed module was not
   regenerated.
-- **Combinators, each child codec built inside its field:** the extractor
-  [invoice](apps/extractor/src/extractor/invoice.gleam#L54) (a custom date check
-  and a total that depends on the decoded lines), the clinic registration
-  [extraction](apps/clinic_registration/src/clinic_registration/domain.gleam#L360)
-  and [card](apps/clinic_registration/src/clinic_registration/desk.gleam#L200)
-  codecs, and the research agent
-  [answer union](apps/research_agent/src/research_agent/domain.gleam#L135).
-- **Copy-cost tests:** each high-risk application bounds the terms it hands to
-  another process, as in the
-  [payout desk's](apps/payout_desk/test/payout_desk/copy_cost_test.gleam); where
-  a codec was fixed, a codec-size guard fails if the capture returns, as in the
-  [extractor's](apps/extractor/test/copy_cost_test.gleam).
+- **Combinators:** every other codec, such as the extractor
+  [invoice](apps/extractor/src/extractor/invoice.gleam), whose date check and
+  total that depends on the decoded lines the generator cannot express. On 2.2.0
+  it no longer matters which field builds a child codec; a run-time enum would be
+  built once, before the field chain.
+- **Copy-cost tests:** extractor, clinic_registration, research_agent,
+  payout_desk, secure_mcp and tool_hub each bound the terms they hand to another
+  process, as in the
+  [payout desk's](apps/payout_desk/test/payout_desk/copy_cost_test.gleam).
 
-The guide's third rule is to send inputs rather than built codecs. The
-applications still hand Fabric a built agent, which copies in 26 to 63 kB per run
-on 2.1.1. Fabric's
+The applications still hand Fabric a built agent, which copies in 9 to 33 kB per
+run on 2.2.0. Fabric's
 [builder entry point](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)
-removes that copy; the applications adopt it once it is released
+removes that copy; adopting it means moving to Fabric 0.5
 ([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build-with.md)).
 
 ## Run an example

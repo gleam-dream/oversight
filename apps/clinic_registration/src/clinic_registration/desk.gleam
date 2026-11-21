@@ -192,11 +192,6 @@ pub fn card(db: pog.Connection, card: Card(Registration)) -> CardDocument {
 }
 
 /// The card document's JSON form, with its schema.
-///
-/// Each child codec is built inside its field, never bound with `let` above
-/// the record, so no later field's continuation captures a codec. See the
-/// codec practice guide:
-/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
 pub fn card_codec() -> codec.Codec(CardDocument) {
   use card <- codec.field(
     "card",

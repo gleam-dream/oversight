@@ -2,29 +2,28 @@
 
 <a id="adr-0041"></a>
 
-Recorded on 2026-11-19.
+Recorded on 2026-11-20.
 
 ## Decision
 
 - Every application and current playground package requires JSON Blueprint
-  `>= 2.1.1 and < 3.0.0` and locks 2.1.1. The compatibility probes under
+  `>= 2.2.0 and < 3.0.0` and locks 2.2.0. The compatibility probes under
   `playground/blueprint_compatibility/` keep their 1.7.1 and 1.1.0 pins: they
   are oracles whose checksums [ORACLE.md](../ORACLE.md) records.
 - The applications follow the
   [codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
-  of JSON Blueprint rather than restating it:
-  - Each child codec is built in the field that uses it (the guide's first
-    rule). The extractor invoice and the clinic registration extraction
-    and card codecs captured a child codec that way and were changed. The
-    extractor job error codec and the research agent answer union used their
-    `let`-bound child only in the first field or variant, where nothing
-    captures it; they were rewritten in the same form for consistency.
+  of JSON Blueprint rather than restating it. With a 2.2.0 minimum its rules
+  on where a child codec is built and on sending built codecs no longer
+  apply, and a run-time enum is built once, before the field chain; none of
+  the applications builds one.
   - A shape fixed at build time whose codec is hot, long-lived or held by
-    other processes may use a codec generated from a typed definition. The extractor's Grind job payload,
-    `DocumentJob`, is the generated example: the definition and the generation
-    task are development modules under `test/`, the generated module is
-    committed under `src/extractor/generated/`, and `gleam test` fails when the
-    committed fingerprint differs from a fresh compilation of the definition.
+    other processes may use a codec generated from a typed definition. The
+    extractor's Grind job payload, `DocumentJob`, is the generated example:
+    the definition and the generation task are development modules under
+    `test/`, the generated module is committed under
+    `src/extractor/generated/` exactly as the generator emits it and then
+    formatted, and `gleam test` fails when the committed fingerprint differs
+    from a fresh compilation of the definition.
   - Combinators remain where the generator cannot express the shape: custom
     `try_map` checks, a field that depends on an earlier decoded field, tagged
     unions and run-time data. The invoice and every other codec stay
@@ -32,41 +31,40 @@ Recorded on 2026-11-19.
 - `copy_cost_test` in extractor, clinic_registration, research_agent,
   payout_desk, secure_mcp and tool_hub bounds the flat size, in bytes, of the
   terms each application hands to another process: Grind workers with what
-  their handlers capture, Fabric agents and Relay tool lists. Where a codec
-  that never crosses a process was fixed, a labelled codec-size guard fails if
-  the capture returns. Each bound tied to a fix fails on the code before it.
+  their handlers capture, Fabric agents and Relay tool lists. Each bound is set
+  from a 2.2.0 measurement and fails on 2.1.1.
 
 ## Rationale and consequences
 
-- A BEAM copy does not keep sharing. Before 2.1.1 each combinator callback
-  retained its whole child codec, so a nested codec multiplied its copied size
-  at every layer; a production consumer of these libraries ran out of memory
-  copying agents, job closures and requests between processes. 2.1.1 makes the
-  combinators additive, but a codec captured by a later field's continuation is
-  still copied once per callback that holds the continuation.
-- Measured on 2.1.0 and on 2.1.1: the research agent's Grind worker copied in
-  1,604,448 and 45,392 bytes, the payout desk's Relay tool list in 1,123,728
-  and 210,528 bytes, the tool hub's Fabric agent in 553,128 and 63,456 bytes,
-  and the clinic registration worker in 73,808 and 32,384 bytes. Most of the
-  saving is the upgrade itself.
-- The application fixes shrink the codecs they touch, not what crosses: the
-  extractor invoice codec went from 163,400 to 1,640 bytes on 2.1.1, but it is
-  built inside the output codec's later field, so the extractor worker copies
-  in 14,392 bytes either way. The generated job input codec is what took that
-  worker from 16,552 to 14,392 bytes.
-- The payout desk's tool list stays at about 210 kB because its `open_payout`
-  output codec, `decisions/view.codec`, captures the payout codec in later
-  fields. That is owned by json_blueprint's
-  [record continuation issue](https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md).
-- JSON Blueprint 2.1.1 ends each generated enum encoder with a catch-all arm
-  that an exhaustive enum makes unreachable, and the application gate compiles
-  with warnings as errors. Following the guide, the generated module is
-  committed exactly as the generator emits it, formatted, and the gate accepts
-  that one warning in modules under `src/**/generated/` while failing on any
-  other. The release with lostbean/json_blueprint#7's guarded arms ends the
-  exception
-  ([issue](../../issues/codec-copy-cost/issues/02-build-generated-codecs-with-warnings-as-errors.md)).
+- A BEAM copy does not keep sharing, so a term costs its flat size each time
+  it crosses a process. Up to 2.1.0 each combinator callback retained its whole
+  child codec and a nested codec multiplied its copied size at every layer; a
+  production consumer of these libraries ran out of memory copying agents, job
+  closures and requests between processes. 2.1.1 made the combinators
+  additive, and 2.2.0 holds each input once, so a codec copies at about its
+  in-heap size wherever its children are built.
+- The terms that cross, measured on 2.1.0, 2.1.1 and 2.2.0 (the Relay
+  applications also moved from Relay 0.2.1 to 0.2.2 in the last step): the
+  research agent's Grind worker copied in 1,604,448, 45,392 and 22,280 bytes;
+  the payout desk's Relay tool list in 1,123,728, 210,528 and 86,080 bytes; the
+  tool hub's Fabric agent in 553,128, 63,456 and 32,560 bytes; the clinic
+  registration worker in 73,808, 32,384 and 23,552 bytes; the extractor worker
+  in 84,504, 14,392 and 4,024 bytes.
+- On 2.2.0 a child codec bound above the record and used by a later field
+  costs little more than one built in its field (the clinic extraction codec:
+  288 against 168 bytes), so the applications keep no codec-size tests for
+  codecs that never cross a process.
+- About 66 kB of the payout desk's tool list is the `open_payout` definition,
+  whose output codec `decisions/view.codec` holds the payout schema parsed into
+  a JSON value.
+- The application gate builds every application with
+  `gleam build --warnings-as-errors`. JSON Blueprint 2.2.0's typed generator
+  guards its enum arms, so the generated module compiles without warnings.
 - The generated codec's functions are module references, so its copied size
   does not grow with the shape. Generation is a development step: changing the
   definition or the payload type requires running the task and formatting its
   output before the tests pass.
+- The applications still hand Fabric a built agent, copied into each run.
+  Fabric 0.5's builder entry point removes that copy; adopting it replaces the
+  deprecated `agent.build` across the applications and is tracked as its own
+  issue.

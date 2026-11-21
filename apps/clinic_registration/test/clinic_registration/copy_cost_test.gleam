@@ -1,9 +1,9 @@
 //// A BEAM copy does not keep sharing, so a term costs its flat size every
-//// time it crosses a process. See the codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// time it crosses a process. These bounds hold the terms the application
+//// hands to Grind; they are set from json_blueprint 2.2.0 measurements and
+//// fail on 2.1.1. See the codec practice guide, rule 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
-import clinic_registration/desk
-import clinic_registration/domain
 import clinic_registration/jobs
 import gleam/list
 import support
@@ -18,26 +18,12 @@ fn flat_size_bytes(term: a) -> Int
 pub fn crossing() -> List(#(String, Int, Int)) {
   use env <- support.with_app(fn(config) { config })
   [
-    #("register worker", flat_size_bytes(env.app.register), 45_056),
+    #("register worker", flat_size_bytes(env.app.register), 28_672),
     #(
       "confirm worker",
       flat_size_bytes(jobs.confirm_worker(env.app.env)),
-      45_056,
+      28_672,
     ),
-  ]
-}
-
-/// Codec-size guards. These codecs are built where they are used and never
-/// cross a process; each bound fails if a child codec is bound with `let`
-/// above the record again and captured by a later field.
-pub fn codec_guards() -> List(#(String, Int, Int)) {
-  [
-    #("extraction codec", flat_size_bytes(domain.extraction_codec()), 3072),
-    // Most of this is `decisions/view.codec`, whose later fields capture the
-    // output codec: https://github.com/lostbean/json_blueprint/blob/main/issues/record-copy-cost/issues/01-hold-a-record-continuation-once.md
-    // The bound sits between the current size and the size with the
-    // `exchange` codec captured again.
-    #("card codec", flat_size_bytes(desk.card_codec()), 286_720),
   ]
 }
 
@@ -50,8 +36,4 @@ fn over(entries: List(#(String, Int, Int))) -> List(#(String, Int, Int)) {
 
 pub fn workers_handed_to_grind_stay_within_their_copy_budget_test() {
   assert over(crossing()) == []
-}
-
-pub fn codecs_capture_no_child_codec_test() {
-  assert over(codec_guards()) == []
 }

@@ -1,9 +1,10 @@
 //// A BEAM copy does not keep sharing, so a term costs its flat size every
 //// time it crosses a process. Grind copies the report worker into the
 //// processes that run each job, and Relay holds the tool list that serves
-//// each request. These bounds hold those terms. See the codec practice
-//// guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// each request. These bounds hold those terms; they are set from
+//// json_blueprint 2.2.0 measurements and fail on 2.1.1. See the codec
+//// practice guide, rule 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import envoy
 import gleam/list
@@ -19,11 +20,11 @@ pub fn crossing() -> List(#(String, Int, Int)) {
   let assert Ok(url) = envoy.get("DATABASE_URL")
   let assert Ok(running) = app.start(app.options(url))
   let measured = [
-    #("report worker", flat_size_bytes(running.report_worker), 12_288),
+    #("report worker", flat_size_bytes(running.report_worker), 2560),
     #(
       "relay tools",
       flat_size_bytes(tools.tools(running.jobs, running.report_worker)),
-      45_056,
+      19_456,
     ),
   ]
   app.stop(running)

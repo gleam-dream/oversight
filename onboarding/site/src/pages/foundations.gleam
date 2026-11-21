@@ -655,7 +655,7 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
       html.div([class("note"), css("margin-top:16px")], [
         html.b([], [html.text("Mind the copy:")]),
         html.text(
-          " a codec is a value built from functions, and sending a value to another process copies it whole, without the sharing it had in the process that built it. A Grind worker, a Fabric agent or a Relay tool list that holds codecs is copied that way each time it moves. Build each child codec in the field that uses it, as JSON Blueprint's ",
+          " sending a value to another process copies it whole, without the sharing it had in the process that built it. A Grind worker, a Fabric agent or a Relay tool list, with the codecs and closures it holds, is copied that way each time it moves, so bound its size in a test. JSON Blueprint's ",
         ),
         html.a(
           [
@@ -665,7 +665,16 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
           ],
           [html.text("codec practice guide")],
         ),
-        html.text(" explains, and measure what crosses."),
+        html.text(" covers codecs; the "),
+        html.a(
+          [
+            attribute.href(
+              "https://github.com/gleam-dream/gleam-agent-tools/blob/main/skills/gleam-otp/SKILL.md",
+            ),
+          ],
+          [html.text("gleam-otp skill")],
+        ),
+        html.text(" states the rule for any process design."),
       ]),
     ],
   )

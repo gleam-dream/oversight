@@ -47,10 +47,8 @@ pub fn line_total(item: LineItem) -> Int {
 ///
 /// It stays a combinator codec: the date check is a custom `try_map` and the
 /// total depends on the decoded lines, which the generator does not express.
-/// Each child codec is built inside its field, never bound with `let` above
-/// the record, so a later field's continuation captures no codec and the
-/// codec copies at its own size. See the codec practice guide:
-/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+/// See the codec practice guide:
+/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#choose-generated-codecs-or-combinators
 pub fn codec() -> codec.Codec(Invoice) {
   use vendor <- codec.field("vendor", codec.string(), get: fn(i) { i.vendor })
   use number <- codec.field("number", codec.string(), get: fn(i) { i.number })

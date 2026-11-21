@@ -21,7 +21,7 @@ saga = ">= 0.2.0 and < 0.3.0"
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.1.0", path = "integrations/saga_postgres" }
 relay = ">= 0.2.1 and < 0.3.0"
 hellhound = ">= 0.2.2 and < 0.3.0"
-json_blueprint = ">= 2.1.1 and < 3.0.0"
+json_blueprint = ">= 2.2.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
 # decisions is on Hex. decisions_postgres is released as a Git tag of
 # gleam-dream/decisions, as fabric_postgres and saga_postgres are above.

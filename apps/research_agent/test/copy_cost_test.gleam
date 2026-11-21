@@ -1,9 +1,10 @@
 //// A BEAM copy does not keep sharing, so a term costs its flat size every
 //// time it crosses a process. Grind copies the research worker, with the
 //// `Deps` it captures, into the processes that run each job, and Fabric
-//// copies the agent into each run. These bounds hold those terms. See the
-//// codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// copies the agent into each run. These bounds hold those terms; they are
+//// set from json_blueprint 2.2.0 measurements and fail on 2.1.1. See the
+//// codec practice guide, rule 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import envoy
 import gleam/list
@@ -31,8 +32,8 @@ pub fn crossing() -> List(#(String, Int, Int)) {
       telemetry: None,
     ))
   let measured = [
-    #("fabric agent", flat_size_bytes(node.deps.agent), 36_864),
-    #("research worker", flat_size_bytes(node.worker), 61_440),
+    #("fabric agent", flat_size_bytes(node.deps.agent), 14_336),
+    #("research worker", flat_size_bytes(node.worker), 28_672),
   ]
   app.stop(node)
   measured

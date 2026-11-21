@@ -125,13 +125,6 @@ pub type Answer {
 /// or `{"tag": "no_sources", "value": "<reason>"}`. `fabric/llm` wraps a
 /// non-object root as `{"answer": ..}` for the provider and unwraps the
 /// reply, so the codec stays the natural sum type.
-///
-/// The `written` codec is used only by the first variant, which is built
-/// before any continuation, so binding it with `let` above the union would
-/// capture nothing. It is built in its own function, as the codec practice
-/// guide asks of a child codec used in a later field, so that reordering the
-/// variants cannot make one capture it:
-/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
 pub fn answer_codec() -> codec.Codec(Answer) {
   codec.union({
     use written <- codec.variant("written", written_codec(), fn(pair) {

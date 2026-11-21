@@ -6,7 +6,7 @@
 //// holds the typed definition; regenerate with
 //// `gleam run -m generate_codecs && gleam format src/extractor/generated`.
 //// See the codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#choose-generated-codecs-or-combinators
 
 import extractor/llm
 

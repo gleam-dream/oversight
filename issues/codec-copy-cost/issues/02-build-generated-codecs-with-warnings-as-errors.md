@@ -1,6 +1,6 @@
 # Build generated codecs with warnings as errors
 
-Status: needs-info
+Status: done
 Category: enhancement
 
 AI-assisted contribution.
@@ -34,3 +34,11 @@ constructor is named.
 
 The application gate builds every application with `--warnings-as-errors`
 and the extractor's generated module compiles without warnings.
+
+## Comments
+
+AI-assisted contribution. Done in the change that raised every application to
+JSON Blueprint 2.2.0, whose typed generator guards its enum arms. The extractor's
+module was regenerated, it compiles without warnings, and
+`scripts/test-applications.sh` builds with `gleam build --warnings-as-errors`
+again.

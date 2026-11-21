@@ -352,11 +352,6 @@ pub fn registration_codec() -> Codec(Registration) {
 /// The structured output the model is asked for. Every field is present;
 /// an unknown one is `null`, so the schema stays within what providers
 /// accept for strict structured output.
-///
-/// Each child codec is built inside its field: a codec bound with `let`
-/// above the record would be captured by every later field's continuation
-/// and copied once per callback that holds it. See the codec practice guide:
-/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
 pub fn extraction_codec() -> Codec(Extraction) {
   use name <- codec.field("name", codec.string(), get: fn(e: Extraction) {
     e.name

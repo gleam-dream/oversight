@@ -1,6 +1,6 @@
 # Adopt Fabric's `agent.build_with`
 
-Status: needs-info
+Status: ready-for-agent
 Category: enhancement
 
 AI-assisted contribution.
@@ -8,19 +8,18 @@ AI-assisted contribution.
 ## Problem
 
 `agent.build` returns a built agent, and Fabric copies it whole into every
-runner it starts. On JSON Blueprint 2.1.1 the applications' agents copy in
-26 to 63 kB per run (tool_hub 63,456 bytes, payout_desk 34,344, research_agent
-26,440; each `copy_cost_test` bounds them). Fabric's
+runner it starts. On JSON Blueprint 2.2.0 the applications' agents copy in
+9 to 33 kB per run (tool_hub 32,560 bytes, research_agent 11,104, payout_desk
+9,328; each `copy_cost_test` bounds them). Fabric's
 [ADR 0023](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)
 adds `agent.build_with(spec: fn() -> Spec(..))`, which keeps the builder and
 builds the agent in each process that runs it, and deprecates `agent.build`.
 
-## Blocked on
+## Releases
 
-A Fabric release with `agent.build_with`. It adds the
-`fabric.Error` variant `AgentUnbuildable`, so it is expected as 0.5.0, and a
-`fabric_postgres` tag that requires it. Every application pins
-`fabric >= 0.4.0 and < 0.5.0`.
+Fabric 0.5.0 adds `agent.build_with` and the `fabric.Error` variant
+`AgentUnbuildable`; the `fabric_postgres-v0.4.0` tag goes with it. Every
+application pins `fabric >= 0.4.0 and < 0.5.0`.
 
 ## What to do
 

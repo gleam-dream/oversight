@@ -1,8 +1,10 @@
 //// A BEAM copy does not keep sharing, so a term costs its flat size every
 //// time it crosses a process. Fabric copies the agent, with its tool codecs,
 //// into each run, and Relay holds the inventory tool list that serves each
-//// request. These bounds hold those terms. See the codec practice guide:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md
+//// request. These bounds hold those terms; they are set from json_blueprint
+//// 2.2.0 measurements and fail on 2.1.1. See the codec practice guide, rule
+//// 4:
+//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import gleam/list
 import http_gun
@@ -30,8 +32,8 @@ pub fn crossing() -> List(#(String, Int, Int)) {
     )
   let relay_tools = inventory.tools(inventory.demo_catalog())
   let measured = [
-    #("fabric agent", flat_size_bytes(agent), 81_920),
-    #("relay inventory tools", flat_size_bytes(relay_tools), 36_864),
+    #("fabric agent", flat_size_bytes(agent), 40_960),
+    #("relay inventory tools", flat_size_bytes(relay_tools), 20_480),
   ]
   http_gun.stop(http)
   measured
