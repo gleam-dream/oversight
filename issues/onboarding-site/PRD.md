@@ -99,8 +99,8 @@ repositories when porting. Facts that are easy to get wrong:
 - A process copy does not keep sharing, so a value holding codecs or
   closures (a Grind worker, a Fabric agent, a Relay tool list) costs its flat
   size each time it moves, and a test should bound it. JSON Blueprint's codec
-  practice guide covers codecs and the `gleam-otp` agent skill states the
-  general rule (module 6's "Mind the copy" note).
+  practice guide states the rule for any such value and how to test it
+  (module 6's "Mind the copy" note).
 
 Honesty labels that must stay visible in the port:
 

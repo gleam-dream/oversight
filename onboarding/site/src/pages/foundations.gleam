@@ -665,16 +665,9 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
           ],
           [html.text("codec practice guide")],
         ),
-        html.text(" covers codecs; the "),
-        html.a(
-          [
-            attribute.href(
-              "https://github.com/gleam-dream/gleam-agent-tools/blob/main/skills/gleam-otp/SKILL.md",
-            ),
-          ],
-          [html.text("gleam-otp skill")],
+        html.text(
+          " states the rule for any value that crosses a process, and how to test it.",
         ),
-        html.text(" states the rule for any process design."),
       ]),
     ],
   )
