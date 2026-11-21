@@ -8,6 +8,7 @@
 import envoy
 import extractor/clients
 import extractor/document
+import extractor/document_job
 import extractor/fixtures
 import extractor/invoice
 import extractor/jobs
@@ -78,7 +79,7 @@ pub fn run(database_url: String) -> Result(Nil, String) {
     list.filter_map(assignments(), fn(pair) {
       let #(id, provider) = pair
       let job =
-        jobs.DocumentJob(
+        document_job.DocumentJob(
           document_id: id,
           url: scripted.document_url(services, fixtures.document_host, id),
           provider:,

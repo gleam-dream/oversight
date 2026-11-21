@@ -1,6 +1,7 @@
 import envoy
 import extractor/clients
 import extractor/document
+import extractor/document_job
 import extractor/fixtures
 import extractor/invoice
 import extractor/jobs
@@ -92,9 +93,9 @@ fn submit(
   context: Context,
   id: String,
   provider: llm.Provider,
-) -> #(jobs.DocumentJob, jobs.Handle) {
+) -> #(document_job.DocumentJob, jobs.Handle) {
   let job =
-    jobs.DocumentJob(
+    document_job.DocumentJob(
       document_id: id,
       url: scripted.document_url(context.services, fixtures.document_host, id),
       provider:,
@@ -103,7 +104,10 @@ fn submit(
   #(job, handle)
 }
 
-fn finish(context: Context, submitted: #(jobs.DocumentJob, jobs.Handle)) {
+fn finish(
+  context: Context,
+  submitted: #(document_job.DocumentJob, jobs.Handle),
+) {
   let assert Ok(finished) =
     jobs.await(context.pipeline, submitted.1, duration.seconds(10))
   finished
@@ -634,7 +638,7 @@ pub fn http_failures_are_decided_by_kind_test() {
 pub fn handler_runs_without_a_queue_test() {
   use context <- with_pipeline("extract_handler", fixtures.batch(), live)
   let job =
-    jobs.DocumentJob(
+    document_job.DocumentJob(
       document_id: "acme",
       url: scripted.document_url(
         context.services,

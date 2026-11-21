@@ -652,6 +652,23 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
           codec.Schema -> schema_face()
         },
       ]),
+      html.div([class("note"), css("margin-top:16px")], [
+        html.b([], [html.text("Mind the copy:")]),
+        html.text(
+          " sending a value to another process copies it whole, without the sharing it had in the process that built it. A Grind worker, a Fabric agent or a Relay tool list, with the codecs and closures it holds, is copied that way each time it moves, so bound its size in a test. JSON Blueprint's ",
+        ),
+        html.a(
+          [
+            attribute.href(
+              "https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md",
+            ),
+          ],
+          [html.text("codec practice guide")],
+        ),
+        html.text(
+          " states the rule for any value that crosses a process, and how to test it.",
+        ),
+      ]),
     ],
   )
 }

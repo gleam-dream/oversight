@@ -126,21 +126,8 @@ pub type Answer {
 /// non-object root as `{"answer": ..}` for the provider and unwraps the
 /// reply, so the codec stays the natural sum type.
 pub fn answer_codec() -> codec.Codec(Answer) {
-  let written = {
-    use title <- codec.field(
-      "title",
-      codec.string() |> codec.describe("The article's title"),
-      get: fn(pair: #(String, String)) { pair.0 },
-    )
-    use body <- codec.field(
-      "body",
-      codec.string() |> codec.describe("The article's body"),
-      get: fn(pair: #(String, String)) { pair.1 },
-    )
-    codec.success(#(title, body))
-  }
   codec.union({
-    use written <- codec.variant("written", written, fn(pair) {
+    use written <- codec.variant("written", written_codec(), fn(pair) {
       Written(pair.0, pair.1)
     })
     use no_sources <- codec.variant(
@@ -155,6 +142,20 @@ pub fn answer_codec() -> codec.Codec(Answer) {
       }
     })
   })
+}
+
+fn written_codec() -> codec.Codec(#(String, String)) {
+  use title <- codec.field(
+    "title",
+    codec.string() |> codec.describe("The article's title"),
+    get: fn(pair: #(String, String)) { pair.0 },
+  )
+  use body <- codec.field(
+    "body",
+    codec.string() |> codec.describe("The article's body"),
+    get: fn(pair: #(String, String)) { pair.1 },
+  )
+  codec.success(#(title, body))
 }
 
 pub fn system_prompt() -> String {

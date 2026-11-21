@@ -96,6 +96,11 @@ repositories when porting. Facts that are easy to get wrong:
   `http_gun.lifecycle` with milestones `admission_granted`,
   `gun_call_returned`, `response_headers`, `http_terminated`.
 - Example-app package sets come from each app's `gleam.toml` in this repository.
+- A process copy does not keep sharing, so a value holding codecs or
+  closures (a Grind worker, a Fabric agent, a Relay tool list) costs its flat
+  size each time it moves, and a test should bound it. JSON Blueprint's codec
+  practice guide states the rule for any such value and how to test it
+  (module 6's "Mind the copy" note).
 
 Honesty labels that must stay visible in the port:
 

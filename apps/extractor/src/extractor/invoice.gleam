@@ -44,57 +44,73 @@ pub fn line_total(item: LineItem) -> Int {
 /// properties in schema order. The `total_cents` codec is built after
 /// `line_items` decodes, so its check sees the lines and a mismatch is
 /// reported at `total_cents`.
+///
+/// It stays a combinator codec: the date check is a custom `try_map` and the
+/// total depends on the decoded lines, which the generator does not express.
+/// See the codec practice guide:
+/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#choose-generated-codecs-or-combinators
 pub fn codec() -> codec.Codec(Invoice) {
-  let currency =
-    codec.string_enum([#("USD", Usd), #("EUR", Eur), #("GBP", Gbp)])
-  let quantity = codec.integer_between(1, 1_000_000)
-  let cents = codec.integer_between(0, 1_000_000_000)
-  let line_item = {
-    use description <- codec.field("description", codec.string(), get: fn(item) {
-      item.description
-    })
-    use quantity <- codec.field("quantity", quantity, get: fn(item) {
-      item.quantity
-    })
-    use unit_price_cents <- codec.field(
-      "unit_price_cents",
-      cents,
-      get: fn(item) { item.unit_price_cents },
-    )
-    codec.success(LineItem(description:, quantity:, unit_price_cents:))
-  }
-  let date =
-    codec.try_map(
-      codec.string(),
-      decode: check_date,
-      encode: Ok,
-      placeholder: "1970-01-01",
-    )
-    |> codec.describe("Issue date as YYYY-MM-DD")
-  {
-    use vendor <- codec.field("vendor", codec.string(), get: fn(i) { i.vendor })
-    use number <- codec.field("number", codec.string(), get: fn(i) { i.number })
-    use issued_on <- codec.field("issued_on", date, get: fn(i) { i.issued_on })
-    use currency <- codec.field("currency", currency, get: fn(i) { i.currency })
-    use line_items <- codec.field(
-      "line_items",
-      codec.list(line_item),
-      get: fn(i) { i.line_items },
-    )
-    use total_cents <- codec.field(
-      "total_cents",
-      total_matching(line_items, cents),
-      get: fn(i) { i.total_cents },
-    )
-    codec.success(Invoice(
-      vendor:,
-      number:,
-      issued_on:,
-      currency:,
-      line_items:,
-      total_cents:,
-    ))
-  }
+  use vendor <- codec.field("vendor", codec.string(), get: fn(i) { i.vendor })
+  use number <- codec.field("number", codec.string(), get: fn(i) { i.number })
+  use issued_on <- codec.field("issued_on", date_codec(), get: fn(i) {
+    i.issued_on
+  })
+  use currency <- codec.field("currency", currency_codec(), get: fn(i) {
+    i.currency
+  })
+  use line_items <- codec.field(
+    "line_items",
+    codec.list(line_item_codec()),
+    get: fn(i) { i.line_items },
+  )
+  use total_cents <- codec.field(
+    "total_cents",
+    total_matching(line_items),
+    get: fn(i) { i.total_cents },
+  )
+  codec.success(Invoice(
+    vendor:,
+    number:,
+    issued_on:,
+    currency:,
+    line_items:,
+    total_cents:,
+  ))
+}
+
+fn currency_codec() -> codec.Codec(Currency) {
+  codec.string_enum([#("USD", Usd), #("EUR", Eur), #("GBP", Gbp)])
+}
+
+fn cents_codec() -> codec.Codec(Int) {
+  codec.integer_between(0, 1_000_000_000)
+}
+
+fn line_item_codec() -> codec.Codec(LineItem) {
+  use description <- codec.field("description", codec.string(), get: fn(item) {
+    item.description
+  })
+  use quantity <- codec.field(
+    "quantity",
+    codec.integer_between(1, 1_000_000),
+    get: fn(item) { item.quantity },
+  )
+  use unit_price_cents <- codec.field(
+    "unit_price_cents",
+    cents_codec(),
+    get: fn(item) { item.unit_price_cents },
+  )
+  codec.success(LineItem(description:, quantity:, unit_price_cents:))
+}
+
+fn date_codec() -> codec.Codec(String) {
+  codec.try_map(
+    codec.string(),
+    decode: check_date,
+    encode: Ok,
+    placeholder: "1970-01-01",
+  )
+  |> codec.describe("Issue date as YYYY-MM-DD")
 }
 
 fn check_date(text: String) -> Result(String, String) {
@@ -116,10 +132,7 @@ fn check_date(text: String) -> Result(String, String) {
   }
 }
 
-fn total_matching(
-  items: List(LineItem),
-  cents: codec.Codec(Int),
-) -> codec.Codec(Int) {
+fn total_matching(items: List(LineItem)) -> codec.Codec(Int) {
   let check = fn(total) {
     let sum = list.fold(items, 0, fn(acc, item) { acc + line_total(item) })
     case sum == total {
@@ -133,5 +146,5 @@ fn total_matching(
         )
     }
   }
-  codec.try_map(cents, decode: check, encode: Ok, placeholder: 0)
+  codec.try_map(cents_codec(), decode: check, encode: Ok, placeholder: 0)
 }

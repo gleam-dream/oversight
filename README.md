@@ -46,6 +46,39 @@ packages owned by their respective libraries.
 The [application catalogue](apps/README.md) lists every runnable composition and
 its boundaries. These are examples to read and adapt, rather than a shared framework.
 
+## Codecs that cross processes
+
+A BEAM copy does not keep sharing, so a term costs its flat size each time
+Grind, Fabric or Relay hands it to another process: a worker with the
+dependencies its handler captures, an agent with its tool codecs, a tool list.
+The `gleam-otp` agent skill states that rule for process design in general
+([source](https://github.com/gleam-dream/gleam-agent-tools/blob/main/skills/gleam-otp/SKILL.md)).
+The applications require JSON Blueprint 2.2.0 or later, where each combinator
+holds its inputs once, and follow its
+[codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
+
+- **Generated codec:** the extractor's Grind job payload codec,
+  [`document_job_codec`](apps/extractor/src/extractor/generated/document_job_codec.gleam),
+  is generated from the typed definition in
+  [`document_job_definition.gleam`](apps/extractor/test/document_job_definition.gleam);
+  `gleam test` fails when the definition changes and the committed module was not
+  regenerated.
+- **Combinators:** every other codec, such as the extractor
+  [invoice](apps/extractor/src/extractor/invoice.gleam), whose date check and
+  total that depends on the decoded lines the generator cannot express. On 2.2.0
+  it no longer matters which field builds a child codec; a run-time enum would be
+  built once, before the field chain.
+- **Copy-cost tests:** extractor, clinic_registration, research_agent,
+  payout_desk, secure_mcp and tool_hub each bound the terms they hand to another
+  process, as in the
+  [payout desk's](apps/payout_desk/test/payout_desk/copy_cost_test.gleam).
+
+The applications still hand Fabric a built agent, which copies in 9 to 33 kB per
+run on 2.2.0. Fabric's
+[builder entry point](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)
+removes that copy; adopting it means moving to Fabric 0.5
+([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build-with.md)).
+
 ## Run an example
 
 From the Oversight checkout:

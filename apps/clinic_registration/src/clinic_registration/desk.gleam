@@ -193,19 +193,6 @@ pub fn card(db: pog.Connection, card: Card(Registration)) -> CardDocument {
 
 /// The card document's JSON form, with its schema.
 pub fn card_codec() -> codec.Codec(CardDocument) {
-  let exchange = {
-    use request <- codec.field(
-      "request",
-      codec.string(),
-      get: fn(e: ModelExchange) { e.request },
-    )
-    use answer <- codec.field(
-      "answer",
-      codec.string(),
-      get: fn(e: ModelExchange) { e.answer },
-    )
-    codec.success(ModelExchange(request:, answer:))
-  }
   use card <- codec.field(
     "card",
     view.codec(decisions.codec(domain.point())),
@@ -218,7 +205,7 @@ pub fn card_codec() -> codec.Codec(CardDocument) {
   )
   use exchange <- codec.field(
     "model_exchange",
-    codec.nullable(exchange),
+    codec.nullable(exchange_codec()),
     get: fn(d: CardDocument) { d.exchange },
   )
   use attempts <- codec.field(
@@ -238,6 +225,18 @@ pub fn card_codec() -> codec.Codec(CardDocument) {
     attempts:,
     policy_version:,
   ))
+}
+
+fn exchange_codec() -> codec.Codec(ModelExchange) {
+  use request <- codec.field(
+    "request",
+    codec.string(),
+    get: fn(e: ModelExchange) { e.request },
+  )
+  use answer <- codec.field("answer", codec.string(), get: fn(e: ModelExchange) {
+    e.answer
+  })
+  codec.success(ModelExchange(request:, answer:))
 }
 
 /// The card as JSON text.
