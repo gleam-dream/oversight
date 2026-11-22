@@ -5,33 +5,18 @@
 # of coderabbit-config itself, and `repository` marks a rule beyond the catalog.
 #
 # Catalogs read:
-#   practice catalog (not public)  879841a61c3f83cd809edca9229c4a6bb7f909f8
-#   gleam-agent-tools  6a9ea2f647e787a32d3c7fa88d9c58c5b81ae9d7
+#   practice catalog (not public)  a56636a4eed7a0d644b89f5bb7c7d7c9692e0887
+#   gleam-agent-tools  d7b541cb885b3edbf25563b06aee97b28b66074f
 #
 # Governing skills: coderabbit-config (policy), gleam, gleam-ffi, gleam-otp,
 # wisp, lustre, gleam-sql, relay, sinal, json-blueprint, correio, retrace,
 # grind, saga, fabric, llm-wire, hellhound, http-gun, modeling, testing,
 # python, design, tracker, gate, git.
 #
-# Governing dependency versions, locked in the manifest.toml of each package
-# under apps/, playground/ and onboarding/site:
-#   Rules taken:
-#     wisp 2.2.2, mist 6.0.3 (the wisp skill's Mist rules name 6.0.3)
-#     lustre 5.7.1 (onboarding/site)
-#     pog 4.1.0 (gleam-sql)
-#     relay 0.2.2 (skill: >= 0.2.2)
-#     sinal 0.1.0, json_blueprint 2.2.0, correio 0.1.0, retrace 0.1.0
-#     gleam_otp 1.3.0, gleam_erlang 1.3.0
-#   No rule taken, because the locked version is outside the version the
-#   skill names; re-derive once they agree:
-#     grind 0.1.1 (skill: 0.2.1), saga 0.2.0 (skill: 0.1.0),
-#     fabric 0.4.0 (skill: 0.5), llm_wire 0.2.0 (skill: 0.1.0),
-#     hellhound 0.2.2 (skill: 0.1.0), http_gun 0.2.0 (skill: 0.1.0)
-#   playground/blueprint_compatibility pins json_blueprint 1.7.1 and 1.1.0 on
-#   purpose; the json-blueprint rules do not apply there.
-#   Also locked: decisions 0.1.0, decisions_otp and decisions_postgres 0.1.0
-#   (Git tags), fabric_postgres 0.3.0, saga_postgres 0.1.0, correio_mailbox
-#   0.1.1 (Git tags); no catalog skill covers them.
+# playground/blueprint_compatibility pins earlier json_blueprint releases and
+# playground/fabric_record_compatibility/old an earlier Fabric reader, both on
+# purpose; the json-blueprint and fabric rules do not apply there. The
+# decisions packages have no catalog skill.
 language: en-US
 tone_instructions: >-
   Literal and concise. Report only defects you can evidence from the diff, its
@@ -171,8 +156,8 @@ reviews:
 
     - path: "{apps,playground}/**/*.{gleam,erl}"
       instructions: |
-        Processes (gleam-otp; gleam_otp 1.3.0, gleam_erlang 1.3.0). In a
-        module that imports `gleam/otp/*` or `gleam/erlang/process`:
+        Processes (gleam-otp). In a module that imports `gleam/otp/*` or
+        `gleam/erlang/process`:
         - Flag a slow effect, such as a provider or model call, in a
           coordinator that must stay responsive; run it under a deliberate
           owner and route completion, failure and cancellation back as
@@ -193,8 +178,7 @@ reviews:
 
     - path: "apps/**/*.gleam"
       instructions: |
-        HTTP handlers (wisp; wisp 2.2.2 on mist 6.0.3). In a module that
-        imports `wisp` or `mist`:
+        HTTP handlers (wisp). In a module that imports `wisp` or `mist`:
         - Flag a domain decision made in a handler or middleware instead of
           an application function the handler calls.
         - Flag a body read twice, or by two layers, instead of read once and
@@ -220,7 +204,7 @@ reviews:
 
     - path: "onboarding/site/{src,test}/**/*.gleam"
       instructions: |
-        Onboarding site (lustre; lustre 5.7.1).
+        Onboarding site (lustre).
         - Flag a request, timer or random read executed inside `view` or
           `update`; return it as an effect and its result as a message.
         - Flag exclusive interface states held as flags instead of variants,
@@ -240,8 +224,7 @@ reviews:
 
     - path: "{apps,playground}/**/*.gleam"
       instructions: |
-        PostgreSQL access (gleam-sql; rules for pog 4.1.0). In a module that
-        imports `pog`:
+        PostgreSQL access (gleam-sql). In a module that imports `pog`:
         - Flag a value interpolated into SQL text instead of bound as a
           parameter, and an identifier or ordering taken from input.
         - Flag a query inside a transaction callback that uses the pool
@@ -260,8 +243,7 @@ reviews:
 
     - path: "{apps,playground}/**/*.gleam"
       instructions: |
-        MCP tools (relay; rules for 0.2.2 with json_blueprint 2.2.0). In a
-        module that imports `relay`:
+        MCP tools (relay). In a module that imports `relay`:
         - Flag a tool declared twice instead of one `tool.Definition` reused
           for server decoding and the typed client call.
         - Flag `define` used for a definition built at run time; use
@@ -284,7 +266,7 @@ reviews:
 
     - path: "{apps,playground}/**/*.gleam"
       instructions: |
-        Telemetry (sinal; rules for 0.1.0). In a module that imports `sinal`:
+        Telemetry (sinal). In a module that imports `sinal`:
         - Flag an event name, field key or route prefix built from a runtime
           value; each creates a permanent atom. Request ids and other
           unbounded values go in metadata values.
@@ -305,8 +287,8 @@ reviews:
 
     - path: "{apps,playground}/**/*.gleam"
       instructions: |
-        JSON codecs (json-blueprint; rules for 2.2.0). In a module that
-        imports `json/blueprint/*`, outside
+        JSON codecs (json-blueprint). In a module that imports
+        `json/blueprint/*`, outside
         playground/blueprint_compatibility:
         - Flag a change to a union envelope (`tag`/`value`) or a stored
           format in a change that claims wire compatibility.
@@ -326,15 +308,15 @@ reviews:
           `value.with_max_bytes`, and `Float` or `codec.int()` used for an
           exact number where the `number` API applies.
         - Flag a reader of `codec.view` that does not handle `OtherSchema`.
-        - Flag a codec stored with `term_to_binary`.
+        - Flag a codec stored with `term_to_binary` or kept across a hot code
+          upgrade; rebuild it.
         - Flag a hand edit to a module under `generated/`; change the
           definition and regenerate, and declare `gleam_json` where a
           generated module imports it.
 
     - path: "apps/**/*.gleam"
       instructions: |
-        Email and challenges (correio; rules for 0.1.0). In a module that
-        imports `correio`:
+        Email and challenges (correio). In a module that imports `correio`:
         - Flag an address or message built without its checked constructor.
         - Flag provider selection inside business code instead of a
           `delivery.Sender` injected at setup.
@@ -354,8 +336,8 @@ reviews:
 
     - path: "apps/**/*.gleam"
       instructions: |
-        Frontend session replay (retrace; rules for 0.1.0). In a module that
-        imports `retrace`:
+        Frontend session replay (retrace). In a module that imports
+        `retrace`:
         - Flag a model or message captured before it is projected to a safe
           value; credentials and private values never reach the recorder.
         - Flag `record` called before the reducer accepted the event, and a
@@ -369,6 +351,191 @@ reviews:
           time, reducer error) not matched, and a missing historical artifact
           replaced by today's reducer.
         - Flag `record` taken as an acknowledgement of persistence.
+        - Flag a fallible projection not passed through
+          `capture.observe_projected`, which stops capture on failure
+          without recording the error.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Durable jobs (grind). In a module that imports `grind`:
+        - Flag a new submission key after a timeout or `CommitUnknown`;
+          retain the `PendingSubmission` and call `reconcile_submission`.
+        - Flag a submission key that is not stable across retries of one
+          exact command, and a uniqueness window treated as a permanent
+          business ledger; pruning ends deduplication.
+        - Flag `submit_in` or `admin.resolve_uncertain_in` given a connection
+          other than the caller's open transaction, and its staged reply
+          presented as proof of the caller's commit.
+        - Flag a handler's external effect sent without an application
+          idempotency key the provider enforces; admission deduplication
+          does not prevent repeated effects.
+        - Flag `Uncertain` work replayed because its process died, and
+          uncertainty settled without an attributed `admin.resolution` from
+          authoritative evidence.
+        - Flag cancellation, or `await` returning `Pending`, treated as proof
+          that no effect happened or that work stopped.
+        - Flag a changed worker callback meaning or codec with no worker
+          version change, so stored jobs are read with a new meaning.
+        - Flag a worker closure that captures an environment, catalogue or
+          agent; each job copies the whole worker definition.
+        - Flag a correctness decision read from telemetry instead of the
+          durable outcome, and a local queue limit treated as a cluster
+          quota.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Workflows (saga). In a module that imports `saga`:
+        - Flag request-specific state captured in a shared `define` builder;
+          the builder runs once and each request arrives as input.
+        - Flag step names used as an untyped result dictionary; connect steps
+          through typed ports.
+        - Flag a possibly completed failure not marked with `unknown_when`,
+          a transport timeout taken as grounds for replay or rollback, and a
+          `CoordinatorCrashed` cause treated as a known failure.
+        - Flag an undo or refund of a possibly completed effect without
+          evidence.
+        - Flag an `effect` step that does not pass its `EffectKey`
+          idempotency key to the provider, and an effect key or execution id
+          that changes across attempts, deliveries or recovery.
+        - Flag an interrupted action resolved as `NotSent` without proof of
+          absence, or retried because no checkpoint exists; a missing lookup
+          proves nothing.
+        - Flag an unfinished `start` handle dropped without cancel and
+          `await`, and `await` used on a `start_reporting` run.
+        - Flag a claim that an application commit and a checkpoint commit are
+          atomic because they share a pool or database.
+        - Flag `outcome.summary` used for a decision instead of display.
+        - Flag a `Config` or step bound beyond about 49.7 days.
+        - Flag `saga_postgres` storage given a transaction-scoped connection
+          instead of a pooled handle.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Agents and graphs (fabric). In a module that imports `fabric`,
+        outside playground/fabric_record_compatibility/old, which pins an
+        earlier Fabric reader on purpose:
+        - Flag built tools, codecs, agents or `Run` handles captured by a
+          builder or sent to another process per request; send the run id
+          and `open` it there.
+        - Flag a subject, name or table made inside the `agent.build_with`
+          builder; it is remade in each process.
+        - Flag a per-run capture whose agent shares its name with another
+          agent or is listed in `sweeper.agent`.
+        - Flag a possibly completed effect returned as `tool.Explain`
+          instead of `tool.Uncertain`, and an uncertain mutation retried to
+          discover whether it succeeded.
+        - Flag `with_replay` on a tool that is not a read or an idempotent
+          write keyed by run and action identity.
+        - Flag an effect in graph selection, acceptance, codecs or request
+          preparation.
+        - Flag a final answer treated as business success without reading
+          `fabric.snapshot` actions, and a status match that ignores denied
+          or failed actions before `Finished(Completed(answer))`.
+        - Flag an await timeout or a dropped handle treated as cancellation.
+        - Flag an approval reused after its arguments, policy or
+          requirements changed.
+        - Flag per-call timeouts presented as a whole-agent deadline.
+        - Flag a database backend whose recovery worker is not supervised,
+          and a queued run reference treated as the owner of Fabric
+          recovery.
+        - Flag a result that must be incorporated once with no retained
+          applied marker.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Login and tokens (hellhound). In a module that imports `hellhound`:
+        - Flag email used as the stable account key; map the verified
+          `(issuer, subject)` to a principal.
+        - Flag login treated as permission, and a protected route that does
+          not check permission and origin.
+        - Flag `hellhound.new` or `exchange.new` called per request instead
+          of once at setup, and `exchange.perform` on a client not started
+          with `exchange.supervised`.
+        - Flag a recreated state, nonce or PKCE value, and a browser-binding
+          cookie or callback input not preserved from `begin_login` to
+          `complete_login`.
+        - Flag a match on `Action` that does not name `Reauthenticate`,
+          `RetryLater`, `Recover`, `FixConfiguration` and `RejectRequest`,
+          and `Recover` turned into a fresh token exchange instead of
+          `recover_custody` or `recover_refresh`.
+        - Flag a possibly consumed authorization code or refresh token sent
+          again.
+        - Flag a resource request repeated after a 401 because refresh
+          succeeded.
+        - Flag an opaque token, session reference or recovery value logged;
+          diagnose with `describe_*`.
+        - Flag logout that reports custody removal, token revocation or
+          provider redirection as the end of the application session.
+        - Flag durable stores configured without a stable sealing key, and
+          `ProviderNotReady` left unhandled during supervised discovery.
+        - Flag a custom store whose conditional write does not check its
+          deadline under exclusive write authority or drops an uncertain
+          commit.
+        - Flag disabled HTTPS verification or transaction binding, and a
+          signing JWK for `hellhound/assertion` that carries an unused `alg`
+          or `kid`.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Provider calls (llm-wire). In a module that imports `llm_wire`:
+        - Flag a request executed without `prepare` and handling of its
+          unsupported settings and schemas, `ThinkingUnsupported` included.
+        - Flag a match on a call outcome that does not name `Answer`,
+          `NeedsTools`, `OutputLimited` and `Refused`, and an
+          `OutputLimited` partial treated as a complete typed answer.
+        - Flag a thinking level set with a token limit sized for the answer
+          alone; the limit also counts thoughts.
+        - Flag a `NeedsTools` follow-up that does not append
+          `message.Assistant(turn)` and one `tool_result` per call, and a turn
+          rebuilt from visible text instead of kept or decoded with the
+          message and turn codecs.
+        - Flag tool arguments acted on before they are decoded, and a model
+          request treated as authorization for a business action.
+        - Flag a `with_output` codec whose root is not a record.
+        - Flag a `tool.new` tool sent on many calls where a
+          `tool.from_contract` or `tool.from_json_schema` tool with
+          `decode_arguments` in the calling process would do; a `tool.new`
+          tool carries its input codec into each call's processes.
+        - Flag a stream neither read until `Done` nor closed, two readers of
+          one stream, and `TimedOut` from `next_within` treated as the end of
+          the call.
+        - Flag every failure or timeout retried, `advise` treated as an
+          effect guarantee, `MaybeSent` treated as no paid work, missing
+          usage treated as zero tokens, and a wait on `ProviderDelay` beyond
+          the remaining application deadline.
+        - Flag credentials written in source instead of read from live
+          configuration.
+
+    - path: "{apps,playground}/**/*.gleam"
+      instructions: |
+        Outgoing HTTP (http-gun). In a module that imports `http_gun`:
+        - Flag a shared client started by a short-lived request process, and
+          a short-lived client not stopped on every exit path.
+        - Flag a decoded response body with no check of `status` first; an
+          `Ok` transport result can hold a 404 or 503.
+        - Flag a truncated collection (`truncated`) decoded as a complete
+          document.
+        - Flag a body opened with `open` that is not closed on every path,
+          including after EOF or a failed collection, and a body read from a
+          process other than the one that opened it.
+        - Flag `body.next_within` returning `None` treated as EOF.
+        - Flag a retry decided without the failure's send evidence and
+          `error.is_retryable(failure, idempotent:)` under the request's real
+          idempotency, a retry loop with no attempt limit or backoff, and a
+          timeout or cancellation treated as proof the server did nothing.
+        - Flag a destination view that widens authority, loopback enabled
+          outside local services and tests, and disabled or weakened TLS
+          verification; a server that accepts only TLS 1.2 CBC suites takes
+          `config.with_cipher_suites(settings, config.OtpDefaultsAndTls12Cbc)`.
+        - Flag a recording whose redaction policy does not add the
+          provider's credential headers (`with_headers`), query parameters
+          (`with_query_parameters`) and body fields (`with_body_fields`,
+          `with_body`); the defaults do not remove every secret.
+        - Flag `cassette.encode` on a hand-built or parsed script that can
+          hold credentials without `cassette.redact(script, policy)` first,
+          and `redaction.request_fields_only` on a recording whose response
+          bodies carry tokens saved unredacted.
+        - Flag a recording not finished with its result handled.
 
     - path: "{apps/*/src,playground/**/src}/**/*.gleam"
       instructions: |
