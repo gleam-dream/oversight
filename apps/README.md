@@ -41,6 +41,9 @@ and removes its own local database:
 ../scripts/with-postgres.sh gleam run
 ```
 
+From the repository root on Linux, `nix build .#checks.x86_64-linux.<name>-tests`
+runs one application's tests in the Nix sandbox with the same cluster layout.
+
 No existing database, provider account or sibling checkout is needed. Published
 libraries resolve from Hex; integration packages are Git+path dependencies at
 their release tags. Each `manifest.toml` locks the resolved versions and commits.

@@ -5,7 +5,7 @@
     design-layer.url = "github:lostbean/design-layer/main";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     gleam-nix = {
-      url = "github:gleam-dream/gleam-nix";
+      url = "github:gleam-dream/gleam-nix/de32009ec2dec98bb5a06b6f93c279076393c1ed";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";
@@ -105,7 +105,7 @@
 
         formatter = treefmtEval.config.build.wrapper;
 
-        packages = pkgs.lib.mapAttrs (_: project: project.package) applications;
+        packages = pkgs.lib.mapAttrs (_: project: project.package) applications.projects;
 
         checks = {
           formatting = treefmtEval.config.build.check ./.;
@@ -113,12 +113,12 @@
             assert
               builtins.length (
                 pkgs.lib.unique (
-                  map (project: project.packages.gleam_stdlib.drvPath) (builtins.attrValues applications)
+                  map (project: project.packages.gleam_stdlib.drvPath) (builtins.attrValues applications.projects)
                 )
               ) == 1;
             assert
-              applications.checkout.packages.saga_postgres.drvPath
-              == applications.financial_recovery.packages.saga_postgres.drvPath;
+              applications.projects.checkout.packages.saga_postgres.drvPath
+              == applications.projects.financial_recovery.packages.saga_postgres.drvPath;
             pkgs.runCommand "oversight-shared-dependencies" { } "touch $out";
         }
         // pkgs.lib.mapAttrs' (
@@ -136,7 +136,16 @@
                 touch "$out"
               ''
           )
-        ) applications;
+        ) applications.projects
+        // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux (
+          pkgs.lib.mapAttrs' (name: check: pkgs.lib.nameValuePair "${name}-tests" check) (
+            import ./nix/tests.nix {
+              inherit pkgs;
+              gleam = gleamBuild;
+              projects = applications.tested;
+            }
+          )
+        );
       }
     );
 }

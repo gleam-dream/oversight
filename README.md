@@ -89,9 +89,12 @@ nix develop --command bash scripts/test-applications.sh financial_recovery
 ```
 
 The Nix build uses [Gleam Nix](https://github.com/gleam-dream/gleam-nix) to compile
-each locked dependency separately. Every application has a named package output;
+each locked dependency separately, Rebar3 packages with Nixpkgs' builder on the
+same OTP. Every application has a named package output;
 applications with identical dependency inputs reuse the same compiled outputs.
-These outputs are OTP libraries, ready for runtime or release assembly.
+These outputs are OTP libraries, ready for runtime or release assembly. On
+Linux, `nix build .#checks.x86_64-linux.financial_recovery-tests` runs the same
+tests in the Nix sandbox with its own disposable PostgreSQL cluster.
 
 The test command builds and tests the application using disposable PostgreSQL and a
 local scripted payment provider. It needs no provider credentials or existing database.

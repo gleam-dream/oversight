@@ -18,7 +18,7 @@
     pending-entry(title: "A pending evidence marker cannot show an in-flight effect", kind: "ruling", since: "2026-10-07")[A worker that stops after committing its pending marker and before sending leaves a condition that provider evidence alone can distinguish from an in-flight effect. The protocol reports uncertainty rather than inferring non-execution. See #adr(20).],
   )
 
-  #section(title: "Validation commands", lead: "Nix runs shared validators directly. Small shell launchers run applications and experiments with their service fixtures.", body: [
+  #section(title: "Validation commands", lead: "Nix runs shared validators and each application's tests as checks. Small shell launchers run applications and experiments with their service fixtures.", body: [
     #code-block("sh", "nix flake check
 nix run .#design-gate-check -- docs/design
 nix develop --command bash scripts/test-applications.sh
@@ -32,7 +32,7 @@ nix develop --command bash scripts/test-experiments.sh")
     ))
     #points(
       [The required commands run shared checks, applications and retained behavioral experiments. The final continuous-integration status requires every mandatory job to succeed; failures, cancellations and unexpected skips cannot satisfy it.],
-      [The local application launcher discovers application manifests; continuous integration lists applications in its matrix. A new application must be added to that matrix and declare whether it needs PostgreSQL; no inventory checker enforces this convention.],
+      [On Linux, `nix flake check` includes a test check per application that compiles it with its tests under the warnings gate and runs them in the Nix sandbox, with a disposable PostgreSQL cluster where the tests need one. Continuous integration builds every flake check. The local application launcher discovers application manifests; the Nix application list names them. A new application must be added to that list and declare whether it needs PostgreSQL; no inventory checker enforces this convention. See #adr(42).],
       [Handwritten Erlang in application source and tests compiles strictly after the Gleam dependency build.],
       [The experiments launcher runs every retained experiment except the Fabric reader check, which needs the older Fabric commit and the sibling commits recorded in that commit's own revision file. Continuous integration holds no sibling checkouts, so that check runs manually from a checkout with Git history. The applications and experiments are the usage examples, so a public API change that breaks one fails its test command.],
       [The interface laboratory and the HTTP declaration probe contain unfinished runtime declarations by design. Their positive and negative compilation tests are their acceptance boundary.],
