@@ -5,7 +5,7 @@
     design-layer.url = "github:lostbean/design-layer/main";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     gleam-nix = {
-      url = "github:gleam-dream/gleam-nix/921d2579f35b01ffc20dfbf91d5ca7093bb64769";
+      url = "github:gleam-dream/gleam-nix/cfe8a97e31fd3fa5d478ca49d323ede6da6a0505";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.url = "github:numtide/flake-utils";

@@ -31,15 +31,6 @@ lib.mapAttrs (
   name: project:
   gleam.mkTestCheck {
     inherit project;
-    # What compiles and runs the tests, so a README edit reruns nothing.
-    inputs = lib.fileset.unions (
-      map (path: project.src + "/${path}") [
-        "gleam.toml"
-        "manifest.toml"
-        "src"
-        "test"
-      ]
-    );
     services = lib.optional (!(builtins.elem name withoutDatabase)) database;
   }
 ) projects
