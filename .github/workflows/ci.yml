@@ -38,10 +38,24 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31
+      # Compilation has no timing assertions, so it uses every core.
+      - name: Compile the applications and their tests
+        run: |
+          # shellcheck disable=SC2016 # Nix expressions, not shell.
+          packages='packages: map (name: ".#packages.x86_64-linux.${name}") (builtins.attrNames packages)'
+          # shellcheck disable=SC2016
+          tests='checks: map (name: ".#checks.x86_64-linux.${name}.compiled") (builtins.filter (name: builtins.match ".*-tests" name != null) (builtins.attrNames checks))'
+          mapfile -t targets < <(
+            nix eval --no-update-lock-file --json .#packages.x86_64-linux --apply "$packages" | jq -r '.[]'
+            nix eval --no-update-lock-file --json .#checks.x86_64-linux --apply "$tests" | jq -r '.[]'
+          )
+          nix build --no-update-lock-file --no-link "${targets[@]}"
+      # Some suites assert on deadlines and leases; two at a time on this
+      # four-core runner keeps them from starving each other.
       - name: Build the checks
         run: >-
           nix run --no-update-lock-file --inputs-from . nixpkgs#nix-fast-build --
-          --no-nom --skip-cached --no-link --flake .#checks.x86_64-linux
+          --no-nom --skip-cached --no-link --max-jobs 2 --flake .#checks.x86_64-linux
       - name: Test reports
         if: always()
         run: |

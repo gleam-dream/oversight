@@ -23,7 +23,10 @@ Git credentials.
 Continuous integration builds every flake check with
 [nix-fast-build](https://github.com/Mic92/nix-fast-build) from the locked
 Nixpkgs, in one job, instead of a matrix that runs each application's tests in
-the development shell. The development launchers stay as they are.
+the development shell. It first compiles every package and test tree at full
+parallelism, then runs the test checks two at a time: several suites assert on
+deadlines and lease timing, and four at once on a four-core runner made two of
+them fail intermittently. The development launchers stay as they are.
 
 No application is sharded. Measured per-module times put the slowest
 application's time almost entirely in one test module, which a module-level
