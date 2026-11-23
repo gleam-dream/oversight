@@ -1,7 +1,7 @@
 { pkgs, gleam }:
 let
   inherit (pkgs) lib;
-  gitHashes = import ./git-sources.nix;
+  registry = import ./git-sources.nix;
   names = [
     "checkout"
     "clinic_registration"
@@ -19,35 +19,18 @@ let
     "webhooks"
   ];
   importApplication =
+    { includeDev }:
     name:
     let
       src = ../apps + "/${name}";
-      locked = gleam.readManifest (src + "/manifest.toml");
-      gitPackages = builtins.filter (package: package.source == "git") locked.packages;
+      manifest = src + "/manifest.toml";
+      locked = gleam.readManifest manifest;
       rebarPackages = builtins.filter (
         package: !(builtins.elem "gleam" package.build_tools) && builtins.elem "rebar3" package.build_tools
       ) locked.packages;
       project = gleam.importProject {
-        inherit src;
-        sourceOverrides = lib.listToAttrs (
-          map (package: {
-            name = package.name;
-            value =
-              let
-                source = pkgs.fetchFromGitHub {
-                  owner = "gleam-dream";
-                  repo = lib.removeSuffix ".git" (baseNameOf package.repo);
-                  rev = package.commit;
-                  hash =
-                    gitHashes.${package.repo}.${package.commit}
-                      or (throw "Register the locked Git source hash for ${package.name} in nix/git-sources.nix.");
-                };
-              in
-              # A package at the repository root is the source itself; "${source}/."
-              # is a path the unpack phase cannot copy.
-              if package ? path then "${source}/${package.path}" else source;
-          }) gitPackages
-        );
+        inherit src includeDev;
+        sourceOverrides = gleam.gitSources { inherit manifest registry; };
         packageOverrides =
           final: _prev:
           lib.listToAttrs (
@@ -80,4 +63,13 @@ let
     in
     project;
 in
-lib.genAttrs names importApplication
+{
+  # The release build of each application.
+  projects = lib.genAttrs names (importApplication {
+    includeDev = false;
+  });
+  # The same applications with their test code and development dependencies.
+  tested = lib.genAttrs names (importApplication {
+    includeDev = true;
+  });
+}
