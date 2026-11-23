@@ -64,17 +64,17 @@
         ]
       },
       "locked": {
-        "lastModified": 1795446592,
-        "narHash": "sha256-hoeqlc4GT+f/FtDwoa9hbdda4kKtFHQrLDwwrKCxd8M=",
+        "lastModified": 1795447603,
+        "narHash": "sha256-OAu2IacQ+GsmM5BJBOLDkCQQe8SxplJ0vC/pd1ZSlcE=",
         "owner": "gleam-dream",
         "repo": "gleam-nix",
-        "rev": "737653543fece3ef85bbad40be764d6510722fcb",
+        "rev": "2d144ed6577e1b9e2b079fcfe10cd2b96e42f9f5",
         "type": "github"
       },
       "original": {
         "owner": "gleam-dream",
         "repo": "gleam-nix",
-        "rev": "737653543fece3ef85bbad40be764d6510722fcb",
+        "rev": "2d144ed6577e1b9e2b079fcfe10cd2b96e42f9f5",
         "type": "github"
       }
     },
