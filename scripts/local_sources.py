@@ -91,8 +91,7 @@ def snapshot(root: Path, target: Path, names: tuple[str, ...]) -> None:
                         continue
                     dependency = {}
                 repository = dependency.get("git", "")
-                owner = "lostbean" if repositories[name] == "json_blueprint" else "gleam-dream"
-                expected = f"https://github.com/{owner}/{repositories[name]}.git"
+                expected = f"https://github.com/gleam-dream/{repositories[name]}.git"
                 if repository and repository != expected:
                     continue
                 if dependency and not repository and "path" not in dependency:
