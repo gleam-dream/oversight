@@ -660,7 +660,7 @@ fn blueprint_section(model: Model, context: Context) -> Element(Msg) {
         html.a(
           [
             attribute.href(
-              "https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md",
+              "https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md",
             ),
           ],
           [html.text("codec practice guide")],

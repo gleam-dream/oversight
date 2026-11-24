@@ -4,7 +4,7 @@
 //// tool list and Fabric copies the agent into each run. These bounds hold
 //// those terms; they are set from json_blueprint 2.2.0 measurements and fail
 //// on 2.1.1. See the codec practice guide, rule 4:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
+//// https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import gleam/list
 import payout_desk/desk_tools

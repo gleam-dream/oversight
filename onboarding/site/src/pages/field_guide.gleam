@@ -547,7 +547,7 @@ fn sheet_row(entry: glossary.Entry) -> List(Element(Msg)) {
 
 const repositories = [
   #("sinal", "https://github.com/gleam-dream/sinal"),
-  #("json_blueprint", "https://github.com/lostbean/json_blueprint"),
+  #("json_blueprint", "https://github.com/gleam-dream/json_blueprint"),
   #("http_gun", "https://github.com/gleam-dream/http_gun"),
   #("llm_wire", "https://github.com/gleam-dream/llm_wire"),
   #("relay", "https://github.com/gleam-dream/relay"),

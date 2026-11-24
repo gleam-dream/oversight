@@ -26,7 +26,7 @@ Instrument replay compares against authored synthetic fixtures and names no exte
 - **Fabric reader.** A writer built from the Fabric checkout under evaluation completes a run, and a separate reader pinned to the old commit opens the directory record. Success prints `PASS new v8 record written through public facade` and `PASS c92e97c public reader rejects v8 without execution`.
 - **Relay baseline.** The consumer asserts Relay's request-deadline contract through public APIs and a native fixture. [ADR 0022](adr/0022-retain-relay-admission-evidence-against-its-baseline.md) holds the baseline and the observed counts.
 
-The independent 62-case exact-number oracle is maintained in [JSON Blueprint](https://github.com/lostbean/json_blueprint/blob/main/docs/ORACLE.md), where it exercises the public number API. The host-parser receipt remains historical evidence. [ADR 0030](adr/0030-retire-production-covered-interface-probes.md#adr-0030) records retirement of the superseded numerical sketch.
+The independent 62-case exact-number oracle is maintained in [JSON Blueprint](https://github.com/gleam-dream/json_blueprint/blob/main/docs/ORACLE.md), where it exercises the public number API. The host-parser receipt remains historical evidence. [ADR 0030](adr/0030-retire-production-covered-interface-probes.md#adr-0030) records retirement of the superseded numerical sketch.
 
 ## Run a comparison
 

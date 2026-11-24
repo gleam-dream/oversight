@@ -11,7 +11,7 @@ Recorded on 2026-11-20.
   `playground/blueprint_compatibility/` keep their 1.7.1 and 1.1.0 pins: they
   are oracles whose checksums [ORACLE.md](../ORACLE.md) records.
 - The applications follow the
-  [codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
+  [codec practice guide](https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
   of JSON Blueprint rather than restating it. With a 2.2.0 minimum its rules
   on where a child codec is built and on sending built codecs no longer
   apply, and a run-time enum is built once, before the field chain; none of

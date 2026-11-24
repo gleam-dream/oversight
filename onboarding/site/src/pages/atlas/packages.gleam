@@ -239,7 +239,7 @@ pub fn info(package: Package) -> Info {
         tiny: "Codecs that also produce JSON Schema",
         needs: [DescribeData, CallModel, ExposeTools],
         deps: [],
-        repo: "https://github.com/lostbean/json_blueprint",
+        repo: "https://github.com/gleam-dream/json_blueprint",
         one: "Describe a data shape once to encode, strictly decode, and publish a JSON Schema from the same definition. Validate runtime schemas you receive, too.",
         owns: [
           "Typed codecs for records, unions, enums and bounded numbers",

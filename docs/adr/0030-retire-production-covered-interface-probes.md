@@ -21,4 +21,4 @@
 ## Provenance
 
 - The [laboratory before retirement](https://github.com/gleam-dream/oversight/tree/ae000e0/playground/interface_lab) records the original inputs and assertions.
-- Production owners are [JSON Blueprint](https://github.com/lostbean/json_blueprint/tree/main/test), [Sinal](https://github.com/gleam-dream/sinal/tree/main/test), [Fabric](https://github.com/gleam-dream/fabric/tree/main/test/fabric), [Saga](https://github.com/gleam-dream/saga/tree/main/test) and [Grind](https://github.com/gleam-dream/grind/tree/main/test/grind/observations).
+- Production owners are [JSON Blueprint](https://github.com/gleam-dream/json_blueprint/tree/main/test), [Sinal](https://github.com/gleam-dream/sinal/tree/main/test), [Fabric](https://github.com/gleam-dream/fabric/tree/main/test/fabric), [Saga](https://github.com/gleam-dream/saga/tree/main/test) and [Grind](https://github.com/gleam-dream/grind/tree/main/test/grind/observations).
