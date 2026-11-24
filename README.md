@@ -12,20 +12,20 @@ libraries together through runnable applications.
 Choose the packages your application needs. Each owns its API and runtime;
 applications supply domain types, policy and resource lifetimes.
 
-| Library                                                      | Use it for                                                             |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| [Sinal](https://github.com/gleam-dream/sinal)                | Typed native telemetry, spans and bounded forwarding                   |
+| Library                                                         | Use it for                                                             |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Sinal](https://github.com/gleam-dream/sinal)                   | Typed native telemetry, spans and bounded forwarding                   |
 | [JSON Blueprint](https://github.com/gleam-dream/json_blueprint) | JSON codecs, schema projection and finite runtime contracts            |
-| [HTTP Gun](https://github.com/gleam-dream/http_gun)          | Pooled HTTP requests, streamed responses and cassettes                 |
-| [Saga](https://github.com/gleam-dream/saga)                  | Typed dependency workflows, compensation and durable recovery          |
-| [Grind](https://github.com/gleam-dream/grind)                | PostgreSQL background jobs and transactional admission                 |
-| [LLM Wire](https://github.com/gleam-dream/llm_wire)          | Provider calls, typed answers, streaming and classification            |
-| [Relay](https://github.com/gleam-dream/relay)                | Typed MCP servers and clients over HTTP or stdio                       |
-| [Hellhound](https://github.com/gleam-dream/hellhound)        | OIDC login, OAuth tokens and access-token validation                   |
-| [Correio](https://github.com/gleam-dream/correio)            | Transactional email, captured-mail tests and passwordless verification |
-| [Fabric](https://github.com/gleam-dream/fabric)              | Bounded LLM agents, approvals and durable control graphs               |
-| [Retrace](https://github.com/gleam-dream/retrace)            | Typed session capture, delivery and inert replay                       |
-| [Decisions](https://github.com/gleam-dream/decisions)        | Decision points: recommendations, verdicts and release at most once    |
+| [HTTP Gun](https://github.com/gleam-dream/http_gun)             | Pooled HTTP requests, streamed responses and cassettes                 |
+| [Saga](https://github.com/gleam-dream/saga)                     | Typed dependency workflows, compensation and durable recovery          |
+| [Grind](https://github.com/gleam-dream/grind)                   | PostgreSQL background jobs and transactional admission                 |
+| [LLM Wire](https://github.com/gleam-dream/llm_wire)             | Provider calls, typed answers, streaming and classification            |
+| [Relay](https://github.com/gleam-dream/relay)                   | Typed MCP servers and clients over HTTP or stdio                       |
+| [Hellhound](https://github.com/gleam-dream/hellhound)           | OIDC login, OAuth tokens and access-token validation                   |
+| [Correio](https://github.com/gleam-dream/correio)               | Transactional email, captured-mail tests and passwordless verification |
+| [Fabric](https://github.com/gleam-dream/fabric)                 | Bounded LLM agents, approvals and durable control graphs               |
+| [Retrace](https://github.com/gleam-dream/retrace)               | Typed session capture, delivery and inert replay                       |
+| [Decisions](https://github.com/gleam-dream/decisions)           | Decision points: recommendations, verdicts and release at most once    |
 
 The package READMEs state release status and supported targets. Retrace includes
 separate core, frontend and server packages; PostgreSQL adapters are optional
