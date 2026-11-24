@@ -15,7 +15,7 @@ applications supply domain types, policy and resource lifetimes.
 | Library                                                      | Use it for                                                             |
 | ------------------------------------------------------------ | ---------------------------------------------------------------------- |
 | [Sinal](https://github.com/gleam-dream/sinal)                | Typed native telemetry, spans and bounded forwarding                   |
-| [JSON Blueprint](https://github.com/lostbean/json_blueprint) | JSON codecs, schema projection and finite runtime contracts            |
+| [JSON Blueprint](https://github.com/gleam-dream/json_blueprint) | JSON codecs, schema projection and finite runtime contracts            |
 | [HTTP Gun](https://github.com/gleam-dream/http_gun)          | Pooled HTTP requests, streamed responses and cassettes                 |
 | [Saga](https://github.com/gleam-dream/saga)                  | Typed dependency workflows, compensation and durable recovery          |
 | [Grind](https://github.com/gleam-dream/grind)                | PostgreSQL background jobs and transactional admission                 |
@@ -55,7 +55,7 @@ The `gleam-otp` agent skill states that rule for process design in general
 ([source](https://github.com/gleam-dream/gleam-agent-tools/blob/main/skills/gleam-otp/SKILL.md)).
 The applications require JSON Blueprint 2.2.0 or later, where each combinator
 holds its inputs once, and follow its
-[codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
+[codec practice guide](https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md):
 
 - **Generated codec:** the extractor's Grind job payload codec,
   [`document_job_codec`](apps/extractor/src/extractor/generated/document_job_codec.gleam),

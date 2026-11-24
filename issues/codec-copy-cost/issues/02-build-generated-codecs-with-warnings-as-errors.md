@@ -17,7 +17,7 @@ therefore compiles with two `Unreachable pattern` warnings, and
 ## Blocked on
 
 A JSON Blueprint release with the guarded enum arms of
-lostbean/json_blueprint#7, which keeps the catch-all and guards the other
+gleam-dream/json_blueprint#7, which keeps the catch-all and guards the other
 arms so the module compiles without warnings whether or not every
 constructor is named.
 

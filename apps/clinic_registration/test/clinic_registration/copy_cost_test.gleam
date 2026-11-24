@@ -2,7 +2,7 @@
 //// time it crosses a process. These bounds hold the terms the application
 //// hands to Grind; they are set from json_blueprint 2.2.0 measurements and
 //// fail on 2.1.1. See the codec practice guide, rule 4:
-//// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
+//// https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import clinic_registration/jobs
 import gleam/list

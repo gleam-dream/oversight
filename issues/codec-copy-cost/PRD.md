@@ -8,7 +8,7 @@ AI-assisted contribution.
 ## Summary
 
 The applications follow JSON Blueprint's
-[codec practice guide](https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
+[codec practice guide](https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md)
 ([ADR 0041](../../docs/adr/0041-follow-the-blueprint-codec-practice-in-the-applications.md)).
 Building Fabric agents inside the processes that run them waits on adopting
 Fabric 0.5. Building generated codecs under the plain warnings-as-errors gate

@@ -123,7 +123,7 @@ pub fn input_codec() -> worker.Codec(DocumentJob) {
 /// The output and error codecs stay combinators: the invoice checks its date
 /// and its total against the decoded lines, which the generator does not
 /// express. See the codec practice guide:
-/// https://github.com/lostbean/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#choose-generated-codecs-or-combinators
+/// https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#choose-generated-codecs-or-combinators
 pub fn output_codec() -> worker.Codec(Extracted) {
   grind_codec({
     use row_id <- codec.field("row_id", codec.int(), get: fn(e) { e.row_id })
