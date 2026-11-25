@@ -20,7 +20,9 @@ stable `error` code; internal detail goes to the log.
 Every route needs `Authorization: Bearer <token>` for a customer in the app's
 configured token table, and answers 401 otherwise. An order belongs to the customer
 who placed it, and another customer's order reads as 404. The `order_id` is the
-customer's own idempotency key. Repeating a placement returns the existing order
+customer's own idempotency key: 1 to 64 ASCII letters, digits, `.`, `_` or `-`,
+starting with a letter or digit. Any other id is refused with 422, because the id
+becomes part of job ids, saga execution ids and the keys in provider URLs. Repeating a placement returns the existing order
 with 200 and does not run the saga again. Reusing the id for a different SKU or
 quantity answers 409. Order ids are scoped to the customer: another customer placing
 under the same id creates a separate order of their own and never touches or learns

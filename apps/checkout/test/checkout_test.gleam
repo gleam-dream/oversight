@@ -81,7 +81,17 @@ fn order(
   address: String,
 ) -> domain.Order {
   let token = providers.tokenise(application.providers, card)
-  domain.Order(id, "alice", sku, 1, 2500, token, address, id <> "@example.test")
+  let assert Ok(order_id) = domain.order_id(id)
+  domain.Order(
+    order_id,
+    "alice",
+    sku,
+    1,
+    2500,
+    token,
+    address,
+    id <> "@example.test",
+  )
 }
 
 /// Lists `sku` at 2500 cents with `available` units.
@@ -760,6 +770,61 @@ pub fn internal_errors_stay_out_of_response_bodies_test() {
   let assert Some(#(domain.Rejected, detail)) =
     db.order_status(pool, "alice", "broken-1")
   assert !string.contains(detail, "Postgresql")
+}
+
+// --- order ids and provider paths ----------------------------------------------------
+
+/// An order id is 1 to 64 characters of letters, digits, `.`, `_` and `-`.
+/// Anything else is refused at the request boundary, before pricing, so it
+/// never reaches a job, a saga or a provider.
+pub fn order_ids_outside_the_safe_alphabet_are_refused_test() {
+  use application <- with_app(fn(c) { c })
+  let assert Ok(Nil) = set_stock(application.services.pool, "id-sku", 9)
+  let assert Ok(#(_, port)) = web.start(application)
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  list.each(
+    ["", "a/b", "a#b", "a?b", "a b", "a%2Fb", "..", string.repeat("a", 65)],
+    fn(id) {
+      let #(status, text) =
+        post_order(port, body(order_fields(id, "id-sku", 1, token)), "")
+      assert #(id, status) == #(id, 422)
+      let assert Ok("invalid_order") = error_code(text)
+    },
+  )
+  assert providers.snapshot(application.providers).charge_requests == 0
+  assert stock(application, "id-sku") == 9
+
+  let #(status, _) =
+    post_order(
+      port,
+      body(order_fields("A.b_c-" <> string.repeat("9", 58), "id-sku", 1, token)),
+      "",
+    )
+  assert status == 201
+}
+
+/// The gateway sends a provider key as one path segment whatever it
+/// contains: a lookup or a cancel reaches the record the key was created
+/// under. (A customer id comes from configuration and is not restricted to
+/// the order id's alphabet.)
+pub fn provider_keys_are_sent_as_one_path_segment_test() {
+  use application <- with_app(fn(c) { c })
+  let gateway = application.services.gateway
+  let placed =
+    order(application, "segment-1", "segment-sku", providers.card_ok, "1 St")
+  let key = "3:a/b:x#1?y z"
+
+  let assert Ok(charge_id) =
+    gateway.charge(gateway, gateway.client, placed, "pay-" <> key)
+  assert gateway.find_charge(gateway, gateway.client, "pay-" <> key)
+    == Ok(gateway.ChargeFound(charge_id, False))
+
+  let assert Ok(shipment_id) =
+    gateway.book(gateway, gateway.client, placed, "ship-" <> key)
+  let assert Ok(Nil) =
+    gateway.cancel_shipment(gateway, gateway.client, "ship-" <> key)
+  assert gateway.find_shipment(gateway, gateway.client, "ship-" <> key)
+    == Ok(gateway.ShipmentFound(shipment_id, True))
 }
 
 // --- wisp secret key base ----------------------------------------------------------

@@ -217,7 +217,7 @@ pub fn reserve(
          ON CONFLICT (customer_id, order_id) DO NOTHING",
       )
       |> pog.parameter(pog.text(order.customer_id))
-      |> pog.parameter(pog.text(order.order_id))
+      |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
       |> pog.parameter(pog.text(order.sku))
       |> pog.parameter(pog.int(order.quantity))
       |> pog.execute(tx)
@@ -259,7 +259,7 @@ pub fn release(
          RETURNING sku, quantity",
       )
       |> pog.parameter(pog.text(order.customer_id))
-      |> pog.parameter(pog.text(order.order_id))
+      |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
       |> pog.returning({
         use sku <- decode.field(0, decode.string)
         use quantity <- decode.field(1, decode.int)
@@ -296,7 +296,7 @@ pub fn reservation(
     "SELECT released FROM reservations WHERE customer_id = $1 AND order_id = $2",
   )
   |> pog.parameter(pog.text(order.customer_id))
-  |> pog.parameter(pog.text(order.order_id))
+  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
   |> pog.returning(decode.at([0], decode.bool))
   |> pog.execute(conn)
   |> result.map_error(store_failed)
@@ -347,7 +347,7 @@ pub fn insert_order(
        VALUES ($1, $2, $3, $4, $5, 'pending')
        ON CONFLICT (customer_id, order_id) DO NOTHING",
     )
-    |> pog.parameter(pog.text(order.order_id))
+    |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
     |> pog.parameter(pog.text(order.customer_id))
     |> pog.parameter(pog.text(order.sku))
     |> pog.parameter(pog.int(order.quantity))
@@ -359,7 +359,7 @@ pub fn insert_order(
     _ ->
       select_orders(
         "WHERE customer_id = $1 AND order_id = $2",
-        [order.customer_id, order.order_id],
+        [order.customer_id, domain.order_id_to_string(order.order_id)],
         conn,
       )
       |> result.map(fn(rows) {
@@ -382,7 +382,7 @@ pub fn set_status(
      WHERE customer_id = $1 AND order_id = $2",
   )
   |> pog.parameter(pog.text(order.customer_id))
-  |> pog.parameter(pog.text(order.order_id))
+  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
   |> pog.parameter(pog.text(domain.status_to_string(status)))
   |> pog.parameter(pog.text(detail))
   |> pog.execute(conn)

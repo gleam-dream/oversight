@@ -69,7 +69,15 @@ fn demo(url: String) -> Nil {
   let payments_url = providers.payments_url(application.providers)
   let order = fn(id, card, address) {
     let assert Ok(token) = tokenise(customer, payments_url, card)
-    CheckoutRequest(id, "kettle", 1, token, address, id <> "@example.test")
+    let assert Ok(order_id) = domain.order_id(id)
+    CheckoutRequest(
+      order_id,
+      "kettle",
+      1,
+      token,
+      address,
+      id <> "@example.test",
+    )
   }
   let _ =
     narrate(
@@ -196,7 +204,12 @@ fn narrate(
     |> request.set_header("content-type", "application/json")
     |> request.set_header("authorization", "Bearer " <> bearer)
     |> request.set_body(body)
-  io.println("\nPOST /orders" <> query <> "  " <> order.order_id)
+  io.println(
+    "\nPOST /orders"
+    <> query
+    <> "  "
+    <> domain.order_id_to_string(order.order_id),
+  )
   case http_gun.send(customer, req) {
     Ok(buffered) -> {
       let body =

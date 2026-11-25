@@ -6,8 +6,8 @@
 
 import checkout/domain.{
   type Booked, type Charged, type CheckoutError, type CheckoutRequest,
-  type Order, type Provider, type Reserved, type UndoError, Booked, Charged,
-  CheckoutRequest, Declined, Interrupted, Order, OutOfStock, Payments,
+  type Order, type OrderId, type Provider, type Reserved, type UndoError, Booked,
+  Charged, CheckoutRequest, Declined, Interrupted, Order, OutOfStock, Payments,
   ProviderRejected, ProviderUnreachable, Reserved, Shipping, StockStoreFailed,
   UndoError,
 }
@@ -50,7 +50,7 @@ pub fn checkout_request_decoder() -> Decoder(CheckoutRequest) {
     list.filter(dict.keys(fields), fn(f) { !list.contains(request_fields, f) })
   {
     [] -> {
-      use order_id <- decode.field("order_id", decode.string)
+      use order_id <- decode.field("order_id", order_id_decoder())
       use sku <- decode.field("sku", decode.string)
       use quantity <- decode.field("quantity", quantity_decoder())
       use payment_token <- decode.field("payment_token", decode.string)
@@ -69,6 +69,21 @@ pub fn checkout_request_decoder() -> Decoder(CheckoutRequest) {
   }
 }
 
+/// An order id in a request body or a stored payload: refused unless it
+/// parses as `domain.OrderId`.
+fn order_id_decoder() -> Decoder(OrderId) {
+  use text <- decode.then(decode.string)
+  case domain.order_id(text) {
+    Ok(id) -> decode.success(id)
+    Error(Nil) -> decode.failure(placeholder_order_id(), "OrderId")
+  }
+}
+
+fn placeholder_order_id() -> OrderId {
+  let assert Ok(id) = domain.order_id("0")
+  id
+}
+
 fn quantity_decoder() -> Decoder(Int) {
   use quantity <- decode.then(decode.int)
   case quantity >= 1 && quantity <= domain.max_quantity {
@@ -78,13 +93,13 @@ fn quantity_decoder() -> Decoder(Int) {
 }
 
 fn placeholder_request() -> CheckoutRequest {
-  CheckoutRequest("", "", 0, "", "", "")
+  CheckoutRequest(placeholder_order_id(), "", 0, "", "", "")
 }
 
 /// The body a client sends; the demo and the tests use it.
 pub fn encode_checkout_request(r: CheckoutRequest) -> Json {
   json.object([
-    #("order_id", json.string(r.order_id)),
+    #("order_id", json.string(domain.order_id_to_string(r.order_id))),
     #("sku", json.string(r.sku)),
     #("quantity", json.int(r.quantity)),
     #("payment_token", json.string(r.payment_token)),
@@ -103,7 +118,7 @@ pub fn order() -> JsonCodec(Order) {
 
 pub fn encode_order(o: Order) -> Json {
   json.object([
-    #("order_id", json.string(o.order_id)),
+    #("order_id", json.string(domain.order_id_to_string(o.order_id))),
     #("customer_id", json.string(o.customer_id)),
     #("sku", json.string(o.sku)),
     #("quantity", json.int(o.quantity)),
@@ -115,7 +130,7 @@ pub fn encode_order(o: Order) -> Json {
 }
 
 pub fn order_decoder() -> Decoder(Order) {
-  use order_id <- decode.field("order_id", decode.string)
+  use order_id <- decode.field("order_id", order_id_decoder())
   use customer_id <- decode.field("customer_id", decode.string)
   use sku <- decode.field("sku", decode.string)
   use quantity <- decode.field("quantity", decode.int)
