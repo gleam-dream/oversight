@@ -177,7 +177,10 @@ fn place(
           case orders.place(app.services, app.checkout_worker, order) {
             Ok(orders.Started(job_id)) ->
               json.object([
-                #("order_id", json.string(domain.order_id_to_string(order.order_id))),
+                #(
+                  "order_id",
+                  json.string(domain.order_id_to_string(order.order_id)),
+                ),
                 #("status", json.string("pending")),
                 #("amount_cents", json.int(order.amount_cents)),
                 #("job_id", json.int(job_id)),
