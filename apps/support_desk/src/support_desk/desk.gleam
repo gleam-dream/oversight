@@ -178,12 +178,13 @@ fn build(
       |> tool.with_replay(3),
     issue_refund,
   ]
-  agent.new("support_desk", model, tools, refund_policy)
-  |> agent.with_system_prompt(system_prompt)
-  |> agent.with_answer(domain.resolution())
-  |> agent.with_approvers(settings.approvers)
-  |> settings.tune
-  |> agent.build
+  agent.build_with(fn() {
+    agent.new("support_desk", model, tools, refund_policy)
+    |> agent.with_system_prompt(system_prompt)
+    |> agent.with_answer(domain.resolution())
+    |> agent.with_approvers(settings.approvers)
+    |> settings.tune
+  })
   |> result.map_error(fn(errors) {
     "agent: " <> agent.describe_config_errors(errors)
   })
@@ -323,7 +324,7 @@ fn check(
   pending: run.PendingApproval,
   credential: String,
 ) -> Result(approvers.Proof, AnswerError) {
-  approvers.check(desk.approvers, credential, pending.reference.requirement)
+  approvers.check(desk.approvers, credential, pending.reference)
   |> result.map_error(fn(denial) {
     case denial {
       approvers.NotAuthenticated(reason) -> NotAuthenticated(reason)

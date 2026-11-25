@@ -18,6 +18,7 @@ import hellhound/testing
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
+import saga
 import saga/execution
 import saga/telemetry as saga_events
 import sinal
@@ -783,11 +784,7 @@ pub fn a_proof_from_other_approvers_is_refused_test() {
       audience: app.audience,
     ))
   let assert Ok(proof) =
-    fabric_approvers.check(
-      again,
-      signed_in(app, "alice"),
-      pending.reference.requirement,
-    )
+    fabric_approvers.check(again, signed_in(app, "alice"), pending.reference)
   let assert Error(fabric.ProofRefused(fabric_approvers.OtherApprovers(
     "hellhound",
   ))) = fabric.approve(handle, pending.reference, proof:, context: session)
@@ -916,8 +913,11 @@ pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   // attempt as an unknown effect and, with no decider and no `on_unknown`,
   // ends the run `Unresolved` and undoes nothing; the saga recipe reports it as
   // uncertain rather than as a failure the model may retry.
-  let assert execution.Unresolved(_, shop.PaymentOutcomeUnknown(_), settlement) =
-    outcome
+  let assert execution.Unresolved(
+    _,
+    saga.Returned(shop.PaymentOutcomeUnknown(_)),
+    settlement,
+  ) = outcome
   assert settlement.undone == []
   let assert [
     execution.UnknownEffect(

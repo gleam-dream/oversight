@@ -4,7 +4,6 @@
 
 import fabric/agent
 import gleam/function
-import gleam/http/request
 import gleam/result
 import gleam/string
 import gleam/time/duration.{type Duration}
@@ -81,11 +80,9 @@ pub fn start_with(
       // The default policy admits public hosts only; the scripted services
       // are on loopback, and nothing else is reachable.
       http_config.default()
-      |> http_config.with_destination(destination.loopback_only())
-      |> http_config.with_request_timeout(
-        http_config.After(duration.seconds(10)),
-      ),
+      |> http_config.with_destination(destination.loopback_only()),
     )
+    |> result.map(http_gun.with_timeout(_, duration.seconds(10)))
     |> result.map_error(http_gun.describe_start_error),
   )
   use <- release_on_error(fn() {
@@ -128,8 +125,7 @@ pub fn start_with(
     Ok(Nil)
   })
   // One client; the shop's tighter budget is a view of it.
-  let shop_view =
-    http_gun.with_timeout(client, http_config.After(shop_deadline))
+  let shop_view = http_gun.with_timeout(client, shop_deadline)
   let shop = shop.Shop(shop_view, services.base_url)
   use desk <- result.map(
     desk.start(desk.Settings(
@@ -153,11 +149,7 @@ pub fn start_with(
 /// consumer does.
 pub fn sign_in(app: App, subject: String) -> Result(String, String) {
   use redirect <- result.try(
-    hellhound.begin_login(
-      app.hellhound,
-      request.new(),
-      hellhound.default_login(),
-    )
+    hellhound.begin_login(app.hellhound, hellhound.default_login())
     |> result.map_error(hellhound.describe_login_error),
   )
   use callback <- result.try(
