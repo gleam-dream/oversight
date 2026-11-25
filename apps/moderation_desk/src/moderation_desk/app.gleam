@@ -5,7 +5,7 @@
 //// root (rest for one)
 //// ├── store owner      the record and the platform's rows, in memory
 //// ├── platform         seeds an empty store: authors, threads, policy 1
-//// ├── collector        the operator's counts
+//// ├── collector        the operator's counts; owns the telemetry handlers
 //// ├── desk (one for one)
 //// │   └── one process per person on duty
 //// └── runtime          decisions_otp/runtime: sweeper, dispatcher, workers
@@ -15,7 +15,7 @@
 //// | --- | --- | --- |
 //// | store owner | everything: the record, the backlog and the platform's rows live in its memory | the root, with an empty store under the same name; every later child restarts with it and takes the new handle |
 //// | platform | nothing; it only seeds a store that holds no policy | the root |
-//// | collector | the counts so far | the root; handlers address it by name |
+//// | collector | the counts so far, and its handlers, which sinal detaches with it | the root; the new process attaches the handlers again under the same ids |
 //// | desk person | the card being read and its verdict transaction; the claim row survives and names the person | the desk supervisor; the new process finds its claim again |
 //// | runtime | the transaction in hand, which rolls back; its job stays in the backlog, because each child acts on rows and keeps none | the runtime's own supervisor for a child, the root for the runtime |
 ////
@@ -49,7 +49,6 @@ import moderation_desk/point
 import moderation_desk/scripted.{type Fault}
 import moderation_desk/telemetry
 import moderation_desk/wiring
-import sinal
 
 /// Everything the application can be started with.
 pub type Config {
@@ -110,7 +109,6 @@ pub opaque type App {
     control: runtime.Control,
     collector: Name(telemetry.Message),
     people: List(#(String, Name(desk.Message))),
-    attachments: List(sinal.Attachment),
   )
 }
 
@@ -125,7 +123,6 @@ pub fn start(config: Config) -> Result(App, String) {
     list.map(config.people, fn(person) {
       #(person, process.new_name("moderation_desk_person"))
     })
-  let attachments = telemetry.attach(collector, source:)
   let desk = wiring.desk()
   let desk_tree =
     list.fold(
@@ -144,7 +141,7 @@ pub fn start(config: Config) -> Result(App, String) {
     |> supervisor.restart_tolerance(intensity: 10, period: 5)
     |> supervisor.add(store.supervised(config.store, named: store_name))
     |> supervisor.add(platform(store_name))
-    |> supervisor.add(telemetry.supervised(collector))
+    |> supervisor.add(telemetry.supervised(collector, source:))
     |> supervisor.add(supervisor.supervised(desk_tree))
     |> supervisor.add(
       runtime.supervised_from(fn() {
@@ -165,12 +162,8 @@ pub fn start(config: Config) -> Result(App, String) {
         people: list.map(people, fn(pair) {
           #({ pair.0 }.validator.subject, pair.1)
         }),
-        attachments:,
       ))
-    Error(error) -> {
-      telemetry.detach(attachments)
-      Error(string.inspect(error))
-    }
+    Error(error) -> Error(string.inspect(error))
   }
 }
 
@@ -221,7 +214,6 @@ fn platform(name: store.Name) -> supervision.ChildSpecification(Nil) {
 /// Stop every process of the application. Everything the store held is
 /// lost.
 pub fn stop(app: App) -> Nil {
-  telemetry.detach(app.attachments)
   process.unlink(app.root)
   stop_supervisor(app.root)
 }
