@@ -13,7 +13,7 @@ import gleam/time/duration
 import research_agent/app
 import research_agent/services
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "research_agent_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// Each term handed to another process: its name, its copied size in bytes

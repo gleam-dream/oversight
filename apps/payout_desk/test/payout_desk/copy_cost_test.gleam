@@ -11,7 +11,7 @@ import payout_desk/desk_tools
 import payout_desk/jobs
 import support
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "payout_desk_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// Each term handed to another process: its name, its copied size in bytes

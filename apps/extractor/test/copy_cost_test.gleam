@@ -11,7 +11,7 @@ import extractor/llm
 import gleam/list
 import gleam/option.{None}
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "extractor_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// The term Grind copies into the processes that run each job: the worker,
