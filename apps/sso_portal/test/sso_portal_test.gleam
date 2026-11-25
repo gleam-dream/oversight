@@ -700,3 +700,35 @@ pub fn commit_connection_loss_preserves_unknown_outcome_test() {
   // acknowledgement itself must not claim that knowledge.
   assert store.get(records, original.key) == Ok(Some(original))
 }
+
+// --- Telemetry ---------------------------------------------------------------
+
+@external(erlang, "owned_handlers_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process owns its handlers: they record the portal's
+/// requests while the portal runs, and once it stops they are detached and
+/// the collector holds nothing.
+pub fn telemetry_handlers_live_as_long_as_the_portal_test() {
+  let assert Ok(portal) = app.start(options())
+  let b = browser.new(testing.trust_anchor_der(portal.provider))
+  let _ = sign_in(portal, b)
+  browser.close(b)
+  assert telemetry.records(portal.telemetry) != []
+  app.stop(portal)
+  assert eventually(2000, fn() {
+    collector_handlers("sinal/collector:sso_portal_telemetry") == 0
+  })
+  assert telemetry.records(portal.telemetry) == []
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
+}
