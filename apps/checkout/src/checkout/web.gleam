@@ -11,7 +11,8 @@
 ////
 //// Every route needs `Authorization: Bearer <token>` for a configured
 //// customer (401 otherwise). The `order_id` is the customer's own
-//// idempotency key: repeating a placement returns the existing order (200)
+//// idempotency key (see `domain.OrderId` for its alphabet; anything else
+//// is a 422): repeating a placement returns the existing order (200)
 //// without running the saga again, and reusing the id for a different SKU
 //// or quantity is a 409. Order ids are scoped to the customer, so another
 //// customer placing under the same id creates their own order.
@@ -21,6 +22,7 @@ import checkout/customers.{type Customers}
 import checkout/db
 import checkout/domain.{type CheckoutError, type Order}
 import checkout/orders.{type Report, type Services}
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/http.{Get, Post}
@@ -181,7 +183,10 @@ fn place(
               {
                 Ok(orders.Started(job_id)) ->
                   json.object([
-                    #("order_id", json.string(order.order_id)),
+                    #(
+                      "order_id",
+                      json.string(domain.order_id_to_string(order.order_id)),
+                    ),
                     #("status", json.string("pending")),
                     #("amount_cents", json.int(order.amount_cents)),
                     #("job_id", json.int(job_id)),
@@ -194,7 +199,7 @@ fn place(
             _ ->
               case orders.place_local(app.services, order) {
                 Ok(orders.Started(report)) ->
-                  report_json(order.order_id, report)
+                  report_json(domain.order_id_to_string(order.order_id), report)
                   |> json.to_string
                   |> wisp.json_response(status_code(report))
                 Ok(orders.Existing(existing)) -> existing_order(existing)
@@ -217,6 +222,8 @@ fn place_error(error: orders.PlaceError) -> wisp.Response {
 }
 
 fn show(app: Context, customer_id: String, order_id: String) -> wisp.Response {
+  // A path segment that is not an order id names no order.
+  use <- bool.guard(domain.order_id(order_id) == Error(Nil), wisp.not_found())
   case db.order_for(app.services.pool, customer_id, order_id) {
     Ok(Some(existing)) -> existing_order(existing)
     Ok(None) -> wisp.not_found()

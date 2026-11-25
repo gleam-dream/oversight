@@ -119,7 +119,11 @@ pub fn price(
       Ok(domain.price(request, customer_id:, unit_price_cents:))
     Ok(None) -> Error(UnknownSku(request.sku))
     Error(error) -> {
-      log_internal(request.order_id, "catalog lookup failed", error)
+      log_internal(
+        domain.order_id_to_string(request.order_id),
+        "catalog lookup failed",
+        error,
+      )
       Error(StoreUnavailable)
     }
   }
@@ -141,7 +145,7 @@ fn claim(
     -> Ok(Existing(existing))
     Ok(db.AlreadyExists(_)) | Ok(db.Contended) -> Error(OrderIdConflict)
     Error(error) -> {
-      log_internal(order.order_id, "order insert failed", error)
+      log_internal(order_text(order), "order insert failed", error)
       Error(StoreUnavailable)
     }
   }
@@ -183,7 +187,7 @@ fn run_local(s: Services, order: Order) -> Result(Report, Unrecorded) {
     )
   case execution.start(s.workflow, order, config) {
     Error(error) -> {
-      log_internal(order.order_id, "saga start failed", error)
+      log_internal(order_text(order), "saga start failed", error)
       let detail = "checkout could not start"
       record(s, order, Report(domain.Rejected, detail, Error(Nil), [], 0))
     }
@@ -191,12 +195,12 @@ fn run_local(s: Services, order: Order) -> Result(Report, Unrecorded) {
       case execution.await(run, s.local_budget) {
         Ok(outcome) -> finalize(s, order, outcome)
         Error(error) -> {
-          log_internal(order.order_id, "saga await ended", error)
+          log_internal(order_text(order), "saga await ended", error)
           execution.cancel(run)
           case execution.await(run, settle_budget()) {
             Ok(outcome) -> finalize(s, order, outcome)
             Error(error) -> {
-              log_internal(order.order_id, "saga did not settle", error)
+              log_internal(order_text(order), "saga did not settle", error)
               let detail = "checkout outcome unknown"
               record(
                 s,
@@ -238,7 +242,7 @@ pub fn place_durable(
         |> result.map(fn(admission) { Started(job.id(grind.handle(admission))) })
         |> result.map_error(fn(error) {
           log_internal(
-            order.order_id,
+            order_text(order),
             "durable admission failed",
             grind.describe_submit_error(error),
           )
@@ -250,11 +254,15 @@ pub fn place_durable(
     case error {
       pog.TransactionRolledBack(error) -> error
       pog.TransactionQueryError(error) -> {
-        log_internal(order.order_id, "durable admission failed", error)
+        log_internal(order_text(order), "durable admission failed", error)
         StoreUnavailable
       }
     }
   })
+}
+
+fn order_text(order: Order) -> String {
+  domain.order_id_to_string(order.order_id)
 }
 
 /// Internal detail for operators: the full term goes to the log, keyed by
@@ -295,14 +303,14 @@ pub fn finalize(
       case confirm_with_receipt(s, order, detail) {
         Ok(_) -> Ok(report)
         Error(error) -> {
-          log_internal(order.order_id, "confirmation not recorded", error)
+          log_internal(order_text(order), "confirmation not recorded", error)
           Error(Unrecorded(report))
         }
       }
     }
     execution.Failed(cause, settlement) -> {
       let #(detail, error) = describe_cause(cause)
-      log_cause(order.order_id, error)
+      log_cause(order_text(order), error)
       record(
         s,
         order,
@@ -316,7 +324,7 @@ pub fn finalize(
       )
     }
     execution.Unresolved(step, evidence, settlement) -> {
-      log_cause(order.order_id, Ok(evidence))
+      log_cause(order_text(order), Ok(evidence))
       let detail =
         saga.address_to_string(step)
         <> " held: "
@@ -363,7 +371,7 @@ fn record(
   case db.set_status(s.pool, order, report.status, report.detail) {
     Ok(Nil) -> Ok(report)
     Error(error) -> {
-      log_internal(order.order_id, "outcome not recorded", error)
+      log_internal(order_text(order), "outcome not recorded", error)
       Error(Unrecorded(report))
     }
   }
@@ -427,7 +435,7 @@ pub fn receipt_job(
     s.receipt_worker,
     ReceiptRequest(
       order.customer_id,
-      order.order_id,
+      order_text(order),
       order.email,
       order.amount_cents,
     ),
