@@ -1,5 +1,5 @@
 -module(support_ffi).
--export([unique/0, ensure/2, quiet_pool_shutdown/0, once/1]).
+-export([unique/0, ensure/2, quiet_pool_shutdown/0, once/1, handlers/1]).
 
 %% A positive integer no other call on this node returns.
 unique() ->
@@ -50,3 +50,7 @@ once(Key) ->
                   C -> C
               end,
     atomics:add_get(Counter, 1, 1) =:= 1.
+
+%% How many telemetry handlers are attached to events under Prefix.
+handlers(Prefix) ->
+    length(telemetry:list_handlers([binary_to_atom(P) || P <- Prefix])).

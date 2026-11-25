@@ -193,18 +193,25 @@ pub fn start(config: Config) -> Result(App, String) {
     use Nil <- result.try(first_policy(db))
     Ok(swept)
   }
-  let collector = telemetry.start()
   let admit = fn(message: Inbound) { jobs.admit(env, db, message, register) }
   let served = {
     use swept <- result.try(prepared)
+    use collector <- result.try(telemetry.start())
     let secret = wisp.random_string(64)
-    owner.start(fn() {
-      web.start(web.Routes(db:, desk: registration, admit:), secret)
-    })
-    |> result.map(fn(started) { #(started, swept) })
+    case
+      owner.start(fn() {
+        web.start(web.Routes(db:, desk: registration, admit:), secret)
+      })
+    {
+      Ok(started) -> Ok(#(started, swept, collector))
+      Error(reason) -> {
+        telemetry.stop(collector)
+        Error(reason)
+      }
+    }
   }
   case served {
-    Ok(#(#(port, server), swept)) ->
+    Ok(#(#(port, server), swept, collector)) ->
       Ok(App(
         db:,
         jobs: grind_handle,
@@ -222,7 +229,6 @@ pub fn start(config: Config) -> Result(App, String) {
     Error(reason) -> {
       let _ = grind.stop(grind_handle)
       http_gun.stop(http)
-      telemetry.stop(collector)
       Error(reason)
     }
   }
