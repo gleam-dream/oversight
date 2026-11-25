@@ -60,11 +60,16 @@ fn refuse(kind: resource.ErrorKind) -> authorization.VerificationError {
 
 /// Build once per driver and share the exact value between agent and handler.
 pub fn approvers(validator: resource.Validator) -> approvers.Approvers(String) {
-  use token, requirement <- approvers.new("archive-hellhound")
+  use token, request <- approvers.new("archive-hellhound")
   use claims <- result.try(
     resource.verify(validator, token) |> result.map_error(denial),
   )
-  case list.contains(resource.scopes(claims), "approve:" <> requirement.name) {
+  case
+    list.contains(
+      resource.scopes(claims),
+      "approve:" <> request.requirement.name,
+    )
+  {
     False -> Error(approvers.NotAuthorized("missing approval scope"))
     True ->
       reviewer.new(resource.subject(claims))
