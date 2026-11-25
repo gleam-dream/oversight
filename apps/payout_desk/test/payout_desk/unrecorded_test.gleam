@@ -1,6 +1,7 @@
 //// A write the record or the seller depends on that fails is not taken for
 //// done: the job waits for the store and writes again.
 
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{Some}
@@ -36,7 +37,7 @@ fn refuse_insert(
   }
 }
 
-/// The jobs of `worker` that have run at least once.
+/// The jobs of `worker` that have finished, run twice or snoozed.
 fn ran(running: App, worker: String) -> List(admin.JobSummary) {
   let assert Ok(jobs) =
     admin.list(
@@ -48,7 +49,7 @@ fn ran(running: App, worker: String) -> List(admin.JobSummary) {
     && {
       summary.attempt > 1
       || summary.snooze_count > 0
-      || summary.state == job.Succeeded
+      || option.is_some(summary.finished_at)
     }
   })
 }
@@ -108,4 +109,47 @@ pub fn an_unrecorded_run_failure_spends_no_attempt_test() {
   let assert Ok(id) = app.occurrence_of(running, "r-u2", 15_000)
   let known = support.read(running, id)
   assert list.length(known.attempts) == 1
+}
+
+/// A record that cannot be read does not count as a record with no failed
+/// attempts: the job would drive the request's first run again, which may
+/// have failed already. It waits for the record instead and calls no model.
+pub fn an_unreadable_record_drives_no_run_test() {
+  let calls = process.new_subject()
+  use running <- support.with_app("unreadable_record", fn(s) {
+    app.Settings(..s, model_fault: fn() {
+      process.send(calls, Nil)
+      False
+    })
+  })
+  // Every entry stored under the request's key is unreadable.
+  let assert Ok(_) =
+    pog.query(
+      "CREATE FUNCTION garble() RETURNS trigger AS $$
+       BEGIN NEW.event := 'not json'; RETURN NEW; END $$ LANGUAGE plpgsql",
+    )
+    |> pog.execute(running.db)
+  let assert Ok(_) =
+    pog.query("CREATE TRIGGER garble BEFORE INSERT ON decisions_entries
+       FOR EACH ROW WHEN (NEW.occurrence_id = '" <> jobs.request_key("r-u3") <> "') EXECUTE FUNCTION garble()")
+    |> pog.execute(running.db)
+  let assert Ok(Nil) =
+    world.disputed(
+      running.db,
+      order: "O-7003",
+      status: "partial",
+      owed_cents: 8000,
+      fee_cents: 2000,
+    )
+  let assert Ok(Nil) =
+    app.request(
+      running,
+      world.request("r-u3", "O-7003"),
+      requested_by: world.fiona,
+    )
+  let assert True =
+    support.eventually(10_000, fn() { ran(running, "payout.agent") != [] })
+  assert process.receive(calls, 0) == Error(Nil)
+  let assert [agent] = ran(running, "payout.agent")
+  assert agent.state == job.Scheduled
 }

@@ -234,6 +234,13 @@ pub fn propose(
           worker.Succeeded("its deadline passed before the agent proposed")
         Attempts(failed) ->
           drive_and_admit(deps, conn, request, requested_by, failed)
+        // Without the record the job cannot tell which run is this
+        // attempt's: driving the first one again could repeat a failure.
+        Unread(detail) ->
+          worker.Snoozed(
+            duration.milliseconds(200),
+            "the request's record was not read: " <> detail,
+          )
       }
   }
 }
@@ -246,6 +253,8 @@ type Prior {
   Ended(cause: vocabulary.ExpiryCause)
   /// So many of the request's agent runs failed before this one.
   Attempts(failed: Int)
+  /// The record could not be read.
+  Unread(detail: String)
 }
 
 fn prior(deps: Deps, conn: pog.Connection, request: String) -> Prior {
@@ -262,7 +271,7 @@ fn prior(deps: Deps, conn: pog.Connection, request: String) -> Prior {
         None -> Attempts(list.length(pending.attempts))
       }
     Ok(decisions.Begun(known)) -> Attempts(list.length(known.attempts))
-    Error(_) -> Attempts(0)
+    Error(error) -> Unread(decisions_postgres.describe(error))
   }
 }
 
