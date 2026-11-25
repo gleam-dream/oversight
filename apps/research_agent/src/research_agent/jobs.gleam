@@ -222,7 +222,8 @@ fn record(
 }
 
 type Ending {
-  /// Fabric's store could not be read or written: the job tries again.
+  /// Fabric's store or the research row could not be read or written:
+  /// the job tries again.
   Unavailable(reason: String)
   Cancelled
   Stopped(reason: String)
@@ -269,18 +270,27 @@ fn start_run(
     Ok(handle) -> {
       use Nil <- result.map(
         db.set_state(conn, research.id, events.Researching, "")
-        |> result.map_error(Stopped),
+        |> result.map_error(Unavailable),
       )
       handle
     }
     // A replay: on a leased store `recover` is safe at any time. It takes
     // over only a free or expired lease, or a lease of this store whose
     // runner is gone, and otherwise just opens the run.
-    Error(fabric.AlreadyStarted(_, same_input: True)) ->
-      fabric.recover(deps.runs, deps.agent, deps.context, id)
-      |> result.map_error(fn(e) {
-        Stopped("recover: " <> fabric.describe_error(e))
-      })
+    Error(fabric.AlreadyStarted(_, same_input: True)) -> {
+      use handle <- result.try(
+        fabric.recover(deps.runs, deps.agent, deps.context, id)
+        |> result.map_error(fn(e) {
+          Stopped("recover: " <> fabric.describe_error(e))
+        }),
+      )
+      // The first delivery may have started the run and then failed to
+      // write `researching`.
+      use Nil <- result.map(
+        db.resume_research(conn, research.id) |> result.map_error(Unavailable),
+      )
+      handle
+    }
     // The same id may be started again: the first start may have landed
     // (`AlreadyStarted`), and a store that blinks while the taken id is
     // compared answers `StoreUnavailable`, which asks to start again.

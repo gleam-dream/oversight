@@ -222,6 +222,26 @@ pub fn unrecorded_publication_keeps_the_job_test() {
   let assert 1 = services.counts(f.world).published
 }
 
+/// A run whose `researching` state cannot be written is not stopped for
+/// good: the store fault is transient, so the job waits and the run goes on
+/// once the row accepts the write.
+pub fn unrecorded_start_keeps_the_job_test() {
+  use f <- with_node("t_unrecorded_start")
+  services.script(f.world, "otp", services.happy_script(f.world, "otp"))
+  let restore = refuse_state(f.node.db, "researching")
+  let assert Ok(id) = app.start_research(f.node, "otp")
+  let assert Ok(grind.Pending(_)) =
+    app.await_outcome(f.node, id, duration.milliseconds(1500))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "queued" = row.state
+  restore()
+
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "published" = row.state
+}
+
 /// A publication left uncertain is not reported uncertain while its row
 /// still says `publishing`: an operator reading the row would not look.
 pub fn unrecorded_uncertainty_keeps_the_job_test() {
