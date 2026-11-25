@@ -167,6 +167,9 @@ type NoSession {
   /// elsewhere or expired).
   CustodyLost
   StoreDown
+  /// Custody holds a record this node cannot open, most often because its
+  /// sealing key is wrong. The row is kept: the right key still opens it.
+  CustodyUnreadable
 }
 
 fn current(request: Request, context: Context) -> Result(Current, NoSession) {
@@ -184,11 +187,16 @@ fn current(request: Request, context: Context) -> Result(Current, NoSession) {
     Ok(session) -> Ok(Current(stored:, session:))
     Error(error) ->
       case hellhound.session_error_action(error) {
-        hellhound.RetryLater -> Error(StoreDown)
-        _ -> {
+        hellhound.RetryLater | hellhound.Recover -> Error(StoreDown)
+        // Custody no longer holds the reference: the row is of no use.
+        hellhound.Reauthenticate -> {
           let _ = session_store.delete(context.db, stored.id)
           Error(CustodyLost)
         }
+        // A new login would not help, and deleting the row would lose a
+        // session the right configuration still opens.
+        hellhound.FixConfiguration | hellhound.RejectRequest ->
+          Error(CustodyUnreadable)
       }
   }
 }
@@ -201,6 +209,8 @@ fn require_session(
   case current(request, context) {
     Ok(current) -> next(current)
     Error(StoreDown) -> page(503, "Try again later", "<p>sessions down</p>")
+    Error(CustodyUnreadable) ->
+      page(500, "Session unavailable", "<p>sessions misconfigured</p>")
     Error(Anonymous) | Error(CustodyLost) ->
       wisp.redirect("/login") |> clear_session(request)
   }
