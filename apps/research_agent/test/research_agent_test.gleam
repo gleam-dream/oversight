@@ -68,7 +68,7 @@ fn with_node(schema: String, body: fn(Fixture) -> a) -> a {
   let assert Ok(world) = services.start()
   let notices = process.new_subject()
   services.watch(world, notices)
-  let observed = telemetry.start(False)
+  let assert Ok(observed) = telemetry.start()
   let assert Ok(node) =
     app.start(settings(world, "test-node", schema, Some(observed)))
   let result = body(Fixture(world, node, notices, observed))
@@ -338,7 +338,7 @@ fn crash_and_recover(
   // A new node in this VM. Once Grind's lease (6 s) expires, the worker's
   // abandonment policy (`ReplayAfterLeaseExpiry`) requeues the job, and
   // this node's consumer runs it again: no app sweep, no operator decision.
-  let observed = telemetry.start(False)
+  let assert Ok(observed) = telemetry.start()
   let assert Ok(survivor) =
     app.start(settings(world, "node-b", schema, Some(observed)))
   check(Fixture(world, survivor, notices, observed), id)
