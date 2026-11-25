@@ -45,7 +45,8 @@ collector, and each restarts alone. A service group starts the provider client, 
 together with the ones started after it. The application reaches each of them by a
 name made once at start, so a restart does not invalidate a handle. A restart restores
 processes, not state: jobs and sagas resume from PostgreSQL, and the collector starts
-empty. `Config.port` sets the API port; with 0 the listener binds a free port, which
+empty. The collector keeps the newest `Config.telemetry_capacity` entries (10,000 by
+default) and counts the ones it discards; `telemetry.usage` reads both numbers. `Config.port` sets the API port; with 0 the listener binds a free port, which
 `app.port` reads and which changes when the listener restarts. `app.stop` stops the
 tree in reverse order and waits for it.
 

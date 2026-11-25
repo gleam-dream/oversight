@@ -780,6 +780,40 @@ pub fn a_failed_process_is_replaced_and_orders_still_complete_test() {
   })
 }
 
+// --- telemetry bound ----------------------------------------------------------------
+
+/// The collector holds at most its capacity. Beyond it the oldest entries
+/// are discarded and counted, so a long-running application's telemetry
+/// does not grow with the number of orders, and the newest events stay
+/// readable.
+pub fn the_collector_keeps_at_most_its_capacity_test() {
+  use application <- with_app(fn(c) { app.Config(..c, telemetry_capacity: 8) })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "bound-sku", 3)
+  let place = fn(id) {
+    let assert Ok(orders.Started(report)) =
+      orders.place_local(
+        services,
+        order(application, id, "bound-sku", providers.card_ok, "10 Main St"),
+      )
+    assert report.status == domain.Confirmed
+    assert eventually(fn() { db.receipt_sent(services.pool, "alice", id) }, 100)
+  }
+  place("bound-1")
+  place("bound-2")
+  // Let forwarded events of the last order arrive.
+  let _ = telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+
+  let usage = telemetry.usage(services.collector)
+  assert usage.held == 8
+  assert usage.dropped > 0
+  // The first order's events were the oldest; the last order's remain.
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-1")))
+    == []
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+    != []
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {

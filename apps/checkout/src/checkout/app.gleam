@@ -82,6 +82,9 @@ pub type Config {
     customers: Customers,
     /// The order API's port on loopback; 0 binds any free port.
     port: Int,
+    /// How many telemetry entries the collector keeps; the oldest are
+    /// discarded beyond it.
+    telemetry_capacity: Int,
   )
 }
 
@@ -100,6 +103,7 @@ pub fn default_config(database_url: String) -> Config {
     redelivery_ms: 100,
     customers: customers.from_list([]),
     port: 0,
+    telemetry_capacity: 10_000,
   )
 }
 
@@ -152,7 +156,8 @@ pub fn start(config: Config) -> Result(App, String) {
   let storage =
     saga_postgres.config(pool)
     |> saga_postgres.with_lease(config.saga_lease)
-  let collector = telemetry.attach(collector_name)
+  let collector =
+    telemetry.attach(collector_name, capacity: config.telemetry_capacity)
   let gateway =
     gateway.Gateway(
       client: http,
