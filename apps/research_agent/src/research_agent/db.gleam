@@ -68,6 +68,25 @@ pub fn set_state(
   |> announced(id, state)
 }
 
+/// Moves a row still `queued` to `researching`. A job replayed after its
+/// first write failed calls it when it resumes its run; a row already past
+/// `queued` keeps its state, so a replay never moves a row back.
+pub fn resume_research(db: pog.Connection, id: String) -> Result(Nil, String) {
+  pog.query(
+    "UPDATE research SET state = 'researching', detail = '', updated_at = now()
+     WHERE id = $1 AND state = 'queued'",
+  )
+  |> pog.parameter(pog.text(id))
+  |> pog.execute(db)
+  |> result.map_error(string.inspect)
+  |> result.map(fn(returned) {
+    case returned.count {
+      0 -> Nil
+      _ -> events.announce(id, events.Researching)
+    }
+  })
+}
+
 /// Announces a state the table now holds.
 fn announced(
   written: Result(Nil, String),

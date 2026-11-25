@@ -10,6 +10,7 @@ import gleam/time/duration
 import grind
 import grind/job
 import http_gun/error
+import pog
 import webhooks/attempt
 import webhooks/delivery
 import webhooks/receiver
@@ -218,6 +219,89 @@ pub fn ssrf_rejected_at_registration_and_at_delivery_test() {
       "{\"type\":\"invoice.paid\",\"id\":\"evt_b\",\"data\":{}}",
     )
     == []
+}
+
+/// Makes every update of `table` whose row `id` names fail, the way a
+/// database fault would. Returns the function that removes the fault.
+fn refuse_update(db: pog.Connection, table: String, id: String) -> fn() -> Nil {
+  let run = fn(sql) {
+    let assert Ok(_) = pog.query(sql) |> pog.execute(db)
+    Nil
+  }
+  run(
+    "CREATE FUNCTION refuse_update() RETURNS trigger AS $$
+     BEGIN RAISE EXCEPTION 'store fault'; END $$ LANGUAGE plpgsql",
+  )
+  run("CREATE TRIGGER refuse_update BEFORE UPDATE ON " <> table <> "
+     FOR EACH ROW WHEN (OLD.id = '" <> id <> "')
+     EXECUTE FUNCTION refuse_update()")
+  fn() {
+    run("DROP TRIGGER refuse_update ON " <> table)
+    run("DROP FUNCTION refuse_update()")
+  }
+}
+
+/// A delivery whose attempt cannot be recorded does not settle: the
+/// tenant's delivery record would show no attempt for a delivery Grind
+/// calls done. The next attempt sends again, the receiver acknowledges the
+/// duplicate by its delivery id, and the record shows that one attempt.
+pub fn unrecorded_attempt_does_not_settle_the_delivery_test() {
+  use svc <- support.with_service(support.options())
+  let rx = receiver.start()
+  let assert Ok(#(_, secret)) =
+    support.subscribe(svc, "ops", receiver.url(rx, "/ok"))
+  receiver.trust(rx, "/ok", secret)
+  let assert [#(delivery_id, job_id)] =
+    support.publish(
+      svc,
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_unrecorded\",\"data\":null}",
+    )
+  let restore = refuse_update(svc.db, "webhook_deliveries", delivery_id)
+  assert support.drain_up_to(svc, 1) == Ok(1)
+  let outcome = support.outcome(svc, job_id)
+  restore()
+  let assert Ok(grind.Pending(_)) = outcome
+
+  assert support.drain(svc) == Ok(1)
+  assert support.outcome(svc, job_id)
+    == Ok(grind.Succeeded(attempt.Receipt(204, attempt.BodyRead(0))))
+  let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
+  assert row.attempts == 1
+  let assert [_, again] = receiver.received(rx)
+  assert again.verdict == receiver.Duplicate
+}
+
+/// A gone endpoint whose subscription cannot be disabled does not discard
+/// the delivery: the subscription would keep receiving. The attempt's
+/// record and the disablement commit together, once.
+pub fn undisabled_gone_endpoint_does_not_discard_the_delivery_test() {
+  use svc <- support.with_service(support.options())
+  let rx = receiver.start()
+  let assert Ok(#(sub_id, secret)) =
+    support.subscribe(svc, "ops", receiver.url(rx, "/gone"))
+  receiver.trust(rx, "/gone", secret)
+  let assert [#(delivery_id, job_id)] =
+    support.publish(
+      svc,
+      "ops",
+      "{\"type\":\"ping\",\"id\":\"evt_undisabled\",\"data\":null}",
+    )
+  let restore = refuse_update(svc.db, "webhook_subscriptions", sub_id)
+  assert support.drain_up_to(svc, 1) == Ok(1)
+  let outcome = support.outcome(svc, job_id)
+  let subscribed = store.get_subscription(svc.db, sub_id)
+  restore()
+  let assert Ok(grind.Pending(_)) = outcome
+  let assert Ok(subscription.Subscription(status: subscription.Active, ..)) =
+    subscribed
+
+  assert support.drain(svc) == Ok(1)
+  let assert Ok(grind.Discarded(_)) = support.outcome(svc, job_id)
+  let assert Ok(subscription.Subscription(status: subscription.Disabled(_), ..)) =
+    store.get_subscription(svc.db, sub_id)
+  let assert Ok(row) = store.get_delivery(svc.db, delivery_id)
+  assert row.attempts == 1
 }
 
 fn unwrap_text(value: Result(String, Nil)) -> String {
