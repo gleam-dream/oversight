@@ -85,6 +85,17 @@ pub type PlaceError {
   /// The catalog or order store could not be read or written; the detail is
   /// in the log.
   StoreUnavailable
+  /// The checkout ran to the outcome in `report`, but the order row could
+  /// not be updated: the row still reads `pending`, and a confirmed order
+  /// has no receipt job. The provider effects stand as the report says.
+  OutcomeUnrecorded(report: Report)
+}
+
+/// The checkout settled on `report`, and writing it to the order row
+/// failed. The report says what happened at the providers; the order row
+/// does not.
+pub type Unrecorded {
+  Unrecorded(report: Report)
 }
 
 /// What a placement did.
@@ -142,15 +153,20 @@ pub fn place_local(
   s: Services,
   order: Order,
 ) -> Result(Placement(Report), PlaceError) {
-  use claimed <- result.map(claim(s.pool, order))
+  use claimed <- result.try(claim(s.pool, order))
   case claimed {
-    Existing(existing) -> Existing(existing)
-    Started(Nil) -> Started(run_local(s, order))
+    Existing(existing) -> Ok(Existing(existing))
+    Started(Nil) ->
+      case run_local(s, order) {
+        Ok(report) -> Ok(Started(report))
+        Error(Unrecorded(report)) -> Error(OutcomeUnrecorded(report))
+      }
   }
 }
 
 /// Runs the saga and records its outcome before the request answers, so the
-/// order never stays `pending` behind a local placement. A saga that
+/// order never stays `pending` behind a reported outcome. An outcome that
+/// cannot be recorded is returned as `Unrecorded`, never as a report. A saga that
 /// cannot start is recorded `rejected`. One that outlasts `local_budget` is
 /// cancelled and awaited until it settles, and that settled outcome is
 /// recorded: the run never keeps reserving or charging after the request
@@ -159,7 +175,7 @@ pub fn place_local(
 /// Re-running the saga on a retry instead would not be safe: a released
 /// reservation and a voided charge under the same order key read as
 /// already done.
-fn run_local(s: Services, order: Order) -> Report {
+fn run_local(s: Services, order: Order) -> Result(Report, Unrecorded) {
   let config =
     execution.with_correlation(
       s.saga_config,
@@ -169,8 +185,7 @@ fn run_local(s: Services, order: Order) -> Report {
     Error(error) -> {
       log_internal(order.order_id, "saga start failed", error)
       let detail = "checkout could not start"
-      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
-      Report(domain.Rejected, detail, Error(Nil), [], 0)
+      record(s, order, Report(domain.Rejected, detail, Error(Nil), [], 0))
     }
     Ok(run) ->
       case execution.await(run, s.local_budget) {
@@ -183,9 +198,11 @@ fn run_local(s: Services, order: Order) -> Report {
             Error(error) -> {
               log_internal(order.order_id, "saga did not settle", error)
               let detail = "checkout outcome unknown"
-              let _ =
-                db.set_status(s.pool, order, domain.NeedsReconciliation, detail)
-              Report(domain.NeedsReconciliation, detail, Error(Nil), [], 0)
+              record(
+                s,
+                order,
+                Report(domain.NeedsReconciliation, detail, Error(Nil), [], 0),
+              )
             }
           }
         }
@@ -255,9 +272,16 @@ fn describe_transaction_error(error: pog.TransactionError(String)) -> String {
   }
 }
 
-/// Records the saga outcome on the order. A confirmed order and its receipt
-/// job commit in one transaction.
-pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
+/// Records the saga outcome on the order and returns the report of what
+/// was recorded. A confirmed order and its receipt job commit in one
+/// transaction. When the write fails the order row is unchanged and the
+/// result is `Unrecorded`: the caller must not present the outcome as the
+/// order's state, and may call `finalize` again with the same outcome.
+pub fn finalize(
+  s: Services,
+  order: Order,
+  outcome: Outcome,
+) -> Result(Report, Unrecorded) {
   let unknown = list.length(execution.unknown_effects(outcome))
   case outcome {
     execution.Completed(booked)
@@ -267,19 +291,28 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
         <> booked.charged.charge_id
         <> ", shipment "
         <> booked.shipment_id
-      let _ = confirm_with_receipt(s, order, detail)
-      Report(domain.Confirmed, detail, Error(Nil), [], unknown)
+      let report = Report(domain.Confirmed, detail, Error(Nil), [], unknown)
+      case confirm_with_receipt(s, order, detail) {
+        Ok(_) -> Ok(report)
+        Error(error) -> {
+          log_internal(order.order_id, "confirmation not recorded", error)
+          Error(Unrecorded(report))
+        }
+      }
     }
     execution.Failed(cause, settlement) -> {
       let #(detail, error) = describe_cause(cause)
       log_cause(order.order_id, error)
-      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
-      Report(
-        domain.Rejected,
-        detail,
-        error,
-        list.map(settlement.undone, saga.address_to_string),
-        unknown,
+      record(
+        s,
+        order,
+        Report(
+          domain.Rejected,
+          detail,
+          error,
+          list.map(settlement.undone, saga.address_to_string),
+          unknown,
+        ),
       )
     }
     execution.Unresolved(step, evidence, settlement) -> {
@@ -288,13 +321,16 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
         saga.address_to_string(step)
         <> " held: "
         <> domain.describe_error(evidence)
-      let _ = db.set_status(s.pool, order, domain.NeedsReconciliation, detail)
-      Report(
-        domain.NeedsReconciliation,
-        detail,
-        Ok(evidence),
-        list.map(settlement.undone, saga.address_to_string),
-        unknown,
+      record(
+        s,
+        order,
+        Report(
+          domain.NeedsReconciliation,
+          detail,
+          Ok(evidence),
+          list.map(settlement.undone, saga.address_to_string),
+          unknown,
+        ),
       )
     }
     execution.Cancelled(reason, settlement) -> {
@@ -302,14 +338,33 @@ pub fn finalize(s: Services, order: Order, outcome: Outcome) -> Report {
         execution.CancelRequested -> "cancelled: requested"
         execution.OwnerExited -> "cancelled: owner exited"
       }
-      let _ = db.set_status(s.pool, order, domain.Rejected, detail)
-      Report(
-        domain.Rejected,
-        detail,
-        Error(Nil),
-        list.map(settlement.undone, saga.address_to_string),
-        unknown,
+      record(
+        s,
+        order,
+        Report(
+          domain.Rejected,
+          detail,
+          Error(Nil),
+          list.map(settlement.undone, saga.address_to_string),
+          unknown,
+        ),
       )
+    }
+  }
+}
+
+/// Writes the report's status and detail to the order row. The report is
+/// returned only when the row holds it.
+fn record(
+  s: Services,
+  order: Order,
+  report: Report,
+) -> Result(Report, Unrecorded) {
+  case db.set_status(s.pool, order, report.status, report.detail) {
+    Ok(Nil) -> Ok(report)
+    Error(error) -> {
+      log_internal(order.order_id, "outcome not recorded", error)
+      Error(Unrecorded(report))
     }
   }
 }
