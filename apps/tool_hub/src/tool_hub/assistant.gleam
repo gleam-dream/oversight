@@ -159,7 +159,7 @@ pub fn build_agent(
   read_only read_only: List(String),
   approvers approvers: Approvers(String),
 ) -> Result(agent.Agent(Context, Answer), List(agent.ConfigError)) {
-  use <- agent.build_with
+  use <- agent.build
   agent.new(
     "inventory_assistant",
     llm.model(http, settings, model_id),

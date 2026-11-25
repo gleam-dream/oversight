@@ -16,5 +16,5 @@ came with JSON Blueprint 2.2.0.
 
 ## Issues
 
-- [01: Adopt Fabric's `agent.build_with`](issues/01-adopt-fabric-agent-build-with.md)
+- [01: Adopt Fabric's builder `agent.build`](issues/01-adopt-fabric-agent-build-with.md)
 - [02: Build generated codecs with warnings as errors](issues/02-build-generated-codecs-with-warnings-as-errors.md)

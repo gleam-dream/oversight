@@ -67,7 +67,7 @@ pub fn build(
       },
     )
   let assert Ok(agent) = {
-    use <- agent.build_with
+    use <- agent.build
     agent.new("archive_release", scripted, [release], authorize)
     |> agent.with_version(2)
     |> agent.with_approvers(approvers)

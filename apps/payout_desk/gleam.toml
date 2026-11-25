@@ -15,12 +15,12 @@ pog = ">= 4.1.0 and < 4.2.0"
 pgo = ">= 0.20.0 and < 0.21.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "85cf543fbb2031b76701fc4e3f4b79fdd22fead7" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "85cf543fbb2031b76701fc4e3f4b79fdd22fead7", path = "integrations/fabric_postgres" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "a547a79418cf24249b81c837b474731fa388625c" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "a547a79418cf24249b81c837b474731fa388625c", path = "integrations/fabric_postgres" }
 grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
 saga = { git = "https://github.com/gleam-dream/saga.git", ref = "ec31675925d65552c3c70a4b4e5a8742661f8329" }
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "ccea2bef2884ca92aa4962b38977de83308494b7", path = "integrations/saga_postgres" }
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "e8c2913fc5e7294931c1fb5aa0df348ac71e5065" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "4374f1c69c05988b5743c9eaa8c4ebaa0c41af37" }
 hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
 json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
 sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }

@@ -178,7 +178,7 @@ fn build(
       |> tool.with_replay(3),
     issue_refund,
   ]
-  agent.build_with(fn() {
+  agent.build(fn() {
     agent.new("support_desk", model, tools, refund_policy)
     |> agent.with_system_prompt(system_prompt)
     |> agent.with_answer(domain.resolution())

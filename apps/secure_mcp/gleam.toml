@@ -17,7 +17,7 @@ pog = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 gleam_crypto = ">= 1.6.0 and < 2.0.0"
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "e8c2913fc5e7294931c1fb5aa0df348ac71e5065" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "4374f1c69c05988b5743c9eaa8c4ebaa0c41af37" }
 hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
 grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
 json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }

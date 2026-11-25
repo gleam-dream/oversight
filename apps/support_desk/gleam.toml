@@ -12,7 +12,7 @@ gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
 mist = ">= 6.0.2 and < 7.0.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "85cf543fbb2031b76701fc4e3f4b79fdd22fead7" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "a547a79418cf24249b81c837b474731fa388625c" }
 saga = { git = "https://github.com/gleam-dream/saga.git", ref = "ec31675925d65552c3c70a4b4e5a8742661f8329" }
 llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "5bed4249fc91416ca7c862afbe6eb920ec56bdd6" }
 http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" }

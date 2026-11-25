@@ -84,7 +84,7 @@ pub fn start() -> App {
     fabric_postgres.store(process.new_name("history_delivery_runs"), backend)
   let assert Ok(runs) = store.with_drain(runs, duration.milliseconds(1))
   let agent = {
-    use <- agent.build_with
+    use <- agent.build
     agent.new(
       "history-delivery-agent",
       model.new(fn(request) {

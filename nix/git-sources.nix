@@ -6,7 +6,7 @@
     "84e9bc3600930934398457c93a470a709a01f9ac" = "sha256-6SY9Dqk3bxZnCh7J6zHJSzN8Qwq8v5LNRwTS56cKrOI=";
   };
   "https://github.com/gleam-dream/fabric.git" = {
-    "85cf543fbb2031b76701fc4e3f4b79fdd22fead7" = "sha256-VcoxCsHZy8ParmPRX2YBjLNgxGb+kEZ1EaXvrH7d8JI=";
+    "a547a79418cf24249b81c837b474731fa388625c" = "sha256-KQJ9DQJnp46jmrQBr8blKImZhg6dukApp/Oh2aO7I2U=";
   };
   "https://github.com/gleam-dream/grind.git" = {
     "beb23feb47133ea5dc7996881855e21bfd2412f0" = "sha256-VAw5EohnCFizUydUa0TIYHGY/dsW18wf+5lCn+cLhcc=";
@@ -24,7 +24,7 @@
     "5bed4249fc91416ca7c862afbe6eb920ec56bdd6" = "sha256-gu78b0+AkYOpAQZ6Cbb6l9ldVlA3V9SNl7NV91dI7uI=";
   };
   "https://github.com/gleam-dream/relay.git" = {
-    "e8c2913fc5e7294931c1fb5aa0df348ac71e5065" = "sha256-DJKuIwcDGC+VVdCgSLqRMDUx7+1wbyab3BUj0yLoZro=";
+    "4374f1c69c05988b5743c9eaa8c4ebaa0c41af37" = "sha256-3KqVqd4aUyma+pvmV3ZCRb+SPQzLZRueWZMax7qQOPk=";
   };
   "https://github.com/gleam-dream/retrace.git" = {
     "19e45a4bde46dd59b68ea626e52081150c367678" = "sha256-d9HLHRR+t+D0X0R4H9s7WzUgJHudvEg2pq4LLVP6zEo=";

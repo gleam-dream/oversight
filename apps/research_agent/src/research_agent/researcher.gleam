@@ -162,7 +162,7 @@ pub fn build(
   llm_client: http_gun.Client,
   endpoints: Endpoints,
 ) -> Result(Agent(Context, Answer), List(agent.ConfigError)) {
-  use <- agent.build_with
+  use <- agent.build
   let settings =
     openai.new("sk-scripted")
     |> openai.config
