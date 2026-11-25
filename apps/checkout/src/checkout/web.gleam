@@ -16,22 +16,23 @@
 //// or quantity is a 409. Order ids are scoped to the customer, so another
 //// customer placing under the same id creates their own order.
 
-import checkout/app.{type App}
 import checkout/codecs
-import checkout/customers
+import checkout/customers.{type Customers}
 import checkout/db
-import checkout/domain.{type CheckoutError}
-import checkout/orders.{type Report}
-import envoy
+import checkout/domain.{type CheckoutError, type Order}
+import checkout/orders.{type Report, type Services}
 import gleam/dynamic/decode
-import gleam/erlang/process.{type Pid}
+import gleam/erlang/process.{type Name, type Subject}
 import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
+import gleam/otp/actor
+import gleam/otp/supervision
 import gleam/result
 import gleam/string
+import grind/worker.{type Worker}
 import http_gun/error
 import mist
 import wisp
@@ -64,23 +65,74 @@ pub fn secret_key_base(
   }
 }
 
-pub fn start(app: App) -> Result(#(Pid, Int), String) {
-  use secret <- result.try(secret_key_base(envoy.get(secret_key_base_variable)))
-  let port = process.new_subject()
-  wisp_mist.handler(handle(_, app), secret)
-  |> mist.new
-  |> mist.bind("127.0.0.1")
-  |> mist.port(0)
-  |> mist.after_start(fn(bound, _, _) { process.send(port, bound) })
-  |> mist.start
-  |> result.map_error(string.inspect)
-  |> result.map(fn(started) {
-    let assert Ok(bound) = process.receive(port, 1000)
-    #(started.pid, bound)
+/// What the routes act on. Every handle in it is a name, so the same
+/// value stays usable after the process behind a handle restarts.
+pub type Context {
+  Context(
+    services: Services,
+    checkout_worker: Worker(Order, String, Nil),
+    customers: Customers,
+  )
+}
+
+/// The messages of the endpoint process, which holds the port the
+/// listener is bound to.
+pub opaque type EndpointMessage {
+  Bound(port: Int)
+  CurrentPort(reply: Subject(Option(Int)))
+}
+
+/// The endpoint process, registered under `name`. Start it before the
+/// listener, in a group that restarts the listener when the endpoint
+/// restarts: the listener reports its port once, when it starts.
+pub fn endpoint(
+  name: Name(EndpointMessage),
+) -> supervision.ChildSpecification(Nil) {
+  supervision.worker(fn() {
+    actor.new(None)
+    |> actor.named(name)
+    |> actor.on_message(fn(port, message) {
+      case message {
+        Bound(port) -> actor.continue(Some(port))
+        CurrentPort(reply) -> {
+          process.send(reply, port)
+          actor.continue(port)
+        }
+      }
+    })
+    |> actor.start
+    |> result.map(fn(started) { actor.Started(..started, data: Nil) })
   })
 }
 
-pub fn handle(req: wisp.Request, app: App) -> wisp.Response {
+/// The order API's listener on loopback. `port` 0 binds any free port.
+/// Each time the listener starts it tells the endpoint which port it
+/// bound, so with `port` 0 a restarted listener has a new address.
+pub fn listener(
+  context: Context,
+  secret_key_base secret: String,
+  port port: Int,
+  endpoint endpoint: Name(EndpointMessage),
+) -> supervision.ChildSpecification(Nil) {
+  wisp_mist.handler(handle(_, context), secret)
+  |> mist.new
+  |> mist.bind("127.0.0.1")
+  |> mist.port(port)
+  |> mist.after_start(fn(bound, _, _) {
+    process.send(process.named_subject(endpoint), Bound(bound))
+  })
+  |> mist.supervised
+  |> supervision.map_data(fn(_) { Nil })
+}
+
+/// The port the listener is bound to now, or `Error(Nil)` while no
+/// listener has reported one. Panics when no endpoint is running.
+pub fn port(endpoint: Name(EndpointMessage)) -> Result(Int, Nil) {
+  actor.call(process.named_subject(endpoint), 1000, CurrentPort)
+  |> option.to_result(Nil)
+}
+
+pub fn handle(req: wisp.Request, app: Context) -> wisp.Response {
   use <- wisp.rescue_crashes
   use customer_id <- require_customer(req, app)
   case req.method, wisp.path_segments(req) {
@@ -94,7 +146,7 @@ pub fn handle(req: wisp.Request, app: App) -> wisp.Response {
 /// the body is read. No token, or one the table does not know, is a 401.
 fn require_customer(
   req: wisp.Request,
-  app: App,
+  app: Context,
   next: fn(String) -> wisp.Response,
 ) -> wisp.Response {
   case
@@ -110,7 +162,11 @@ fn require_customer(
   }
 }
 
-fn place(req: wisp.Request, app: App, customer_id: String) -> wisp.Response {
+fn place(
+  req: wisp.Request,
+  app: Context,
+  customer_id: String,
+) -> wisp.Response {
   use body <- wisp.require_json(req)
   case decode.run(body, codecs.checkout_request_decoder()) {
     Error(_) -> error_response(422, "invalid_order")
@@ -157,7 +213,7 @@ fn place_error(error: orders.PlaceError) -> wisp.Response {
   }
 }
 
-fn show(app: App, customer_id: String, order_id: String) -> wisp.Response {
+fn show(app: Context, customer_id: String, order_id: String) -> wisp.Response {
   case db.order_for(app.services.pool, customer_id, order_id) {
     Ok(Some(existing)) -> existing_order(existing)
     Ok(None) -> wisp.not_found()

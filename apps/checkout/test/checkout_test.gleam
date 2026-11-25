@@ -119,7 +119,7 @@ pub fn order_api_confirms_and_sends_receipt_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "happy-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
 
   let placed =
@@ -699,6 +699,87 @@ pub fn provider_refuses_a_negative_content_length_test() {
   assert providers.snapshot(application.providers).charge_requests == 0
 }
 
+// --- supervision ------------------------------------------------------------------
+
+@external(erlang, "checkout_test_ffi", "children")
+fn children(supervisor: process.Pid) -> List(process.Pid)
+
+@external(erlang, "checkout_test_ffi", "fail")
+fn fail(pid: process.Pid) -> Nil
+
+/// The application's processes one level below its two groups: the
+/// forwarder, the collector, the provider client, grind, the endpoint and
+/// the listener.
+fn workers(application: App) -> List(process.Pid) {
+  list.flat_map(children(application.root), children)
+}
+
+fn job_id(text: String) -> Result(Int, json.DecodeError) {
+  json.parse(text, decode.at(["job_id"], decode.int))
+}
+
+/// The abnormal exit of any one process of the application leaves the
+/// application running: its supervisor starts a replacement, and a durable order placed
+/// through the API afterwards is charged, shipped, confirmed and traced.
+/// Nothing the caller holds (the `App`, its services, the collector) is
+/// replaced; the handles are names.
+pub fn a_failed_process_is_replaced_and_orders_still_complete_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(probe) = app.start(app.default_config(url))
+  let count = list.length(workers(probe))
+  app.stop(probe)
+  assert count == 6
+
+  list.each([0, 1, 2, 3, 4, 5], fn(index) {
+    use application <- with_app(fn(c) { c })
+    let services = application.services
+    let id = "killed-" <> int.to_string(index)
+    let sku = id <> "-sku"
+    let assert Ok(Nil) = set_stock(services.pool, sku, 1)
+    let before = workers(application)
+    let assert Ok(victim) = list.first(list.drop(before, index))
+
+    let monitor = process.monitor(victim)
+    fail(victim)
+    let assert Ok(Nil) =
+      process.new_selector()
+      |> process.select_specific_monitor(monitor, fn(_) { Nil })
+      |> process.selector_receive(5000)
+    assert eventually(
+      fn() {
+        let now = workers(application)
+        list.length(now) == count
+        && !list.contains(now, victim)
+        && list.all(now, process.is_alive)
+        && result.is_ok(app.port(application))
+      },
+      100,
+    )
+
+    let assert Ok(port) = app.port(application)
+    let token = providers.tokenise(application.providers, providers.card_ok)
+    let #(status, text) =
+      post_order(port, body(order_fields(id, sku, 1, token)), "?mode=durable")
+    assert #(index, status) == #(index, 202)
+    let assert Ok(job) = job_id(text)
+    let assert grind.Succeeded(_) = await_job(application, job)
+    let assert Some(#(domain.Confirmed, _)) =
+      db.order_status(services.pool, "alice", id)
+    assert eventually(fn() { db.receipt_sent(services.pool, "alice", id) }, 100)
+    assert eventually(
+      fn() {
+        let sources =
+          telemetry.trace(services.collector, telemetry.order(key(id)))
+          |> list.map(fn(e) { e.source })
+        list.contains(sources, telemetry.Saga)
+        && list.contains(sources, telemetry.Http)
+        && list.contains(sources, telemetry.Grind)
+      },
+      40,
+    )
+  })
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
@@ -737,7 +818,7 @@ pub fn internal_errors_stay_out_of_response_bodies_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "broken-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let rename = fn(from, to) {
     let assert Ok(_) =
       pog.query("ALTER TABLE " <> from <> " RENAME TO " <> to)
@@ -765,20 +846,25 @@ pub fn internal_errors_stay_out_of_response_bodies_test() {
 // --- wisp secret key base ----------------------------------------------------------
 
 /// The signing secret comes from `CHECKOUT_SECRET_KEY_BASE`; one shorter
-/// than wisp's 64-character minimum stops startup, and an unset variable
-/// falls back to a random per-boot secret.
+/// than wisp's 64-character minimum stops startup before any process
+/// starts, and an unset variable falls back to a random per-boot secret.
 pub fn secret_key_base_comes_from_the_environment_test() {
-  use application <- with_app(fn(c) { c })
+  let assert Ok(url) = envoy.get("DATABASE_URL")
   let variable = "CHECKOUT_SECRET_KEY_BASE"
+  let boot = fn() {
+    app.start(app.default_config(url))
+    |> result.map(app.stop)
+  }
   envoy.set(variable, "too-short")
-  let short = web.start(application)
+  let short = boot()
   envoy.set(variable, string.repeat("k", 64))
-  let configured = web.start(application)
+  let configured = boot()
   envoy.unset(variable)
-  let generated = web.start(application)
-  assert result.is_error(short)
-  assert result.is_ok(configured)
-  assert result.is_ok(generated)
+  let generated = boot()
+  assert short
+    == Error("CHECKOUT_SECRET_KEY_BASE must be at least 64 characters")
+  assert configured == Ok(Nil)
+  assert generated == Ok(Nil)
 }
 
 // --- pricing and payment tokens ------------------------------------------------------
@@ -828,7 +914,7 @@ pub fn server_prices_the_order_from_the_catalog_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "priced-sku", unit_price_cents: 1250, available: 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(token) = tokenise(application, providers.card_ok)
 
   let #(status, _) =
@@ -860,7 +946,7 @@ pub fn client_amount_and_card_fields_are_refused_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "strict-sku", unit_price_cents: 4999, available: 10)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   // The request shape the API used to accept: a client-chosen amount and a
   // raw card number.
   let legacy =
@@ -925,7 +1011,7 @@ pub fn card_digits_never_reach_stored_rows_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "token-sku", unit_price_cents: 900, available: 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(token) = tokenise(application, providers.card_ok)
   assert !string.contains(token, providers.card_ok)
 
@@ -957,7 +1043,7 @@ pub fn requests_without_a_customer_identity_are_refused_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "anon-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let token = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("anon-1", "anon-sku", 1, token))
 
@@ -978,7 +1064,7 @@ pub fn another_customers_order_reads_as_not_found_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "owned-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let token = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("owned-1", "owned-sku", 1, token))
   let #(status, _) =
@@ -1004,7 +1090,7 @@ pub fn repeated_order_id_never_reruns_the_saga_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "repeat-sku", 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let alice_card = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("repeat-1", "repeat-sku", 1, alice_card))
   let #(status, _) =
@@ -1061,7 +1147,7 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "shared-sku", 10)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let alice_card = providers.tokenise(application.providers, providers.card_ok)
   let bob_card = providers.tokenise(application.providers, providers.card_ok)
   let #(status, _) =

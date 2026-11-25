@@ -38,6 +38,17 @@ left unchanged. There is no upgrade path, because the old orders have no custome
 price to backfill. Drop the `stock`, `reservations`, `orders` and `receipts_sent`
 tables, or use a fresh database.
 
+`app.start` starts one root supervisor and returns when the tree is up and the
+schemas are applied. An observation group holds the Sinal forwarder and the telemetry
+collector, and each restarts alone. A service group starts the provider client, Grind
+(with the pool), and the order API listener in that order, and restarts a failed child
+together with the ones started after it. The application reaches each of them by a
+name made once at start, so a restart does not invalidate a handle. A restart restores
+processes, not state: jobs and sagas resume from PostgreSQL, and the collector starts
+empty. `Config.port` sets the API port; with 0 the listener binds a free port, which
+`app.port` reads and which changes when the listener restarts. `app.stop` stops the
+tree in reverse order and waits for it.
+
 `CHECKOUT_SECRET_KEY_BASE` sets Wisp's signing secret (at least 64 characters). When
 it is unset, the app generates a random secret at boot, so signed values do not
 survive a restart.
