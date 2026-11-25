@@ -2,10 +2,10 @@
 ////
 //// - `POST /orders` takes `{order_id, sku, quantity, payment_token, address,
 ////   email}`. The server prices it from the catalog; a body with any other
-////   field (an amount, a card number) is refused with 422. The checkout
-////   saga runs in the request and answers with the final status (201
-////   confirmed, 402/409/502/504 rejected, 202 held).
-//// - `POST /orders?mode=durable` enqueues the durable checkout job (202).
+////   field (an amount, a card number) is refused with 422. It records the
+////   pending order and enqueues its checkout job in one transaction and
+////   answers 202 with the job id; `GET /orders/:id` shows the outcome once
+////   the job has recorded it.
 //// - `GET /orders/:id` reads the caller's own order; another customer's
 ////   order is a 404.
 ////
@@ -19,21 +19,19 @@
 import checkout/codecs
 import checkout/customers.{type Customers}
 import checkout/db
-import checkout/domain.{type CheckoutError, type Order}
-import checkout/orders.{type Report, type Services}
+import checkout/domain.{type Order}
+import checkout/orders.{type Services}
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Name, type Subject}
 import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/json
-import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import gleam/string
 import grind/worker.{type Worker}
-import http_gun/error
 import mist
 import wisp
 import wisp/wisp_mist
@@ -174,32 +172,18 @@ fn place(
       case orders.price(app.services, customer_id, request) {
         Error(error) -> place_error(error)
         Ok(order) ->
-          case list.key_find(wisp.get_query(req), "mode") {
-            Ok("durable") ->
-              case
-                orders.place_durable(app.services, app.checkout_worker, order)
-              {
-                Ok(orders.Started(job_id)) ->
-                  json.object([
-                    #("order_id", json.string(order.order_id)),
-                    #("status", json.string("pending")),
-                    #("amount_cents", json.int(order.amount_cents)),
-                    #("job_id", json.int(job_id)),
-                  ])
-                  |> json.to_string
-                  |> wisp.json_response(202)
-                Ok(orders.Existing(existing)) -> existing_order(existing)
-                Error(error) -> place_error(error)
-              }
-            _ ->
-              case orders.place_local(app.services, order) {
-                Ok(orders.Started(report)) ->
-                  report_json(order.order_id, report)
-                  |> json.to_string
-                  |> wisp.json_response(status_code(report))
-                Ok(orders.Existing(existing)) -> existing_order(existing)
-                Error(error) -> place_error(error)
-              }
+          case orders.place(app.services, app.checkout_worker, order) {
+            Ok(orders.Started(job_id)) ->
+              json.object([
+                #("order_id", json.string(order.order_id)),
+                #("status", json.string("pending")),
+                #("amount_cents", json.int(order.amount_cents)),
+                #("job_id", json.int(job_id)),
+              ])
+              |> json.to_string
+              |> wisp.json_response(202)
+            Ok(orders.Existing(existing)) -> existing_order(existing)
+            Error(error) -> place_error(error)
           }
       }
   }
@@ -210,9 +194,6 @@ fn place_error(error: orders.PlaceError) -> wisp.Response {
     orders.UnknownSku(_) -> error_response(422, "unknown_sku")
     orders.OrderIdConflict -> error_response(409, "order_id_conflict")
     orders.StoreUnavailable -> error_response(503, "store_unavailable")
-    // The checkout ran but the order row does not show it. The body names
-    // neither outcome: the order still reads `pending`.
-    orders.OutcomeUnrecorded(_) -> error_response(503, "outcome_unrecorded")
   }
 }
 
@@ -244,56 +225,8 @@ fn existing_order(existing: db.OrderRecord) -> wisp.Response {
   |> wisp.json_response(200)
 }
 
-/// Bodies carry the order's status, a stable error code when there is one,
-/// and the report's client-facing detail. Internal terms are logged by
-/// `orders`, never rendered here.
-fn report_json(order_id: String, report: Report) -> json.Json {
-  let code = case report.status, report.error {
-    _, Ok(error) -> [#("error", json.string(domain.error_code(error)))]
-    domain.Rejected, Error(Nil) -> [#("error", json.string("checkout_failed"))]
-    _, Error(Nil) -> []
-  }
-  json.object(
-    [
-      #("order_id", json.string(order_id)),
-      #("status", json.string(domain.status_to_string(report.status))),
-      ..code
-    ]
-    |> list.append([
-      #("detail", json.string(report.detail)),
-      #("undone", json.array(report.undone, json.string)),
-      #("unknown_effects", json.int(report.unknown_effects)),
-    ]),
-  )
-}
-
 fn error_response(status: Int, code: String) -> wisp.Response {
   json.object([#("error", json.string(code))])
   |> json.to_string
   |> wisp.json_response(status)
-}
-
-/// The HTTP status follows the typed error, including http_gun's failure
-/// kind: a provider timeout is a 504, any other transport failure a 502.
-pub fn status_code(report: Report) -> Int {
-  case report.status, report.error {
-    domain.Confirmed, _ -> 201
-    domain.NeedsReconciliation, _ | domain.Pending, _ -> 202
-    domain.Rejected, Ok(error) -> error_status(error)
-    domain.Rejected, Error(Nil) -> 500
-  }
-}
-
-fn error_status(error: CheckoutError) -> Int {
-  case error {
-    domain.Declined(_) -> 402
-    domain.OutOfStock(..) -> 409
-    domain.ProviderUnreachable(failure:, ..) ->
-      case error.kind(failure) {
-        error.TimedOut -> 504
-        _ -> 502
-      }
-    domain.ProviderRejected(..) -> 502
-    domain.StockStoreFailed(_) | domain.Interrupted(_) -> 503
-  }
 }

@@ -59,6 +59,32 @@ pub fn key(order: Order) -> String {
   order_key(order.customer_id, order.order_id)
 }
 
+/// What recording an order's outcome needs: whose order it is, its id, and
+/// what its receipt says and where it goes. The order row keeps these, so
+/// an outcome can be recorded without the payment token or the address.
+pub type OrderRef {
+  OrderRef(
+    customer_id: String,
+    order_id: String,
+    email: String,
+    amount_cents: Int,
+  )
+}
+
+pub fn ref(order: Order) -> OrderRef {
+  OrderRef(
+    customer_id: order.customer_id,
+    order_id: order.order_id,
+    email: order.email,
+    amount_cents: order.amount_cents,
+  )
+}
+
+/// The `order_key` of the order `ref` names.
+pub fn ref_key(ref: OrderRef) -> String {
+  order_key(ref.customer_id, ref.order_id)
+}
+
 /// Prices a customer's request at the catalog's unit price.
 pub fn price(
   request: CheckoutRequest,

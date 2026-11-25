@@ -42,6 +42,7 @@ import checkout/gateway
 import checkout/jobs
 import checkout/orders.{type Services, Services}
 import checkout/providers.{type Providers}
+import checkout/sweeper
 import checkout/telemetry
 import checkout/web
 import checkout/workflow
@@ -82,6 +83,10 @@ pub type Config {
     customers: Customers,
     /// The order API's port on loopback; 0 binds any free port.
     port: Int,
+    /// How often the sweeper looks for pending orders nothing will finish,
+    /// and how long an order must have been pending to be looked at.
+    sweep_every: Duration,
+    stale_after: Duration,
   )
 }
 
@@ -100,6 +105,8 @@ pub fn default_config(database_url: String) -> Config {
     redelivery_ms: 100,
     customers: customers.from_list([]),
     port: 0,
+    sweep_every: duration.minutes(1),
+    stale_after: duration.minutes(5),
   )
 }
 
@@ -180,7 +187,6 @@ pub fn start(config: Config) -> Result(App, String) {
       workflow: checkout,
       persistence: workflow.persistence(checkout, saga_config),
       saga_config:,
-      local_budget: duration.seconds(60),
       receipt_worker: orders.receipt_worker(),
     )
   let checkout_worker =
@@ -234,6 +240,12 @@ pub fn start(config: Config) -> Result(App, String) {
       secret_key_base: secret,
       port: config.port,
       endpoint:,
+    ))
+    |> static_supervisor.add(sweeper.supervised(
+      services,
+      checkout_worker,
+      every: config.sweep_every,
+      stale_after: config.stale_after,
     ))
   let started =
     static_supervisor.new(static_supervisor.OneForOne)
