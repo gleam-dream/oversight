@@ -352,7 +352,13 @@ pub fn info(package: Package) -> Info {
           "Where durable custody is stored",
         ],
         not_for: "being an identity provider itself. It talks to one. Production use needs independent security review.",
-        apps: ["SSO portal", "secure MCP", "support desk", "payout desk"],
+        apps: [
+          "SSO portal",
+          "secure MCP",
+          "support desk",
+          "clinic",
+          "payout desk",
+        ],
       )
     Correio ->
       Info(
