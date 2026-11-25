@@ -162,6 +162,7 @@ pub fn build(
   llm_client: http_gun.Client,
   endpoints: Endpoints,
 ) -> Result(Agent(Context, Answer), List(agent.ConfigError)) {
+  use <- agent.build_with
   let settings =
     openai.new("sk-scripted")
     |> openai.config
@@ -192,5 +193,4 @@ pub fn build(
   |> agent.with_answer(domain.answer_codec())
   |> agent.with_max_turns(8)
   |> agent.with_model_retry_delay(duration.milliseconds(50))
-  |> agent.build
 }

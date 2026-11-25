@@ -71,8 +71,7 @@ pub fn endpoints(services: String) -> researcher.Endpoints {
 }
 
 /// One client for the tools, the publisher and the provider, confined to
-/// the scripted services. llm_wire sends each model call through a view
-/// with its own budget, so the 5 s request timeout does not cut a stream.
+/// the scripted services.
 fn http_settings(services: String) -> Result(http_config.Config, String) {
   use parsed <- result.try(
     uri.parse(services) |> result.replace_error("invalid services URL"),
@@ -86,7 +85,6 @@ fn http_settings(services: String) -> Result(http_config.Config, String) {
   |> http_config.with_destination(
     destination.loopback_only() |> destination.only_hosts([authority]),
   )
-  |> http_config.with_request_timeout(http_config.After(duration.seconds(5)))
   |> Ok
 }
 
@@ -174,7 +172,10 @@ pub fn start(settings: Settings) -> Result(App, String) {
   )
   use saga_settings <- result.try(saga_settings(settings, database))
   use http_settings <- result.try(http_settings(settings.services))
-  let http = http_gun.named(http_name)
+  // Each request is bounded by 5 s. llm_wire sends each model call through
+  // a view with its own budget, so this timeout does not cut a stream.
+  let http =
+    http_gun.named(http_name) |> http_gun.with_timeout(duration.seconds(5))
   let endpoints = endpoints(settings.services)
   // One agent serves every run: fabric hands each model call the run's
   // correlation.
