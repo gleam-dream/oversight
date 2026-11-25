@@ -3,6 +3,7 @@ version = "0.1.0"
 target = "erlang"
 gleam = ">= 1.18.0"
 description = "Composition app: durable, signed outbound webhooks on grind + http_gun + sinal, served by wisp/mist on pog."
+licences = ["Apache-2.0"]
 
 [dependencies]
 grind = ">= 0.1.1 and < 0.2.0"

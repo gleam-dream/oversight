@@ -2,6 +2,7 @@ name = "payout_desk"
 version = "0.1.0"
 target = "erlang"
 description = "Composition app: a support agent's payout tool call gated by a decision point, decided over MCP, paid through a durable saga, built from decisions, decisions_postgres, fabric, fabric_postgres, relay, mist, grind, saga, saga_postgres, hellhound and sinal."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"

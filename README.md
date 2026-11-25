@@ -151,3 +151,7 @@ belong to the library that owns the workload, not to Oversight.
 For the [application and experiment checks](AGENTS.md), use the repository's Nix
 shell. The [context map](docs/CONTEXT-MAP.md) indexes the design; the
 [ADRs](docs/adr/) explain decisions.
+
+## Licence
+
+Oversight is licensed under the [Apache License 2.0](LICENSE).

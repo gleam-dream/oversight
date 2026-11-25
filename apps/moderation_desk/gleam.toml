@@ -3,6 +3,7 @@ version = "0.1.0"
 target = "erlang"
 gleam = ">= 1.18.0"
 description = "Composition app: moderation at volume on the BEAM with no database, built from decisions, decisions_otp and sinal."
+licences = ["Apache-2.0"]
 
 [dependencies]
 # decisions is on Hex. decisions_otp is released as a Git tag of
