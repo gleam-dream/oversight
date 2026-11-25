@@ -2,6 +2,7 @@ name = "financial_recovery"
 version = "0.1.0"
 target = "erlang"
 description = "Executable financial recovery recipe with Saga, Grind and PostgreSQL."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
