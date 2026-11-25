@@ -106,21 +106,6 @@ pub fn active_for_tenant(
   |> result.map_error(QueryFailed)
 }
 
-pub fn disable(
-  db: pog.Connection,
-  id: String,
-  reason: String,
-) -> Result(Nil, StoreError) {
-  pog.query(
-    "UPDATE webhook_subscriptions SET disabled_reason = $2 WHERE id = $1 AND disabled_reason IS NULL",
-  )
-  |> pog.parameter(pog.text(id))
-  |> pog.parameter(pog.text(reason))
-  |> pog.execute(db)
-  |> result.replace(Nil)
-  |> result.map_error(QueryFailed)
-}
-
 pub fn record_delivery(
   db: pog.Connection,
   id: String,
@@ -140,21 +125,50 @@ pub fn record_delivery(
   |> result.map_error(QueryFailed)
 }
 
+/// Records one delivery attempt and, for an endpoint that is gone or
+/// refused, disables its subscription, in one transaction: the record and
+/// the disablement commit together or not at all.
 pub fn record_attempt(
   db: pog.Connection,
   id: String,
   status: Option(Int),
   note: String,
+  disabling: Option(Disabling),
 ) -> Result(Nil, StoreError) {
-  pog.query(
-    "UPDATE webhook_deliveries SET attempts = attempts + 1, last_status = $2, last_note = $3 WHERE id = $1",
-  )
-  |> pog.parameter(pog.text(id))
-  |> pog.parameter(pog.nullable(pog.int, status))
-  |> pog.parameter(pog.text(note))
-  |> pog.execute(db)
-  |> result.replace(Nil)
-  |> result.map_error(QueryFailed)
+  pog.transaction(db, fn(tx) {
+    use Nil <- result.try(
+      pog.query(
+        "UPDATE webhook_deliveries SET attempts = attempts + 1, last_status = $2, last_note = $3 WHERE id = $1",
+      )
+      |> pog.parameter(pog.text(id))
+      |> pog.parameter(pog.nullable(pog.int, status))
+      |> pog.parameter(pog.text(note))
+      |> pog.execute(tx)
+      |> result.replace(Nil),
+    )
+    case disabling {
+      None -> Ok(Nil)
+      Some(Disabling(subscription_id:, reason:)) ->
+        pog.query(
+          "UPDATE webhook_subscriptions SET disabled_reason = $2 WHERE id = $1 AND disabled_reason IS NULL",
+        )
+        |> pog.parameter(pog.text(subscription_id))
+        |> pog.parameter(pog.text(reason))
+        |> pog.execute(tx)
+        |> result.replace(Nil)
+    }
+  })
+  |> result.map_error(fn(error) {
+    case error {
+      pog.TransactionQueryError(error) | pog.TransactionRolledBack(error) ->
+        QueryFailed(error)
+    }
+  })
+}
+
+/// A subscription to disable with an attempt, and why.
+pub type Disabling {
+  Disabling(subscription_id: String, reason: String)
 }
 
 pub type DeliveryRow {

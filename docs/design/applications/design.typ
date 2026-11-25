@@ -155,7 +155,7 @@
         interface: [Subscription/event operations authenticated by a per-tenant API key, and a contextual Grind worker with a stable delivery identity.],
         interactions: [Application rows and enqueue share a transaction. HTTP Gun applies per-tenant destination views; Grind executes explicit retry/snooze/discard policy.],
         invariants: [The caller's API key, never the request, names the tenant; registration, publishing and reads act for that tenant only. The same delivery id signs and identifies every retry and is the receiver's idempotency key. Registration and delivery use destination policy; delivery re-reads subscription configuration so disablement and key rotation are effective.],
-        failure: [Successful status can settle delivery despite an oversized unused body. Rate limits snooze within the cap; gone/unsafe destinations disable subscriptions; retryable transport/server failures consume bounded attempts.],
+        failure: [Successful status can settle delivery despite an oversized unused body. Rate limits snooze within the cap; gone/unsafe destinations disable subscriptions; retryable transport/server failures consume bounded attempts. An attempt settles only once its record, and a disablement, commit together; a failed write retries the attempt (`Unrecorded`), and the receiver deduplicates a request it already processed.],
       )
       #points(
         [Destination policy is per tenant tier on one HTTP client. A public tenant reaches public addresses only and every DNS answer is checked; the internal tier reaches allowlisted loopback host entries. Registration applies the same policy value, so a refused address is rejected before any delivery.],

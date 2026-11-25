@@ -53,6 +53,10 @@ pub type DeliveryError {
   Http(failure: error.Failure)
   /// The local client could not take the request; nothing was sent.
   Unavailable(reason: String)
+  /// The attempt ran, but its record (or the disablement of a gone
+  /// endpoint) could not be stored; retried, and the receiver deduplicates
+  /// a request it already processed.
+  Unrecorded(reason: String)
   /// A local defect or configuration problem; never retried.
   Internal(reason: String)
 }
@@ -119,6 +123,7 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
         RateLimited -> #("rate_limited", [])
         Http(failure) -> #("http", [#("failure", error.to_json(failure))])
         Unavailable(reason) -> #("unavailable", [#("text", json.string(reason))])
+        Unrecorded(reason) -> #("unrecorded", [#("text", json.string(reason))])
         Internal(reason) -> #("internal", [#("text", json.string(reason))])
       }
       json.object([#("kind", json.string(kind)), ..detail])
@@ -134,6 +139,7 @@ pub fn error_codec() -> worker.Codec(DeliveryError) {
         "rate_limited" -> decode.success(RateLimited)
         "http" -> decode.at(["failure"], error.decoder()) |> decode.map(Http)
         "unavailable" -> decode.map(text, Unavailable)
+        "unrecorded" -> decode.map(text, Unrecorded)
         "internal" -> decode.map(text, Internal)
         _ -> decode.failure(Internal(kind), "DeliveryError")
       }
@@ -149,6 +155,7 @@ pub fn describe_error(e: DeliveryError) -> String {
     RateLimited -> "rate limited past the snooze budget"
     Http(failure) -> "http: " <> error.name(failure)
     Unavailable(reason) -> "unavailable: " <> reason
+    Unrecorded(reason) -> "unrecorded: " <> reason
     Internal(reason) -> "internal: " <> reason
   }
 }
@@ -158,7 +165,8 @@ pub fn describe_error(e: DeliveryError) -> String {
 /// send again.
 pub fn retryable(e: DeliveryError) -> Bool {
   case e {
-    ServerError(_) | Timeout | RateLimited | Unavailable(_) -> True
+    ServerError(_) | Timeout | RateLimited | Unavailable(_) | Unrecorded(_) ->
+      True
     ClientError(_) | Internal(_) -> False
     Http(failure) -> error.is_retryable(failure, idempotent: True)
   }
