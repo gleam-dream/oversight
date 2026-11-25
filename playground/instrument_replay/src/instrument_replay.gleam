@@ -153,8 +153,12 @@ fn settings(label: String) -> config.Config {
   |> config.with_label(label)
   |> config.with_redaction(scrub)
   |> config.with_max_response_body_bytes(512)
-  |> config.with_request_timeout(config.After(duration.seconds(2)))
   |> config.with_shutdown_timeout(duration.seconds(1))
+}
+
+/// Every request ends two seconds after it starts.
+fn timed(client: http_gun.Client) -> http_gun.Client {
+  http_gun.with_timeout(client, duration.seconds(2))
 }
 
 fn req(path: String, token: String) -> request.Request(BitArray) {
@@ -286,15 +290,11 @@ fn capture() {
       env("INSTRUMENT_CASSETTE"),
       cassette.options() |> cassette.with_max_bytes(65_536),
     )
+  let client = timed(recorded.client)
   let assert Ok(data) =
-    pages(
-      recorded.client,
-      Historical,
-      correlation.from_key("capture"),
-      "capture",
-    )
+    pages(client, Historical, correlation.from_key("capture"), "capture")
   assert data == expected()
-  faults(recorded.client)
+  faults(client)
   let assert Ok(_) = cassette.finish(recorded.recording, duration.seconds(2))
   let assert Error(closed) =
     http_gun.send(recorded.client, req("/measurements?page=1", "capture"))
@@ -306,7 +306,7 @@ fn capture() {
 fn playback(label: String) -> http_gun.Client {
   let assert Ok(script) = cassette.load(env("INSTRUMENT_CASSETTE"), 65_536)
   let assert Ok(client) = testing.playback(script, settings(label))
-  client
+  timed(client)
 }
 
 fn replay() {
