@@ -3,6 +3,7 @@
 //// application over them, and small helpers to wait for an outcome and to
 //// call the desk over HTTP.
 
+import clinic_registration/access
 import clinic_registration/app.{type App}
 import clinic_registration/domain.{type Inbound, type Registration, Inbound}
 import clinic_registration/owner
@@ -124,6 +125,9 @@ pub fn boot(
       messaging_base: scripted.messaging_base(services),
       provider_ports: scripted.ports(services),
     )
+    |> fn(config) {
+      app.Config(..config, staff: staff(), channel: Some(channel()))
+    }
     |> configure
   let assert Ok(application) = app.start(config)
   list.each(insurers, fn(name) {
@@ -236,13 +240,28 @@ pub fn client() -> http_gun.Client {
   client
 }
 
-/// Call the desk as `validator` (the `x-clinic-validator` header), or
-/// anonymously with `""`.
+/// Call the desk with a staff member's bearer token (`felipe`, `marta`,
+/// `bia`), or anonymously with `""`.
 pub fn call(
   env: Env,
   method: http.Method,
   path: String,
   as_validator: String,
+  body: String,
+) -> Answer {
+  let headers = case as_validator {
+    "" -> []
+    token -> [#("authorization", "Bearer " <> token)]
+  }
+  send(env, method, path, headers, body)
+}
+
+/// One request to the application with exactly these headers.
+pub fn send(
+  env: Env,
+  method: http.Method,
+  path: String,
+  headers: List(#(String, String)),
   body: String,
 ) -> Answer {
   let http = client()
@@ -252,10 +271,10 @@ pub fn call(
     |> request.set_method(method)
     |> request.set_header("content-type", "application/json")
     |> request.set_body(bit_array.from_string(body))
-  let req = case as_validator {
-    "" -> req
-    header -> request.set_header(req, "x-clinic-validator", header)
-  }
+  let req =
+    list.fold(headers, req, fn(req, header) {
+      request.set_header(req, header.0, header.1)
+    })
   let assert Ok(reply) = http_gun.send(http, req)
   http_gun.stop(http)
   Answer(
@@ -264,9 +283,47 @@ pub fn call(
   )
 }
 
-pub const felipe = "felipe; reception"
+/// Deliver a webhook body as the messaging channel does: signed with the
+/// channel's secret.
+pub fn deliver(env: Env, body: String) -> Answer {
+  send(
+    env,
+    http.Post,
+    "/inbound",
+    [
+      #(
+        access.signature_header,
+        access.sign(channel(), bit_array.from_string(body)),
+      ),
+    ],
+    body,
+  )
+}
 
-pub const marta = "marta; manager"
+/// The bearer tokens of the test clinic's staff: Felipe and Bia at
+/// reception, Marta the manager.
+pub const felipe = "felipe-test-token-4f0c2a9d6e1b7c35"
+
+pub const bia = "bia-test-token-91d7e3a05c2f8b46aa"
+
+pub const marta = "marta-test-token-c8a1f47e2d905b63"
+
+fn staff() -> access.Staff {
+  let assert Ok(staff) =
+    access.staff([
+      #(felipe, domain.validator("felipe", [domain.reception])),
+      #(bia, domain.validator("bia", [domain.reception])),
+      #(marta, domain.validator("marta", [domain.manager])),
+    ])
+  staff
+}
+
+/// The secret the test channel signs with.
+pub fn channel() -> access.ChannelSecret {
+  let assert Ok(secret) =
+    access.channel_secret("test-channel-secret-7b2e9c41d08f5a36")
+  secret
+}
 
 /// Open a card over HTTP and return its ticket's `seen` with the document.
 pub fn open(

@@ -26,10 +26,17 @@ registrations that version 2 let proceed. `GET /pending` lists the messages
 still waiting for a recommendation, and since when. The LLM provider and the
 messaging provider are scripted servers on loopback.
 
-The desk identifies the validator from one header,
-`x-clinic-validator: <name>; <set>,<set>`, read by `web.authenticate`. It
-stands in for identity in this example: a real application puts its own
-sign-in there and resolves the decision sets a person holds from it.
+Nothing a request says about its sender is taken as identity
+(`clinic_registration/access`). A desk request carries
+`Authorization: Bearer <token>`, and the application's configured staff table
+resolves the token to a validator and the decision sets that validator holds. A
+webhook delivery carries `x-channel-signature: sha256=<hex>`, the HMAC-SHA256 of
+its body under the secret the clinic shares with the channel, checked before the
+body is parsed. Both are unset by default, and unset means closed: with no staff
+every desk route answers 401, and with no channel secret so does the webhook.
+The staff table stands in for the clinic's sign-in: an application with one
+verifies its session or access token in `access.authenticate` and looks the
+decision sets up by the verified subject.
 
 `decisions` resolves from Hex. `decisions_otp` and `decisions_postgres` resolve
 from their release tags in the

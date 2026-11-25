@@ -340,14 +340,14 @@ pub fn an_admission_that_waits_too_long_for_the_contact_is_delivered_again_test(
     <> "\",\"from\":\""
     <> phone
     <> "\",\"profile_name\":\"Ana\",\"text\":\"Oi\"}"
-  let first = support.call(env, http.Post, "/inbound", "", body)
+  let first = support.deliver(env, body)
   // The admission ended as contention and kept nothing: the channel is
   // told to deliver it again.
   assert first.status == 503
   assert support.status_of(env, message.id) == "absent"
   // Delivered again once the other transaction ended, it is admitted.
   process.sleep(2500)
-  let again = support.call(env, http.Post, "/inbound", "", body)
+  let again = support.deliver(env, body)
   assert again.status == 202
   let _ = support.await_status(env, message.id, "awaiting")
 }

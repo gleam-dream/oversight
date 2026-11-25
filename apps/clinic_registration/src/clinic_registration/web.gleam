@@ -18,15 +18,17 @@
 ////   a registration the policy let proceed (reception may).
 //// - `GET /pending` lists the messages still waiting for a recommendation
 ////   and since when (`decisions_postgres/queue.pending`), for an operator.
-//// - `POST /inbound` is the channel's webhook for a new message. Its
-////   signature is not verified: anyone who can reach the route can deliver
-////   a message.
+//// - `POST /inbound` is the channel's webhook for a new message. Its body
+////   must carry the channel's signature in `x-channel-signature`
+////   (`access.sign`); any other delivery is a 401 and admits nothing.
 ////
-//// The desk routes need `x-clinic-validator: <name>; <set>,<set>`, read by
-//// `authenticate` alone. This header is the stand-in for identity in this
-//// example: a real application resolves the validator and the decision
-//// sets they hold from its own sign-in.
+//// The desk routes need `Authorization: Bearer <token>` for a member of
+//// the application's staff table (`access.authenticate`); the validator
+//// and the decision sets they hold come from that table, never from the
+//// request. With no staff or no channel secret configured, the routes
+//// that need them refuse every request.
 
+import clinic_registration/access.{type ChannelSecret, type Staff}
 import clinic_registration/desk
 import clinic_registration/domain.{type Inbound, type Registration}
 import clinic_registration/jobs
@@ -40,13 +42,13 @@ import decisions/vocabulary.{
 import decisions/wire
 import decisions_postgres
 import decisions_postgres/queue
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http.{Get, Post}
 import gleam/http/request
 import gleam/json
-import gleam/list
-import gleam/option.{None}
+import gleam/option.{type Option, None}
 import gleam/result
 import gleam/string
 import mist
@@ -60,6 +62,10 @@ pub type Routes {
     db: pog.Connection,
     desk: Desk(Registration, pog.Connection),
     admit: fn(Inbound) -> Result(jobs.Admission, String),
+    /// Who may use the desk, and as whom.
+    staff: Staff,
+    /// The messaging channel's signing secret; `None` refuses the webhook.
+    channel: Option(ChannelSecret),
   )
 }
 
@@ -85,7 +91,7 @@ pub fn handle(req: wisp.Request, routes: Routes) -> wisp.Response {
   case req.method, wisp.path_segments(req) {
     Post, ["inbound"] -> inbound(req, routes)
     method, segments -> {
-      use validator <- require_validator(req)
+      use validator <- require_validator(req, routes)
       case method, segments {
         Get, ["queue"] -> show_queue(routes, validator)
         Post, ["cards", id, "open"] -> open(routes, validator, id)
@@ -102,36 +108,21 @@ pub fn handle(req: wisp.Request, routes: Routes) -> wisp.Response {
   }
 }
 
-/// The validator a request acts as, from `x-clinic-validator`. The one
-/// place this example decides who is asking.
-pub fn authenticate(header: Result(String, Nil)) -> Result(Validator, Nil) {
-  use value <- result.try(header)
-  let #(name, sets) = case string.split_once(value, ";") {
-    Ok(#(name, sets)) -> #(name, sets)
-    Error(Nil) -> #(value, "")
-  }
-  let holds =
-    string.split(sets, ",")
-    |> list.map(string.trim)
-    |> list.filter(fn(set) { set != "" })
-  case string.trim(name) {
-    "" -> Error(Nil)
-    name -> Ok(domain.validator(name, holds))
-  }
-}
-
+/// Every desk route acts as one validator, resolved from the bearer token
+/// before the body is read. No token, or one the staff table does not
+/// know, is a 401.
 fn require_validator(
   req: wisp.Request,
+  routes: Routes,
   next: fn(Validator) -> wisp.Response,
 ) -> wisp.Response {
-  case authenticate(request.get_header(req, "x-clinic-validator")) {
+  case
+    access.authenticate(routes.staff, request.get_header(req, "authorization"))
+  {
     Ok(validator) -> next(validator)
     Error(Nil) ->
-      error_response(
-        401,
-        "unauthenticated",
-        "name the validator in x-clinic-validator",
-      )
+      error_response(401, "unauthenticated", "send a staff bearer token")
+      |> wisp.set_header("www-authenticate", "Bearer")
   }
 }
 
@@ -334,11 +325,16 @@ fn verdict_name(verdict: Verdict(Registration)) -> String {
   }
 }
 
-/// The messaging channel's webhook. This example does not verify the
-/// webhook's signature, so it is not a verified webhook: a real application
-/// checks the channel's signature before it admits anything.
+/// The messaging channel's webhook. The signature is checked over the
+/// exact bytes received, before they are parsed.
 fn inbound(req: wisp.Request, routes: Routes) -> wisp.Response {
-  use body <- wisp.require_json(req)
+  use <- wisp.require_content_type(req, "application/json")
+  use body <- wisp.require_bit_array_body(req)
+  let signature = request.get_header(req, access.signature_header)
+  use <- bool.guard(
+    !access.verified(routes.channel, signature, body),
+    error_response(401, "unsigned", "the channel's signature did not verify"),
+  )
   let decoder = {
     use id <- decode.field("id", decode.string)
     use contact <- decode.field("from", decode.string)
@@ -346,7 +342,7 @@ fn inbound(req: wisp.Request, routes: Routes) -> wisp.Response {
     use text <- decode.field("text", decode.string)
     decode.success(domain.Inbound(id:, contact:, profile_name:, text:))
   }
-  case decode.run(body, decoder) {
+  case json.parse_bits(body, decoder) {
     Error(_) ->
       error_response(
         422,

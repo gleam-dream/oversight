@@ -12,6 +12,7 @@
 //// a job for every pending wake-up and undelivered settlement notice that
 //// has none, such as one whose job was lost or pruned.
 
+import clinic_registration/access.{type ChannelSecret, type Staff}
 import clinic_registration/desk
 import clinic_registration/domain.{type Inbound, type Registration}
 import clinic_registration/jobs
@@ -27,6 +28,7 @@ import decisions_postgres
 import gleam/erlang/process
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import grind
@@ -62,6 +64,12 @@ pub type Config {
     lease: Duration,
     /// The Grind schema; a restart reuses it.
     jobs_schema: String,
+    /// Who may use the desk, by bearer token. `access.nobody()`, the
+    /// default, refuses every desk request.
+    staff: Staff,
+    /// The messaging channel's signing secret. `None`, the default,
+    /// refuses every webhook delivery.
+    channel: Option(ChannelSecret),
   )
 }
 
@@ -87,6 +95,8 @@ pub fn default_config(
     after_model: fn(_) { Nil },
     lease: duration.seconds(6),
     jobs_schema: "clinic_jobs",
+    staff: access.nobody(),
+    channel: None,
   )
 }
 
@@ -199,7 +209,16 @@ pub fn start(config: Config) -> Result(App, String) {
     use swept <- result.try(prepared)
     let secret = wisp.random_string(64)
     owner.start(fn() {
-      web.start(web.Routes(db:, desk: registration, admit:), secret)
+      web.start(
+        web.Routes(
+          db:,
+          desk: registration,
+          admit:,
+          staff: config.staff,
+          channel: config.channel,
+        ),
+        secret,
+      )
     })
     |> result.map(fn(started) { #(started, swept) })
   }
