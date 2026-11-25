@@ -199,7 +199,11 @@ fn place_and_finish(
     orders.place(application.services, application.checkout_worker, placed)
   let _ = await_job(application, job_id)
   let assert Some(recorded) =
-    db.order_status(application.services.pool, "alice", placed.order_id)
+    db.order_status(
+      application.services.pool,
+      "alice",
+      domain.order_id_to_string(placed.order_id),
+    )
   recorded
 }
 
@@ -1003,7 +1007,7 @@ pub fn internal_errors_stay_out_of_stored_details_test() {
 pub fn order_ids_outside_the_safe_alphabet_are_refused_test() {
   use application <- with_app(fn(c) { c })
   let assert Ok(Nil) = set_stock(application.services.pool, "id-sku", 9)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let token = providers.tokenise(application.providers, providers.card_ok)
   list.each(
     ["", "a/b", "a#b", "a?b", "a b", "a%2Fb", "..", string.repeat("a", 65)],

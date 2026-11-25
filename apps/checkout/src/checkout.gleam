@@ -196,8 +196,9 @@ fn narrate(
       )
       case buffered.response.status {
         202 -> {
-          await_outcome(customer, bearer, base, order.order_id, 200)
-          show(customer, bearer, base, order.order_id)
+          let id = domain.order_id_to_string(order.order_id)
+          await_outcome(customer, bearer, base, id, 200)
+          show(customer, bearer, base, id)
         }
         _ -> Nil
       }

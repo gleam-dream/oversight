@@ -169,7 +169,7 @@ pub fn place(
           grind.submit_in(s.jobs, tx, checkout)
           |> result.map_error(fn(error) {
             log_internal(
-              order.order_id,
+              order_text(order),
               "durable admission failed",
               grind.describe_submit_error(error),
             )
@@ -180,7 +180,7 @@ pub fn place(
         use Nil <- result.try(
           db.set_job(tx, order, job_id)
           |> result.map_error(fn(error) {
-            log_internal(order.order_id, "job not recorded", error)
+            log_internal(order_text(order), "job not recorded", error)
             StoreUnavailable
           }),
         )
@@ -241,14 +241,14 @@ pub fn finalize(
       case confirm_with_receipt(s, order, detail) {
         Ok(_) -> Ok(report)
         Error(error) -> {
-          log_internal(order_text(order), "confirmation not recorded", error)
+          log_internal(order.order_id, "confirmation not recorded", error)
           Error(Unrecorded(report))
         }
       }
     }
     execution.Failed(cause, settlement) -> {
       let #(detail, error) = describe_cause(cause)
-      log_cause(order_text(order), error)
+      log_cause(order.order_id, error)
       record(
         s,
         order,
@@ -262,7 +262,7 @@ pub fn finalize(
       )
     }
     execution.Unresolved(step, evidence, settlement) -> {
-      log_cause(order_text(order), Ok(evidence))
+      log_cause(order.order_id, Ok(evidence))
       let detail =
         saga.address_to_string(step)
         <> " held: "
@@ -309,7 +309,7 @@ pub fn record(
   case db.set_status(s.pool, order, report.status, report.detail) {
     Ok(Nil) -> Ok(report)
     Error(error) -> {
-      log_internal(order_text(order), "outcome not recorded", error)
+      log_internal(order.order_id, "outcome not recorded", error)
       Error(Unrecorded(report))
     }
   }
@@ -373,7 +373,7 @@ pub fn receipt_job(
     s.receipt_worker,
     ReceiptRequest(
       order.customer_id,
-      order_text(order),
+      order.order_id,
       order.email,
       order.amount_cents,
     ),

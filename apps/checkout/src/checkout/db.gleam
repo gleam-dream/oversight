@@ -387,7 +387,7 @@ pub fn set_status(
      WHERE customer_id = $1 AND order_id = $2",
   )
   |> pog.parameter(pog.text(order.customer_id))
-  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
+  |> pog.parameter(pog.text(order.order_id))
   |> pog.parameter(pog.text(domain.status_to_string(status)))
   |> pog.parameter(pog.text(detail))
   |> pog.execute(conn)
@@ -405,7 +405,7 @@ pub fn set_job(
     "UPDATE orders SET job_id = $3 WHERE customer_id = $1 AND order_id = $2",
   )
   |> pog.parameter(pog.text(order.customer_id))
-  |> pog.parameter(pog.text(order.order_id))
+  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
   |> pog.parameter(pog.int(job_id))
   |> pog.execute(conn)
   |> result.replace(Nil)
