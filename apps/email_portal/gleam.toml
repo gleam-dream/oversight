@@ -5,8 +5,8 @@ description = "Retained Correio consumer: captured delivery, development inspect
 licences = ["Apache-2.0"]
 
 [dependencies]
-correio = ">= 0.1.0 and < 0.2.0"
-correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "correio_mailbox-v0.1.1", path = "adapters/correio_mailbox" }
+correio = { git = "https://github.com/gleam-dream/correio.git", ref = "c45c4b227b862c926f361265ef298c69dcbfa429" }
+correio_mailbox = { git = "https://github.com/gleam-dream/correio.git", ref = "c45c4b227b862c926f361265ef298c69dcbfa429", path = "adapters/correio_mailbox" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_http = ">= 4.4.0 and < 5.0.0"
 envoy = ">= 1.2.0 and < 2.0.0"

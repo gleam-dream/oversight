@@ -15,17 +15,15 @@ pog = ">= 4.1.0 and < 4.2.0"
 pgo = ">= 0.20.0 and < 0.21.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = ">= 0.4.0 and < 0.5.0"
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "fabric_postgres-v0.3.0", path = "integrations/fabric_postgres" }
-grind = ">= 0.1.1 and < 0.2.0"
-saga = ">= 0.2.0 and < 0.3.0"
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.1.0", path = "integrations/saga_postgres" }
-relay = ">= 0.2.1 and < 0.3.0"
-hellhound = ">= 0.3.0 and < 0.4.0"
-json_blueprint = ">= 2.2.0 and < 3.0.0"
-# Owner-bound handlers and the bounded collector, unreleased
-# (gleam-dream/sinal#15). Replace with the Hex release once published.
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "3871be23e72754345c0525b067e518fefb3b434d" }
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "3871be23e72754345c0525b067e518fefb3b434d", path = "integrations/fabric_postgres" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "22802b7f3015f72e7775c67ee3ed3079a0229319" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "7349b1bb853912910eb51f9a4dfa65dcb1dd2452" }
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "7349b1bb853912910eb51f9a4dfa65dcb1dd2452", path = "integrations/saga_postgres" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "e9181a132f5e45324611898152d2729a25a102b2" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" }
+json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "3adcf515bcc91beb8b40f025c5dc81c4f863b1cf" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
 # decisions is on Hex. decisions_postgres is released as a Git tag of
 # gleam-dream/decisions, as fabric_postgres and saga_postgres are above.
 decisions = ">= 0.1.0 and < 0.2.0"

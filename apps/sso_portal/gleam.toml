@@ -16,11 +16,9 @@ wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 5.0.0 and < 7.0.0"
 pog = ">= 4.0.0 and < 5.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-hellhound = ">= 0.3.0 and < 0.4.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-# Owner-bound handlers and the bounded collector, unreleased
-# (gleam-dream/sinal#15). Replace with the Hex release once published.
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0d6558c9ede95fab9a6bbf287ecd363e05b0fbcb" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

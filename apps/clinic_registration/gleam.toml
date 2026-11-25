@@ -17,16 +17,12 @@ pog = ">= 4.1.0 and < 4.2.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-grind = ">= 0.1.1 and < 0.2.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-llm_wire = ">= 0.2.0 and < 0.3.0"
-json_blueprint = ">= 2.2.0 and < 3.0.0"
-# Owner-bound handlers and the bounded collector, unreleased
-# (gleam-dream/sinal#15). Replace with the Hex release once published.
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
-# Staff sign in through OIDC. Pinned to the unreleased sealed-cookie login
-# (gleam-dream/hellhound#35) until it is on Hex.
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "28999beadc6348674650d5c1b9f02d5dd374ef96" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "22802b7f3015f72e7775c67ee3ed3079a0229319" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0d6558c9ede95fab9a6bbf287ecd363e05b0fbcb" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "016d71c3a68ee8eaedc818821ba16ee65427a3f3" }
+json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "3adcf515bcc91beb8b40f025c5dc81c4f863b1cf" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" }
 # The core is on Hex. The two integrations are released as Git tags of
 # gleam-dream/decisions.
 decisions = ">= 0.1.0 and < 0.2.0"

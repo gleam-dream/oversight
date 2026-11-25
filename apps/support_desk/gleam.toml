@@ -12,15 +12,13 @@ gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
 mist = ">= 6.0.2 and < 7.0.0"
-fabric = ">= 0.4.0 and < 0.5.0"
-saga = ">= 0.2.0 and < 0.3.0"
-llm_wire = ">= 0.2.0 and < 0.3.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-json_blueprint = ">= 2.2.0 and < 3.0.0"
-# Owner-bound handlers and the bounded collector, unreleased
-# (gleam-dream/sinal#15). Replace with the Hex release once published.
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
-hellhound = ">= 0.3.0 and < 0.4.0"
+fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "3871be23e72754345c0525b067e518fefb3b434d" }
+saga = { git = "https://github.com/gleam-dream/saga.git", ref = "7349b1bb853912910eb51f9a4dfa65dcb1dd2452" }
+llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "016d71c3a68ee8eaedc818821ba16ee65427a3f3" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0d6558c9ede95fab9a6bbf287ecd363e05b0fbcb" }
+json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "3adcf515bcc91beb8b40f025c5dc81c4f863b1cf" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
