@@ -39,6 +39,12 @@ pub const reviewers = "reviewers"
 /// The world event that supersedes a waiting recommendation about a post.
 pub const edited = "post_edited"
 
+/// The world event that supersedes a waiting recommendation about a post
+/// when the gated tool refused a verdict's release about it: whatever
+/// made the tool refuse, no verdict can be released through it, so no
+/// moderator is asked again.
+pub const release_refused = "release_refused"
+
 /// Minutes an occurrence waits before it goes to seniors.
 pub const escalate_after_minutes = 30
 
@@ -90,6 +96,7 @@ pub fn declaration() -> decisions.Point(Action) {
   |> decisions.signal(new_author())
   |> decisions.valid_for(duration.minutes(valid_minutes))
   |> decisions.superseded_by(edited)
+  |> decisions.superseded_by(release_refused)
   |> decisions.reviewed_by(reviewers)
   |> decisions.withdrawn_by(seniors)
 }

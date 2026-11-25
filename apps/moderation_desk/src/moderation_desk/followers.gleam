@@ -13,6 +13,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import moderation_desk/domain.{type Action, type Settlement}
+import moderation_desk/point
 import moderation_desk/wiring
 
 /// The platform's reading of how an occurrence ended. `Error` for one
@@ -20,6 +21,11 @@ import moderation_desk/wiring
 pub fn settlement(known: Occurrence(Action)) -> Result(Settlement, Nil) {
   case known.status {
     occurrence.Released(final:, ..) -> Ok(domain.Decided(final))
+    // The gated tool refused a verdict on it: it ended for every
+    // moderator, unreleased.
+    occurrence.Expired(cause: Superseded(event))
+      if event == point.release_refused
+    -> Ok(domain.Unreleased(domain.ReleaseRefused))
     occurrence.Expired(cause: Superseded(_)) -> Ok(domain.Superseded)
     occurrence.Expired(cause: DeadlinePassed) ->
       Ok(domain.Unreleased(domain.NobodyDecided))
@@ -44,7 +50,8 @@ pub fn revision_of(known: Occurrence(Action)) -> Result(Int, Nil) {
 /// decision will. An edit supersedes what is expected, waiting or held,
 /// but not what is released: a release committed just before the edit
 /// can have its settlement delivered just after it, and that one must not
-/// overwrite the new revision's visibility.
+/// overwrite the new revision's visibility. A settlement about a post that
+/// no longer exists changes nothing.
 ///
 /// A record that ended before it began recommended nothing, so nothing
 /// follows it: an edit superseded it, and the edit's own decision will.
@@ -75,10 +82,22 @@ fn occurrence_settled(
       decisions.DeskRefused(decisions.StoreFailed(error))
     }),
   )
-  use post <- result.try(
-    wiring.post(tx, post_id)
-    |> result.replace_error(decisions.ApplicationFailed("no post " <> post_id)),
-  )
+  // A post that no longer exists has nothing to show, hide or notify
+  // about: the record keeps how its decision ended. This is how a card
+  // ends when the gated tool refused a verdict because the post was gone.
+  case wiring.post(tx, post_id) {
+    Error(Nil) -> Ok(Nil)
+    Ok(post) -> follow(tx, known, found, post)
+  }
+}
+
+fn follow(
+  tx: Tx,
+  known: Occurrence(Action),
+  found: Settlement,
+  post: domain.Post,
+) -> Result(Nil, HandlerFailure) {
+  let post_id = post.id
   case revision_of(known) == Ok(post.revision) {
     False -> Ok(Nil)
     True -> {

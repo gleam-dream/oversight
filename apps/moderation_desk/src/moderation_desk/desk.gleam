@@ -17,17 +17,19 @@
 //// is not keeping up, the process is told how many it missed and reads
 //// its queues again.
 ////
-//// A verdict the gated tool refuses at release rolls back; the desk keeps
-//// the attempt on the record as a `verdict_refused` entry, in a
-//// transaction of its own. When that write fails, the process crashes
-//// before it lets go of the claim: its supervisor starts it again, and the
-//// new process finds the claim, opens the card again and records the
-//// refusal of that showing. A person whose refusal is on the record does
-//// not open the card again, so a refusal is recorded once per person and
-//// card, after a restart too.
+//// A verdict the gated tool refuses at release rolls back. The tool
+//// refused the verdict, not the person: in a transaction of its own, the
+//// desk keeps the attempt on the record as a `verdict_refused` entry,
+//// reports the refused release as the world event
+//// `point.release_refused`, which supersedes every waiting occurrence
+//// about the post, and removes the claim. The card has then ended, so it
+//// is in nobody's queue, and its settlement says the release was refused.
+//// When that transaction fails, the process crashes before it lets go of
+//// the claim: its supervisor starts it again, and the new process finds
+//// the claim, opens the card again and records the refusal of that
+//// showing. A refusal is recorded once per card, after a restart too.
 
 import decisions.{type Desk, type Ticket}
-import decisions/entry
 import decisions/model
 import decisions/occurrence
 import decisions/view
@@ -268,19 +270,16 @@ fn poll(state: State) -> State {
   }
 }
 
-/// A card opened for the person: its ticket and the verdict they reached
-/// reading it.
+/// A card opened for the person: its ticket, who it is about, and the
+/// verdict they reached reading it.
 type Opened {
-  Opened(ticket: Ticket, verdict: Verdict(Action))
+  Opened(ticket: Ticket, subject: vocabulary.Subject, verdict: Verdict(Action))
 }
 
 /// Why a card could not be opened.
 type NotOpened {
   /// Another person holds it.
   Taken
-  /// The gated tool refused this person's verdict on it, and the record
-  /// keeps the refusal: the card is left to others.
-  RefusedBefore
   /// The desk refused to open it.
   Unopened(decisions.Refusal)
 }
@@ -332,11 +331,7 @@ fn open(state: State, id: String) -> Result(Opened, NotOpened) {
     )
     use Nil <- result.try(case store.get(tx, wiring.claims, id) {
       Ok(holder) if holder != me -> Error(Taken)
-      _ -> Ok(Nil)
-    })
-    use Nil <- result.try(case refused_before(state.desk, tx, id, me) {
-      True -> Error(RefusedBefore)
-      False -> Ok(store.put(tx, wiring.claims, id, me))
+      _ -> Ok(store.put(tx, wiring.claims, id, me))
     })
     use card <- result.try(
       decisions.open(
@@ -375,6 +370,7 @@ fn open(state: State, id: String) -> Result(Opened, NotOpened) {
     )
     Ok(Opened(
       ticket: decisions.ticket(card),
+      subject: decisions.shown(card).subject,
       verdict: scripted.judge(
         post,
         shown.standing,
@@ -382,26 +378,6 @@ fn open(state: State, id: String) -> Result(Opened, NotOpened) {
       ),
     ))
   })
-}
-
-/// Whether the record keeps a verdict of `me` on the occurrence that the
-/// gated tool refused.
-fn refused_before(
-  desk: Desk(Action, Tx),
-  tx: Tx,
-  id: String,
-  me: String,
-) -> Bool {
-  case decisions.read(desk, tx, occurrence: id) {
-    Ok(known) ->
-      list.any(known.entries, fn(recorded) {
-        case recorded.event {
-          entry.VerdictRefused(by:, ..) -> by == me
-          _ -> False
-        }
-      })
-    Error(_) -> False
-  }
 }
 
 /// Give the verdict on the ticket's card, in a transaction that also
@@ -457,35 +433,50 @@ fn give(state: State, opened: Opened, tries: Int) -> State {
           process.sleep(5)
           give(state, opened, tries - 1)
         }
-        _, _ -> refused(state, id, refusal)
+        _, _ -> refused(state, opened, refusal)
       }
   }
 }
 
-fn refused(state: State, id: String, refusal: decisions.Refusal) -> State {
+fn refused(state: State, opened: Opened, refusal: decisions.Refusal) -> State {
   let me = state.person.validator.subject
+  let id = opened.ticket.occurrence
   case refusal {
-    // Keep the attempt on the record, in a transaction of its own. The
-    // process must not go on without it: it crashes still holding the
-    // claim, and the restarted process opens the card again.
+    // The tool refused the verdict, not the person: the card ends for
+    // everyone, with the attempt on the record. The process must not go
+    // on without that commit: it crashes still holding the claim, and the
+    // restarted process opens the card again.
     decisions.ToolRefused(rollback:, ..) -> {
-      let assert Ok(_) =
+      let assert Ok(Nil) =
         store.transaction(state.store, fn(tx) {
-          decisions.record_refusal(state.desk, tx, rollback)
+          // The subject lock before the record, in the order `happened`
+          // takes them, so an edit of the post cannot deadlock with this.
+          use Nil <- result.try(
+            wiring.lock_subject(tx, opened.subject)
+            |> result.map_error(decisions.StoreFailed),
+          )
+          use _ <- result.try(decisions.record_refusal(state.desk, tx, rollback))
+          use _ <- result.try(decisions.happened(
+            state.desk,
+            tx,
+            point.release_refused,
+            about: opened.subject,
+          ))
+          release_claim(tx, id, me)
+          Ok(Nil)
         })
         as "the refused verdict was not recorded"
       Nil
     }
-    _ -> Nil
+    _ -> {
+      let _ =
+        store.transaction(state.store, fn(tx) {
+          release_claim(tx, id, me)
+          Ok(Nil)
+        })
+      Nil
+    }
   }
-  let _ =
-    store.transaction(state.store, fn(tx) {
-      case store.get(tx, wiring.claims, id) {
-        Ok(holder) if holder == me -> store.remove(tx, wiring.claims, id)
-        _ -> Nil
-      }
-      Ok(Nil)
-    })
   let stale = refusal == decisions.OutputChanged
   sinal.emit(
     telemetry.card_refused(),
@@ -502,6 +493,14 @@ fn refused(state: State, id: String, refusal: decisions.Refusal) -> State {
     True -> Snapshot(..state.snapshot, stale: state.snapshot.stale + 1)
     False -> state.snapshot
   })
+}
+
+/// Remove `me`'s claim on the card, in the caller's transaction.
+fn release_claim(tx: Tx, id: String, me: String) -> Nil {
+  case store.get(tx, wiring.claims, id) {
+    Ok(holder) if holder == me -> store.remove(tx, wiring.claims, id)
+    _ -> Nil
+  }
 }
 
 /// The decision sets a moderator, a senior and a reviewer hold.
