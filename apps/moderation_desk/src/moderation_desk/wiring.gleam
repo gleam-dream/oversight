@@ -63,11 +63,17 @@ pub const renderer = "moderation-card-1"
 /// The desk of the point over the store. It holds no state: build it
 /// wherever it is needed.
 pub fn desk() -> Desk(Action, Tx) {
+  desk_over(store.port())
+}
+
+/// The desk of the point over `port`: the store's own port, or one a test
+/// wraps to make a write fail.
+pub fn desk_over(port: port.Port(Tx)) -> Desk(Action, Tx) {
   decisions.desk(
     point.declaration(),
     drives: fn(_) { gated() },
     under: current_policy,
-    over: store.port(),
+    over: port,
   )
 }
 

@@ -63,6 +63,9 @@ pub type Config {
     timing: models.Timing,
     faults: fn(Post, Int) -> Fault,
     people: List(Person),
+    /// The port every desk of the application writes the record through.
+    /// A test wraps the store's own port to make a write fail.
+    port: port.Port(Tx),
   )
 }
 
@@ -92,6 +95,7 @@ pub fn config() -> Config {
       person(desk.senior("carla"), Moderating),
       person(desk.reviewer("dev"), Reviewing),
     ],
+    port: store.port(),
   )
 }
 
@@ -123,7 +127,7 @@ pub fn start(config: Config) -> Result(App, String) {
     list.map(config.people, fn(person) {
       #(person, process.new_name("moderation_desk_person"))
     })
-  let desk = wiring.desk()
+  let desk = wiring.desk_over(config.port)
   let desk_tree =
     list.fold(
       people,
@@ -173,7 +177,7 @@ fn runtime_config(
   source: String,
   control: runtime.Control,
 ) -> runtime.Config(Tx) {
-  let desk = wiring.desk()
+  let desk = wiring.desk_over(config.port)
   let env =
     models.Env(
       store: s,
