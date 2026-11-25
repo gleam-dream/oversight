@@ -23,7 +23,7 @@ json_blueprint = ">= 2.2.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
 # Staff sign in through OIDC. Pinned to the unreleased sealed-cookie login
 # (gleam-dream/hellhound#35) until it is on Hex.
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "b5f5a255601df16fe5482c4c0f2c0dff4ba88e82" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "28999beadc6348674650d5c1b9f02d5dd374ef96" }
 # The core is on Hex. The two integrations are released as Git tags of
 # gleam-dream/decisions.
 decisions = ">= 0.1.0 and < 0.2.0"
