@@ -911,6 +911,40 @@ pub fn durable_checkout_retries_an_unrecorded_confirmation_test() {
   assert stock(application, "redo-sku") == 1
 }
 
+// --- telemetry bound ----------------------------------------------------------------
+
+/// The collector holds at most its capacity. Beyond it the oldest entries
+/// are discarded and counted, so a long-running application's telemetry
+/// does not grow with the number of orders, and the newest events stay
+/// readable.
+pub fn the_collector_keeps_at_most_its_capacity_test() {
+  use application <- with_app(fn(c) { app.Config(..c, telemetry_capacity: 8) })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "bound-sku", 3)
+  let place = fn(id) {
+    let assert Ok(orders.Started(report)) =
+      orders.place_local(
+        services,
+        order(application, id, "bound-sku", providers.card_ok, "10 Main St"),
+      )
+    assert report.status == domain.Confirmed
+    assert eventually(fn() { db.receipt_sent(services.pool, "alice", id) }, 100)
+  }
+  place("bound-1")
+  place("bound-2")
+  // Let forwarded events of the last order arrive.
+  let _ = telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+
+  let usage = telemetry.usage(services.collector)
+  assert usage.held == 8
+  assert usage.dropped > 0
+  // The first order's events were the oldest; the last order's remain.
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-1")))
+    == []
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+    != []
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
@@ -1540,4 +1574,43 @@ pub fn an_outdated_schema_is_refused_at_boot_test() {
     |> pog.returning(decode.at([0], decode.int))
     |> pog.execute(legacy)
   assert columns.rows == [0]
+}
+
+@external(erlang, "checkout_test_ffi", "registered_name")
+fn registered_name(pid: process.Pid) -> String
+
+@external(erlang, "checkout_test_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process attaches the twelve handlers and owns them:
+/// while the application runs they are attached once, a replacement
+/// collector takes them over instead of adding a second set, and once the
+/// application stops none is left.
+pub fn telemetry_handlers_live_as_long_as_the_collector_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(application) = app.start(app.default_config(url))
+  let prefix = "sinal/collector:checkout_collector"
+  assert collector_handlers(prefix) == 12
+  let is_collector = fn(pid) {
+    string.starts_with(registered_name(pid), "checkout_collector")
+  }
+  let assert Ok(collector) = list.find(workers(application), is_collector)
+  let monitor = process.monitor(collector)
+  fail(collector)
+  let assert Ok(Nil) =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(_) { Nil })
+    |> process.selector_receive(5000)
+  assert eventually(
+    fn() {
+      case list.find(workers(application), is_collector) {
+        Ok(replacement) -> replacement != collector
+        Error(Nil) -> False
+      }
+    },
+    100,
+  )
+  assert collector_handlers(prefix) == 12
+  app.stop(application)
+  assert eventually(fn() { collector_handlers(prefix) == 0 }, 100)
 }

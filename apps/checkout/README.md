@@ -54,7 +54,12 @@ collector, and each restarts alone. A service group starts the provider client, 
 together with the ones started after it. The application reaches each of them by a
 name made once at start, so a restart does not invalidate a handle. A restart restores
 processes, not state: jobs and sagas resume from PostgreSQL, and the collector starts
-empty. `Config.port` sets the API port; with 0 the listener binds a free port, which
+empty. The collector is Sinal's bounded collector: its process attaches the telemetry
+handlers and owns them, so they exist exactly while it runs and a restart attaches them
+again. It keeps the newest `Config.telemetry_capacity` entries (10,000 by default);
+`telemetry.usage` reads how many it holds and how many it overwrote. Sinal is pinned to
+an unreleased commit that carries owner-bound handlers and the collector. `Config.port`
+sets the API port; with 0 the listener binds a free port, which
 `app.port` reads and which changes when the listener restarts. `app.stop` stops the
 tree in reverse order and waits for it.
 
