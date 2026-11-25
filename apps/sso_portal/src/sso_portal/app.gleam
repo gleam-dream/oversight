@@ -195,7 +195,6 @@ fn start_hellhound(
     testing.config(provider, portal_url <> "/callback")
     |> config.with_scopes(["email"])
     |> config.with_custody_store(records)
-    |> config.with_transaction_store(records)
     |> config.with_sealing_key(sealing_key)
   let configuration = case options.clock_tolerance {
     Some(tolerance) -> config.with_clock_tolerance(configuration, tolerance)
@@ -254,11 +253,11 @@ fn start_billing_client(
   telemetry: Telemetry,
 ) -> Result(http_gun.Client, String) {
   gun_config.default()
-  |> gun_config.with_request_timeout(gun_config.After(duration.seconds(5)))
   |> gun_config.with_connect_timeout(duration.seconds(1))
   |> gun_config.with_observations(telemetry.forwarder(telemetry))
   |> gun_config.with_destination(destination.loopback_only())
   |> http_gun.start
+  |> result.map(http_gun.with_timeout(_, duration.seconds(5)))
   |> result.map_error(fn(failure) {
     "billing client: " <> http_gun.describe_start_error(failure)
   })

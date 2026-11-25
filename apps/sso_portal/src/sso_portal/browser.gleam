@@ -30,9 +30,9 @@ pub fn new(root_der: BitArray) -> Browser {
   let assert Ok(client) =
     config.default()
     |> config.with_trust(config.Anchors([root_der]))
-    |> config.with_request_timeout(config.After(duration.seconds(10)))
     |> config.with_destination(destination.loopback_only())
     |> http_gun.start
+    |> result.map(http_gun.with_timeout(_, duration.seconds(10)))
   Browser(client:, jar: dict.new())
 }
 

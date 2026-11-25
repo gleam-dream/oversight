@@ -294,7 +294,7 @@ pub fn tampered_callback_state_is_rejected_test() {
   let tampered = before <> "state=x" <> after
   let assert Ok(#(_, page)) = browser.get(b, tampered)
   assert page.status == 400
-  assert string.contains(page.body, "unknown state")
+  assert string.contains(page.body, "no login cookie for this state")
   // The code was never exchanged and no session exists.
   assert testing.requests(portal.provider).code_grants == 0
   assert rows(portal) == 0
