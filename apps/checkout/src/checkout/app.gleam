@@ -15,7 +15,8 @@
 ////    ├─ http client      provider calls
 ////    ├─ grind            the pool, both queues, the workers
 ////    ├─ endpoint         the port the listener is bound to
-////    └─ listener         the order API
+////    ├─ listener         the order API
+////    └─ sweeper          resolves pending orders nothing will finish
 //// ```
 ////
 //// Observation is optional to the work: http_gun and the telemetry

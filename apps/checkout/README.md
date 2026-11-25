@@ -12,9 +12,11 @@ customer gets the token by sending the card number to the payment provider
 (`POST /tokens`), so the order API never receives a card number. The server prices
 the order from its catalog, and a body that carries an amount or any other unknown
 field is refused with 422. The checkout saga reserves stock, charges the token and
-books a shipment, compensating in reverse on failure. `POST /orders?mode=durable`
-records the order and enqueues a Grind job in one transaction, and the job drives
-the same saga durably. `GET /orders/:id` reads the order row. Error bodies carry a
+books a shipment, compensating in reverse on failure. Every placement is durable:
+`POST /orders` records the pending order, enqueues a Grind job and names the job on
+the order in one transaction, and answers 202 with the job id. The job drives the
+saga durably and records the outcome on the order. `GET /orders/:id` reads the order
+row. Error bodies carry a
 stable `error` code; internal detail goes to the log.
 
 Every route needs `Authorization: Bearer <token>` for a customer in the app's
@@ -26,17 +28,20 @@ quantity answers 409. Order ids are scoped to the customer: another customer pla
 under the same id creates a separate order of their own and never touches or learns
 about the first.
 
-`POST /orders` without `?mode=durable` answers only after the saga's outcome is
-recorded. A saga that cannot start is recorded as rejected. A saga still running after
-the request's budget (60 seconds) is cancelled, and the outcome it settles on is
-recorded before the reply, so the order never stays pending behind a local placement.
+A job ends only after the order row holds the saga's outcome. When the row cannot be
+written, the job snoozes, and its redelivery reads the saved saga outcome and repeats
+the write, up to Grind's snooze limit.
 
-A reply or a finished job reports only an outcome the order row holds. When the row
-cannot be written after the saga settles, the local placement answers 503 with
-`outcome_unrecorded` and the order stays `pending`; the log line names the order and
-the outcome, and nothing retries the write. The durable job snoozes instead: its
-redelivery reads the saved saga outcome and repeats the write, up to Grind's snooze
-limit.
+A supervised sweeper resolves orders that nothing will finish. Every
+`Config.sweep_every` (one minute by default) it looks at the orders pending longer
+than `Config.stale_after` (five minutes). It leaves an order whose job is still
+running or waiting. For an order whose job ended without recording an outcome, it
+records the saga's saved outcome with its receipt job, records `rejected` when the
+saga never started, and records `needs_reconciliation` when the saga stopped before
+it finished. An order with an uncertain job, or with no job, is held as
+`needs_reconciliation` as well. The sweeper never runs a saga step, so it never
+charges or books
+([ADR 0043](../../docs/adr/0043-place-every-checkout-order-durably.md)).
 
 At boot the app creates its tables and checks the shape of tables that already exist.
 A database holding tables from an earlier version, without the catalog price or the
@@ -48,7 +53,7 @@ tables, or use a fresh database.
 `app.start` starts one root supervisor and returns when the tree is up and the
 schemas are applied. An observation group holds the Sinal forwarder and the telemetry
 collector, and each restarts alone. A service group starts the provider client, Grind
-(with the pool), and the order API listener in that order, and restarts a failed child
+(with the pool), the order API listener and the sweeper in that order, and restarts a failed child
 together with the ones started after it. The application reaches each of them by a
 name made once at start, so a restart does not invalidate a handle. A restart restores
 processes, not state: jobs and sagas resume from PostgreSQL, and the collector starts
