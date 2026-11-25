@@ -8,6 +8,9 @@
   "https://github.com/gleam-dream/fabric.git" = {
     "4ca0dc17027d2ffa392cf0f1510b39f261ff2da1" = "sha256-5YdwrX38iw7M6yAL5m2g8WjI0B3G4eUTZts3HN9gjww=";
   };
+  "https://github.com/gleam-dream/hellhound.git" = {
+    "28999beadc6348674650d5c1b9f02d5dd374ef96" = "sha256-TwlDRorFPboQ3jNwH8kiqkKHjOE0e4Vokl0h17Tx35M=";
+  };
   "https://github.com/gleam-dream/saga.git" = {
     "0d345cacf777515f2c9401d1ad90f5d67b07f38e" = "sha256-sRZbIpxhuwqIjoMZhkE0Md6H5kUjyog3rr8S+8uefZs=";
   };
