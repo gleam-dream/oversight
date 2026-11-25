@@ -15,7 +15,8 @@
 ////    ├─ http client      provider calls
 ////    ├─ grind            the pool, both queues, the workers
 ////    ├─ endpoint         the port the listener is bound to
-////    └─ listener         the order API
+////    ├─ listener         the order API
+////    └─ sweeper          resolves pending orders nothing will finish
 //// ```
 ////
 //// Observation is optional to the work: http_gun drops an event while the
@@ -42,6 +43,7 @@ import checkout/gateway
 import checkout/jobs
 import checkout/orders.{type Services, Services}
 import checkout/providers.{type Providers}
+import checkout/sweeper
 import checkout/telemetry
 import checkout/web
 import checkout/workflow
@@ -85,6 +87,10 @@ pub type Config {
     /// How many telemetry entries the collector keeps; the oldest are
     /// discarded beyond it.
     telemetry_capacity: Int,
+    /// How often the sweeper looks for pending orders nothing will finish,
+    /// and how long an order must have been pending to be looked at.
+    sweep_every: Duration,
+    stale_after: Duration,
   )
 }
 
@@ -104,6 +110,8 @@ pub fn default_config(database_url: String) -> Config {
     customers: customers.from_list([]),
     port: 0,
     telemetry_capacity: 10_000,
+    sweep_every: duration.minutes(1),
+    stale_after: duration.minutes(5),
   )
 }
 
@@ -185,7 +193,6 @@ pub fn start(config: Config) -> Result(App, String) {
       workflow: checkout,
       persistence: workflow.persistence(checkout, saga_config),
       saga_config:,
-      local_budget: duration.seconds(60),
       receipt_worker: orders.receipt_worker(),
     )
   let checkout_worker =
@@ -239,6 +246,12 @@ pub fn start(config: Config) -> Result(App, String) {
       secret_key_base: secret,
       port: config.port,
       endpoint:,
+    ))
+    |> static_supervisor.add(sweeper.supervised(
+      services,
+      checkout_worker,
+      every: config.sweep_every,
+      stale_after: config.stale_after,
     ))
   let started =
     static_supervisor.new(static_supervisor.OneForOne)

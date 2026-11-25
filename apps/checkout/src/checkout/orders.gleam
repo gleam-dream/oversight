@@ -1,12 +1,14 @@
-//// Order placement and finalisation, shared by the local path (the HTTP
-//// handler runs the saga in-request) and the durable path (a grind job
-//// drives the saga through `saga/durable`).
+//// Order placement and finalisation. Placement records the pending order
+//// and admits its checkout job in one transaction; the job drives the saga
+//// through `saga/durable` and records the outcome on the order
+//// (`finalize`). The sweeper (`checkout/sweeper`) resolves an order whose
+//// job ended without recording one.
 
 import checkout/codecs
 import checkout/db
 import checkout/domain.{
   type Booked, type CheckoutError, type CheckoutRequest, type Order,
-  type OrderStatus, type UndoError,
+  type OrderRef, type OrderStatus, type UndoError,
 }
 import checkout/gateway.{type Gateway}
 import checkout/telemetry.{type Collector}
@@ -18,7 +20,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
-import gleam/time/duration
 import grind.{type Grind}
 import grind/job
 import grind/worker.{type Worker}
@@ -53,8 +54,6 @@ pub type Services {
     workflow: Checkout,
     persistence: Persistence,
     saga_config: execution.Config,
-    /// How long `POST /orders` waits for the local saga before cancelling it.
-    local_budget: duration.Duration,
     receipt_worker: Worker(ReceiptRequest, String, Nil),
   )
 }
@@ -85,10 +84,6 @@ pub type PlaceError {
   /// The catalog or order store could not be read or written; the detail is
   /// in the log.
   StoreUnavailable
-  /// The checkout ran to the outcome in `report`, but the order row could
-  /// not be updated: the row still reads `pending`, and a confirmed order
-  /// has no receipt job. The provider effects stand as the report says.
-  OutcomeUnrecorded(report: Report)
 }
 
 /// The checkout settled on `report`, and writing it to the order row
@@ -151,80 +146,12 @@ fn claim(
   }
 }
 
-/// Runs the checkout saga inside the caller (the HTTP request), once per
-/// order id.
-pub fn place_local(
-  s: Services,
-  order: Order,
-) -> Result(Placement(Report), PlaceError) {
-  use claimed <- result.try(claim(s.pool, order))
-  case claimed {
-    Existing(existing) -> Ok(Existing(existing))
-    Started(Nil) ->
-      case run_local(s, order) {
-        Ok(report) -> Ok(Started(report))
-        Error(Unrecorded(report)) -> Error(OutcomeUnrecorded(report))
-      }
-  }
-}
-
-/// Runs the saga and records its outcome before the request answers, so the
-/// order never stays `pending` behind a reported outcome. An outcome that
-/// cannot be recorded is returned as `Unrecorded`, never as a report. A saga that
-/// cannot start is recorded `rejected`. One that outlasts `local_budget` is
-/// cancelled and awaited until it settles, and that settled outcome is
-/// recorded: the run never keeps reserving or charging after the request
-/// returns, which would otherwise happen unobserved (the request process
-/// owns the run, so its exit cancels the run with nobody to record it).
-/// Re-running the saga on a retry instead would not be safe: a released
-/// reservation and a voided charge under the same order key read as
-/// already done.
-fn run_local(s: Services, order: Order) -> Result(Report, Unrecorded) {
-  let config =
-    execution.with_correlation(
-      s.saga_config,
-      telemetry.order(domain.key(order)),
-    )
-  case execution.start(s.workflow, order, config) {
-    Error(error) -> {
-      log_internal(order_text(order), "saga start failed", error)
-      let detail = "checkout could not start"
-      record(s, order, Report(domain.Rejected, detail, Error(Nil), [], 0))
-    }
-    Ok(run) ->
-      case execution.await(run, s.local_budget) {
-        Ok(outcome) -> finalize(s, order, outcome)
-        Error(error) -> {
-          log_internal(order_text(order), "saga await ended", error)
-          execution.cancel(run)
-          case execution.await(run, settle_budget()) {
-            Ok(outcome) -> finalize(s, order, outcome)
-            Error(error) -> {
-              log_internal(order_text(order), "saga did not settle", error)
-              let detail = "checkout outcome unknown"
-              record(
-                s,
-                order,
-                Report(domain.NeedsReconciliation, detail, Error(Nil), [], 0),
-              )
-            }
-          }
-        }
-      }
-  }
-}
-
-/// How long a cancelled local run may take to settle: its settle window,
-/// then undo and compensation, each under its own timeout.
-fn settle_budget() -> duration.Duration {
-  duration.seconds(60)
-}
-
-/// Records the pending order and enqueues its durable checkout job in one
-/// transaction, once per order id. The job id is derived from the order as
-/// well, so even a lost commit reply converges on the first job. A store
-/// failure is logged; the caller learns only that admission did not commit.
-pub fn place_durable(
+/// Records the pending order, enqueues its checkout job and names the job
+/// on the order, in one transaction, once per order id. The job id is
+/// derived from the order as well, so even a lost commit reply converges on
+/// the first job. A store failure is logged; the caller learns only that
+/// admission did not commit.
+pub fn place(
   s: Services,
   checkout_worker: Worker(Order, String, Nil),
   order: Order,
@@ -237,17 +164,28 @@ pub fn place_durable(
     use claimed <- result.try(claim(tx, order))
     case claimed {
       Existing(existing) -> Ok(Existing(existing))
-      Started(Nil) ->
-        grind.submit_in(s.jobs, tx, checkout)
-        |> result.map(fn(admission) { Started(job.id(grind.handle(admission))) })
-        |> result.map_error(fn(error) {
-          log_internal(
-            order_text(order),
-            "durable admission failed",
-            grind.describe_submit_error(error),
-          )
-          StoreUnavailable
-        })
+      Started(Nil) -> {
+        use admission <- result.try(
+          grind.submit_in(s.jobs, tx, checkout)
+          |> result.map_error(fn(error) {
+            log_internal(
+              order.order_id,
+              "durable admission failed",
+              grind.describe_submit_error(error),
+            )
+            StoreUnavailable
+          }),
+        )
+        let job_id = job.id(grind.handle(admission))
+        use Nil <- result.try(
+          db.set_job(tx, order, job_id)
+          |> result.map_error(fn(error) {
+            log_internal(order.order_id, "job not recorded", error)
+            StoreUnavailable
+          }),
+        )
+        Ok(Started(job_id))
+      }
     }
   })
   |> result.map_error(fn(error) {
@@ -287,7 +225,7 @@ fn describe_transaction_error(error: pog.TransactionError(String)) -> String {
 /// order's state, and may call `finalize` again with the same outcome.
 pub fn finalize(
   s: Services,
-  order: Order,
+  order: OrderRef,
   outcome: Outcome,
 ) -> Result(Report, Unrecorded) {
   let unknown = list.length(execution.unknown_effects(outcome))
@@ -363,9 +301,9 @@ pub fn finalize(
 
 /// Writes the report's status and detail to the order row. The report is
 /// returned only when the row holds it.
-fn record(
+pub fn record(
   s: Services,
-  order: Order,
+  order: OrderRef,
   report: Report,
 ) -> Result(Report, Unrecorded) {
   case db.set_status(s.pool, order, report.status, report.detail) {
@@ -411,7 +349,7 @@ fn describe_cause(
 /// both commit, or neither does. Returns the receipt job's id.
 pub fn confirm_with_receipt(
   s: Services,
-  order: Order,
+  order: OrderRef,
   detail: String,
 ) -> Result(Int, String) {
   pog.transaction(s.pool, fn(tx) {
@@ -429,7 +367,7 @@ pub fn confirm_with_receipt(
 /// The receipt job for an order, under an order-derived id.
 pub fn receipt_job(
   s: Services,
-  order: Order,
+  order: OrderRef,
 ) -> job.Job(ReceiptRequest, String, Nil) {
   job.new(
     s.receipt_worker,
@@ -440,8 +378,8 @@ pub fn receipt_job(
       order.amount_cents,
     ),
   )
-  |> job.with_id("receipt:" <> domain.key(order))
-  |> job.with_correlation(telemetry.order(domain.key(order)))
+  |> job.with_id("receipt:" <> domain.ref_key(order))
+  |> job.with_correlation(telemetry.order(domain.ref_key(order)))
 }
 
 pub fn receipt_codec() -> codecs.JsonCodec(ReceiptRequest) {

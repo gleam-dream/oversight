@@ -40,7 +40,12 @@ fn attempt_budget() -> Duration {
 }
 
 pub fn execution_id(order: Order) -> String {
-  "checkout:" <> domain.key(order)
+  execution_id_of(domain.key(order))
+}
+
+/// The saga execution id of the order with this `domain.order_key`.
+pub fn execution_id_of(order_key: String) -> String {
+  "checkout:" <> order_key
 }
 
 /// `redelivery` is the snooze after a lost runner or a storage failure;
@@ -90,7 +95,7 @@ fn drive(
   }
   case driven {
     Ok(outcome) ->
-      case orders.finalize(s, order, outcome), outcome {
+      case orders.finalize(s, domain.ref(order), outcome), outcome {
         // The order row does not hold the outcome, so the job is not done.
         // The saga's outcome is saved: the redelivery reads it back without
         // running a step and only repeats the write.
