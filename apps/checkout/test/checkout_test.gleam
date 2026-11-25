@@ -699,6 +699,127 @@ pub fn provider_refuses_a_negative_content_length_test() {
   assert providers.snapshot(application.providers).charge_requests == 0
 }
 
+// --- recording the outcome ------------------------------------------------------
+
+/// Makes every write that sets `order_id` to `status` fail, the way a
+/// database fault between the saga and its bookkeeping would. Returns the
+/// function that removes the fault.
+fn refuse_status(
+  pool: pog.Connection,
+  order_id: String,
+  status: String,
+) -> fn() -> Nil {
+  let run = fn(sql) {
+    let assert Ok(_) = pog.query(sql) |> pog.execute(pool)
+    Nil
+  }
+  let name = "refuse_" <> string.replace(order_id, "-", "_")
+  run("CREATE FUNCTION " <> name <> "() RETURNS trigger AS $$
+     BEGIN RAISE EXCEPTION 'order store fault'; END $$ LANGUAGE plpgsql")
+  run("CREATE TRIGGER " <> name <> " BEFORE UPDATE ON orders FOR EACH ROW
+     WHEN (NEW.order_id = '" <> order_id <> "' AND NEW.status = '" <> status <> "')
+     EXECUTE FUNCTION " <> name <> "()")
+  fn() {
+    run("DROP TRIGGER " <> name <> " ON orders")
+    run("DROP FUNCTION " <> name <> "()")
+  }
+}
+
+/// A local checkout whose confirmation cannot be written does not answer
+/// 201: the order row is still pending and no receipt job exists, so the
+/// reply must not say the order is confirmed.
+pub fn local_checkout_does_not_report_an_unrecorded_confirmation_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = set_stock(pool, "unrecorded-sku", 3)
+  let assert Ok(#(_, port)) = web.start(application)
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  let restore = refuse_status(pool, "unrecorded-1", "confirmed")
+  let #(status, body) =
+    post_order(
+      port,
+      body(order_fields("unrecorded-1", "unrecorded-sku", 1, token)),
+      "",
+    )
+  restore()
+
+  let assert Some(#(domain.Pending, _)) =
+    db.order_status(pool, "alice", "unrecorded-1")
+  assert !db.receipt_sent(pool, "alice", "unrecorded-1")
+  assert status == 503
+  let assert Ok("outcome_unrecorded") = error_code(body)
+  assert !string.contains(body, "order store fault")
+}
+
+/// A local checkout whose rejection cannot be written says so as well.
+pub fn local_checkout_does_not_report_an_unrecorded_rejection_test() {
+  use application <- with_app(fn(c) { c })
+  let pool = application.services.pool
+  let assert Ok(Nil) = set_stock(pool, "unrecorded-no-sku", 3)
+  let restore = refuse_status(pool, "unrecorded-2", "rejected")
+  let placed =
+    orders.place_local(
+      application.services,
+      order(
+        application,
+        "unrecorded-2",
+        "unrecorded-no-sku",
+        providers.card_declined,
+        "10 Main St",
+      ),
+    )
+  restore()
+
+  let assert Error(orders.OutcomeUnrecorded(report)) = placed
+  assert report.status == domain.Rejected
+  let assert Some(#(domain.Pending, _)) =
+    db.order_status(pool, "alice", "unrecorded-2")
+}
+
+/// A durable checkout whose confirmation cannot be written keeps its job:
+/// the job does not succeed while the order row is pending. Once the store
+/// accepts the write, the redelivered job reads the saga's saved outcome,
+/// records it with the receipt job, and charges nothing again.
+pub fn durable_checkout_retries_an_unrecorded_confirmation_test() {
+  use application <- with_app(fn(c) { c })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "redo-sku", 2)
+  let placed =
+    order(application, "redo-1", "redo-sku", providers.card_ok, "10 Main St")
+  let restore = refuse_status(services.pool, "redo-1", "confirmed")
+  let assert Ok(orders.Started(job_id)) =
+    orders.place_durable(services, application.checkout_worker, placed)
+  let assert Ok(handle) =
+    grind.bind(services.jobs, application.checkout_worker, job_id)
+
+  // The saga finished: the shipment is booked. The job stays unfinished
+  // while the order row cannot be written.
+  assert eventually(
+    fn() {
+      providers.shipment_for(application.providers, "ship-" <> key("redo-1"))
+      != None
+    },
+    200,
+  )
+  let assert Ok(grind.Pending(_)) =
+    grind.await(services.jobs, handle, within: duration.milliseconds(1000))
+  let assert Some(#(domain.Pending, _)) =
+    db.order_status(services.pool, "alice", "redo-1")
+  restore()
+
+  let assert grind.Succeeded(_) = await_job(application, job_id)
+  let assert Some(#(domain.Confirmed, _)) =
+    db.order_status(services.pool, "alice", "redo-1")
+  assert eventually(
+    fn() { db.receipt_sent(services.pool, "alice", "redo-1") },
+    100,
+  )
+  let snapshot = providers.snapshot(application.providers)
+  assert snapshot.charge_requests == 1
+  assert snapshot.shipment_requests == 1
+  assert stock(application, "redo-sku") == 1
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {

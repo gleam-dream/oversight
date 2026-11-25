@@ -154,6 +154,9 @@ fn place_error(error: orders.PlaceError) -> wisp.Response {
     orders.UnknownSku(_) -> error_response(422, "unknown_sku")
     orders.OrderIdConflict -> error_response(409, "order_id_conflict")
     orders.StoreUnavailable -> error_response(503, "store_unavailable")
+    // The checkout ran but the order row does not show it. The body names
+    // neither outcome: the order still reads `pending`.
+    orders.OutcomeUnrecorded(_) -> error_response(503, "outcome_unrecorded")
   }
 }
 
