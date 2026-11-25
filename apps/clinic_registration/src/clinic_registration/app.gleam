@@ -1,8 +1,9 @@
 //// The composition root. It owns one pool (which Grind builds from the
 //// application's `pog.Config` and which also serves the clinic's tables
 //// and `decisions_postgres`), the Grind runtime with every worker, one
-//// HTTP Gun client for the two providers, the telemetry collector and the
-//// desk's HTTP server. `stop` closes all of them.
+//// HTTP Gun client for the two providers, the telemetry collector, the
+//// Hellhound client staff sign in through, and the desk's HTTP server.
+//// `stop` closes all of them.
 ////
 //// Start-up order follows `decisions_postgres`: the tables are migrated on
 //// a pool of their own before any worker polls (in production a deploy
@@ -12,7 +13,7 @@
 //// a job for every pending wake-up and undelivered settlement notice that
 //// has none, such as one whose job was lost or pruned.
 
-import clinic_registration/access.{type ChannelSecret, type Staff}
+import clinic_registration/access.{type ChannelSecret, type SignIn}
 import clinic_registration/desk
 import clinic_registration/domain.{type Inbound, type Registration}
 import clinic_registration/jobs
@@ -28,12 +29,13 @@ import decisions_postgres
 import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import grind
 import grind/queue
 import grind/worker.{type Worker}
+import hellhound
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
@@ -64,9 +66,13 @@ pub type Config {
     lease: Duration,
     /// The Grind schema; a restart reuses it.
     jobs_schema: String,
-    /// Who may use the desk, by bearer token. `access.nobody()`, the
+    /// The loopback port the desk listens on; 0 picks a free one. With
+    /// sign-in configured it is the port of the relying party's redirect
+    /// URI, which the provider must know before the listener binds.
+    port: Int,
+    /// How staff sign in to the desk and who is staff. `None`, the
     /// default, refuses every desk request.
-    staff: Staff,
+    sign_in: Option(SignIn),
     /// The messaging channel's signing secret. `None`, the default,
     /// refuses every webhook delivery.
     channel: Option(ChannelSecret),
@@ -95,7 +101,8 @@ pub fn default_config(
     after_model: fn(_) { Nil },
     lease: duration.seconds(6),
     jobs_schema: "clinic_jobs",
-    staff: access.nobody(),
+    port: 0,
+    sign_in: None,
     channel: None,
   )
 }
@@ -208,15 +215,19 @@ pub fn start(config: Config) -> Result(App, String) {
   let served = {
     use swept <- result.try(prepared)
     let secret = wisp.random_string(64)
+    // The Hellhound client is started by the owner, so it stops with the
+    // listener that uses it.
     owner.start(fn() {
+      use sign_in <- result.try(start_sign_in(config.sign_in))
       web.start(
         web.Routes(
           db:,
           desk: registration,
           admit:,
-          staff: config.staff,
+          sign_in:,
           channel: config.channel,
         ),
+        config.port,
         secret,
       )
     })
@@ -243,6 +254,27 @@ pub fn start(config: Config) -> Result(App, String) {
       http_gun.stop(http)
       telemetry.stop(collector)
       Error(reason)
+    }
+  }
+}
+
+/// Build and start the Hellhound client the desk signs staff in through.
+fn start_sign_in(
+  sign_in: Option(SignIn),
+) -> Result(Option(web.SignIn), String) {
+  case sign_in {
+    None -> Ok(None)
+    Some(access.SignIn(relying_party:, staff:)) -> {
+      let describe = fn(error) {
+        "sign-in: " <> hellhound.describe_start_error(error)
+      }
+      use client <- result.try(
+        hellhound.new(relying_party) |> result.map_error(describe),
+      )
+      use Nil <- result.try(
+        hellhound.start(client) |> result.map_error(describe),
+      )
+      Ok(Some(web.SignIn(client:, staff:)))
     }
   }
 }

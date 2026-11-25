@@ -54,21 +54,26 @@ const ana_phone = "+5511987654321"
 const ana_says =
   "Oi! Queria marcar uma consulta com a Dra. Paula. Sou Ana Souza, nasci em 12/04/1990, tenho Unimed Flex. Pode me cadastrar."
 
-/// Who a request of this run is from: a member of staff, by bearer token,
-/// or the messaging channel, which signs what it delivers.
+/// Who a request of this run is from: a member of staff, by the desk
+/// session cookie their sign-in set, or the messaging channel, which signs
+/// what it delivers.
 type Sender {
-  Staff(token: String)
+  Staff(cookie: String)
   Channel(secret: access.ChannelSecret)
 }
 
 pub fn run(url: String) -> Result(Nil, String) {
   wisp.set_logger_level(wisp.ErrorLevel)
   use services <- result.try(scripted.start())
-  // This run's credentials: Felipe's bearer token at reception, and the
-  // secret the channel signs its deliveries with.
-  let felipe = wisp.random_string(32)
-  use staff <- result.try(
-    access.staff([#(felipe, domain.validator("felipe", [domain.reception]))]),
+  // Felipe at reception signs in through the clinic's OpenID provider as
+  // subject `felipe`; the channel signs its deliveries with this run's
+  // secret. The provider must know the desk's callback address before the
+  // desk listens, so the desk takes a port chosen first.
+  let port = scripted.free_port()
+  use sign_in <- result.try(
+    scripted.staff_sign_in(services, port, [
+      #("felipe", domain.validator("felipe", [domain.reception])),
+    ]),
   )
   use channel <- result.try(access.channel_secret(wisp.random_string(32)))
   use clinic <- result.try(app.start(
@@ -79,9 +84,15 @@ pub fn run(url: String) -> Result(Nil, String) {
         messaging_base: scripted.messaging_base(services),
         provider_ports: scripted.ports(services),
       ),
-      staff:,
+      port:,
+      sign_in: Some(sign_in),
       channel: Some(channel),
     ),
+  ))
+  use felipe <- result.try(scripted.sign_in(
+    services,
+    app.base_url(clinic),
+    "felipe",
   ))
   let assert Ok(client) =
     http_gun.start(
@@ -328,7 +339,10 @@ fn call(
     |> request.set_header("content-type", "application/json")
     |> request.set_body(bit_array.from_string(body))
   let req = case sender {
-    Staff(token) -> request.set_header(req, "authorization", "Bearer " <> token)
+    Staff(cookie) ->
+      req
+      |> request.set_header("cookie", cookie)
+      |> request.set_header("origin", app.base_url(clinic))
     Channel(secret) ->
       request.set_header(
         req,

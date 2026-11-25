@@ -1,7 +1,7 @@
 name = "clinic_registration"
 version = "0.1.0"
 target = "erlang"
-description = "Composition app: registering a patient from a conversation through a decision point, built from decisions, decisions_postgres, decisions_otp, llm_wire, grind, wisp and sinal on pog and mist."
+description = "Composition app: registering a patient from a conversation through a decision point, built from decisions, decisions_postgres, decisions_otp, llm_wire, grind, hellhound, wisp and sinal on pog and mist."
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
@@ -21,6 +21,9 @@ http_gun = ">= 0.2.0 and < 0.3.0"
 llm_wire = ">= 0.2.0 and < 0.3.0"
 json_blueprint = ">= 2.2.0 and < 3.0.0"
 sinal = ">= 0.1.0 and < 0.2.0"
+# Staff sign in through OIDC. Pinned to the unreleased sealed-cookie login
+# (gleam-dream/hellhound#35) until it is on Hex.
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "b5f5a255601df16fe5482c4c0f2c0dff4ba88e82" }
 # The core is on Hex. The two integrations are released as Git tags of
 # gleam-dream/decisions.
 decisions = ">= 0.1.0 and < 0.2.0"

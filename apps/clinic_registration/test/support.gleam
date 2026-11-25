@@ -11,10 +11,12 @@ import clinic_registration/scripted.{type Services}
 import clinic_registration/store
 import decisions
 import decisions/occurrence.{type Occurrence}
+import decisions/vocabulary.{type Validator}
 import decisions_postgres
 import decisions_postgres/queue
 import envoy
 import gleam/bit_array
+import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
@@ -86,7 +88,15 @@ fn split_last(text: String, on: String) -> Result(#(String, String), Nil) {
 }
 
 pub type Env {
-  Env(app: App, services: Services, url: String, config: app.Config)
+  Env(
+    app: App,
+    services: Services,
+    url: String,
+    config: app.Config,
+    /// The desk session cookie of each member of staff who signed in when
+    /// the application started (`felipe`, `bia`, `marta`), by name.
+    sessions: Dict(String, String),
+  )
 }
 
 /// Start the scripted providers and the application over a fresh database,
@@ -126,14 +136,32 @@ pub fn boot(
       provider_ports: scripted.ports(services),
     )
     |> fn(config) {
-      app.Config(..config, staff: staff(), channel: Some(channel()))
+      let port = scripted.free_port()
+      let assert Ok(sign_in) = scripted.staff_sign_in(services, port, staff())
+      app.Config(
+        ..config,
+        port:,
+        sign_in: Some(sign_in),
+        channel: Some(channel()),
+      )
     }
     |> configure
   let assert Ok(application) = app.start(config)
   list.each(insurers, fn(name) {
     let assert Ok(Nil) = store.accept_insurer(application.db, name)
   })
-  Env(app: application, services:, url:, config:)
+  // Custody is in memory, so every start signs the staff in again.
+  let sessions = case config.sign_in {
+    None -> dict.new()
+    Some(_) ->
+      list.map(staff(), fn(member) {
+        let assert Ok(cookie) =
+          scripted.sign_in(services, app.base_url(application), member.0)
+        #(member.0, cookie)
+      })
+      |> dict.from_list
+  }
+  Env(app: application, services:, url:, config:, sessions:)
 }
 
 pub const insurers = ["Bradesco Saúde", "SulAmérica", "Unimed"]
@@ -240,8 +268,9 @@ pub fn client() -> http_gun.Client {
   client
 }
 
-/// Call the desk with a staff member's bearer token (`felipe`, `marta`,
-/// `bia`), or anonymously with `""`.
+/// Call the desk from its own origin as a member of staff who signed in
+/// at start-up (`felipe`, `marta`, `bia`), or anonymously with `""`. Any
+/// other name sends a cookie no sign-in set.
 pub fn call(
   env: Env,
   method: http.Method,
@@ -249,9 +278,14 @@ pub fn call(
   as_validator: String,
   body: String,
 ) -> Answer {
-  let headers = case as_validator {
-    "" -> []
-    token -> [#("authorization", "Bearer " <> token)]
+  let origin = #("origin", app.base_url(env.app))
+  let headers = case as_validator, dict.get(env.sessions, as_validator) {
+    "", _ -> [origin]
+    _, Ok(cookie) -> [origin, #("cookie", cookie)]
+    name, Error(Nil) -> [
+      origin,
+      #("cookie", scripted.session_cookie <> "=" <> name),
+    ]
   }
   send(env, method, path, headers, body)
 }
@@ -300,22 +334,21 @@ pub fn deliver(env: Env, body: String) -> Answer {
   )
 }
 
-/// The bearer tokens of the test clinic's staff: Felipe and Bia at
-/// reception, Marta the manager.
-pub const felipe = "felipe-test-token-4f0c2a9d6e1b7c35"
+/// The test clinic's staff, by the subject they sign in as: Felipe and Bia
+/// at reception, Marta the manager.
+pub const felipe = "felipe"
 
-pub const bia = "bia-test-token-91d7e3a05c2f8b46aa"
+pub const bia = "bia"
 
-pub const marta = "marta-test-token-c8a1f47e2d905b63"
+pub const marta = "marta"
 
-fn staff() -> access.Staff {
-  let assert Ok(staff) =
-    access.staff([
-      #(felipe, domain.validator("felipe", [domain.reception])),
-      #(bia, domain.validator("bia", [domain.reception])),
-      #(marta, domain.validator("marta", [domain.manager])),
-    ])
-  staff
+/// Each member of staff's subject and the validator the desk acts as.
+pub fn staff() -> List(#(String, Validator)) {
+  [
+    #(felipe, domain.validator("felipe", [domain.reception])),
+    #(bia, domain.validator("bia", [domain.reception])),
+    #(marta, domain.validator("marta", [domain.manager])),
+  ]
 }
 
 /// The secret the test channel signs with.

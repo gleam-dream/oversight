@@ -1,77 +1,77 @@
 //// Who the application believes. Nothing a request says about its sender
-//// is taken as identity: a desk request acts as the validator its bearer
-//// token resolves to in the application's own table, with the decision
-//// sets that table gives, and the webhook admits only a body signed with
-//// the secret the clinic shares with the messaging channel.
+//// is taken as identity. A member of staff signs in through the clinic's
+//// OpenID provider (Hellhound verifies the login); the desk acts as the
+//// validator the application's staff table names for that verified issuer
+//// and subject, with the decision sets the table gives. The webhook admits
+//// only a body signed with the secret the clinic shares with the messaging
+//// channel.
 ////
-//// Both are unset by default, and unset means closed: with no staff every
-//// desk route answers 401, and with no channel secret so does the webhook.
-////
-//// The staff table stands in for the clinic's sign-in. An application
-//// with one verifies its session or access token here instead and looks
-//// the decision sets up by the verified subject; the rest of the
-//// application only needs what `authenticate` returns.
+//// Both are unset by default, and unset means closed: with no sign-in
+//// configured every desk route answers 401, and with no channel secret so
+//// does the webhook. A verified login whose subject the table does not
+//// name gets no desk session.
 
 import decisions/vocabulary.{type Validator}
 import gleam/bit_array
 import gleam/crypto
+import gleam/dict.{type Dict}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import hellhound
+import hellhound/config as hellhound_config
 
-/// The least bytes a bearer token or a channel secret may have.
+/// The least bytes a channel secret may have.
 pub const least_secret_bytes = 32
 
-/// The people who may use the desk, by the digest of their bearer token.
+/// How staff sign in, and who of those who sign in is staff.
+pub type SignIn {
+  SignIn(
+    /// The relying-party configuration of the desk at the clinic's OpenID
+    /// provider. Its redirect URI is the desk's `/auth/callback`.
+    relying_party: hellhound_config.Config,
+    /// The validator each verified subject acts as.
+    staff: Staff,
+  )
+}
+
+/// The people who may use the desk: the verified issuer and subject of a
+/// sign-in, and the validator that sign-in acts as.
 pub opaque type Staff {
-  Staff(members: List(#(BitArray, Validator)))
+  Staff(members: Dict(#(String, String), Validator))
 }
 
-/// Nobody: every desk request is refused.
-pub fn nobody() -> Staff {
-  Staff([])
+/// One member of staff: the subject the provider at `issuer` signs them in
+/// as, and the validator the desk acts as for them.
+pub type Member {
+  Member(issuer: String, subject: String, acts_as: Validator)
 }
 
-/// The staff table from `#(bearer token, validator)` pairs. A token
-/// shorter than `least_secret_bytes` or used twice refuses the table.
-pub fn staff(members: List(#(String, Validator))) -> Result(Staff, String) {
-  let tokens = list.map(members, fn(member) { member.0 })
-  case
-    list.any(tokens, fn(token) { string.byte_size(token) < least_secret_bytes }),
-    list.unique(tokens) == tokens
-  {
-    True, _ -> Error("a staff token is shorter than 32 bytes")
-    False, False -> Error("two staff members share a token")
-    False, True ->
-      Ok(Staff(list.map(members, fn(member) { #(digest(member.0), member.1) })))
+/// The staff table. A subject named twice for one issuer refuses the table.
+pub fn staff(members: List(Member)) -> Result(Staff, String) {
+  let keys = list.map(members, fn(member) { #(member.issuer, member.subject) })
+  case list.unique(keys) == keys {
+    False -> Error("two staff members share an issuer and subject")
+    True ->
+      Ok(
+        Staff(
+          list.fold(members, dict.new(), fn(table, member) {
+            dict.insert(table, #(member.issuer, member.subject), member.acts_as)
+          }),
+        ),
+      )
   }
 }
 
-/// The validator an `Authorization` header value authenticates.
-///
-/// Both sides are hashed before a constant-time comparison and every
-/// member is compared, so the timing shows neither how much of a token
-/// matched nor which member did.
-pub fn authenticate(
+/// The validator a verified sign-in acts as, when the staff table names it.
+pub fn member(
   staff: Staff,
-  authorization: Result(String, Nil),
+  identity: hellhound.VerifiedIdentity,
 ) -> Result(Validator, Nil) {
-  case authorization {
-    Ok("Bearer " <> token) -> {
-      let presented = digest(token)
-      list.fold(staff.members, Error(Nil), fn(found, member) {
-        case crypto.secure_compare(member.0, presented), found {
-          True, Error(Nil) -> Ok(member.1)
-          _, _ -> found
-        }
-      })
-    }
-    _ -> Error(Nil)
-  }
-}
-
-fn digest(token: String) -> BitArray {
-  crypto.hash(crypto.Sha256, bit_array.from_string(token))
+  dict.get(staff.members, #(
+    hellhound.issuer(identity),
+    hellhound.subject(identity),
+  ))
 }
 
 /// The secret the clinic shares with the messaging channel.
