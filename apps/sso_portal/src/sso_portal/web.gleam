@@ -167,6 +167,9 @@ type NoSession {
   /// elsewhere or expired).
   CustodyLost
   StoreDown
+  /// Custody holds a record this node cannot open, most often because its
+  /// sealing key is wrong. The row is kept: the right key still opens it.
+  CustodyUnreadable
 }
 
 fn current(request: Request, context: Context) -> Result(Current, NoSession) {
@@ -184,11 +187,16 @@ fn current(request: Request, context: Context) -> Result(Current, NoSession) {
     Ok(session) -> Ok(Current(stored:, session:))
     Error(error) ->
       case hellhound.session_error_action(error) {
-        hellhound.RetryLater -> Error(StoreDown)
-        _ -> {
+        hellhound.RetryLater | hellhound.Recover -> Error(StoreDown)
+        // Custody no longer holds the reference: the row is of no use.
+        hellhound.Reauthenticate -> {
           let _ = session_store.delete(context.db, stored.id)
           Error(CustodyLost)
         }
+        // A new login would not help, and deleting the row would lose a
+        // session the right configuration still opens.
+        hellhound.FixConfiguration | hellhound.RejectRequest ->
+          Error(CustodyUnreadable)
       }
   }
 }
@@ -201,6 +209,8 @@ fn require_session(
   case current(request, context) {
     Ok(current) -> next(current)
     Error(StoreDown) -> page(503, "Try again later", "<p>sessions down</p>")
+    Error(CustodyUnreadable) ->
+      page(500, "Session unavailable", "<p>sessions misconfigured</p>")
     Error(Anonymous) | Error(CustodyLost) ->
       wisp.redirect("/login") |> clear_session(request)
   }
@@ -318,7 +328,14 @@ fn billing_error(error: billing.BillingError) -> DashboardError {
 
 fn logout(request: Request, context: Context) -> Response {
   case current(request, context) {
-    Error(_) -> wisp.redirect("/signed-out") |> clear_session(request)
+    Error(_) ->
+      // The person asked to end the session. A row kept because custody
+      // could not be read must not outlive that: the cookie would work
+      // again once custody reads.
+      case forget_row(request, context) {
+        Ok(Nil) -> wisp.redirect("/signed-out") |> clear_session(request)
+        Error(Nil) -> logout_unconfirmed()
+      }
     Ok(current) -> {
       let options =
         hellhound.LogoutOptions(
@@ -335,13 +352,32 @@ fn logout(request: Request, context: Context) -> Response {
         )) -> hellhound.logout_response(wisp.response(303), to)
         Ok(hellhound.LoggedOut(..)) | Error(_) -> wisp.redirect("/signed-out")
       }
-      let _ = session_store.delete(context.db, current.stored.id)
-      clear_session(response, request)
+      case session_store.delete(context.db, current.stored.id) {
+        Ok(Nil) -> clear_session(response, request)
+        // Custody is gone, so a retry reads no session and deletes the row
+        // through `forget_row`.
+        Error(_) -> logout_unconfirmed()
+      }
     }
   }
 }
 
+/// The session row was not deleted, so the session is not reported as
+/// ended: the cookie stays and the person can sign out again.
+fn logout_unconfirmed() -> Response {
+  page(503, "Try again later", "<p>Signing out did not finish.</p>")
+}
+
 // --- Helpers ----------------------------------------------------------------
+
+/// Delete the session row the request's cookie names. `Ok` when it is gone
+/// or the request names none.
+fn forget_row(request: Request, context: Context) -> Result(Nil, Nil) {
+  case wisp.get_cookie(request, session_cookie, wisp.Signed) {
+    Ok(id) -> session_store.delete(context.db, id) |> result.replace_error(Nil)
+    Error(Nil) -> Ok(Nil)
+  }
+}
 
 fn clear_session(response: Response, request: Request) -> Response {
   wisp.set_cookie(response, request, session_cookie, "", wisp.Signed, 0)
