@@ -315,17 +315,19 @@ pub fn invalid_tool_arguments_are_rejected_before_handler_test() {
   )) = ecosystem_pilot.provider_run(http_client, prepared)
   ecosystem_pilot.decode_lookup(definition, "{\"sku\":42}") |> should.be_error
 
-  let assert Error(response) =
+  // Arguments that fail the input contract are a tool execution error the
+  // model can read and correct, not a protocol error.
+  let assert Ok(value.Object(result)) =
     client.call_raw(relay_client, "tools/call", Some("inventory_lookup"), [
       #("name", json.string("inventory_lookup")),
       #("arguments", invalid_arguments),
     ])
-  let assert client.RpcError(-32_602, _, _) = client.reason(response)
+  assert list.key_find(result, "isError") == Ok(value.Bool(True))
   ecosystem_pilot.decode_lookup(definition, "{\"sku\":42}") |> should.be_error
 
   process.receive(invocations, 0) |> should.be_error
   process.receive(application_errors, 0) |> should.be_error
-  await_relay_status(relay_events, relay_telemetry.Failed)
+  await_relay_status(relay_events, relay_telemetry.ToolFailed)
   await_provider_request(provider, fn(body) {
     scripted_provider.is_initial_request(body, "MISSING")
   })
