@@ -9,29 +9,26 @@
 //// - http_gun: `http_gun.with_correlation` on the client view;
 //// - grind: `job.with_correlation` at submit, in every job event's `ref`.
 ////
-//// The collector is a named actor under the application's supervisor. The
-//// handlers are attached once, by `attach`, and send to the name, so they
-//// reach whichever collector process is running. A restarted collector
-//// starts empty.
-////
-//// The collector keeps the newest `capacity` entries and counts the ones
-//// it discards (`usage`), so its memory does not grow with the number of
-//// orders. The bound is on what it holds, not on its mailbox: handlers
-//// send without waiting, and recording an entry takes constant time.
+//// The collector is Sinal's bounded collector, a child of the application's
+//// supervisor. Its process attaches the handlers while it starts and owns
+//// them: they are attached exactly while it runs, a restart attaches them
+//// again under the same ids, and the application never attaches or
+//// detaches a handler itself. It keeps the newest `capacity` entries in a
+//// table that handlers write directly, so nothing queues in a mailbox and
+//// its memory does not grow with the number of orders. A restarted
+//// collector starts empty.
 
-import gleam/erlang/process.{type Name, type Subject}
+import gleam/erlang/process.{type Name}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
 import gleam/otp/supervision
-import gleam/result
 import gleam/string
 import grind/job
 import grind/telemetry as grind_telemetry
 import http_gun/telemetry as http_telemetry
 import saga/telemetry as saga_telemetry
-import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 
 pub type Source {
@@ -45,23 +42,17 @@ pub type Entry {
 }
 
 pub opaque type Collector {
-  Collector(
-    name: Name(Message),
-    capacity: Int,
-    attachments: List(sinal.Attachment),
-  )
+  Collector(recent: collector.Collector(Entry))
 }
 
-/// How many entries the collector holds, and how many it has discarded
+/// The process name a collector registers under.
+pub type CollectorName =
+  Name(collector.Message(Entry))
+
+/// How many entries the collector holds, and how many it has overwritten
 /// to stay within its capacity since it started.
 pub type Usage {
   Usage(held: Int, dropped: Int)
-}
-
-pub opaque type Message {
-  Record(Entry)
-  Trace(order: Option(Correlation), reply: Subject(List(Entry)))
-  ReadUsage(reply: Subject(Usage))
 }
 
 /// The correlation of an order, from its `domain.order_key`.
@@ -69,121 +60,41 @@ pub fn order(key: String) -> Correlation {
   correlation.from_key(key)
 }
 
-/// Attaches one handler per event descriptor. Each handler sends to the
-/// collector registered under `name`; while none is running, the event is
-/// dropped. Call once per application start and `detach` at its stop:
-/// handlers are node-wide registrations, not processes, so no supervisor
-/// removes them.
-pub fn attach(name: Name(Message), capacity capacity: Int) -> Collector {
-  Collector(name:, capacity:, attachments: attach_all(name))
+/// A collector registered under `name` that keeps the newest `capacity`
+/// entries. It starts nothing; `supervised` runs it.
+pub fn new(name: CollectorName, capacity capacity: Int) -> Collector {
+  Collector(collector.new(name) |> collector.with_capacity(capacity))
 }
 
-/// The collector process, registered under the name given to `attach`.
-/// It keeps the newest `capacity` entries.
-pub fn supervised(collector: Collector) -> supervision.ChildSpecification(Nil) {
-  supervision.worker(fn() {
-    actor.new(empty(collector.capacity))
-    |> actor.named(collector.name)
-    |> actor.on_message(fn(held, message) {
-      case message {
-        Record(entry) -> actor.continue(push(held, entry))
-        Trace(order, reply) -> {
-          oldest_first(held)
-          |> list.filter(fn(e) { e.order == order })
-          |> process.send(reply, _)
-          actor.continue(held)
-        }
-        ReadUsage(reply) -> {
-          process.send(reply, Usage(held: held.size, dropped: held.dropped))
-          actor.continue(held)
-        }
-      }
-    })
-    |> actor.start
-    |> result.map(fn(started) { actor.Started(..started, data: Nil) })
-  })
-}
-
-/// The newest entries, at most `capacity` of them, as a queue: an entry is
-/// added to `newer` and the oldest is taken from `older`, which is refilled
-/// by reversing `newer` when it runs out. Adding costs constant time on
-/// average, whatever the capacity.
-type Held {
-  Held(
-    capacity: Int,
-    size: Int,
-    dropped: Int,
-    /// Oldest first.
-    older: List(Entry),
-    /// Newest first.
-    newer: List(Entry),
-  )
-}
-
-/// A capacity below 1 is treated as 1.
-fn empty(capacity: Int) -> Held {
-  Held(
-    capacity: int.max(capacity, 1),
-    size: 0,
-    dropped: 0,
-    older: [],
-    newer: [],
-  )
-}
-
-fn push(held: Held, entry: Entry) -> Held {
-  let held = Held(..held, size: held.size + 1, newer: [entry, ..held.newer])
-  case held.size > held.capacity {
-    False -> held
-    True -> drop_oldest(held)
-  }
-}
-
-fn drop_oldest(held: Held) -> Held {
-  case held.older {
-    [_, ..older] ->
-      Held(..held, size: held.size - 1, dropped: held.dropped + 1, older:)
-    [] ->
-      case list.reverse(held.newer) {
-        [_, ..older] ->
-          Held(
-            ..held,
-            size: held.size - 1,
-            dropped: held.dropped + 1,
-            older:,
-            newer: [],
-          )
-        [] -> held
-      }
-  }
-}
-
-fn oldest_first(held: Held) -> List(Entry) {
-  list.append(held.older, list.reverse(held.newer))
-}
-
-pub fn detach(collector: Collector) -> Nil {
-  list.each(collector.attachments, fn(a) {
-    let _ = sinal.detach(a)
-    Nil
-  })
+/// The collector process, which attaches one handler per event while it
+/// starts and owns them.
+pub fn supervised(
+  telemetry: Collector,
+) -> supervision.ChildSpecification(collector.Collector(Entry)) {
+  collector.supervised(telemetry.recent, sources())
 }
 
 /// Every collected event attributed to `order`, in arrival order.
-pub fn trace(collector: Collector, order: Correlation) -> List(Entry) {
+pub fn trace(telemetry: Collector, order: Correlation) -> List(Entry) {
   // Forwarded events (http_gun, grind) arrive asynchronously.
   process.sleep(50)
-  actor.call(process.named_subject(collector.name), 1000, Trace(Some(order), _))
+  entries_of(telemetry, Some(order))
 }
 
-/// How much the collector holds and how much it has discarded.
-pub fn usage(collector: Collector) -> Usage {
-  actor.call(process.named_subject(collector.name), 1000, ReadUsage)
+/// How much the collector holds and how much it has overwritten.
+pub fn usage(telemetry: Collector) -> Usage {
+  let held = list.length(collector.entries(telemetry.recent))
+  Usage(held:, dropped: collector.recorded(telemetry.recent) - held)
 }
 
 /// Events that carried no correlation.
-pub fn unattributed(collector: Collector) -> List(Entry) {
-  actor.call(process.named_subject(collector.name), 1000, Trace(None, _))
+pub fn unattributed(telemetry: Collector) -> List(Entry) {
+  entries_of(telemetry, None)
+}
+
+fn entries_of(telemetry: Collector, order: Option(Correlation)) -> List(Entry) {
+  collector.entries(telemetry.recent)
+  |> list.filter(fn(entry) { entry.order == order })
 }
 
 pub fn render(entry: Entry) -> String {
@@ -195,26 +106,10 @@ pub fn render(entry: Entry) -> String {
   source <> " " <> entry.line
 }
 
-// --- attachments ----------------------------------------------------------
+// --- sources ----------------------------------------------------------------
 
-/// Runs `send` and reports whether it returned. A handler that raises is
-/// removed by telemetry for good, and a send to a name raises while no
-/// process holds it, which is the case between a collector's exit and its
-/// restart.
-@external(erlang, "checkout_ffi", "attempt")
-fn attempt(send: fn() -> Nil) -> Bool
-
-fn attach_all(name: Name(Message)) -> List(sinal.Attachment) {
-  let record = fn(source, order, line) {
-    let _ =
-      attempt(fn() {
-        process.send(
-          process.named_subject(name),
-          Record(Entry(source, order, line)),
-        )
-      })
-    Nil
-  }
+fn sources() -> List(collector.Source(Entry)) {
+  let record = Entry
   let job = fn(ref: grind_telemetry.JobRef, line) {
     record(
       Grind,
@@ -230,10 +125,10 @@ fn attach_all(name: Name(Message)) -> List(sinal.Attachment) {
     )
   }
   [
-    sinal.observe(saga_telemetry.run_started(), fn(_m, d) {
+    collector.source(saga_telemetry.run_started(), fn(_m, d) {
       record(Saga, Some(d.correlation), "run start " <> d.workflow)
     }),
-    sinal.observe(saga_telemetry.run_stopped(), fn(m, d) {
+    collector.source(saga_telemetry.run_stopped(), fn(m, d) {
       record(
         Saga,
         Some(d.correlation),
@@ -243,14 +138,14 @@ fn attach_all(name: Name(Message)) -> List(sinal.Attachment) {
           <> int.to_string(m.undone),
       )
     }),
-    sinal.observe(saga_telemetry.step_started(), fn(_m, d) {
+    collector.source(saga_telemetry.step_started(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "step start " <> d.step <> " attempt=" <> int.to_string(d.attempt),
       )
     }),
-    sinal.observe(saga_telemetry.step_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.step_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
@@ -262,36 +157,36 @@ fn attach_all(name: Name(Message)) -> List(sinal.Attachment) {
           <> string.inspect(d.result),
       )
     }),
-    sinal.observe(saga_telemetry.compensation_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.compensation_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "compensate " <> d.step <> " " <> string.inspect(d.decision),
       )
     }),
-    sinal.observe(saga_telemetry.undo_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.undo_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "undo " <> d.step <> " " <> string.inspect(d.result),
       )
     }),
-    sinal.observe(http_telemetry.event(), fn(_m, d) {
+    collector.source(http_telemetry.event(), fn(_m, d) {
       record(Http, d.correlation, "request " <> string.inspect(d.milestone))
     }),
-    sinal.observe(grind_telemetry.admitted(), fn(_m, d) {
+    collector.source(grind_telemetry.admitted(), fn(_m, d) {
       job(d.ref, "admitted state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_telemetry.claimed(), fn(_m, d) {
+    collector.source(grind_telemetry.claimed(), fn(_m, d) {
       job(d.ref, "claimed attempt=" <> int.to_string(d.attempt.attempt))
     }),
-    sinal.observe(grind_telemetry.acknowledged(), fn(_m, d) {
+    collector.source(grind_telemetry.acknowledged(), fn(_m, d) {
       job(d.ref, "acknowledged state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_telemetry.quarantined(), fn(_m, d) {
+    collector.source(grind_telemetry.quarantined(), fn(_m, d) {
       job(d.ref, "quarantined replayed=" <> string.inspect(d.replayed))
     }),
-    sinal.observe(grind_telemetry.resolved(), fn(_m, d) {
+    collector.source(grind_telemetry.resolved(), fn(_m, d) {
       job(d.ref, "resolved " <> string.inspect(d.decision))
     }),
   ]

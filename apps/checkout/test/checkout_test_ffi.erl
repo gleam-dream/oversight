@@ -1,5 +1,5 @@
 -module(checkout_test_ffi).
--export([parent/1, raw_http/3, children/1, fail/1]).
+-export([parent/1, raw_http/3, children/1, fail/1, handlers_with_id_prefix/1, registered_name/1]).
 
 %% The process that spawned Pid (OTP 25+). Used only to find the grind
 %% attempt process that started a saga runner.
@@ -51,4 +51,17 @@ read_status(Socket, Buffer, TimeoutMs) ->
                 {ok, More} -> read_status(Socket, <<Buffer/binary, More/binary>>, TimeoutMs);
                 {error, _} -> {error, nil}
             end
+    end.
+
+%% How many telemetry handlers have an id that starts with Prefix.
+handlers_with_id_prefix(Prefix) ->
+    length([H || #{id := Id} = H <- telemetry:list_handlers([]),
+                 is_binary(Id),
+                 binary:longest_common_prefix([Id, Prefix]) =:= byte_size(Prefix)]).
+
+%% The name Pid is registered under, or an empty string.
+registered_name(Pid) ->
+    case erlang:process_info(Pid, registered_name) of
+        {registered_name, Name} -> atom_to_binary(Name);
+        _ -> <<>>
     end.

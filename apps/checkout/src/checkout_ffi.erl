@@ -1,13 +1,5 @@
 -module(checkout_ffi).
--export([attempt/1, stop_supervisor/1]).
-
-%% Runs Fun and reports whether it returned instead of raising.
-attempt(Fun) ->
-    try Fun() of
-        _ -> true
-    catch
-        _:_ -> false
-    end.
+-export([stop_supervisor/1]).
 
 %% Stops a supervisor and waits until it has stopped its children, in
 %% reverse start order, and exited. Works from any process. A supervisor

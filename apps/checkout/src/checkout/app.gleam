@@ -18,9 +18,9 @@
 ////    └─ listener         the order API
 //// ```
 ////
-//// Observation is optional to the work: http_gun and the telemetry
-//// handlers drop an event while the forwarder or the collector is away,
-//// so neither restarts anything else. In `service` each child uses the
+//// Observation is optional to the work: http_gun drops an event while the
+//// forwarder is away, and the telemetry handlers exist only while the
+//// collector that attached them runs, so neither restarts anything else. In `service` each child uses the
 //// ones before it: a job calls the providers through the client, and a
 //// request reads and writes through grind's pool. `RestForOne` restarts a
 //// failed child and everything started after it, so the API is never up
@@ -157,7 +157,7 @@ pub fn start(config: Config) -> Result(App, String) {
     saga_postgres.config(pool)
     |> saga_postgres.with_lease(config.saga_lease)
   let collector =
-    telemetry.attach(collector_name, capacity: config.telemetry_capacity)
+    telemetry.new(collector_name, capacity: config.telemetry_capacity)
   let gateway =
     gateway.Gateway(
       client: http,
@@ -250,7 +250,6 @@ pub fn start(config: Config) -> Result(App, String) {
     // supervisor reports the failure. Only what is outside the tree is
     // left to undo.
     Error(error) -> {
-      telemetry.detach(collector)
       providers.stop(providers)
       Error(string.inspect(error))
     }
@@ -301,7 +300,6 @@ pub fn port(app: App) -> Result(Int, Nil) {
 pub fn stop(app: App) -> Nil {
   process.unlink(app.root)
   stop_supervisor(app.root)
-  telemetry.detach(app.services.collector)
   providers.stop(app.providers)
 }
 

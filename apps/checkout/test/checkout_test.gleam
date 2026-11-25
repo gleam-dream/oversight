@@ -1389,3 +1389,42 @@ pub fn an_outdated_schema_is_refused_at_boot_test() {
     |> pog.execute(legacy)
   assert columns.rows == [0]
 }
+
+@external(erlang, "checkout_test_ffi", "registered_name")
+fn registered_name(pid: process.Pid) -> String
+
+@external(erlang, "checkout_test_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process attaches the twelve handlers and owns them:
+/// while the application runs they are attached once, a replacement
+/// collector takes them over instead of adding a second set, and once the
+/// application stops none is left.
+pub fn telemetry_handlers_live_as_long_as_the_collector_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(application) = app.start(app.default_config(url))
+  let prefix = "sinal/collector:checkout_collector"
+  assert collector_handlers(prefix) == 12
+  let is_collector = fn(pid) {
+    string.starts_with(registered_name(pid), "checkout_collector")
+  }
+  let assert Ok(collector) = list.find(workers(application), is_collector)
+  let monitor = process.monitor(collector)
+  fail(collector)
+  let assert Ok(Nil) =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(_) { Nil })
+    |> process.selector_receive(5000)
+  assert eventually(
+    fn() {
+      case list.find(workers(application), is_collector) {
+        Ok(replacement) -> replacement != collector
+        Error(Nil) -> False
+      }
+    },
+    100,
+  )
+  assert collector_handlers(prefix) == 12
+  app.stop(application)
+  assert eventually(fn() { collector_handlers(prefix) == 0 }, 100)
+}
