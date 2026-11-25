@@ -61,6 +61,7 @@ import payout_desk/provider.{type Provider}
 import payout_desk/reads
 import payout_desk/workflow
 import pog
+import saga
 import saga/durable
 import saga/execution
 import saga/storage.{type Storage}
@@ -556,8 +557,12 @@ fn pay(
           cause: execution.StepFailed(error: workflow.Declined(reason), ..),
           ..,
         )) -> settle(deps, conn, id, NotPerformed(reason))
-        Ok(execution.Unresolved(evidence:, ..)) ->
-          uncertain(deps, conn, id, workflow.describe_fault(evidence))
+        Ok(execution.Unresolved(failure:, ..)) ->
+          uncertain(deps, conn, id, case failure {
+            saga.Returned(error) -> workflow.describe_fault(error)
+            saga.Crashed(crash) -> "crashed: " <> crash.reason
+            saga.TimedOut -> "timed out"
+          })
         Ok(other) -> uncertain(deps, conn, id, string.inspect(other))
         Error(error) ->
           case durable.error_kind(error) {
