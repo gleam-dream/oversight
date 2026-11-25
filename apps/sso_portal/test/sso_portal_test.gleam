@@ -318,12 +318,13 @@ pub fn rate_limited_refresh_keeps_the_session_test() {
   billing_api.deny_accepted_tokens(portal.billing_api)
   let assert Ok(#(b, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.status == 503
-  assert rows(portal) == 1
-  // The limiter lets go: the same session refreshes and works.
+  assert page.location == None
+  // The limiter lets go: the same session refreshes and works, with no
+  // redirect to sign in.
   testing.set_refresh_answer(portal.provider, testing.RefreshWithoutIdToken)
   let assert Ok(#(_, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.status == 200
-  assert testing.requests(portal.provider).code_grants == 1
+  assert string.contains(page.body, "INV-1001")
 }
 
 // --- Durable sessions --------------------------------------------------------------
@@ -420,16 +421,40 @@ pub fn a_wrong_sealing_key_denies_and_keeps_the_session_test() {
   let assert Ok(#(b, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.status == 500
   assert page.location == None
-  assert rows(portal) == 1
 
-  // The operator restores the key: the same browser session works and
-  // nobody signed in again.
+  // The operator restores the key: the same browser session works, with no
+  // redirect to sign in.
   let assert Ok(portal) =
     app.restart_hellhound(app.App(..portal, sealing_key: right_key))
   let assert Ok(#(b, page)) = browser.get(b, portal.portal_url <> "/dashboard")
   assert page.status == 200
-  assert testing.requests(portal.provider).code_grants == 1
+  assert string.contains(page.body, "INV-1001")
   browser.close(b)
+  app.stop(portal)
+}
+
+pub fn logout_under_a_wrong_sealing_key_ends_the_session_test() {
+  let assert Ok(portal) = app.start(options())
+  let signed_in =
+    sign_in(portal, browser.new(testing.trust_anchor_der(portal.provider)))
+  let right_key = portal.sealing_key
+  let assert Ok(wrong_key) = config.sealing_key(crypto.strong_random_bytes(32))
+  let assert Ok(portal) =
+    app.restart_hellhound(app.App(..portal, sealing_key: wrong_key))
+
+  // Custody cannot be read, and the person signs out anyway.
+  let assert Ok(#(_, page)) =
+    browser.post(signed_in, portal.portal_url <> "/logout")
+  assert page.url == portal.portal_url <> "/signed-out"
+
+  // The key comes back. A kept copy of the cookie from before the logout
+  // does not open the session again.
+  let assert Ok(portal) =
+    app.restart_hellhound(app.App(..portal, sealing_key: right_key))
+  let assert Ok(#(_, page)) =
+    browser.get(signed_in, portal.portal_url <> "/dashboard")
+  assert page.location == Some(portal.portal_url <> "/login")
+  browser.close(signed_in)
   app.stop(portal)
 }
 

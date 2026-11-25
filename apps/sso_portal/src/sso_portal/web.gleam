@@ -328,7 +328,13 @@ fn billing_error(error: billing.BillingError) -> DashboardError {
 
 fn logout(request: Request, context: Context) -> Response {
   case current(request, context) {
-    Error(_) -> wisp.redirect("/signed-out") |> clear_session(request)
+    Error(_) -> {
+      // The person asked to end the session. A row kept because custody
+      // could not be read must not outlive that: the cookie would work
+      // again once custody reads.
+      forget_row(request, context)
+      wisp.redirect("/signed-out") |> clear_session(request)
+    }
     Ok(current) -> {
       let options =
         hellhound.LogoutOptions(
@@ -352,6 +358,17 @@ fn logout(request: Request, context: Context) -> Response {
 }
 
 // --- Helpers ----------------------------------------------------------------
+
+/// Delete the session row the request's cookie names, if there is one.
+fn forget_row(request: Request, context: Context) -> Nil {
+  case wisp.get_cookie(request, session_cookie, wisp.Signed) {
+    Ok(id) -> {
+      let _ = session_store.delete(context.db, id)
+      Nil
+    }
+    Error(Nil) -> Nil
+  }
+}
 
 fn clear_session(response: Response, request: Request) -> Response {
   wisp.set_cookie(response, request, session_cookie, "", wisp.Signed, 0)
