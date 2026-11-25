@@ -38,8 +38,7 @@ pub fn with_runtime(
       config.default()
       |> config.with_destination(
         destination.loopback_only() |> destination.only_hosts([authority]),
-      )
-      |> config.with_request_timeout(config.After(duration.seconds(20))),
+      ),
     )
   let pool_name = process.new_name("financial_pool")
   let assert Ok(pool) = pog.url_config(pool_name, url)
@@ -62,7 +61,10 @@ pub fn with_runtime(
     coordinator.Deps(
       connection,
       saga_postgres.storage(saga_config),
-      provider.Provider(http, "http://" <> authority),
+      provider.Provider(
+        http_gun.with_timeout(http, duration.seconds(20)),
+        "http://" <> authority,
+      ),
     )
   let settings =
     grind.new(pool)
