@@ -1,5 +1,5 @@
 -module(tool_hub_raw_http_ffi).
--export([status/2]).
+-export([status/2, accepts/1]).
 
 %% Sends one raw HTTP/1.1 request to a loopback port and returns the
 %% response's status code, so a test can frame a body as a client library
@@ -27,3 +27,15 @@ read_status(Socket, Seen) when byte_size(Seen) < 12 ->
     end;
 read_status(_Socket, _Seen) ->
     {error, nil}.
+
+%% Whether a TCP connection to a loopback port is accepted. A stopped
+%% listener can keep its socket open while it shuts down, and the kernel
+%% accepts connections into its backlog until the socket closes.
+accepts(Port) ->
+    case gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 500) of
+        {ok, Socket} ->
+            gen_tcp:close(Socket),
+            true;
+        {error, _} ->
+            false
+    end.
