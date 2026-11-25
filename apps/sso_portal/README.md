@@ -17,13 +17,31 @@ A browser session lasts one hour on the server as well as in the cookie: each ro
 post-logout redirect is built from the portal's configured origin, the one its OpenID
 `redirect_uri` uses, never from the request's `Host` header.
 
+## Keys
+
+The portal reads two keys from the environment when it starts, and refuses to start when
+either is missing or invalid:
+
+- `SSO_PORTAL_SEALING_KEY` seals Hellhound's records in PostgreSQL. It is 32 bytes, written
+  as 64 hex digits or as base64, and not all zero (`openssl rand -hex 32`).
+- `SSO_PORTAL_SECRET_KEY_BASE` signs the session cookie. It has at least 64 characters.
+
+Every node that serves the portal needs the same two values, and a restart keeps them, so
+sessions and stored tokens survive both. Changing a key is not a rotation. Records sealed
+under the old sealing key no longer open: Hellhound reports them as unreadable and keeps
+them for an operator, every signed-in person must sign in again, and the refresh tokens in
+those records are neither used nor revoked at the provider. Cookies signed with the old
+secret are refused, which signs everyone out. The tests set fixed test keys.
+
 ## Run
 
 From this directory, inside the Oversight shell:
 
 ```sh
 ../scripts/with-postgres.sh gleam test
-../scripts/with-postgres.sh gleam run
+SSO_PORTAL_SEALING_KEY=$(openssl rand -hex 32) \
+SSO_PORTAL_SECRET_KEY_BASE=$(openssl rand -hex 32) \
+  ../scripts/with-postgres.sh gleam run
 ```
 
 The [composition contract](../../docs/design/design-layer.pdf) describes

@@ -3,7 +3,6 @@
 //// the portal itself.
 
 import envoy
-import gleam/crypto
 import gleam/erlang/process
 import gleam/int
 import gleam/option.{type Option, None, Some}
@@ -20,11 +19,11 @@ import http_gun/destination
 import pog
 import sso_portal/billing_api.{type BillingApi}
 import sso_portal/hellhound_records
+import sso_portal/keys
 import sso_portal/server.{type Server, Server}
 import sso_portal/session_store
 import sso_portal/telemetry.{type Telemetry}
 import sso_portal/web
-import wisp
 
 /// The audience the provider puts in access tokens and the billing API
 /// requires.
@@ -76,7 +75,12 @@ pub type App {
   )
 }
 
+/// Start everything. The sealing key and the cookie secret come from the
+/// environment (`sso_portal/keys`); without valid ones nothing starts.
 pub fn start(options: Options) -> Result(App, String) {
+  use keys <- result.try(
+    keys.from_environment() |> result.map_error(keys.describe),
+  )
   use telemetry <- result.try(telemetry.start(options.print_telemetry))
   use provider <- result.try(
     options.provider
@@ -86,10 +90,7 @@ pub fn start(options: Options) -> Result(App, String) {
   )
   use db <- result.try(connect_database())
   let records = hellhound_records.new(db, records_table)
-  use sealing_key <- result.try(
-    config.sealing_key(crypto.strong_random_bytes(32))
-    |> result.replace_error("sealing key"),
-  )
+  let sealing_key = keys.sealing_key
   use billing_api <- result.try(start_billing_api(options, provider))
   use port <- result.try(
     server.free_port() |> result.replace_error("no free port"),
@@ -117,7 +118,7 @@ pub fn start(options: Options) -> Result(App, String) {
       // Placeholder: `serve_portal` starts the listener on this port.
       portal: Server(pid: process.self(), port:),
       portal_url:,
-      secret_key_base: wisp.random_string(64),
+      secret_key_base: keys.secret_key_base,
     )
   serve_portal(app)
 }

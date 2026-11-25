@@ -232,12 +232,12 @@
         failure: [The application may refresh once after a resource refusal and recover uncertain publication once, then maps Hellhound's typed action to user-visible decisions. Storage uncertainty is not treated as definite non-action. Listener startup refusal returns a recoverable error without terminating its caller. Listener shutdown and caller exit retire the owned Mist subtree.],
       )
       #points(
-        [Hellhound's stored records are sealed with an application-held key and hold nothing readable. The PostgreSQL adapter implements Hellhound's explicit write conditions: a guarded write locks the row, checks its version and samples database time before updating, and a failed commit acknowledgement remains an unknown outcome.],
+        [Hellhound's stored records are sealed with an application-held key and hold nothing readable. The sealing key and the cookie-signing secret come from the environment at start-up, validated (a 32-byte sealing key that is not all zero, a secret of at least 64 characters), and a missing or invalid one stops startup, so stored custody and signed cookies survive a restart and every node shares them. A changed key is not a rotation: records sealed under the old key are unreadable and kept for an operator, and their holders sign in again. The PostgreSQL adapter implements Hellhound's explicit write conditions: a guarded write locks the row, checks its version and samples database time before updating, and a failed commit acknowledgement remains an unknown outcome.],
         [Web-tier restart waits for the owning actor to retire the previous listener subtree, allowing a bounded interval for child cleanup and failing explicitly on timeout.],
       )
       #behavior(title: "Listener startup refusal preserves its caller", area: "SSO portal", level: "boundary")[#given[Another listener already owns the requested address.] #when[The application attempts to start its listener.] #then[Startup returns an error without terminating the caller.] #then[The caller can start and stop a listener at an available address.]]
       #adr(18)
-      Source owners: `apps/sso_portal/src/sso_portal/hellhound_records.gleam`, `session_store.gleam`, `web.gleam`, `billing_api.gleam`, and `server.gleam`.
+      Source owners: `apps/sso_portal/src/sso_portal/hellhound_records.gleam`, `keys.gleam`, `session_store.gleam`, `web.gleam`, `billing_api.gleam`, and `server.gleam`.
     ]
     #subsection(title: "Durable research and publication")[
       #answers(title: "Independent delivery, conversation and publication",
