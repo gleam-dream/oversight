@@ -302,8 +302,10 @@ fn drive_and_admit(
         worker.Snoozed(duration.milliseconds(200), detail)
       Error(payout_agent.RunStopped(detail)) -> {
         // The record keeps the failed attempt under the request's key,
-        // beside its expectation.
-        let _ =
+        // beside its expectation. It is what counts the request's
+        // attempts (`prior`), so the job fails only once the attempt is
+        // on it; until then the next delivery finds the same stopped run.
+        case
           decisions_postgres.transaction(conn, decisions.record_failure(
             payouts(deps),
             _,
@@ -312,7 +314,15 @@ fn drive_and_admit(
             about: Subject("seller", request.seller),
             failure: decisions_model.Declined(detail),
           ))
-        worker.Failed(detail)
+        {
+          Ok(_) -> worker.Failed(detail)
+          Error(error) ->
+            worker.Snoozed(
+              duration.milliseconds(200),
+              "the failed attempt was not recorded: "
+                <> decisions_postgres.describe(error),
+            )
+        }
       }
     }
   }
@@ -754,17 +764,13 @@ pub fn tell(
           within: duration.seconds(10),
         )
       {
-        Ok(payout_agent.Answered(reply)) -> {
-          let _ = deliver(conn, known, Some(reply))
-          worker.Succeeded("told")
-        }
+        Ok(payout_agent.Answered(reply)) ->
+          deliver(conn, known, Some(reply)) |> answered("told")
         // The follow-on run ended without an answer, or the run named by
         // the record has no handover to continue from: the application
         // tells the seller from the record alone.
-        Ok(payout_agent.HandedOver(..)) | Error(payout_agent.RunStopped(_)) -> {
-          let _ = deliver(conn, known, None)
-          worker.Succeeded("told without the agent")
-        }
+        Ok(payout_agent.HandedOver(..)) | Error(payout_agent.RunStopped(_)) ->
+          deliver(conn, known, None) |> answered("told without the agent")
         Error(payout_agent.StillWorking) ->
           worker.Snoozed(duration.milliseconds(300), "the run is not done")
         Error(payout_agent.RunsUnavailable(detail)) ->
@@ -790,6 +796,25 @@ fn handed_action(known: Occurrence(Payout)) -> Result(run.ActionRef, String) {
       run.ActionRef(run: id, id: action)
     }
     _ -> Error("the recommendation names no handed-over action")
+  }
+}
+
+/// The tell job's answer once `deliver` ran: it succeeds only when the
+/// seller's reply is stored. Otherwise it snoozes, and the next delivery
+/// finds the follow-on run and stores the reply.
+fn answered(
+  delivered: Result(db.Told, Undelivered),
+  done: String,
+) -> worker.Response(String, String) {
+  case delivered {
+    Ok(_) -> worker.Succeeded(done)
+    Error(NotKnownYet) ->
+      worker.Snoozed(duration.milliseconds(300), "the outcome is not known yet")
+    Error(Failed(detail)) ->
+      worker.Snoozed(
+        duration.milliseconds(300),
+        "the reply was not stored: " <> detail,
+      )
   }
 }
 
