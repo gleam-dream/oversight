@@ -1027,7 +1027,7 @@ pub fn order_ids_outside_the_safe_alphabet_are_refused_test() {
       body(order_fields("A.b_c-" <> string.repeat("9", 58), "id-sku", 1, token)),
       "",
     )
-  assert status == 201
+  assert status == 202
 }
 
 /// The gateway sends a provider key as one path segment whatever it
@@ -1345,7 +1345,7 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
   let assert Ok(port) = app.port(application)
   let alice_card = providers.tokenise(application.providers, providers.card_ok)
   let bob_card = providers.tokenise(application.providers, providers.card_ok)
-  let #(status, _) =
+  let #(status, alice_placed) =
     call_api(
       port,
       http.Post,
@@ -1354,6 +1354,9 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
       body(order_fields("shared-1", "shared-sku", 1, alice_card)),
     )
   assert status == 202
+  let assert Ok(alice_job) =
+    json.parse(alice_placed, decode.at(["job_id"], decode.int))
+  let assert grind.Succeeded(_) = await_job(application, alice_job)
   let assert Ok(Some(alice_before)) = db.order_for(pool, "alice", "shared-1")
 
   // Bob reuses Alice's id, locally and durably, with his own placement.
