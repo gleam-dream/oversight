@@ -12,6 +12,7 @@ import gleam/bit_array
 import gleam/erlang/process
 import gleam/http/request
 import gleam/list
+import gleam/otp/static_supervisor
 import gleam/string
 import gleeunit
 import gleeunit/should
@@ -25,11 +26,28 @@ fn account() {
   portal.Account(portal.AccountId(42), email, True)
 }
 
+/// A memory challenge store under its own supervisor, the only way the store
+/// runs, and the supervisor that owns it.
+fn start_store(capacity) {
+  let name = process.new_name("email_portal_test_challenges")
+  let assert Ok(config) = memory.new(name, capacity)
+  let assert Ok(started) =
+    static_supervisor.new(static_supervisor.OneForOne)
+    |> static_supervisor.add(memory.supervised(config))
+    |> static_supervisor.start
+  #(started.pid, memory.store(name))
+}
+
+fn stop_store(runtime: #(process.Pid, a)) -> Nil {
+  process.unlink(runtime.0)
+  process.kill(runtime.0)
+}
+
 fn setup(capacity) {
-  let assert Ok(runtime) = memory.start(20)
+  let runtime = start_store(20)
   let assert Ok(capture) = capture.start(capacity)
   let assert Ok(key) = portal.challenge_key(Error(Nil))
-  let assert Ok(service) = portal.service(memory.store(runtime), key)
+  let assert Ok(service) = portal.service(runtime.1, key)
   let assert Ok(from) = address.parse("login@example.com")
   #(
     runtime,
@@ -40,7 +58,7 @@ fn setup(capacity) {
 }
 
 fn finish(runtime, capture) {
-  memory.stop(runtime) |> should.equal(Ok(Nil))
+  stop_store(runtime)
   capture.stop(capture) |> should.equal(Ok(Nil))
 }
 
@@ -173,7 +191,7 @@ pub fn delivery_capacity_and_stopped_runtime_are_typed_test() {
     portal.request(app, account(), passwordless.MagicLink)
   outcome |> should.equal(delivery.NotSent(delivery.CaptureUnavailable))
   portal.session_count(app) |> should.equal(0)
-  memory.stop(runtime) |> should.equal(Ok(Nil))
+  stop_store(runtime)
 }
 
 pub fn unknown_delivery_is_not_automatically_resent_test() {
@@ -194,7 +212,7 @@ pub fn unknown_delivery_is_not_automatically_resent_test() {
 
 pub fn uncertain_consumption_survives_unavailable_recovery_test() {
   let #(runtime, capture, _, _) = setup(10)
-  let actual = memory.store(runtime)
+  let actual = runtime.1
   let steps = process.new_subject()
   process.send(steps, 1)
   process.send(steps, 2)
