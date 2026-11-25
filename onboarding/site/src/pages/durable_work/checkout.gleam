@@ -181,7 +181,7 @@ fn after_checks(
           ),
           end(
             [#(Charge, Held), #(Ship, Skipped)],
-            "Policy answers Hold(MaybeCharged). Nothing is undone: releasing stock for an order that may be paid would be wrong. Your app checks the provider by key and resolves it.",
+            "Policy answers Hold: the run ends Unresolved, carrying the last attempt's failure. Nothing is undone: releasing stock for an order that may be paid would be wrong. Your app checks the provider by key and resolves it.",
             HeldForReconciliation,
           ),
         ],
