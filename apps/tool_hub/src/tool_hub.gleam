@@ -243,11 +243,7 @@ fn check(
   pending: run.PendingApproval,
   credential: String,
 ) -> Result(approvers.Proof, assistant.AnswerError) {
-  approvers.check(
-    hub.assistant.approvers,
-    credential,
-    pending.reference.requirement,
-  )
+  approvers.check(hub.assistant.approvers, credential, pending.reference)
   |> result.map_error(assistant.Denied)
 }
 

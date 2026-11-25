@@ -94,8 +94,8 @@ pub fn policy(read_only: List(String)) -> policy.Policy(Context) {
 /// deployment would verify an access token's scope here instead, as
 /// `apps/support_desk/src/support_desk/approvers.gleam` does.
 pub fn operator_approvers(credential: String) -> Approvers(String) {
-  approvers.new("tool_hub_operator", fn(presented, requirement) {
-    case secure_equal(presented, credential), requirement == reserver {
+  approvers.new("tool_hub_operator", fn(presented, request) {
+    case secure_equal(presented, credential), request.requirement == reserver {
       False, _ ->
         Error(approvers.NotAuthenticated("not the operator credential"))
       True, False ->
@@ -159,6 +159,7 @@ pub fn build_agent(
   read_only read_only: List(String),
   approvers approvers: Approvers(String),
 ) -> Result(agent.Agent(Context, Answer), List(agent.ConfigError)) {
+  use <- agent.build_with
   agent.new(
     "inventory_assistant",
     llm.model(http, settings, model_id),
@@ -170,7 +171,6 @@ pub fn build_agent(
     "Answer questions about the product catalog using the inventory tools.",
   )
   |> agent.with_answer(answer_codec())
-  |> agent.build
 }
 
 /// The second MCP server, which exposes the agent as one tool. A call with an
