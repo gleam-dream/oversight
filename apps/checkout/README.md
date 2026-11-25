@@ -31,6 +31,13 @@ recorded. A saga that cannot start is recorded as rejected. A saga still running
 the request's budget (60 seconds) is cancelled, and the outcome it settles on is
 recorded before the reply, so the order never stays pending behind a local placement.
 
+A reply or a finished job reports only an outcome the order row holds. When the row
+cannot be written after the saga settles, the local placement answers 503 with
+`outcome_unrecorded` and the order stays `pending`; the log line names the order and
+the outcome, and nothing retries the write. The durable job snoozes instead: its
+redelivery reads the saved saga outcome and repeats the write, up to Grind's snooze
+limit.
+
 At boot the app creates its tables and checks the shape of tables that already exist.
 A database holding tables from an earlier version, without the catalog price or the
 customer-scoped keys, is refused with a message naming each outdated table and is
