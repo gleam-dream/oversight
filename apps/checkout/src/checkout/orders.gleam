@@ -261,7 +261,12 @@ pub fn finalize(
         ),
       )
     }
-    execution.Unresolved(step, evidence, settlement) -> {
+    execution.Unresolved(step, failure, settlement) -> {
+      let evidence = case failure {
+        saga.Returned(error) -> error
+        saga.Crashed(_) | saga.TimedOut ->
+          domain.Interrupted(saga.address_to_string(step))
+      }
       log_cause(order.order_id, Ok(evidence))
       let detail =
         saga.address_to_string(step)

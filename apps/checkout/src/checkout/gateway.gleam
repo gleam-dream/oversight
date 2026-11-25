@@ -43,7 +43,6 @@ pub fn client_config(
   hosts: List(String),
 ) -> config.Config {
   config.default()
-  |> config.with_request_timeout(config.After(duration.seconds(5)))
   |> config.with_destination(
     destination.loopback_only() |> destination.only_hosts(hosts),
   )

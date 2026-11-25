@@ -284,7 +284,7 @@ pub fn unknown_payment_outcome_is_reported_by_saga_test() {
     == 1
 
   // Every answer lost: the decider holds. The outcome is Unresolved with the
-  // typed http_gun evidence, stock stays reserved, nothing is voided, and
+  // typed http_gun failure, stock stays reserved, nothing is voided, and
   // both attempts are named as unknown effects.
   let hole =
     order(
@@ -294,11 +294,14 @@ pub fn unknown_payment_outcome_is_reported_by_saga_test() {
       providers.card_black_hole,
       "1 St",
     )
-  let assert Ok(execution.Unresolved(step, evidence, settlement)) =
+  let assert Ok(execution.Unresolved(step, failure, settlement)) =
     execution.run(services.workflow, hole, services.saga_config)
   assert saga.address_to_string(step) == "charge_card"
-  assert evidence
-    == ProviderUnreachable(domain.Payments, timed_out_after_send())
+  assert failure
+    == saga.Returned(ProviderUnreachable(
+      domain.Payments,
+      timed_out_after_send(),
+    ))
   assert list.map(settlement.unknown_effects, fn(u) { #(u.action, u.ending) })
     == [
       #(execution.StepAttempt(1), execution.ActionReturnedUnknown),
@@ -341,10 +344,13 @@ pub fn unknown_payment_keeps_the_typed_failure_test() {
   ]
 
   let held = charge_only("charge-only-hold", fn(step) { step })
-  let assert Ok(execution.Unresolved(_, evidence, settlement)) =
+  let assert Ok(execution.Unresolved(_, failure, settlement)) =
     execution.run(held, hole, services.saga_config)
-  assert evidence
-    == ProviderUnreachable(domain.Payments, timed_out_after_send())
+  assert failure
+    == saga.Returned(ProviderUnreachable(
+      domain.Payments,
+      timed_out_after_send(),
+    ))
   assert list.map(settlement.unknown_effects, fn(u) { #(u.action, u.ending) })
     == unknown_attempt
 

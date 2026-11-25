@@ -160,7 +160,10 @@ pub fn start(config: Config) -> Result(App, String) {
   // by name, so these handles exist before any process does.
   let pool = pog.named_connection(pool_name)
   let jobs = grind.named(jobs_name)
-  let http = http_gun.named(http_name)
+  // Each provider call is bounded by its own deadline; this view bounds any
+  // other call through the client.
+  let http =
+    http_gun.named(http_name) |> http_gun.with_timeout(duration.seconds(5))
   let storage =
     saga_postgres.config(pool)
     |> saga_postgres.with_lease(config.saga_lease)
