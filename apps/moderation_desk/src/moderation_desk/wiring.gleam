@@ -159,6 +159,19 @@ fn revision_key(id: String, revision: String) -> String {
   id <> "@" <> revision
 }
 
+/// Take the lock `decisions.happened` takes for the point and `subject`,
+/// until the transaction ends. A transaction that changes an occurrence
+/// before it reports a world event about the occurrence's subject takes
+/// this lock first, as `happened` would, so that it and an edit of the
+/// post lock in one order.
+pub fn lock_subject(tx: Tx, subject: Subject) -> Result(Nil, port.StoreError) {
+  store.port().load(
+    tx,
+    decisions.subject_lock(point: point.name, subject: subject),
+  )
+  |> result.replace(Nil)
+}
+
 /// Lock a post's visibility until the transaction ends, so that a
 /// settlement, an edit and an appeal change it one at a time.
 pub fn lock_visibility(tx: Tx, id: String) -> Result(Nil, port.StoreError) {
