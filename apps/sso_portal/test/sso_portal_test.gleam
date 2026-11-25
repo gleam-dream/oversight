@@ -458,6 +458,51 @@ pub fn logout_under_a_wrong_sealing_key_ends_the_session_test() {
   app.stop(portal)
 }
 
+/// A logout whose session row could not be deleted is not reported as done:
+/// the cookie stays, and signing out again finishes once the store answers.
+pub fn a_logout_that_cannot_delete_the_row_keeps_the_cookie_test() {
+  let assert Ok(portal) = app.start(options())
+  let signed_in =
+    sign_in(portal, browser.new(testing.trust_anchor_der(portal.provider)))
+  let right_key = portal.sealing_key
+  let assert Ok(wrong_key) = config.sealing_key(crypto.strong_random_bytes(32))
+  let assert Ok(portal) =
+    app.restart_hellhound(app.App(..portal, sealing_key: wrong_key))
+
+  // The store refuses every delete of a portal session.
+  let assert Ok(_) =
+    pog.query(
+      "create function refuse_session_delete() returns trigger
+       language plpgsql as $$ begin raise exception 'refused'; end $$",
+    )
+    |> pog.execute(portal.db)
+  let assert Ok(_) =
+    pog.query(
+      "create trigger refuse_session_delete before delete on portal_sessions
+       for each row execute function refuse_session_delete()",
+    )
+    |> pog.execute(portal.db)
+  let assert Ok(#(signed_in, page)) =
+    browser.post(signed_in, portal.portal_url <> "/logout")
+  assert page.status == 503
+
+  // The store answers again: the same browser signs out, and the session
+  // is gone once the key comes back.
+  let assert Ok(_) =
+    pog.query("drop trigger refuse_session_delete on portal_sessions")
+    |> pog.execute(portal.db)
+  let assert Ok(#(signed_in, page)) =
+    browser.post(signed_in, portal.portal_url <> "/logout")
+  assert page.url == portal.portal_url <> "/signed-out"
+  let assert Ok(portal) =
+    app.restart_hellhound(app.App(..portal, sealing_key: right_key))
+  let assert Ok(#(_, page)) =
+    browser.get(signed_in, portal.portal_url <> "/dashboard")
+  assert page.location == Some(portal.portal_url <> "/login")
+  browser.close(signed_in)
+  app.stop(portal)
+}
+
 pub fn hellhound_records_hold_nothing_readable_test() {
   use portal, b <- with_app(options())
   let _ = sign_in(portal, b)

@@ -328,13 +328,14 @@ fn billing_error(error: billing.BillingError) -> DashboardError {
 
 fn logout(request: Request, context: Context) -> Response {
   case current(request, context) {
-    Error(_) -> {
+    Error(_) ->
       // The person asked to end the session. A row kept because custody
       // could not be read must not outlive that: the cookie would work
       // again once custody reads.
-      forget_row(request, context)
-      wisp.redirect("/signed-out") |> clear_session(request)
-    }
+      case forget_row(request, context) {
+        Ok(Nil) -> wisp.redirect("/signed-out") |> clear_session(request)
+        Error(Nil) -> logout_unconfirmed()
+      }
     Ok(current) -> {
       let options =
         hellhound.LogoutOptions(
@@ -351,22 +352,30 @@ fn logout(request: Request, context: Context) -> Response {
         )) -> hellhound.logout_response(wisp.response(303), to)
         Ok(hellhound.LoggedOut(..)) | Error(_) -> wisp.redirect("/signed-out")
       }
-      let _ = session_store.delete(context.db, current.stored.id)
-      clear_session(response, request)
+      case session_store.delete(context.db, current.stored.id) {
+        Ok(Nil) -> clear_session(response, request)
+        // Custody is gone, so a retry reads no session and deletes the row
+        // through `forget_row`.
+        Error(_) -> logout_unconfirmed()
+      }
     }
   }
 }
 
+/// The session row was not deleted, so the session is not reported as
+/// ended: the cookie stays and the person can sign out again.
+fn logout_unconfirmed() -> Response {
+  page(503, "Try again later", "<p>Signing out did not finish.</p>")
+}
+
 // --- Helpers ----------------------------------------------------------------
 
-/// Delete the session row the request's cookie names, if there is one.
-fn forget_row(request: Request, context: Context) -> Nil {
+/// Delete the session row the request's cookie names. `Ok` when it is gone
+/// or the request names none.
+fn forget_row(request: Request, context: Context) -> Result(Nil, Nil) {
   case wisp.get_cookie(request, session_cookie, wisp.Signed) {
-    Ok(id) -> {
-      let _ = session_store.delete(context.db, id)
-      Nil
-    }
-    Error(Nil) -> Nil
+    Ok(id) -> session_store.delete(context.db, id) |> result.replace_error(Nil)
+    Error(Nil) -> Ok(Nil)
   }
 }
 
