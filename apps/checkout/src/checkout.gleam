@@ -10,7 +10,6 @@ import checkout/domain.{type CheckoutRequest, CheckoutRequest}
 import checkout/gateway
 import checkout/providers
 import checkout/telemetry
-import checkout/web
 import envoy
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -53,7 +52,7 @@ fn demo(url: String) -> Nil {
       ]),
     )
   let assert Ok(application) = app.start(config)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   // The demo's own customer client, separate from the app's provider client.
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
   let pool = application.services.pool

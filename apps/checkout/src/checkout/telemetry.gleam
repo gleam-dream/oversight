@@ -8,12 +8,19 @@
 ////   `durable.with_correlation` (durable runs);
 //// - http_gun: `http_gun.with_correlation` on the client view;
 //// - grind: `job.with_correlation` at submit, in every job event's `ref`.
+////
+//// The collector is a named actor under the application's supervisor. The
+//// handlers are attached once, by `attach`, and send to the name, so they
+//// reach whichever collector process is running. A restarted collector
+//// starts empty.
 
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process.{type Name, type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
+import gleam/otp/supervision
+import gleam/result
 import gleam/string
 import grind/job
 import grind/telemetry as grind_telemetry
@@ -33,10 +40,10 @@ pub type Entry {
 }
 
 pub opaque type Collector {
-  Collector(subject: Subject(Message), attachments: List(sinal.Attachment))
+  Collector(name: Name(Message), attachments: List(sinal.Attachment))
 }
 
-type Message {
+pub opaque type Message {
   Record(Entry)
   Trace(order: Option(Correlation), reply: Subject(List(Entry)))
 }
@@ -46,10 +53,20 @@ pub fn order(key: String) -> Correlation {
   correlation.from_key(key)
 }
 
-/// Starts the collector and attaches one handler per event descriptor.
-pub fn start() -> Collector {
-  let assert Ok(started) =
+/// Attaches one handler per event descriptor. Each handler sends to the
+/// collector registered under `name`; while none is running, the event is
+/// dropped. Call once per application start and `detach` at its stop:
+/// handlers are node-wide registrations, not processes, so no supervisor
+/// removes them.
+pub fn attach(name: Name(Message)) -> Collector {
+  Collector(name:, attachments: attach_all(name))
+}
+
+/// The collector process, registered under the name given to `attach`.
+pub fn supervised(collector: Collector) -> supervision.ChildSpecification(Nil) {
+  supervision.worker(fn() {
     actor.new([])
+    |> actor.named(collector.name)
     |> actor.on_message(fn(entries, message) {
       case message {
         Record(entry) -> actor.continue([entry, ..entries])
@@ -62,11 +79,11 @@ pub fn start() -> Collector {
       }
     })
     |> actor.start
-  let subject = started.data
-  Collector(subject:, attachments: attach_all(subject))
+    |> result.map(fn(started) { actor.Started(..started, data: Nil) })
+  })
 }
 
-pub fn stop(collector: Collector) -> Nil {
+pub fn detach(collector: Collector) -> Nil {
   list.each(collector.attachments, fn(a) {
     let _ = sinal.detach(a)
     Nil
@@ -77,12 +94,12 @@ pub fn stop(collector: Collector) -> Nil {
 pub fn trace(collector: Collector, order: Correlation) -> List(Entry) {
   // Forwarded events (http_gun, grind) arrive asynchronously.
   process.sleep(50)
-  actor.call(collector.subject, 1000, Trace(Some(order), _))
+  actor.call(process.named_subject(collector.name), 1000, Trace(Some(order), _))
 }
 
 /// Events that carried no correlation.
 pub fn unattributed(collector: Collector) -> List(Entry) {
-  actor.call(collector.subject, 1000, Trace(None, _))
+  actor.call(process.named_subject(collector.name), 1000, Trace(None, _))
 }
 
 pub fn render(entry: Entry) -> String {
@@ -96,9 +113,23 @@ pub fn render(entry: Entry) -> String {
 
 // --- attachments ----------------------------------------------------------
 
-fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
+/// Runs `send` and reports whether it returned. A handler that raises is
+/// removed by telemetry for good, and a send to a name raises while no
+/// process holds it, which is the case between a collector's exit and its
+/// restart.
+@external(erlang, "checkout_ffi", "attempt")
+fn attempt(send: fn() -> Nil) -> Bool
+
+fn attach_all(name: Name(Message)) -> List(sinal.Attachment) {
   let record = fn(source, order, line) {
-    process.send(subject, Record(Entry(source, order, line)))
+    let _ =
+      attempt(fn() {
+        process.send(
+          process.named_subject(name),
+          Record(Entry(source, order, line)),
+        )
+      })
+    Nil
   }
   let job = fn(ref: grind_telemetry.JobRef, line) {
     record(
