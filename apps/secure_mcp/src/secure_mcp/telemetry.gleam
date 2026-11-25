@@ -12,18 +12,17 @@
 ////   introspection mode (the verifier applies `hellhound.with_correlation`);
 ////   local JWT validation sends no request per token at all.
 
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
-import gleam/list
 import gleam/option.{type Option}
-import gleam/otp/actor
+import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import grind/job
 import grind/telemetry as grind_telemetry
 import hellhound/telemetry as hellhound_telemetry
 import relay/telemetry as relay_telemetry
-import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 import sinal/forwarder
 
@@ -33,40 +32,36 @@ pub type Line {
   Line(package: String, event: String, detail: String, pid: String)
 }
 
-type Message {
-  Record(Line)
-  Lines(Subject(List(Line)))
-}
+/// How many lines the collector keeps; older lines are overwritten.
+pub const capacity = 4096
 
+/// A supervised `sinal/collector` over every package's events. Its process
+/// attaches the handlers and owns them, so they are attached exactly while
+/// it runs.
 pub opaque type Collector {
-  Collector(subject: Subject(Message), attachments: List(sinal.Attachment))
+  Collector(recent: collector.Collector(Line), supervisor: process.Pid)
 }
 
-/// Attaches to every package's events and collects them in order.
+/// Starts the collector under a supervisor of its own.
 pub fn start() -> Result(Collector, String) {
-  use started <- result.try(
-    actor.new([])
-    |> actor.on_message(fn(lines, message) {
-      case message {
-        Record(line) -> actor.continue([line, ..lines])
-        Lines(reply) -> {
-          process.send(reply, list.reverse(lines))
-          actor.continue(lines)
-        }
-      }
-    })
-    |> actor.start
-    |> result.replace_error("telemetry collector failed to start"),
-  )
-  let subject = started.data
+  let recent =
+    collector.new(process.new_name("secure_mcp_telemetry"))
+    |> collector.with_capacity(capacity)
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(collector.supervised(recent, sources()))
+  |> supervisor.start
+  |> result.map(fn(started) { Collector(recent:, supervisor: started.pid) })
+  |> result.replace_error("telemetry collector failed to start")
+}
+
+fn sources() -> List(collector.Source(Line)) {
+  // Each line names the process its handler ran in: the emitter, or the
+  // forwarder for a routed event.
   let record = fn(package, event, detail) {
-    process.send(
-      subject,
-      Record(Line(package, event, detail, string.inspect(process.self()))),
-    )
+    Line(package, event, detail, string.inspect(process.self()))
   }
-  let attachments = [
-    sinal.observe(relay_telemetry.authorization_decided_event(), fn(_, m) {
+  [
+    collector.source(relay_telemetry.authorization_decided_event(), fn(_, m) {
       record(
         "relay",
         "authorization.decided",
@@ -78,7 +73,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(relay_telemetry.http_rejected_event(), fn(_, m) {
+    collector.source(relay_telemetry.http_rejected_event(), fn(_, m) {
       record(
         "relay",
         "http.rejected",
@@ -90,7 +85,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(relay_telemetry.request_admitted_event(), fn(_, m) {
+    collector.source(relay_telemetry.request_admitted_event(), fn(_, m) {
       record(
         "relay",
         "request.admitted",
@@ -102,7 +97,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(relay_telemetry.invocation_started_event(), fn(_, m) {
+    collector.source(relay_telemetry.invocation_started_event(), fn(_, m) {
       record(
         "relay",
         "invocation.started",
@@ -116,7 +111,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(
+    collector.source(
       relay_telemetry.invocation_completed_event(),
       fn(measurements, m) {
         record(
@@ -133,7 +128,7 @@ pub fn start() -> Result(Collector, String) {
         )
       },
     ),
-    sinal.observe(relay_telemetry.exchange_closed_event(), fn(_, m) {
+    collector.source(relay_telemetry.exchange_closed_event(), fn(_, m) {
       record(
         "relay",
         "exchange.closed",
@@ -143,7 +138,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(relay_telemetry.client_call_event(), fn(_, m) {
+    collector.source(relay_telemetry.client_call_event(), fn(_, m) {
       record(
         "relay",
         "client.call",
@@ -155,7 +150,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(relay_telemetry.frame_rejected_event(), fn(_, m) {
+    collector.source(relay_telemetry.frame_rejected_event(), fn(_, m) {
       record(
         "relay",
         "frame.rejected",
@@ -165,7 +160,7 @@ pub fn start() -> Result(Collector, String) {
           <> string.inspect(m.problem),
       )
     }),
-    sinal.observe(relay_telemetry.invocation_crashed_event(), fn(_, m) {
+    collector.source(relay_telemetry.invocation_crashed_event(), fn(_, m) {
       record(
         "relay",
         "invocation.crashed",
@@ -177,7 +172,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.correlation),
       )
     }),
-    sinal.observe(hellhound_telemetry.http_request(), fn(measure, r) {
+    collector.source(hellhound_telemetry.http_request(), fn(measure, r) {
       let outcome = case r.outcome {
         hellhound_telemetry.Status(code) -> int.to_string(code)
         hellhound_telemetry.Failed(evidence:, reason:) ->
@@ -200,7 +195,7 @@ pub fn start() -> Result(Collector, String) {
           <> optional(r.correlation),
       )
     }),
-    sinal.observe(grind_telemetry.admitted(), fn(_, m) {
+    collector.source(grind_telemetry.admitted(), fn(_, m) {
       record(
         "grind",
         "job.admitted",
@@ -212,7 +207,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.ref.correlation),
       )
     }),
-    sinal.observe(grind_telemetry.claimed(), fn(_, m) {
+    collector.source(grind_telemetry.claimed(), fn(_, m) {
       record(
         "grind",
         "job.claimed",
@@ -224,7 +219,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.ref.correlation),
       )
     }),
-    sinal.observe(grind_telemetry.acknowledged(), fn(_, m) {
+    collector.source(grind_telemetry.acknowledged(), fn(_, m) {
       record(
         "grind",
         "job.acknowledged",
@@ -236,7 +231,7 @@ pub fn start() -> Result(Collector, String) {
           <> correlation.to_string(m.ref.correlation),
       )
     }),
-    sinal.observe(forwarder.dropped_event(), fn(d, m) {
+    collector.source(forwarder.dropped_event(), fn(d, m) {
       record(
         "sinal",
         "forwarder.dropped",
@@ -244,16 +239,22 @@ pub fn start() -> Result(Collector, String) {
       )
     }),
   ]
-  Ok(Collector(subject, attachments))
 }
 
-pub fn lines(collector: Collector) -> List(Line) {
-  process.call(collector.subject, 1000, Lines)
+/// The lines the collector holds, oldest first: at most `capacity`. Empty
+/// once it has stopped.
+pub fn lines(telemetry: Collector) -> List(Line) {
+  collector.entries(telemetry.recent)
 }
 
-pub fn stop(collector: Collector) -> Nil {
-  list.each(collector.attachments, sinal.detach)
+/// Stops the collector and waits for it. Sinal detaches the handlers its
+/// process owned.
+pub fn stop(telemetry: Collector) -> Nil {
+  shutdown(telemetry.supervisor)
 }
+
+@external(erlang, "secure_mcp_ffi", "shutdown")
+fn shutdown(pid: process.Pid) -> Nil
 
 fn optional(value: Option(Correlation)) -> String {
   option.map(value, correlation.to_string) |> option.unwrap("-")
