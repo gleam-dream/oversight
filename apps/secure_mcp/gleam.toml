@@ -17,12 +17,12 @@ pog = ">= 4.0.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
 gleam_crypto = ">= 1.6.0 and < 2.0.0"
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "e9181a132f5e45324611898152d2729a25a102b2" }
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "22802b7f3015f72e7775c67ee3ed3079a0229319" }
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "3adcf515bcc91beb8b40f025c5dc81c4f863b1cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0d6558c9ede95fab9a6bbf287ecd363e05b0fbcb" }
+relay = { git = "https://github.com/gleam-dream/relay.git", ref = "e8c2913fc5e7294931c1fb5aa0df348ac71e5065" }
+hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
+grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
+json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

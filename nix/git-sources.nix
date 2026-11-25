@@ -4,39 +4,36 @@
   };
   "https://github.com/gleam-dream/decisions.git" = {
     "84e9bc3600930934398457c93a470a709a01f9ac" = "sha256-6SY9Dqk3bxZnCh7J6zHJSzN8Qwq8v5LNRwTS56cKrOI=";
-    "9e44c690323b731cc592a0a676bdc9293f4e9d09" = "sha256-JYI+A75PkILS26V/2zEIzlYKOqf8EYqdoUDWaCEFR5g=";
   };
   "https://github.com/gleam-dream/fabric.git" = {
-    "3871be23e72754345c0525b067e518fefb3b434d" = "sha256-6l2sS+qDYrQn+NEGbKdSm6NiRB/EhcGxOeGUv0UnzG4=";
-    "4ca0dc17027d2ffa392cf0f1510b39f261ff2da1" = "sha256-5YdwrX38iw7M6yAL5m2g8WjI0B3G4eUTZts3HN9gjww=";
+    "85cf543fbb2031b76701fc4e3f4b79fdd22fead7" = "sha256-VcoxCsHZy8ParmPRX2YBjLNgxGb+kEZ1EaXvrH7d8JI=";
   };
   "https://github.com/gleam-dream/grind.git" = {
-    "22802b7f3015f72e7775c67ee3ed3079a0229319" = "sha256-Psq4UcQotxSyMvpKpK7Gq/Pm8KN1d4iIid4rO0jPzhI=";
+    "beb23feb47133ea5dc7996881855e21bfd2412f0" = "sha256-VAw5EohnCFizUydUa0TIYHGY/dsW18wf+5lCn+cLhcc=";
   };
   "https://github.com/gleam-dream/hellhound.git" = {
-    "78acabc2df82d0780099cb9a19a169dd4c8e3c6a" = "sha256-TpcsvPWqYP1rvOOtHbrbV0smiJSb1Uoe0QMW1sPYuvg=";
+    "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" = "sha256-wAHlVRKlhALsnjbcF5FMFMwfyVRtugYDFzGb4kP2hAI=";
   };
   "https://github.com/gleam-dream/http_gun.git" = {
-    "0d6558c9ede95fab9a6bbf287ecd363e05b0fbcb" = "sha256-NX6XUt+yWP2nLdTDiKNcN1NsV2xsqN+KG4NBpJhwhUU=";
+    "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" = "sha256-o28mshjcUrpCFyclr+hxKDBphOw+gdfvsF8yzDiO6qk=";
   };
   "https://github.com/gleam-dream/json_blueprint.git" = {
-    "3adcf515bcc91beb8b40f025c5dc81c4f863b1cf" = "sha256-EoxSKXy+lvPXayeHPA3By1i394m58Or5ZzL5gJRxRS0=";
+    "0cc991164771a85cf6496efe0d2413fd59b300cf" = "sha256-Xi/6VZkKvEv5KbkoYEhOl+IrZmuxXiXwYhZcqnuaBgc=";
   };
   "https://github.com/gleam-dream/llm_wire.git" = {
-    "016d71c3a68ee8eaedc818821ba16ee65427a3f3" = "sha256-VwNpV5V+j0Of3ZT+1e+V15f1G9X4GEEw9ltxWU3p+ss=";
+    "5bed4249fc91416ca7c862afbe6eb920ec56bdd6" = "sha256-gu78b0+AkYOpAQZ6Cbb6l9ldVlA3V9SNl7NV91dI7uI=";
   };
   "https://github.com/gleam-dream/relay.git" = {
-    "e9181a132f5e45324611898152d2729a25a102b2" = "sha256-Gha5ny+yeer82PPIoMdgxdpiUJVN1pnM20chA/aeGHw=";
+    "e8c2913fc5e7294931c1fb5aa0df348ac71e5065" = "sha256-DJKuIwcDGC+VVdCgSLqRMDUx7+1wbyab3BUj0yLoZro=";
   };
   "https://github.com/gleam-dream/retrace.git" = {
     "19e45a4bde46dd59b68ea626e52081150c367678" = "sha256-d9HLHRR+t+D0X0R4H9s7WzUgJHudvEg2pq4LLVP6zEo=";
   };
   "https://github.com/gleam-dream/saga.git" = {
-    "0d345cacf777515f2c9401d1ad90f5d67b07f38e" = "sha256-sRZbIpxhuwqIjoMZhkE0Md6H5kUjyog3rr8S+8uefZs=";
-    "7349b1bb853912910eb51f9a4dfa65dcb1dd2452" = "sha256-0VlRGR3GIltX2DoMM5pv0XXGCoU6Qk998mzDmSpnScc=";
+    "ccea2bef2884ca92aa4962b38977de83308494b7" = "sha256-p3s8nTSvAbjFvJX9hBhArzn1RySZUGpu6UQFm1V2nkg=";
+    "ec31675925d65552c3c70a4b4e5a8742661f8329" = "sha256-pV4CZwNvd4p7gbBEABb3t3JlFw75bMAO4Lw9Vi04Xdw=";
   };
   "https://github.com/gleam-dream/sinal.git" = {
-    "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" = "sha256-SSSGC4IsD12oUbTfZtvnMKgu0SuIQJ5Uk5kktehFu+Q=";
-    "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" = "sha256-+gM2BNz1gNQG54CtNhPnMUio67jzNx4htjq0WWrIFQ8=";
+    "02d386e070c6a99900225c613e8d273f3bebe3c2" = "sha256-RGWorYmQZ5pCmANC1lWwxsTQcof7r2W+/5k3akzvWCU=";
   };
 }
