@@ -33,7 +33,6 @@ pub fn fetcher_config(
 ) -> config.Config {
   let Loopback(document_hosts:, ..) = network
   config.default()
-  |> config.with_request_timeout(config.After(duration.seconds(5)))
   |> config.with_connect_timeout(duration.seconds(1))
   |> config.with_max_connections(8)
   |> config.with_max_connections_per_origin(2)
@@ -80,7 +79,8 @@ pub fn start(
     http_gun.start(fetcher_config(network, observations)),
   )
   use llm <- result.try(http_gun.start(llm_config(network, observations)))
-  Ok(Clients(fetcher:, llm:))
+  // A document fetch ends five seconds after it starts.
+  Ok(Clients(fetcher: http_gun.with_timeout(fetcher, duration.seconds(5)), llm:))
 }
 
 pub fn stop(clients: Clients) -> Nil {
