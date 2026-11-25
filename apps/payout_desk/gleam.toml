@@ -26,8 +26,8 @@ json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", re
 sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "29ea7a90bf820b3c91eb3f76e824abe0d034d78f" }
 # decisions is on Hex. decisions_postgres is released as a Git tag of
 # gleam-dream/decisions, as fabric_postgres and saga_postgres are above.
-decisions = ">= 0.1.0 and < 0.2.0"
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.1.0", path = "integrations/decisions_postgres" }
+decisions = ">= 0.1.1 and < 0.2.0"
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.2.1", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
