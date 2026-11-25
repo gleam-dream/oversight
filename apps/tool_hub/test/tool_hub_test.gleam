@@ -534,12 +534,6 @@ pub fn remote_tool_error_is_shown_to_the_model_test() {
 /// The inventory server goes away mid-run before a reservation. The client
 /// reports that nothing was sent, so the failure is definite: the model sees
 /// it and answers, and nothing waits for reconciliation.
-///
-/// `http.stop` returns while the listener may still be shutting down, and a
-/// streamed response ends its connection, so the reservation opens a new
-/// one. The action waits until the port refuses connections: otherwise the
-/// kernel could still accept the reservation's connection, which then
-/// closes after the request is sent.
 pub fn unreachable_server_before_a_reservation_is_explained_test() {
   let stop = later()
   let script = [
@@ -557,15 +551,7 @@ pub fn unreachable_server_before_a_reservation_is_explained_test() {
     Reply(scripted_llm.answer("The inventory is down; nothing was reserved.")),
   ]
   let assert Ok(hub) = tool_hub.start(tool_hub.settings("unreachable"), script)
-  let inventory_port = http.port(hub.inventory)
-  process.send(
-    stop,
-    SetAction(fn() {
-      http.stop(hub.inventory)
-      let assert True = eventually(2000, fn() { !accepts(inventory_port) })
-      Nil
-    }),
-  )
+  process.send(stop, SetAction(fn() { http.stop(hub.inventory) }))
   let keyed = client.with_idempotency_key(_, "reserve-down")
   let id = awaiting_approval(ask_with(hub, keyed, "Reserve a keyboard."))
   let assert Ok(_) =
@@ -944,9 +930,6 @@ pub fn listing_and_question_share_one_complete_trace_test() {
 
 @external(erlang, "tool_hub_raw_http_ffi", "status")
 fn raw_status(port: Int, request: String) -> Result(Int, Nil)
-
-@external(erlang, "tool_hub_raw_http_ffi", "accepts")
-fn accepts(port: Int) -> Bool
 
 /// The scripted provider reads a body only under a declared length within its
 /// limit: a chunked body, which mist would otherwise read whole, and a
