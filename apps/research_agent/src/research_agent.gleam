@@ -27,7 +27,7 @@ fn story(url: String) -> Nil {
   let assert Ok(world) = services.start()
   let notices = process.new_subject()
   services.watch(world, notices)
-  let observed = telemetry.start(False)
+  let assert Ok(observed) = telemetry.start()
   let assert Ok(node) =
     app.start(app.Settings(
       database_url: url,

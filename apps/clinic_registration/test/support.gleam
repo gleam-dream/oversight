@@ -40,6 +40,10 @@ fn quiet_pool_shutdown() -> Nil
 @external(erlang, "support_ffi", "once")
 pub fn once(key: String) -> Bool
 
+/// How many telemetry handlers are attached to events under `prefix`.
+@external(erlang, "support_ffi", "handlers")
+pub fn handlers(prefix: List(String)) -> Int
+
 @external(erlang, "support_ffi", "ensure")
 fn ensure(body: fn() -> a, cleanup: fn() -> b) -> a
 

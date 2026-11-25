@@ -7,11 +7,10 @@
 //// http_gun and llm_wire, whose events read it from the view. All three
 //// sources therefore carry the same correlation and need no table.
 
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
@@ -19,7 +18,7 @@ import grind/job
 import grind/telemetry as grind_telemetry
 import http_gun/telemetry as http_telemetry
 import llm_wire/telemetry as llm_telemetry
-import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 import sinal/forwarder
 
@@ -33,73 +32,73 @@ pub type Record {
   Record(source: Source, correlation: Option(Correlation), summary: String)
 }
 
-pub opaque type Message {
-  Observed(Record)
-  Snapshot(reply: Subject(List(Record)))
-}
+/// How many records the collector keeps; older records are overwritten.
+pub const capacity = 4096
 
+/// The forwarder http_gun clients emit through and a `sinal/collector`,
+/// under one supervisor. The collector's process attaches one handler per
+/// observed event and owns them, so they are attached exactly while it
+/// runs.
 pub type Collector {
   Collector(
-    subject: Subject(Message),
-    attachments: List(sinal.Attachment),
+    recent: collector.Collector(Record),
     http_observations: forwarder.Forwarder,
+    supervisor: process.Pid,
   )
 }
 
-/// Starts the collector, the forwarder http_gun clients emit through, and
-/// one Sinal handler per observed event.
+/// Starts the forwarder and the collector under one supervisor.
 pub fn start() -> Result(Collector, String) {
-  use subject <- result.try(
-    actor.new([])
-    |> actor.on_message(handle)
-    |> actor.start
-    |> result.map(fn(started) { started.data })
-    |> result.replace_error("could not start the telemetry collector"),
-  )
+  let recent =
+    collector.new(process.new_name("extractor_telemetry"))
+    |> collector.with_capacity(capacity)
   let http_observations =
     forwarder.new(process.new_name("extractor_http_observations"))
-  use _ <- result.try(
-    supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(forwarder.supervised(http_observations))
-    |> supervisor.start
-    |> result.replace_error("could not start the observation forwarder"),
-  )
-  let record = fn(source, correlation, summary) {
-    process.send(subject, Observed(Record(source, correlation, summary)))
-  }
-  let attachments = [
-    sinal.observe(grind_telemetry.admitted(), fn(_, meta) {
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(forwarder.supervised(http_observations))
+  |> supervisor.add(collector.supervised(recent, sources()))
+  |> supervisor.start
+  |> result.map(fn(started) {
+    Collector(recent:, http_observations:, supervisor: started.pid)
+  })
+  |> result.replace_error("could not start the telemetry collector")
+}
+
+fn sources() -> List(collector.Source(Record)) {
+  let record = Record
+  [
+    collector.source(grind_telemetry.admitted(), fn(_, meta) {
       record(
         Grind,
         Some(meta.ref.correlation),
         "admitted " <> job.state_name(meta.committed_state),
       )
     }),
-    sinal.observe(grind_telemetry.claimed(), fn(_, meta) {
+    collector.source(grind_telemetry.claimed(), fn(_, meta) {
       record(
         Grind,
         Some(meta.ref.correlation),
         "claimed attempt " <> int.to_string(meta.attempt.attempt),
       )
     }),
-    sinal.observe(grind_telemetry.acknowledged(), fn(_, meta) {
+    collector.source(grind_telemetry.acknowledged(), fn(_, meta) {
       record(
         Grind,
         Some(meta.ref.correlation),
         "acknowledged " <> job.state_name(meta.committed_state),
       )
     }),
-    sinal.observe(grind_telemetry.released(), fn(_, meta) {
+    collector.source(grind_telemetry.released(), fn(_, meta) {
       record(Grind, Some(meta.ref.correlation), "released")
     }),
-    sinal.observe(http_telemetry.event(), fn(_, meta) {
+    collector.source(http_telemetry.event(), fn(_, meta) {
       record(
         Http,
         meta.correlation,
         option.unwrap(meta.client, "http") <> " " <> milestone(meta.milestone),
       )
     }),
-    sinal.observe(llm_telemetry.event(), fn(_, meta) {
+    collector.source(llm_telemetry.event(), fn(_, meta) {
       record(
         Llm,
         meta.correlation,
@@ -111,15 +110,16 @@ pub fn start() -> Result(Collector, String) {
       )
     }),
   ]
-  Ok(Collector(subject:, attachments:, http_observations:))
 }
 
-pub fn stop(collector: Collector) -> Nil {
-  list.each(collector.attachments, fn(attachment) {
-    let _ = sinal.detach(attachment)
-    Nil
-  })
+/// Stops the collector and the forwarder and waits for them. Sinal detaches
+/// the handlers the collector's process owned.
+pub fn stop(telemetry: Collector) -> Nil {
+  stop_supervisor(telemetry.supervisor)
 }
+
+@external(erlang, "extractor_ffi", "stop_supervisor")
+fn stop_supervisor(pid: process.Pid) -> Nil
 
 /// The correlation a document's job carries, in every package's events.
 /// An id that is empty or longer than 128 bytes becomes its SHA-256 digest.
@@ -127,8 +127,10 @@ pub fn document_correlation(document_id: String) -> Correlation {
   correlation.from_key(document_id)
 }
 
-pub fn snapshot(collector: Collector) -> List(Record) {
-  process.call(collector.subject, 1000, Snapshot)
+/// The records the collector holds, oldest first: at most `capacity`.
+/// Empty once it has stopped.
+pub fn snapshot(telemetry: Collector) -> List(Record) {
+  collector.entries(telemetry.recent)
 }
 
 /// Every record attributable to one document, plus the records the
@@ -137,8 +139,8 @@ pub type Trace {
   Trace(attributed: List(Record), unattributed: List(Record))
 }
 
-pub fn trace(collector: Collector, document_id: String) -> Trace {
-  let records = snapshot(collector)
+pub fn trace(telemetry: Collector, document_id: String) -> Trace {
+  let records = snapshot(telemetry)
   let document_id = document_correlation(document_id) |> correlation.to_string
   let #(attributed, rest) =
     list.partition(records, fn(record) {
@@ -161,19 +163,6 @@ pub fn render(record: Record) -> String {
     Llm -> "llm_wire"
   }
   source <> "  " <> record.summary
-}
-
-fn handle(
-  records: List(Record),
-  message: Message,
-) -> actor.Next(List(Record), Message) {
-  case message {
-    Observed(record) -> actor.continue([record, ..records])
-    Snapshot(reply) -> {
-      process.send(reply, list.reverse(records))
-      actor.continue(records)
-    }
-  }
 }
 
 fn milestone(milestone: http_telemetry.Milestone) -> String {

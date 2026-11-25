@@ -14,12 +14,14 @@
 //// observations: the record is what is true.
 
 import decisions_postgres/telemetry as store_telemetry
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
 import gleam/list
-import gleam/otp/actor
+import gleam/otp/static_supervisor as supervisor
+import gleam/result
 import gleam/string
 import sinal.{type Event}
+import sinal/collector
 import sinal/fields
 
 /// How many things the event counts; always 1.
@@ -146,115 +148,104 @@ pub fn emit(event: Event(Count, metadata), metadata: metadata) -> Nil {
 
 // -- The collector -------------------------------------------------------------
 
+/// How many lines the collector keeps; older lines are overwritten.
+pub const capacity = 4096
+
+/// A supervised `sinal/collector` over every event above and the events of
+/// `decisions_postgres`. Its process attaches the handlers and owns them,
+/// so they are attached exactly while the application runs.
 pub opaque type Collector {
-  Collector(subject: Subject(Message), attachments: List(sinal.Attachment))
+  Collector(recent: collector.Collector(String), supervisor: process.Pid)
 }
 
-type Message {
-  Record(String)
-  Lines(reply: Subject(List(String)))
+/// Start the collector under a supervisor of its own.
+pub fn start() -> Result(Collector, String) {
+  let recent =
+    collector.new(process.new_name("clinic_telemetry"))
+    |> collector.with_capacity(capacity)
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(collector.supervised(recent, sources()))
+  |> supervisor.start
+  |> result.map(fn(started) { Collector(recent:, supervisor: started.pid) })
+  |> result.replace_error("the telemetry collector did not start")
 }
 
-/// Start a collector and attach it to every event above and to the events
-/// of `decisions_postgres`.
-pub fn start() -> Collector {
-  let assert Ok(started) =
-    actor.new([])
-    |> actor.on_message(fn(lines, message) {
-      case message {
-        Record(line) -> actor.continue([line, ..lines])
-        Lines(reply:) -> {
-          process.send(reply, list.reverse(lines))
-          actor.continue(lines)
-        }
+fn sources() -> List(collector.Source(String)) {
+  [
+    collector.source(admitted(), fn(_, a) {
+      "message "
+      <> a.message
+      <> " from "
+      <> a.contact
+      <> case a.duplicate {
+        True -> " delivered again, nothing admitted"
+        False -> " admitted"
       }
-    })
-    |> actor.start
-  let subject = started.data
-  let record = fn(line) { process.send(subject, Record(line)) }
-  let attachments = [
-    sinal.observe(admitted(), fn(_, a) {
-      record(
-        "message "
-        <> a.message
-        <> " from "
-        <> a.contact
-        <> case a.duplicate {
-          True -> " delivered again, nothing admitted"
-          False -> " admitted"
-        },
-      )
     }),
-    sinal.observe(recommended(), fn(_, r) {
-      record(
-        "recommended "
-        <> r.occurrence
-        <> ": "
-        <> r.status
-        <> " under policy v"
-        <> int.to_string(r.policy_version),
-      )
+    collector.source(recommended(), fn(_, r) {
+      "recommended "
+      <> r.occurrence
+      <> ": "
+      <> r.status
+      <> " under policy v"
+      <> int.to_string(r.policy_version)
     }),
-    sinal.observe(attempt_failed(), fn(_, a) {
-      record(
-        "attempt "
-        <> int.to_string(a.attempts)
-        <> " for "
-        <> a.occurrence
-        <> " failed: "
-        <> a.failure
-        <> case a.retry {
-          True -> " (will retry)"
-          False -> " (gave up)"
-        },
-      )
+    collector.source(attempt_failed(), fn(_, a) {
+      "attempt "
+      <> int.to_string(a.attempts)
+      <> " for "
+      <> a.occurrence
+      <> " failed: "
+      <> a.failure
+      <> case a.retry {
+        True -> " (will retry)"
+        False -> " (gave up)"
+      }
     }),
-    sinal.observe(verdict_given(), fn(_, v) {
-      record(
-        v.validator
-        <> " "
-        <> v.verdict
-        <> " "
-        <> v.occurrence
-        <> ": "
-        <> v.outcome,
-      )
+    collector.source(verdict_given(), fn(_, v) {
+      v.validator
+      <> " "
+      <> v.verdict
+      <> " "
+      <> v.occurrence
+      <> ": "
+      <> v.outcome
     }),
-    sinal.observe(effect_reported(), fn(_, r) {
-      record("confirmation for " <> r.occurrence <> ": " <> r.effect)
+    collector.source(effect_reported(), fn(_, r) {
+      "confirmation for " <> r.occurrence <> ": " <> r.effect
     }),
-    sinal.observe(store_telemetry.wake_delivered(), fn(_, d) {
-      record(
-        "wake-up delivered for "
-        <> d.occurrence
-        <> " ("
-        <> int.to_string(d.lag_ms)
-        <> " ms late)",
-      )
+    collector.source(store_telemetry.wake_delivered(), fn(_, d) {
+      "wake-up delivered for "
+      <> d.occurrence
+      <> " ("
+      <> int.to_string(d.lag_ms)
+      <> " ms late)"
     }),
-    sinal.observe(store_telemetry.settlement_delivered(), fn(_, s) {
-      record("settlement notice delivered for " <> s.occurrence)
+    collector.source(store_telemetry.settlement_delivered(), fn(_, s) {
+      "settlement notice delivered for " <> s.occurrence
     }),
-    sinal.observe(store_telemetry.set_aside(), fn(_, s) {
-      record("set aside " <> s.occurrence <> ": " <> s.reason)
+    collector.source(store_telemetry.set_aside(), fn(_, s) {
+      "set aside " <> s.occurrence <> ": " <> s.reason
     }),
   ]
-  Collector(subject:, attachments:)
 }
 
-/// Every line collected so far, oldest first.
-pub fn lines(collector: Collector) -> List(String) {
-  process.call(collector.subject, 1000, Lines)
+/// The lines the collector holds, oldest first: at most `capacity`. Empty
+/// once the collector has stopped.
+pub fn lines(telemetry: Collector) -> List(String) {
+  collector.entries(telemetry.recent)
 }
 
 /// The lines that mention `text`.
-pub fn mentioning(collector: Collector, text: String) -> List(String) {
-  lines(collector) |> list.filter(string.contains(_, text))
+pub fn mentioning(telemetry: Collector, text: String) -> List(String) {
+  lines(telemetry) |> list.filter(string.contains(_, text))
 }
 
-pub fn stop(collector: Collector) -> Nil {
-  list.each(collector.attachments, fn(attachment) {
-    let _ = sinal.detach(attachment)
-    Nil
-  })
+/// Stop the collector's supervisor and wait for it. Sinal detaches the
+/// handlers the collector's process owned.
+pub fn stop(telemetry: Collector) -> Nil {
+  stop_supervisor(telemetry.supervisor)
 }
+
+@external(erlang, "clinic_registration_ffi", "stop_supervisor")
+fn stop_supervisor(pid: process.Pid) -> Nil

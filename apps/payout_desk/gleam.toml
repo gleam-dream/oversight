@@ -22,7 +22,9 @@ saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_p
 relay = ">= 0.2.1 and < 0.3.0"
 hellhound = ">= 0.3.0 and < 0.4.0"
 json_blueprint = ">= 2.2.0 and < 3.0.0"
-sinal = ">= 0.1.0 and < 0.2.0"
+# Owner-bound handlers and the bounded collector, unreleased
+# (gleam-dream/sinal#15). Replace with the Hex release once published.
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
 # decisions is on Hex. decisions_postgres is released as a Git tag of
 # gleam-dream/decisions, as fabric_postgres and saga_postgres are above.
 decisions = ">= 0.1.0 and < 0.2.0"

@@ -7,16 +7,18 @@
 //// event. Every line is therefore keyed by the same `Correlation`, and lines
 //// are ordered by the emitters' monotonic clock, not by arrival.
 
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{type Option}
 import gleam/order
-import gleam/otp/actor
+import gleam/otp/static_supervisor as supervisor
+import gleam/result
 import gleam/string
 import grind/telemetry as jobs
 import http_gun/telemetry as http_telemetry
 import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 import sinal/fields
 import sinal/forwarder
@@ -114,37 +116,46 @@ pub type Line {
   )
 }
 
+/// How many lines the collector keeps; older lines are overwritten.
+pub const capacity = 8192
+
+/// A supervised `sinal/collector` over every event of grind, http_gun,
+/// sinal and the app. Its process attaches the handlers and owns them, so
+/// they are attached exactly while it runs.
 pub opaque type Collector {
-  Collector(subject: Subject(Message))
+  Collector(recent: collector.Collector(Line), supervisor: process.Pid)
 }
 
-pub opaque type Message {
-  Record(at: Int, source: String, name: String, key: Key, detail: String)
-  Snapshot(reply: Subject(List(Line)))
+/// Starts the collector under a supervisor of its own. Handlers run in the
+/// emitting process (http_gun's pool and body processes, the worker) or in
+/// grind's forwarder.
+pub fn start() -> Result(Collector, String) {
+  let recent =
+    collector.new(process.new_name("webhooks_telemetry"))
+    |> collector.with_capacity(capacity)
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(collector.supervised(recent, sources()))
+  |> supervisor.start
+  |> result.map(fn(started) { Collector(recent:, supervisor: started.pid) })
+  |> result.replace_error("the telemetry collector did not start")
 }
 
-pub fn start() -> Collector {
-  let assert Ok(started) =
-    actor.new(#(0, []))
-    |> actor.on_message(fn(state: #(Int, List(Line)), message) {
-      let #(seq, lines) = state
-      case message {
-        Record(at, source, name, key, detail) ->
-          actor.continue(
-            #(seq + 1, [Line(seq + 1, at, source, name, key, detail), ..lines]),
-          )
-        Snapshot(reply) -> {
-          process.send(reply, list.reverse(lines))
-          actor.continue(state)
-        }
-      }
-    })
-    |> actor.start
-  Collector(started.data)
+/// Stops the collector and waits for it. Sinal detaches the handlers its
+/// process owned.
+pub fn stop(telemetry: Collector) -> Nil {
+  let monitor = process.monitor(telemetry.supervisor)
+  process.unlink(telemetry.supervisor)
+  process.kill(telemetry.supervisor)
+  process.new_selector()
+  |> process.select_specific_monitor(monitor, fn(_) { Nil })
+  |> process.selector_receive_forever
 }
 
-pub fn lines(collector: Collector) -> List(Line) {
-  process.call(collector.subject, 1000, Snapshot)
+/// The lines the collector holds, in the order they were recorded and
+/// numbered from 1: at most `capacity`. Empty once it has stopped.
+pub fn lines(telemetry: Collector) -> List(Line) {
+  collector.entries(telemetry.recent)
+  |> list.index_map(fn(line, index) { Line(..line, seq: index + 1) })
 }
 
 /// The lines of one delivery, in the order the emitters stamped them.
@@ -163,20 +174,16 @@ pub fn format(line: Line) -> String {
   <> line.detail
 }
 
-/// Attach to every event of grind, http_gun, sinal and the app. Handlers run
-/// in the emitting process (http_gun's pool and body processes, the worker)
-/// or in grind's forwarder.
-pub fn attach(collector: Collector) -> List(sinal.Attachment) {
-  let c = collector
+fn sources() -> List(collector.Source(Line)) {
   [
     // grind lifecycle, keyed by the job's correlation
-    watch_job(c, jobs.admitted(), "grind.job.admitted", fn(m) {
+    watch_job(jobs.admitted(), "grind.job.admitted", fn(m) {
       #(m.ref, "state=" <> string.inspect(m.committed_state))
     }),
-    watch_job(c, jobs.claimed(), "grind.job.claimed", fn(m) {
+    watch_job(jobs.claimed(), "grind.job.claimed", fn(m) {
       #(m.ref, "attempt=" <> int.to_string(m.attempt.attempt))
     }),
-    watch_job(c, jobs.acknowledged(), "grind.job.acknowledged", fn(m) {
+    watch_job(jobs.acknowledged(), "grind.job.acknowledged", fn(m) {
       #(
         m.ref,
         "attempt="
@@ -187,50 +194,45 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
           <> string.inspect(m.committed_state),
       )
     }),
-    watch_job(c, jobs.quarantined(), "grind.job.quarantined", fn(m) {
+    watch_job(jobs.quarantined(), "grind.job.quarantined", fn(m) {
       #(m.ref, "replayed=" <> string.inspect(m.replayed))
     }),
-    watch_job(c, jobs.resolved(), "grind.job.resolved", fn(m) { #(m.ref, "") }),
-    watch_job(c, jobs.cancellation_decided(), "grind.job.cancellation", fn(m) {
+    watch_job(jobs.resolved(), "grind.job.resolved", fn(m) { #(m.ref, "") }),
+    watch_job(jobs.cancellation_decided(), "grind.job.cancellation", fn(m) {
       #(m.ref, "")
     }),
-    watch_job(c, jobs.released(), "grind.job.released", fn(m) { #(m.ref, "") }),
+    watch_job(jobs.released(), "grind.job.released", fn(m) { #(m.ref, "") }),
     watch_job(
-      c,
       jobs.contract_mismatch_recorded(),
       "grind.job.contract_mismatch",
       fn(m) { #(m.ref, "") },
     ),
-    watch(c, jobs.prune_completed(), "grind.prune.completed", fn(_, _) {
+    watch(jobs.prune_completed(), "grind.prune.completed", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, jobs.prune_failed(), "grind.prune.failed", fn(_, _) {
-      #(Unkeyed, "")
-    }),
+    watch(jobs.prune_failed(), "grind.prune.failed", fn(_, _) { #(Unkeyed, "") }),
     // grind diagnostics: operational; renewals name their job
-    watch(c, jobs.renewal(), "grind.diag.renewal", fn(_, m) {
+    watch(jobs.renewal(), "grind.diag.renewal", fn(_, m) {
       #(Correlated(m.context.ref.correlation), "lease renewed")
     }),
-    watch(c, jobs.acknowledgement(), "grind.diag.ack", fn(_, _) {
+    watch(jobs.acknowledgement(), "grind.diag.ack", fn(_, _) { #(Unkeyed, "") }),
+    watch(jobs.acknowledgement_retry(), "grind.diag.ack_retry", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, jobs.acknowledgement_retry(), "grind.diag.ack_retry", fn(_, _) {
+    watch(jobs.checkout(), "grind.diag.checkout", fn(_, _) { #(Unkeyed, "") }),
+    watch(jobs.claim_failed(), "grind.diag.claim_failed", fn(_, _) {
       #(Unkeyed, "")
     }),
-    watch(c, jobs.checkout(), "grind.diag.checkout", fn(_, _) { #(Unkeyed, "") }),
-    watch(c, jobs.claim_failed(), "grind.diag.claim_failed", fn(_, _) {
-      #(Unkeyed, "")
-    }),
-    watch(c, jobs.capacity(), "grind.diag.capacity", fn(_, _) { #(Unkeyed, "") }),
+    watch(jobs.capacity(), "grind.diag.capacity", fn(_, _) { #(Unkeyed, "") }),
     // http_gun lifecycle, keyed by the delivery's correlation
-    watch(c, http_telemetry.event(), "http_gun.lifecycle", fn(_, m) {
+    watch(http_telemetry.event(), "http_gun.lifecycle", fn(_, m) {
       #(
         option.map(m.correlation, Correlated) |> option.unwrap(Unkeyed),
         milestone(m.milestone) <> " mode=" <> string.inspect(m.mode),
       )
     }),
     // sinal's own drop accounting
-    watch(c, forwarder.dropped_event(), "sinal.forwarder.dropped", fn(d, m) {
+    watch(forwarder.dropped_event(), "sinal.forwarder.dropped", fn(d, m) {
       #(
         Unkeyed,
         m.forwarder
@@ -241,7 +243,7 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
       )
     }),
     // the app's own attempt event
-    watch(c, delivery_attempted(), "webhooks.delivery.attempted", fn(ms, m) {
+    watch(delivery_attempted(), "webhooks.delivery.attempted", fn(ms, m) {
       #(
         Correlated(m.correlation),
         outcome_name(m.outcome)
@@ -255,20 +257,12 @@ pub fn attach(collector: Collector) -> List(sinal.Attachment) {
   ]
 }
 
-pub fn detach(attachments: List(sinal.Attachment)) -> Nil {
-  list.each(attachments, fn(a) {
-    let _ = sinal.detach(a)
-    Nil
-  })
-}
-
 fn watch(
-  collector: Collector,
   event: sinal.Event(m, d),
   name: String,
   describe: fn(m, d) -> #(Key, String),
-) -> sinal.Attachment {
-  observe(collector, event, name, fn(m, d) {
+) -> collector.Source(Line) {
+  observe(event, name, fn(m, d) {
     let #(key, detail) = describe(m, d)
     #(monotonic_ms(), key, detail)
   })
@@ -276,30 +270,29 @@ fn watch(
 
 /// A grind job event: keyed by its job's correlation, stamped by grind.
 fn watch_job(
-  collector: Collector,
   event: sinal.Event(jobs.JobMeasurements, d),
   name: String,
   describe: fn(d) -> #(jobs.JobRef, String),
-) -> sinal.Attachment {
-  observe(collector, event, name, fn(m, d) {
+) -> collector.Source(Line) {
+  observe(event, name, fn(m, d) {
     let #(ref, detail) = describe(d)
     #(m.monotonic_ms, Correlated(ref.correlation), detail)
   })
 }
 
+/// `seq` is filled in when the lines are read (`lines`).
 fn observe(
-  collector: Collector,
   event: sinal.Event(m, d),
   name: String,
   describe: fn(m, d) -> #(Int, Key, String),
-) -> sinal.Attachment {
+) -> collector.Source(Line) {
   let source = case string.split_once(name, ".") {
     Ok(#(head, _)) -> head
     Error(Nil) -> name
   }
-  sinal.observe_labelled(event, "webhooks.collector", fn(m, d) {
+  collector.source(event, fn(m, d) {
     let #(at, key, detail) = describe(m, d)
-    process.send(collector.subject, Record(at, source, name, key, detail))
+    Line(seq: 0, at:, source:, name:, key:, detail:)
   })
 }
 

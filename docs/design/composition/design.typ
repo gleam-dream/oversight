@@ -185,7 +185,7 @@
       failure: [Observation loss or handler failure is diagnostic evidence, not proof that durable work failed or committed.],
     ))
     #points(
-      [The application installs lifetime-scoped observers and routes. A process-local guess about attribution does not replace explicit propagation across asynchronous work.],
+      [The application installs lifetime-scoped observers and routes. A handler belongs to the process that attaches it and is detached when that process exits, so an application attaches the handlers it keeps from a process that lives as long as the application, such as Sinal's supervised bounded collector, which keeps the newest entries up to a fixed count. A process-local guess about attribution does not replace explicit propagation across asynchronous work.],
       [Diagnostic rendering excludes credentials and private application payloads unless the caller deliberately supplies a safe public projection. Typed evidence is retained before rendering.],
       [An exporter may map #term("term-observation-correlation") into a trace system. Exporter policy and parent/child span semantics remain outside the core correlation contract.],
     )

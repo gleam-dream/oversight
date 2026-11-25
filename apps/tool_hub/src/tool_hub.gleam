@@ -104,7 +104,7 @@ pub fn start(
   settings: Settings,
   script: List(scripted_llm.Step),
 ) -> Result(Hub, String) {
-  let telemetry = telemetry.start()
+  use telemetry <- try(telemetry.start())
   let catalog = inventory.demo_catalog()
   use inventory_server <- try(inventory.serve(catalog))
   use config <- try(

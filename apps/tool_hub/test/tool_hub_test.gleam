@@ -963,3 +963,32 @@ pub fn scripted_provider_refuses_a_negative_length_test() {
   let assert [] = scripted_llm.requests(scripted_llm.drain(notices))
   scripted_llm.stop(provider)
 }
+
+@external(erlang, "owned_handlers_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process owns its handlers: they record the hub's work
+/// while it runs, and once the hub stops they are detached and the
+/// collector holds nothing.
+pub fn telemetry_handlers_live_as_long_as_the_hub_test() {
+  let script = [Reply(scripted_llm.answer("Nothing to look up."))]
+  let assert Ok(hub) = tool_hub.start(tool_hub.settings("owned"), script)
+  let assert Ok(client.Succeeded(_, _)) = ask(hub, "Anything?")
+  assert telemetry.records(hub.telemetry) != []
+  tool_hub.stop(hub)
+  assert eventually(2000, fn() {
+    collector_handlers("sinal/collector:tool_hub_telemetry") == 0
+  })
+  assert telemetry.records(hub.telemetry) == []
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
+}

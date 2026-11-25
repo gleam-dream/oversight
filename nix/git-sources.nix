@@ -11,4 +11,7 @@
   "https://github.com/gleam-dream/saga.git" = {
     "0d345cacf777515f2c9401d1ad90f5d67b07f38e" = "sha256-sRZbIpxhuwqIjoMZhkE0Md6H5kUjyog3rr8S+8uefZs=";
   };
+  "https://github.com/gleam-dream/sinal.git" = {
+    "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" = "sha256-+gM2BNz1gNQG54CtNhPnMUio67jzNx4htjq0WWrIFQ8=";
+  };
 }

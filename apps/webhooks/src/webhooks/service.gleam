@@ -9,7 +9,6 @@ import grind
 import grind/queue
 import grind/worker.{type Worker}
 import pog
-import sinal
 import webhooks/attempt.{type Delivery, type DeliveryError, type Receipt}
 import webhooks/delivery.{type Deps, type Plan}
 import webhooks/egress.{type Egress}
@@ -58,7 +57,6 @@ pub type Service {
     jobs: grind.Grind,
     egress: Egress,
     collector: Collector,
-    attachments: List(sinal.Attachment),
     deps: Deps,
     worker: Worker(Delivery, Receipt, DeliveryError),
     context: web.Context,
@@ -67,8 +65,7 @@ pub type Service {
 }
 
 pub fn start(options: Options) -> Result(Service, String) {
-  let collector = telemetry.start()
-  let attachments = telemetry.attach(collector)
+  use collector <- result.try(telemetry.start())
   use egress <- result.try(
     egress.start(options.egress)
     |> result.map_error(fn(e) { "egress: " <> string.inspect(e) }),
@@ -124,7 +121,6 @@ pub fn start(options: Options) -> Result(Service, String) {
     jobs:,
     egress:,
     collector:,
-    attachments:,
     deps:,
     worker:,
     context:,
@@ -135,5 +131,5 @@ pub fn start(options: Options) -> Result(Service, String) {
 pub fn stop(service: Service) -> Nil {
   let _ = grind.stop(service.jobs)
   egress.stop(service.egress)
-  telemetry.detach(service.attachments)
+  telemetry.stop(service.collector)
 }

@@ -15,7 +15,9 @@ gleam_otp = ">= 1.3.0 and < 2.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
 json_blueprint = ">= 2.2.0 and < 3.0.0"
-sinal = ">= 0.1.0 and < 0.2.0"
+# Owner-bound handlers and the bounded collector, unreleased
+# (gleam-dream/sinal#15). Replace with the Hex release once published.
+sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "32d25f2e2bf59c8d1a8f15c45b374ec8032ff38e" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

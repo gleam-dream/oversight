@@ -18,12 +18,11 @@
 
 import fabric/telemetry as fabric_events
 import gleam/dict
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
-import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
+import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import grind/telemetry as grind_events
@@ -32,6 +31,7 @@ import llm_wire/telemetry as llm_events
 import research_agent/events
 import saga/telemetry as saga_events
 import sinal
+import sinal/collector
 import sinal/correlation
 import sinal/forwarder
 
@@ -48,33 +48,33 @@ pub type Observed {
   Observed(source: String, name: String, key: Key, detail: String)
 }
 
-pub type Telemetry {
-  Telemetry(collector: Subject(Message), attachments: List(sinal.Attachment))
+/// How many events the collector keeps; older events are overwritten.
+pub const capacity = 8192
+
+/// A supervised `sinal/collector` over every package's events. Its process
+/// attaches the handlers and owns them, so they are attached exactly while
+/// it runs.
+pub opaque type Telemetry {
+  Telemetry(recent: collector.Collector(Observed), supervisor: process.Pid)
 }
 
-pub opaque type Message {
-  Record(Observed)
-  Snapshot(Subject(List(Observed)))
+/// Starts the collector under a supervisor of its own.
+pub fn start() -> Result(Telemetry, String) {
+  let recent =
+    collector.new(process.new_name("research_telemetry"))
+    |> collector.with_capacity(capacity)
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(collector.supervised(recent, observed_events()))
+  |> supervisor.start
+  |> result.map(fn(started) { Telemetry(recent:, supervisor: started.pid) })
+  |> result.replace_error("the telemetry collector did not start")
 }
 
-type State {
-  State(events: List(Observed), echo_events: Bool)
-}
-
-/// Starts the collector and attaches to every package's events. With
-/// `echo_events`, each event is printed as it arrives.
-pub fn start(echo_events: Bool) -> Telemetry {
-  let assert Ok(started) =
-    actor.new(State([], echo_events))
-    |> actor.on_message(handle)
-    |> actor.start
-  let collector = started.data
-  let record = fn(source, name, key, detail) {
-    process.send(collector, Record(Observed(source, name, key, detail)))
-  }
-  let attachments = [
+fn observed_events() -> List(collector.Source(Observed)) {
+  let record = Observed
+  [
     // the app's own events: the research id is their correlation
-    sinal.observe(events.state_changed(), fn(_, m: events.Transition) {
+    collector.source(events.state_changed(), fn(_, m: events.Transition) {
       record(
         "research_agent",
         "research.state",
@@ -83,7 +83,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
       )
     }),
     // grind
-    sinal.observe(
+    collector.source(
       grind_events.admitted(),
       fn(_, m: grind_events.AdmittedMetadata) {
         record(
@@ -94,7 +94,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.claimed(),
       fn(_, m: grind_events.ClaimedMetadata) {
         record(
@@ -105,7 +105,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.acknowledged(),
       fn(_, m: grind_events.AcknowledgedMetadata) {
         record(
@@ -116,7 +116,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.quarantined(),
       fn(_, m: grind_events.QuarantinedMetadata) {
         record("grind", "job.quarantined", job(m.ref), case m.replayed {
@@ -125,13 +125,13 @@ pub fn start(echo_events: Bool) -> Telemetry {
         })
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.resolved(),
       fn(_, m: grind_events.ResolvedMetadata) {
         record("grind", "job.resolved", job(m.ref), string.inspect(m.decision))
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.cancellation_decided(),
       fn(_, m: grind_events.CancellationMetadata) {
         record(
@@ -142,7 +142,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       grind_events.released(),
       fn(_, m: grind_events.ReleasedMetadata) {
         record(
@@ -154,13 +154,13 @@ pub fn start(echo_events: Bool) -> Telemetry {
       },
     ),
     // fabric
-    sinal.observe(
+    collector.source(
       fabric_events.run_started(),
       fn(_, m: fabric_events.RunStarted) {
         record("fabric", "run.start", research(m.correlation), m.agent)
       },
     ),
-    sinal.observe(
+    collector.source(
       fabric_events.run_recovered(),
       fn(_, m: fabric_events.RunRecovered) {
         record(
@@ -171,7 +171,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       fabric_events.run_taken_over(),
       fn(_, m: fabric_events.RunTakenOver) {
         record(
@@ -182,21 +182,24 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(fabric_events.model_turn(), fn(_, m: fabric_events.ModelTurn) {
-      record(
-        "fabric",
-        "model.stop",
-        research(m.correlation),
-        "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
-      )
-    }),
-    sinal.observe(
+    collector.source(
+      fabric_events.model_turn(),
+      fn(_, m: fabric_events.ModelTurn) {
+        record(
+          "fabric",
+          "model.stop",
+          research(m.correlation),
+          "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
+        )
+      },
+    ),
+    collector.source(
       fabric_events.tool_dispatched(),
       fn(_, m: fabric_events.ToolDispatched) {
         record("fabric", "tool.start", research(m.correlation), m.action.tool)
       },
     ),
-    sinal.observe(
+    collector.source(
       fabric_events.tool_settled(),
       fn(_, m: fabric_events.ToolSettled) {
         record(
@@ -207,13 +210,13 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       fabric_events.run_cancelled(),
       fn(_, m: fabric_events.RunCancelled) {
         record("fabric", "run.cancel", research(m.correlation), "")
       },
     ),
-    sinal.observe(
+    collector.source(
       fabric_events.run_finished(),
       fn(_, m: fabric_events.RunFinished) {
         record(
@@ -224,24 +227,30 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(fabric_events.lease_lost(), fn(_, m: fabric_events.LeaseLost) {
-      record(
-        "fabric",
-        "lease.lose",
-        research(m.correlation),
-        string.inspect(m.reason),
-      )
-    }),
+    collector.source(
+      fabric_events.lease_lost(),
+      fn(_, m: fabric_events.LeaseLost) {
+        record(
+          "fabric",
+          "lease.lose",
+          research(m.correlation),
+          string.inspect(m.reason),
+        )
+      },
+    ),
     // saga
-    sinal.observe(saga_events.run_started(), fn(_, m: saga_events.RunMetadata) {
-      record(
-        "saga",
-        "run.start",
-        research(m.correlation),
-        m.workflow <> " " <> option.unwrap(m.execution, "local"),
-      )
-    }),
-    sinal.observe(
+    collector.source(
+      saga_events.run_started(),
+      fn(_, m: saga_events.RunMetadata) {
+        record(
+          "saga",
+          "run.start",
+          research(m.correlation),
+          m.workflow <> " " <> option.unwrap(m.execution, "local"),
+        )
+      },
+    ),
+    collector.source(
       saga_events.run_stopped(),
       fn(_, m: saga_events.RunStopMetadata) {
         record(
@@ -252,7 +261,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       saga_events.step_stopped(),
       fn(_, m: saga_events.StepStopMetadata) {
         record(
@@ -263,7 +272,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
         )
       },
     ),
-    sinal.observe(
+    collector.source(
       saga_events.undo_stopped(),
       fn(_, m: saga_events.UndoMetadata) {
         record(
@@ -276,7 +285,7 @@ pub fn start(echo_events: Bool) -> Telemetry {
     ),
     // llm_wire
     // llm_wire reads the correlation from the model call's client view.
-    sinal.observe(llm_events.event(), fn(_, m: llm_events.Metadata) {
+    collector.source(llm_events.event(), fn(_, m: llm_events.Metadata) {
       record(
         "llm_wire",
         llm_events.stage_name(m.stage),
@@ -284,34 +293,43 @@ pub fn start(echo_events: Bool) -> Telemetry {
         m.provider <> " " <> llm_events.outcome_name(m.outcome),
       )
     }),
-    // http_gun (routed through the app's forwarder, `http_prefix`)
-    sinal.observe(http_events.event(), fn(_, m: http_events.Metadata) {
-      let key = keyed(m.correlation)
-      case m.milestone {
-        http_events.ResponseHeaders(status) ->
-          record("http_gun", "response_headers", key, int.to_string(status))
-        http_events.HttpTerminated(outcome) ->
-          record("http_gun", "terminated", key, string.inspect(outcome))
-        _ -> Nil
-      }
+    // http_gun (routed through the app's forwarder, `http_prefix`): only
+    // the response headers and the end of each request are kept.
+    collector.source_with(fn(keep) {
+      sinal.subscription(http_events.event(), fn(_, m: http_events.Metadata) {
+        let key = keyed(m.correlation)
+        case m.milestone {
+          http_events.ResponseHeaders(status) ->
+            keep(record(
+              "http_gun",
+              "response_headers",
+              key,
+              int.to_string(status),
+            ))
+          http_events.HttpTerminated(outcome) ->
+            keep(record("http_gun", "terminated", key, string.inspect(outcome)))
+          _ -> Nil
+        }
+      })
     }),
     // sinal
-    sinal.observe(
+    collector.source(
       forwarder.dropped_event(),
       fn(d: forwarder.Dropped, m: forwarder.DroppedMetadata) {
         record("sinal", "forwarder.dropped", Unkeyed, string.inspect(#(d, m)))
       },
     ),
   ]
-  Telemetry(collector:, attachments:)
 }
 
+/// Stops the collector and waits for it. Sinal detaches the handlers its
+/// process owned.
 pub fn stop(telemetry: Telemetry) -> Nil {
-  list.each(telemetry.attachments, fn(a) {
-    let _ = sinal.detach(a)
-    Nil
-  })
+  shutdown(telemetry.supervisor)
 }
+
+@external(erlang, "research_agent_ffi", "shutdown")
+fn shutdown(pid: process.Pid) -> Nil
 
 fn job(ref: grind_events.JobRef) -> Key {
   Research(correlation.to_string(ref.correlation))
@@ -337,7 +355,7 @@ pub type Trace {
 pub fn trace(telemetry: Telemetry, research: String) -> Trace {
   // Let in-flight forwarder deliveries land.
   process.sleep(100)
-  let events = process.call(telemetry.collector, 2000, Snapshot)
+  let events = collector.entries(telemetry.recent)
   let owner = fn(key) {
     case key {
       Research(id) -> Ok(id)
@@ -361,22 +379,6 @@ pub fn sources(trace: Trace) -> List(String) {
 
 pub fn render(e: Observed) -> String {
   e.source <> " " <> e.name <> " " <> e.detail
-}
-
-fn handle(state: State, message: Message) -> actor.Next(State, Message) {
-  case message {
-    Record(observed) -> {
-      case state.echo_events {
-        True -> io.println("    [telemetry] " <> render(observed))
-        False -> Nil
-      }
-      actor.continue(State(..state, events: [observed, ..state.events]))
-    }
-    Snapshot(reply) -> {
-      process.send(reply, list.reverse(state.events))
-      actor.continue(state)
-    }
-  }
 }
 
 /// The `[fabric]` prefix routed through the app's forwarder keeps Fabric's

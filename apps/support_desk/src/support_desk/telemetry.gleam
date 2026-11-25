@@ -19,17 +19,18 @@
 //// and needs no join.
 
 import fabric/telemetry as fabric_obs
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
+import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import http_gun/telemetry as http_obs
 import llm_wire/telemetry as llm_obs
 import saga/telemetry as saga_obs
 import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 import support_desk/events
 
@@ -59,36 +60,41 @@ pub type Observation {
   Observation(source: Source, name: String, key: Key, detail: String)
 }
 
+/// How many observations the collector keeps; older ones are overwritten.
+pub const capacity = 4096
+
+/// A supervised `sinal/collector` over every event. Its process attaches
+/// the handlers and owns them, so they are attached exactly while it runs.
 pub opaque type Telemetry {
-  Telemetry(collector: Subject(Message), attachments: List(sinal.Attachment))
+  Telemetry(recent: collector.Collector(Observation), supervisor: process.Pid)
 }
 
-pub opaque type Message {
-  Stop
-  Observed(Observation)
-  Read(reply: Subject(List(Observation)))
-}
-
-/// Starts the collector and attaches to every event. http_gun emits
+/// Starts the collector under a supervisor of its own. http_gun emits
 /// through `sinal.emit` like the other packages, so no forwarder is needed:
-/// the handler only sends a message.
+/// the handler only writes one entry.
 pub fn start() -> Result(Telemetry, String) {
-  use collector <- result.map(start_collector())
-  Telemetry(collector, handlers(collector))
+  let recent =
+    collector.new(process.new_name("support_desk_telemetry"))
+    |> collector.with_capacity(capacity)
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(collector.supervised(recent, sources()))
+  |> supervisor.start
+  |> result.map(fn(started) { Telemetry(recent:, supervisor: started.pid) })
+  |> result.replace_error("could not start the telemetry collector")
 }
 
+/// The observations the collector holds, oldest first: at most
+/// `capacity`. Empty once it has stopped.
 pub fn observations(telemetry: Telemetry) -> List(Observation) {
-  process.call(telemetry.collector, 1000, Read)
+  collector.entries(telemetry.recent)
 }
 
+/// Stops the collector and waits for it. Sinal detaches the handlers its
+/// process owned.
 pub fn stop(telemetry: Telemetry) -> Nil {
-  list.each(telemetry.attachments, fn(attachment) {
-    let _ = sinal.detach(attachment)
-    Nil
-  })
-  let assert Ok(pid) = process.subject_owner(telemetry.collector)
-  let monitor = process.monitor(pid)
-  process.send(telemetry.collector, Stop)
+  let monitor = process.monitor(telemetry.supervisor)
+  process.unlink(telemetry.supervisor)
+  process.kill(telemetry.supervisor)
   process.new_selector()
   |> process.select_specific_monitor(monitor, fn(_) { Nil })
   |> process.selector_receive_forever
@@ -146,78 +152,70 @@ pub fn render(observation: Observation) -> String {
 
 // Handlers ----------------------------------------------------------------
 
-fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
-  let fabric = fn(name, key, detail) {
-    process.send(collector, Observed(Observation(Fabric, name, key, detail)))
-  }
+fn sources() -> List(collector.Source(Observation)) {
+  let fabric = fn(name, key, detail) { Observation(Fabric, name, key, detail) }
   let saga = fn(name, workflow, run, ticket, detail) {
-    process.send(
-      collector,
-      Observed(Observation(Saga, name, SagaRun(workflow, run, ticket), detail)),
-    )
+    Observation(Saga, name, SagaRun(workflow, run, ticket), detail)
   }
   let ticket = fn(name, ticket, run, detail) {
-    process.send(
-      collector,
-      Observed(Observation(Desk, name, TicketRun(ticket, run), detail)),
-    )
+    Observation(Desk, name, TicketRun(ticket, run), detail)
   }
   [
-    sinal.observe(events.ticket_opened(), fn(_, m) {
+    collector.source(events.ticket_opened(), fn(_, m) {
       ticket("ticket.opened", m.ticket, m.run, "")
     }),
-    sinal.observe(events.ticket_answered(), fn(_, m) {
+    collector.source(events.ticket_answered(), fn(_, m) {
       ticket("ticket.answered", m.ticket, m.run, string.inspect(m.answer))
     }),
-    sinal.observe(fabric_obs.run_started(), fn(_, m) {
+    collector.source(fabric_obs.run_started(), fn(_, m) {
       fabric("run.start", FabricRun(m.run, m.correlation), m.agent)
     }),
-    sinal.observe(fabric_obs.model_turn(), fn(_, m) {
+    collector.source(fabric_obs.model_turn(), fn(_, m) {
       fabric(
         "model.stop",
         FabricRun(m.run, m.correlation),
         "turn " <> int.to_string(m.turn) <> " " <> string.inspect(m.result),
       )
     }),
-    sinal.observe(fabric_obs.approval_requested(), fn(_, m) {
+    collector.source(fabric_obs.approval_requested(), fn(_, m) {
       fabric(
         "approval.request",
         FabricRun(m.action.run, m.correlation),
         m.action.tool,
       )
     }),
-    sinal.observe(fabric_obs.approval_answered(), fn(_, m) {
+    collector.source(fabric_obs.approval_answered(), fn(_, m) {
       fabric(
         "approval.answer",
         FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> string.inspect(m.answer),
       )
     }),
-    sinal.observe(fabric_obs.tool_dispatched(), fn(_, m) {
+    collector.source(fabric_obs.tool_dispatched(), fn(_, m) {
       fabric(
         "tool.start",
         FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> m.action.call_id,
       )
     }),
-    sinal.observe(fabric_obs.tool_settled(), fn(_, m) {
+    collector.source(fabric_obs.tool_settled(), fn(_, m) {
       fabric(
         "tool.stop",
         FabricRun(m.action.run, m.correlation),
         m.action.tool <> " " <> string.inspect(m.disposition),
       )
     }),
-    sinal.observe(fabric_obs.settlement_refused(), fn(_, m) {
+    collector.source(fabric_obs.settlement_refused(), fn(_, m) {
       fabric(
         "tool.settlement.refuse",
         FabricRun(m.action.run, m.correlation),
         m.summary,
       )
     }),
-    sinal.observe(fabric_obs.run_cancelled(), fn(_, m) {
+    collector.source(fabric_obs.run_cancelled(), fn(_, m) {
       fabric("run.cancel", FabricRun(m.run, m.correlation), "")
     }),
-    sinal.observe(fabric_obs.run_finished(), fn(totals, m) {
+    collector.source(fabric_obs.run_finished(), fn(totals, m) {
       fabric(
         "run.stop",
         FabricRun(m.run, m.correlation),
@@ -227,10 +225,10 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
           <> " turns",
       )
     }),
-    sinal.observe(saga_obs.run_started(), fn(_, m) {
+    collector.source(saga_obs.run_started(), fn(_, m) {
       saga("run.start", m.workflow, m.run, m.correlation, "")
     }),
-    sinal.observe(saga_obs.run_stopped(), fn(_, m) {
+    collector.source(saga_obs.run_stopped(), fn(_, m) {
       saga(
         "run.stop",
         m.workflow,
@@ -239,10 +237,10 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         string.inspect(m.outcome),
       )
     }),
-    sinal.observe(saga_obs.step_started(), fn(_, m) {
+    collector.source(saga_obs.step_started(), fn(_, m) {
       saga("step.start", m.workflow, m.run, m.correlation, m.step)
     }),
-    sinal.observe(saga_obs.step_stopped(), fn(_, m) {
+    collector.source(saga_obs.step_stopped(), fn(_, m) {
       saga(
         "step.stop",
         m.workflow,
@@ -251,7 +249,7 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         m.step <> " " <> string.inspect(m.result),
       )
     }),
-    sinal.observe(saga_obs.compensation_stopped(), fn(_, m) {
+    collector.source(saga_obs.compensation_stopped(), fn(_, m) {
       saga(
         "step.compensate",
         m.workflow,
@@ -260,7 +258,7 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         m.step <> " " <> string.inspect(m.decision),
       )
     }),
-    sinal.observe(saga_obs.undo_stopped(), fn(_, m) {
+    collector.source(saga_obs.undo_stopped(), fn(_, m) {
       saga(
         "step.undo",
         m.workflow,
@@ -269,17 +267,10 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         m.step <> " " <> string.inspect(m.result),
       )
     }),
-    sinal.observe(http_obs.event(), fn(_, m) {
+    collector.source_with(fn(keep) {
+      use _, m <- sinal.subscription(http_obs.event())
       let http = fn(name, detail) {
-        process.send(
-          collector,
-          Observed(Observation(
-            HttpGun,
-            name,
-            HttpRequest(m.correlation),
-            detail,
-          )),
-        )
+        keep(Observation(HttpGun, name, HttpRequest(m.correlation), detail))
       }
       case m.client, m.milestone {
         // Hellhound's own client ("hellhound") sends the approvers' sign-in and
@@ -294,35 +285,13 @@ fn handlers(collector: Subject(Message)) -> List(sinal.Attachment) {
         _, _ -> Nil
       }
     }),
-    sinal.observe(llm_obs.event(), fn(_, m) {
-      process.send(
-        collector,
-        Observed(Observation(
-          LlmWire,
-          llm_obs.stage_name(m.stage),
-          ModelCall(m.correlation),
-          m.provider <> " " <> llm_obs.outcome_name(m.outcome),
-        )),
+    collector.source(llm_obs.event(), fn(_, m) {
+      Observation(
+        LlmWire,
+        llm_obs.stage_name(m.stage),
+        ModelCall(m.correlation),
+        m.provider <> " " <> llm_obs.outcome_name(m.outcome),
       )
     }),
   ]
-}
-
-// Collector ---------------------------------------------------------------
-
-fn start_collector() -> Result(Subject(Message), String) {
-  actor.new([])
-  |> actor.on_message(fn(seen: List(Observation), message) {
-    case message {
-      Stop -> actor.stop()
-      Observed(observation) -> actor.continue([observation, ..seen])
-      Read(reply) -> {
-        process.send(reply, list.reverse(seen))
-        actor.continue(seen)
-      }
-    }
-  })
-  |> actor.start
-  |> result.map(fn(started) { started.data })
-  |> result.replace_error("could not start the telemetry collector")
 }
