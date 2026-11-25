@@ -46,6 +46,8 @@ pub type Reply {
   Answer(Extraction)
   /// Text that is not the structured answer.
   NotStructured(text: String)
+  /// An end with a stop reason llm_wire does not know.
+  UnrecognizedStop(reason: String)
   /// An HTTP error status.
   Status(code: Int)
   /// Wait this long, then reply.
@@ -210,6 +212,7 @@ fn answer(reply: Reply) -> Response(mist.ResponseData) {
         testing.text(domain.to_text(domain.extraction_codec(), extraction)),
       )
     NotStructured(text:) -> openai(testing.text(text))
+    UnrecognizedStop(reason:) -> openai(testing.unrecognized_stop(reason, ""))
     Status(code:) ->
       openai(testing.http_status(message.OpenAI, code, "scripted failure"))
   }
@@ -494,9 +497,9 @@ pub fn sign_in(
     |> http_config.with_trust(
       http_config.Anchors([identity.trust_anchor_der(services.identity)]),
     )
-    |> http_config.with_request_timeout(http_config.After(duration.seconds(10)))
     |> http_config.with_destination(destination.loopback_only())
     |> http_gun.start
+    |> result.map(http_gun.with_timeout(_, duration.seconds(10)))
   let walked = walk(client, base_url <> "/login", dict.new(), 4)
   http_gun.stop(client)
   use jar <- result.try(walked)
