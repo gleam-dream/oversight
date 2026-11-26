@@ -1,12 +1,13 @@
 {
   "https://github.com/gleam-dream/correio.git" = {
-    "c45c4b227b862c926f361265ef298c69dcbfa429" = "sha256-LOMQlUxqbrr0usIO6Fz1CENJ4gkXQvvvmwDLd/9O7+A=";
+    "10ba78566e1cb2ffc638fb825e3145e4f4ab7476" = "sha256-PvUze8tgRS+GebdYDqGbgcoJl2rIODZDJlYigar6pU8=";
   };
   "https://github.com/gleam-dream/decisions.git" = {
     "84e9bc3600930934398457c93a470a709a01f9ac" = "sha256-6SY9Dqk3bxZnCh7J6zHJSzN8Qwq8v5LNRwTS56cKrOI=";
   };
   "https://github.com/gleam-dream/fabric.git" = {
     "a547a79418cf24249b81c837b474731fa388625c" = "sha256-KQJ9DQJnp46jmrQBr8blKImZhg6dukApp/Oh2aO7I2U=";
+    "e451366ee7318127f1077965139b5481b1ae4128" = "sha256-PoTm9EXvBzXXjK4weeGFfulP9CJza3HF3C/lQGT49Zw=";
   };
   "https://github.com/gleam-dream/grind.git" = {
     "beb23feb47133ea5dc7996881855e21bfd2412f0" = "sha256-VAw5EohnCFizUydUa0TIYHGY/dsW18wf+5lCn+cLhcc=";
@@ -26,10 +27,8 @@
   "https://github.com/gleam-dream/relay.git" = {
     "4374f1c69c05988b5743c9eaa8c4ebaa0c41af37" = "sha256-3KqVqd4aUyma+pvmV3ZCRb+SPQzLZRueWZMax7qQOPk=";
   };
-  "https://github.com/gleam-dream/retrace.git" = {
-    "19e45a4bde46dd59b68ea626e52081150c367678" = "sha256-d9HLHRR+t+D0X0R4H9s7WzUgJHudvEg2pq4LLVP6zEo=";
-  };
   "https://github.com/gleam-dream/saga.git" = {
+    "7788ebd7d5fe41c74945cec8957c904ba514f91e" = "sha256-6lt2rFdy0L2V10gJdww8m4nLkMGwMGtYeYkCEJtq+XU=";
     "ccea2bef2884ca92aa4962b38977de83308494b7" = "sha256-p3s8nTSvAbjFvJX9hBhArzn1RySZUGpu6UQFm1V2nkg=";
     "ec31675925d65552c3c70a4b4e5a8742661f8329" = "sha256-pV4CZwNvd4p7gbBEABb3t3JlFw75bMAO4Lw9Vi04Xdw=";
   };

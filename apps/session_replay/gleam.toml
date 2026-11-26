@@ -7,7 +7,7 @@ licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
-retrace = { git = "https://github.com/gleam-dream/retrace.git", ref = "19e45a4bde46dd59b68ea626e52081150c367678" }
+retrace = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

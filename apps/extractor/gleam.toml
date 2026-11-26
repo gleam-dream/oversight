@@ -14,11 +14,11 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 5.0.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" }
-llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "5bed4249fc91416ca7c862afbe6eb920ec56bdd6" }
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+grind = ">= 0.3.0 and < 0.4.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+llm_wire = ">= 0.3.0 and < 0.4.0"
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

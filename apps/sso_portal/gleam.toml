@@ -16,9 +16,9 @@ wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 5.0.0 and < 7.0.0"
 pog = ">= 4.0.0 and < 5.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+hellhound = ">= 0.4.0 and < 0.5.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+sinal = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
