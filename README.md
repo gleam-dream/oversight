@@ -73,11 +73,13 @@ holds its inputs once, and follow its
   process, as in the
   [payout desk's](apps/payout_desk/test/payout_desk/copy_cost_test.gleam).
 
-The applications still hand Fabric a built agent, which copies in 9 to 33 kB per
-run on 2.2.0. Fabric's
-[builder entry point](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)
-removes that copy; adopting it means moving to Fabric 0.5
-([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build-with.md)).
+Each Fabric application passes `agent.build` a builder, and Fabric 0.6 builds
+the agent in each process that runs it, so a run copies the builder and its
+captures instead of the built agent with its tool codecs
+([Fabric ADR 0023](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)).
+The payout desk still runs on an earlier Fabric commit until the Decisions
+packages accept JSON Blueprint 3
+([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build.md)).
 
 ## Run an example
 

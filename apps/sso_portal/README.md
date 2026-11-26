@@ -5,8 +5,9 @@
 
 A web portal that signs users in with OpenID Connect, stores sessions in PostgreSQL and
 calls a billing API with their access tokens. Hellhound refreshes tokens near expiry, and the
-application retries a billing request once after a refusal. Hellhound's sessions and pending
-logins live in PostgreSQL through the adapter in `src/sso_portal/hellhound_records.gleam`.
+application retries a billing request once after a refusal. Hellhound's token custody lives in
+PostgreSQL through the adapter in `src/sso_portal/hellhound_records.gleam`; a pending login
+travels in a sealed browser cookie.
 
 Everything external runs on loopback: `hellhound/testing` provides the OpenID provider over
 TLS, `src/sso_portal/billing_api.gleam` validates bearer tokens locally, and

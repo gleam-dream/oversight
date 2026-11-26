@@ -531,8 +531,8 @@ pub fn hellhound_records_hold_nothing_readable_test() {
     pog.query("select sealed from hellhound_records")
     |> pog.returning(decode.at([0], decode.bit_array))
     |> pog.execute(portal.db)
-  // Custody and the pending login are in the table, sealed: neither the
-  // token nor the reference nor the subject appears in any row.
+  // Custody is in the table, sealed: neither the token nor the reference
+  // nor the subject appears in any row.
   assert sealed != []
   let forbidden = [
     hellhound.access_token_value(access.token),

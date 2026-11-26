@@ -76,8 +76,9 @@ repositories when porting. Facts that are easy to get wrong:
   `RequireApproval(requirement)` and `HandOver(reason)`. HandOver ends an
   agent run as `HandedOver` and withdraws calls of the same model reply that
   had not started. A graph run takes no handover; it waits for a signal.
-- Decisions: not on Hex; installed from Git. The core is pure and builds for
-  Erlang and JavaScript; `decisions_otp` and `decisions_postgres` are separate.
+- Decisions: the core is on Hex; `decisions_otp` and `decisions_postgres` are
+  separate packages installed from Git release tags. The core is pure and
+  builds for Erlang and JavaScript.
   The policy ladder used in examples (1 in 10 sampled, undo windows, two from
   finance from 500.00) comes from the payout desk and clinic examples.
 - Hellhound: pre-production; production needs independent security review.
