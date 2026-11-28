@@ -115,7 +115,8 @@ repositories when porting. Facts that are easy to get wrong:
   parent; a trapped exit arrives as `ExitMessage(pid, reason)` and a monitor
   reports `ProcessDown(monitor, pid, reason)`, with `ExitReason` being
   `Normal`, `Killed` or `Abnormal`. A normal exit kills no linked process.
-  Binaries over 64 bytes are shared between processes rather than copied.
+  Binaries over 64 bytes are shared between processes on the same node rather
+  than copied.
 
 Honesty labels that must stay visible in the port:
 

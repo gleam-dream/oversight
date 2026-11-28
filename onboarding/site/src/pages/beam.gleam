@@ -181,7 +181,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           "Five processes, each with its own private memory and an empty mailbox. Press Next (or Play) to watch what a single message does.",
         ),
         tour.act(
-          "web sends add_item to cart. The message is copied into cart’s mailbox, and web carries on immediately: sending never waits.",
+          "web sends add_item to cart. The message is copied into cart’s mailbox, and web carries on without waiting for cart to read it.",
           fn(_) { send(0, 1) },
         ),
         tour.act(

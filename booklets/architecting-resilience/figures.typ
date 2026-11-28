@@ -131,7 +131,7 @@
   line((1.3, 1.2), (3.6, 1.2), stroke: 0.7pt + gold, mark: arrow-mark(gold))
   envelope((2.4, 1.48), w: 0.36, h: 0.24)
   content((2.45, 0.85), tm("send(pid, msg)"), anchor: "north")
-  content((2.45, 0.55), ti("returns immediately"), anchor: "north")
+  content((2.45, 0.55), ti("does not wait for the receiver"), anchor: "north")
   // mailbox tray
   rect((3.75, 0.75), (7.35, 1.65), radius: 0.12, fill: gold-soft.lighten(40%), stroke: 0.7pt + gold)
   content((5.55, 1.95), tb("mailbox · arrival order", fill: gold))
@@ -593,7 +593,7 @@
     edge-stroke: 0.6pt + slate,
     node((0, 0), q[Does one child need another\ to be alive to do its job?], name: <q1>),
     node((1.4, 0), r(":one_for_one", "web handlers, pool workers", heal), name: <r1>),
-    node((0, 1), q[Does one failure leave the\ others' state invalid?], name: <q2>),
+    node((0, 1), q[Does any child's restart leave\ all the others' state invalid?], name: <q2>),
     node((1.4, 1), r(":one_for_all", "resource manager + its clients", crash), name: <r2>),
     node((0, 2), q[Do dependencies follow\ the start order?], name: <q3>),
     node((1.4, 2), r(":rest_for_one", "ingest → transform → load", gold), name: <r3>),
@@ -1004,7 +1004,7 @@
   }
   content((5.45 + 1.95, 2.43), t("← only this one dies", size: 4.6pt, fill: crash), anchor: "west")
   // channels
-  content((4.9, 1.2), tb("one long-lived process per WebSocket · Channel / LiveView", size: 5.4pt, fill: heal))
+  content((4.9, 1.2), tb("a process per WebSocket, and one per channel joined or LiveView", size: 5.4pt, fill: heal))
   for r in range(2) {
     let y = 0.75 - r * 0.4
     for c in range(3) {

@@ -77,9 +77,9 @@ An Elixir process is an isolated, lightweight unit of execution managed entirely
 
 #fig(fig-isolation(), caption: [Two models of concurrency. Threads reach into one shared heap and must coordinate with locks; BEAM processes each own a stack, a heap, a garbage collector, and a mailbox, and touch one another only by message.])
 
-Communication between these isolated entities occurs exclusively through asynchronous message passing. A process sends a message to another process's mailbox without blocking, and the receiving process consumes messages from its mailbox one at a time, at its own pace (in arrival order, unless a `receive` picks messages out by pattern). This decoupling allows for true concurrency, as the BEAM's sophisticated, preemptive schedulers can distribute the execution of millions of processes across all available CPU cores automatically and efficiently. This model stands in stark contrast to conventional thread-based systems that depend on shared memory, locks, and mutexes to coordinate work. Such mechanisms are a notorious source of complexity, introducing the potential for subtle and difficult-to-debug issues like race conditions, deadlocks, and priority inversion.
+Communication between these isolated entities occurs exclusively through asynchronous message passing. A process sends a message to another process's mailbox without waiting for the receiver to take or answer it, and the receiving process consumes messages from its mailbox one at a time, at its own pace (in arrival order, unless a `receive` picks messages out by pattern). This decoupling allows for true concurrency, as the BEAM's sophisticated, preemptive schedulers can distribute the execution of millions of processes across all available CPU cores automatically and efficiently. This model stands in stark contrast to conventional thread-based systems that depend on shared memory, locks, and mutexes to coordinate work. Such mechanisms are a notorious source of complexity, introducing the potential for subtle and difficult-to-debug issues like race conditions, deadlocks, and priority inversion.
 
-#fig(fig-mailbox(), caption: [Asynchronous message passing. The sender never waits; the receiver takes messages one at a time, normally in arrival order.])
+#fig(fig-mailbox(), caption: [Asynchronous message passing. The sender does not wait for the receiver to take the message; the receiver takes messages one at a time, normally in arrival order.])
 
 The performance characteristics of BEAM processes are a direct result of their lightweight design. Their small memory footprint and the speed at which they can be created and destroyed by the VM enable massive concurrency. Systems built on the BEAM are capable of running hundreds of thousands, or even millions, of concurrent processes on a single machine, a scale that is orders of magnitude beyond what is practical with OS-level threads. This capability is not a theoretical curiosity but a practical necessity for building modern, highly connected applications such as large-scale messaging platforms, IoT backends, and real-time web services.
 
@@ -636,7 +636,7 @@ This practice, a classic example of information hiding, creates a stable boundar
 
 == High-Concurrency Web Services: Phoenix Requests and Channels
 
-The Phoenix web framework is a prime example of OTP principles applied to web development. It leverages the BEAM's lightweight process model to achieve massive concurrency and inherent fault tolerance. Each connection, and depending on the web server each request, runs in its own lightweight process.#src(66, 67, 68) Similarly, each persistent WebSocket connection for real-time features using Phoenix Channels or Phoenix LiveView is managed by its own long-lived process.
+The Phoenix web framework is a prime example of OTP principles applied to web development. It leverages the BEAM's lightweight process model to achieve massive concurrency and inherent fault tolerance. Each connection, and depending on the web server each request, runs in its own lightweight process.#src(66, 67, 68) Similarly, each persistent WebSocket connection for real-time features has its own long-lived transport process, and each channel a client joins over it runs in a channel process of its own, one per client and topic; a LiveView likewise runs in its own process.#src(81)
 
 #fig(fig-phoenix(), caption: [Fault isolation at the granularity of one user interaction. A malformed request takes down exactly one process, which is not restarted; the next request gets a fresh one.])
 
@@ -820,6 +820,7 @@ Ultimately, the most profound contribution of the Elixir supervision model is ph
   ("String.to_atom/1 and to_existing_atom/1", "HexDocs (Elixir)", "https://hexdocs.pm/elixir/String.html"),
   ("Registry", "HexDocs (Elixir)", "https://hexdocs.pm/elixir/Registry.html"),
   ("Intro to Contexts", "Phoenix Guides", "https://hexdocs.pm/phoenix/contexts.html"),
+  ("Channels", "Phoenix Guides", "https://phoenix.hexdocs.pm/channels.html"),
 )
 
 #{

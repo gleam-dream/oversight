@@ -303,7 +303,7 @@ pub fn script(id: TourId, motion: Motion) -> tour.Script(Model, Msg) {
           try(signals.Link, signals.BCrashes),
         ),
         tour.act(
-          "Same link, but B finishes its work normally. A normal exit kills nobody: links carry only abnormal exits.",
+          "Same link, but B finishes its work normally. A normal exit kills nobody: the link still delivers the exit signal, and A, which does not trap exits, ignores it.",
           try(signals.Link, signals.BFinishes),
         ),
         tour.act(

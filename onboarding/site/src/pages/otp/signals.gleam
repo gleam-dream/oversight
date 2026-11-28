@@ -156,7 +156,7 @@ pub fn lesson(pair: Pair) -> String {
     Some(BCrashes), TrappedLink ->
       "Trapping turned a lethal signal into an ordinary message. That is all a supervisor needs to restart a child."
     Some(BFinishes), Link ->
-      "A normal exit kills nobody: a link only carries abnormal exits."
+      "A normal exit kills nobody: the link delivers the exit signal, but a process that does not trap exits ignores a normal one."
     Some(BFinishes), _ ->
       "Watchers hear about normal exits too, so they can tell a finished job from a crash."
     Some(ACrashes), Link -> "Links work both ways: A's crash took B down."
