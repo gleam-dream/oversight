@@ -1,0 +1,2 @@
+# typst watch writes the PDF beside main.typ; builds go to result/.
+*.pdf

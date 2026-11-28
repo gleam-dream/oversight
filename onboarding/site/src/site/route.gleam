@@ -116,7 +116,7 @@ pub fn number(module: Module) -> Int {
 pub fn minutes(module: Module) -> Int {
   case module {
     Beam -> 20
-    Otp -> 20
+    Otp -> 30
     Gleam -> 15
     Principles -> 20
     Atlas -> 15

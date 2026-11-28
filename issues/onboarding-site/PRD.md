@@ -6,7 +6,7 @@ Category: enhancement
 ## Summary
 
 An interactive onboarding site that takes a new developer from the BEAM to
-real systems built with the gleam-dream libraries in about 3½ hours, with no
+real systems built with the gleam-dream libraries in about 3¾ hours, with no
 code: concepts, pictures, guided playgrounds and simulations. The goal is a
 mental model the reader can navigate by: what each layer gives them, what
 each package owns, and how the packages compose.
@@ -22,7 +22,7 @@ to that reference.
 - New developers joining work on or with gleam-dream. They may know another
   language well but not the BEAM, OTP or Gleam.
 - Finishable in 2 to 4 hours without rushing (the course map says about
-  3½ hours; module estimates sum to 215 minutes).
+  3¾ hours; module estimates sum to 225 minutes).
 - High level only: no implementation details. Module 3 shows short Gleam
   snippets, highlighted, where the data shape or the pattern is the concept:
   custom types, a Result pipeline, a message type and a case expression,
@@ -41,20 +41,20 @@ to that reference.
 Hash routes are plain names (claude.ai artifacts only pass `#name`; keep this
 on GitHub Pages too so links stay stable).
 
-| #   | Route            | Title                        | Min | Playgrounds (tour id)                                                                                                                                                                                                                                                                                                                                                                                             |
-| --- | ---------------- | ---------------------------- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0   | `#start`         | Course map                   | –   | Six-layer stack (`stack`)                                                                                                                                                                                                                                                                                                                                                                                         |
-| 1   | `#beam`          | The BEAM                     | 20  | Process playground + live sequence chart (`proc`); two-core scheduler, cooperative vs preemptive (`sched`)                                                                                                                                                                                                                                                                                                        |
-| 2   | `#otp`           | OTP                          | 20  | Actor stepper + call/reply chart (`actor`); **real-time** send vs call mailbox under load (`load`); supervision tree with strategies, restart intensity, escalation + chart (`tree`); where libraries plug into your tree (`plug`)                                                                                                                                                                                |
-| 3   | `#gleam`         | Gleam                        | 15  | Impossible states, loose record vs custom type with both types in code, plus the "add Disputed" exhaustiveness demo with the compiler's error (`types`); pattern matching arm by arm: fields, guards, lists, string prefixes, alternatives, and an arm deleted to show exhaustiveness (`match`); Result railway with the `use` pipeline (`rail`); typed Subject vs untyped mailbox with the message type (`msgs`) |
-| 4   | `#principles`    | How gleam-dream thinks       | 20  | Seven habits explorer; ownership sorter, library vs your app (`sorter`); "did it happen?" break-the-network simulator with sequence chart and a provider-side idempotency ledger (`happen`); thundering-herd retry simulation (`herd`); define once, use everywhere (`defs`); LLM Wire timeouts (`bounds`)                                                                                                        |
-| 5   | `#atlas`         | The package atlas            | 15  | Layered map with need filter, dependency highlighting and detail panel (`atlas`)                                                                                                                                                                                                                                                                                                                                  |
-| 6   | `#foundations`   | Foundations                  | 20  | **Real-time** Sinal pipeline, inline vs bounded forwarder (`sinal`); JSON Blueprint codec: encode, decode cases, schema (`codec`); HTTP Gun anatomy (`anatomy`); destination policy (`dest`)                                                                                                                                                                                                                      |
-| 7   | `#outside-world` | The outside world            | 20  | Step-through sequence charts for LLM Wire, Relay, Hellhound and Correio with branch options (`flows`)                                                                                                                                                                                                                                                                                                             |
-| 8   | `#durable-work`  | Work that outlives a request | 20  | Grind job lifecycle state machine (`grind`); live Grind queue: skip-locked claims, leases, renewer heartbeat, killable workers (`lease`); transactional admission (`tx`); Saga checkout with parallel steps, compensation, hold, crash in local vs durable mode (`saga`); 200 checkouts at once (`sagax`)                                                                                                         |
-| 9   | `#agents`        | Agents & people in the loop  | 25  | Fabric policy gate (`gate`); pull the plug: store backends and uncertain effects (`plug`); Decisions point state machine with policy versions v1–v4 (`point`); 400 recommendations scatter, linked back to the single case (`p400`)                                                                                                                                                                               |
-| 10  | `#compose`       | Composition studio           | 25  | Ten Oversight apps step by step (`systems`); six composition patterns; system builder with nearest example (`builder`); capstone: the durable checkout as a telemetry trace (`trace`)                                                                                                                                                                                                                             |
-| 11  | `#field-guide`   | Field guide                  | 15  | Retrace scrub with replay strategies and privacy (`retrace`); tooling; filterable glossary; cheat sheet; reading plan                                                                                                                                                                                                                                                                                             |
+| #   | Route            | Title                        | Min | Playgrounds (tour id)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --- | ---------------- | ---------------------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | `#start`         | Course map                   | –   | Six-layer stack (`stack`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 1   | `#beam`          | The BEAM                     | 20  | Process playground + live sequence chart (`proc`); two-core scheduler, cooperative vs preemptive (`sched`)                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2   | `#otp`           | OTP                          | 30  | Actor stepper + call/reply chart (`actor`); **real-time** send vs call mailbox under load (`load`); link, monitor and trapped-exit bonds between two processes with a sequence chart (`signals`); supervision tree with strategies, restart intensity, escalation + chart (`tree`); strategy choice by dependency; restart types × endings table the reader fills in (`restarts`); four process anti-patterns; where libraries plug into your tree (`plug`); further reading: the resilience booklet |
+| 3   | `#gleam`         | Gleam                        | 15  | Impossible states, loose record vs custom type with both types in code, plus the "add Disputed" exhaustiveness demo with the compiler's error (`types`); pattern matching arm by arm: fields, guards, lists, string prefixes, alternatives, and an arm deleted to show exhaustiveness (`match`); Result railway with the `use` pipeline (`rail`); typed Subject vs untyped mailbox with the message type (`msgs`)                                                                                    |
+| 4   | `#principles`    | How gleam-dream thinks       | 20  | Seven habits explorer; ownership sorter, library vs your app (`sorter`); "did it happen?" break-the-network simulator with sequence chart and a provider-side idempotency ledger (`happen`); thundering-herd retry simulation (`herd`); define once, use everywhere (`defs`); LLM Wire timeouts (`bounds`)                                                                                                                                                                                           |
+| 5   | `#atlas`         | The package atlas            | 15  | Layered map with need filter, dependency highlighting and detail panel (`atlas`)                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 6   | `#foundations`   | Foundations                  | 20  | **Real-time** Sinal pipeline, inline vs bounded forwarder (`sinal`); JSON Blueprint codec: encode, decode cases, schema (`codec`); HTTP Gun anatomy (`anatomy`); destination policy (`dest`)                                                                                                                                                                                                                                                                                                         |
+| 7   | `#outside-world` | The outside world            | 20  | Step-through sequence charts for LLM Wire, Relay, Hellhound and Correio with branch options (`flows`)                                                                                                                                                                                                                                                                                                                                                                                                |
+| 8   | `#durable-work`  | Work that outlives a request | 20  | Grind job lifecycle state machine (`grind`); live Grind queue: skip-locked claims, leases, renewer heartbeat, killable workers (`lease`); transactional admission (`tx`); Saga checkout with parallel steps, compensation, hold, crash in local vs durable mode (`saga`); 200 checkouts at once (`sagax`)                                                                                                                                                                                            |
+| 9   | `#agents`        | Agents & people in the loop  | 25  | Fabric policy gate (`gate`); pull the plug: store backends and uncertain effects (`plug`); Decisions point state machine with policy versions v1–v4 (`point`); 400 recommendations scatter, linked back to the single case (`p400`)                                                                                                                                                                                                                                                                  |
+| 10  | `#compose`       | Composition studio           | 25  | Ten Oversight apps step by step (`systems`); six composition patterns; system builder with nearest example (`builder`); capstone: the durable checkout as a telemetry trace (`trace`)                                                                                                                                                                                                                                                                                                                |
+| 11  | `#field-guide`   | Field guide                  | 15  | Retrace scrub with replay strategies and privacy (`retrace`); tooling; filterable glossary; cheat sheet; reading plan                                                                                                                                                                                                                                                                                                                                                                                |
 
 Every module ends with a "Carry this forward" sentence and a footer with a
 "Mark module N as done" toggle plus previous and next links.
@@ -105,6 +105,18 @@ repositories when porting. Facts that are easy to get wrong:
   size each time it moves, and a test should bound it. JSON Blueprint's codec
   practice guide states the rule for any such value and how to test it
   (module 6's "Mind the copy" note).
+- OTP facts from gleam_otp 1.3 and gleam_erlang 1.3: a static supervisor's
+  restart tolerance defaults to 2 restarts in 5 seconds
+  (`static_supervisor.restart_tolerance`); the tree playground is set to 3 in
+  5 and says so. Restart types are `Permanent` (the default; restarted after
+  any exit), `Transient` (restarted only after an abnormal exit) and
+  `Temporary` (never restarted, even when a one-for-all or rest-for-one
+  sibling's crash stopped it). `process.spawn` links the new process to its
+  parent; a trapped exit arrives as `ExitMessage(pid, reason)` and a monitor
+  reports `ProcessDown(monitor, pid, reason)`, with `ExitReason` being
+  `Normal`, `Killed` or `Abnormal`. A normal exit kills no linked process.
+  Binaries over 64 bytes are shared between processes on the same node rather
+  than copied.
 
 Honesty labels that must stay visible in the port:
 
@@ -116,6 +128,25 @@ Honesty labels that must stay visible in the port:
   requests (capacity drops when arrivals exceed twice capacity).
 - The live Sinal widget uses a forwarder of 12 slots for visibility and says
   the real default is 1,024.
+
+## Booklets
+
+Long-form reading beside the course: Typst booklets under `booklets/` at the
+repository root, one directory each, sharing `booklets/shared/` (theme,
+drawing vocabulary and syntax theme). Each builds to one PDF
+([ADR 0045](../../docs/adr/0045-publish-booklets-as-pdfs-beside-the-course.md)).
+`nix build .#booklets` builds them all offline; the Pages workflow publishes
+each at `booklets/<slug>.pdf`. The course links them, never embeds them: `site/booklets.gleam` lists each booklet, a module
+shows a "Further reading" card where a booklet covers its subject in depth,
+and module 11's reading plan lists them all.
+
+| Booklet                   | Linked from         | Subject                                                                                      |
+| ------------------------- | ------------------- | -------------------------------------------------------------------------------------------- |
+| `architecting-resilience` | modules 1, 2 and 11 | Elixir processes and supervision trees: primitives, configuration, strategies, anti-patterns |
+
+A booklet may use another language's code (this one is Elixir); the course
+modules that draw on it state the gleam_otp equivalent and never show the
+other language's API as Gleam's.
 
 ## Interaction design
 
@@ -142,7 +173,7 @@ Honesty labels that must stay visible in the port:
   playground fits at 75% or more; at 1366×768 most are 80–100%, the worst
   65%.
 - After the tour, a light "Free play" bar offers "Replay the guided tour".
-- The tour scripts for all 35 tours live in each page's `script` function
+- The tour scripts for all 37 tours live in each page's `script` function
   under `onboarding/site/src/pages/`, with the reference's wording.
 
 ### Real-time widgets (GenStage-explainer style)

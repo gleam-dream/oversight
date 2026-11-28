@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>name</key><string>Beam Paper</string>
+  <key>settings</key>
+  <array>
+    <dict><key>settings</key><dict>
+      <key>foreground</key><string>#1c2431</string>
+      <key>background</key><string>#f5f1e8</string>
+    </dict></dict>
+    <dict><key>scope</key><string>comment, punctuation.definition.comment</string>
+      <key>settings</key><dict><key>foreground</key><string>#8a8473</string><key>fontStyle</key><string>italic</string></dict></dict>
+    <dict><key>scope</key><string>keyword, storage, keyword.control, keyword.operator.word</string>
+      <key>settings</key><dict><key>foreground</key><string>#1f3a5f</string><key>fontStyle</key><string>bold</string></dict></dict>
+    <dict><key>scope</key><string>constant.other.symbol, constant.language, constant.other.atom, entity.name.type.class.record, constant.other.symbol.unquoted.erlang, constant.other.symbol.quoted.single.erlang</string>
+      <key>settings</key><dict><key>foreground</key><string>#a2701b</string></dict></dict>
+    <dict><key>scope</key><string>string, string.quoted</string>
+      <key>settings</key><dict><key>foreground</key><string>#2f7a5b</string></dict></dict>
+    <dict><key>scope</key><string>constant.numeric</string>
+      <key>settings</key><dict><key>foreground</key><string>#b4442c</string></dict></dict>
+    <dict><key>scope</key><string>entity.name.function, meta.function-call, entity.name.function.erlang, entity.name.function.function-call.erlang</string>
+      <key>settings</key><dict><key>foreground</key><string>#7a3f8c</string></dict></dict>
+    <dict><key>scope</key><string>variable, variable.other.erlang</string>
+      <key>settings</key><dict><key>foreground</key><string>#2c4f7c</string></dict></dict>
+    <dict><key>scope</key><string>entity.name.type, support.type, entity.name.type.module, entity.name.type.class.module.erlang, entity.name.type.class.module.definition.erlang</string>
+      <key>settings</key><dict><key>foreground</key><string>#b4442c</string></dict></dict>
+    <dict><key>scope</key><string>punctuation, meta.brace</string>
+      <key>settings</key><dict><key>foreground</key><string>#5a6070</string></dict></dict>
+  </array>
+</dict>
+</plist>

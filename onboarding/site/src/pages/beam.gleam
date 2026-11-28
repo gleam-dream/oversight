@@ -18,6 +18,7 @@ import pages/beam/scheduler.{
   WithGreedy,
 }
 import pages/beam/scheduler_widget
+import site/booklets
 import site/context.{type Context}
 import site/msc
 import site/tour
@@ -180,7 +181,7 @@ pub fn script(id: TourId) -> tour.Script(Model, Msg) {
           "Five processes, each with its own private memory and an empty mailbox. Press Next (or Play) to watch what a single message does.",
         ),
         tour.act(
-          "web sends add_item to cart. The message is copied into cart’s mailbox, and web carries on immediately: sending never waits.",
+          "web sends add_item to cart. The message is copied into cart’s mailbox, and web carries on without waiting for cart to read it.",
           fn(_) { send(0, 1) },
         ),
         tour.act(
@@ -855,6 +856,10 @@ fn one_picture() -> Element(Msg) {
           "Failure becomes a signal another process can act on. Next module: OTP.",
         ),
       ],
+    ),
+    booklets.card(
+      booklets.resilience,
+      "Chapter 1 takes this module further: why a process costs 2.6 KB where a thread reserves megabytes, how messages are copied, and how links, monitors and trapped exits make failure a message another process can act on.",
     ),
     ui.carry_forward(
       "On the BEAM you don't try to prevent every failure. You contain it. A process is the unit of concurrency, of state and of failure.",

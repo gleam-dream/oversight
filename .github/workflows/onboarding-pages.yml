@@ -4,11 +4,15 @@ on:
     branches: [main]
     paths:
       - "onboarding/site/**"
+      - "booklets/**"
+      - "nix/booklets.nix"
       - ".github/workflows/onboarding-pages.yml"
   # Pull requests run the checks and the build, never the deploy.
   pull_request:
     paths:
       - "onboarding/site/**"
+      - "booklets/**"
+      - "nix/booklets.nix"
       - ".github/workflows/onboarding-pages.yml"
   workflow_dispatch:
 
@@ -45,6 +49,13 @@ jobs:
       - name: Build
         working-directory: onboarding/site
         run: nix develop --no-update-lock-file ../.. --command bash build.sh
+      - name: Booklets
+        # Each booklet's PDF, published at booklets/<slug>.pdf beside the
+        # course, which links to it.
+        run: |
+          booklets=$(nix build --no-update-lock-file --no-link --print-out-paths .#booklets)
+          cp -R "$booklets" onboarding/site/dist/booklets
+          chmod -R u+w onboarding/site/dist/booklets
       - if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

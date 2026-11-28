@@ -7,10 +7,17 @@ import pages/otp/cart
 import pages/otp/libraries
 import pages/otp/mailbox.{Call, Send}
 import pages/otp/mailbox_widget
+import pages/otp/restart_types.{
+  Crashes, FinishesNormally, Permanent, Removed, Restarted, Temporary, Transient,
+}
+import pages/otp/signals.{
+  ACrashes, BCrashes, BFinishes, Link, Monitor, TrappedLink,
+}
 import pages/otp/supervision.{
   DatabasePool, HttpClient, JobRuntime, OneForAll, OneForOne, RestForOne,
   WebServer,
 }
+import site/booklets
 import site/context
 import site/motion
 import site/msc
@@ -354,6 +361,87 @@ pub fn numbers_print_like_to_fixed_test() {
   assert mailbox_widget.fixed(622.0, 1) == "622.0"
 }
 
+// LINKS, MONITORS AND TRAPPED EXITS -------------------------------------------
+
+fn after(bond: signals.Bond, ending: signals.Ending) -> signals.Pair {
+  signals.new() |> signals.pick(bond) |> signals.end(ending)
+}
+
+pub fn a_link_carries_an_abnormal_exit_both_ways_test() {
+  let pair = after(Link, BCrashes)
+  assert pair.a == signals.KilledByLink
+  assert pair.b == signals.Crashed
+  let pair = after(Link, ACrashes)
+  assert pair.a == signals.Crashed
+  assert pair.b == signals.KilledByLink
+}
+
+pub fn a_normal_exit_kills_nobody_test() {
+  list.each([Link, Monitor, TrappedLink], fn(bond) {
+    let pair = after(bond, BFinishes)
+    assert pair.a == signals.Alive
+    assert pair.b == signals.Finished
+  })
+}
+
+pub fn a_monitor_observes_in_one_direction_test() {
+  let pair = after(Monitor, BCrashes)
+  assert pair.a == signals.Alive
+  assert list.contains(
+    pair.events,
+    msc.Message(1, 0, "ProcessDown(Abnormal)", msc.Blue, msc.Dashed),
+  )
+  let pair = after(Monitor, ACrashes)
+  assert pair.b == signals.Alive
+}
+
+pub fn trapping_protects_only_the_trapper_test() {
+  let pair = after(TrappedLink, BCrashes)
+  assert pair.a == signals.Alive
+  assert list.contains(
+    pair.events,
+    msc.send(1, 0, "ExitMessage(Abnormal)", msc.Amber),
+  )
+  let pair = after(TrappedLink, ACrashes)
+  assert pair.b == signals.KilledByLink
+}
+
+pub fn an_ended_pair_waits_for_a_reset_test() {
+  let pair = after(Link, BCrashes)
+  assert signals.end(pair, ACrashes) == pair
+  let pair = signals.reset(pair)
+  assert pair.bond == Link
+  assert signals.running(pair)
+  assert pair.events == []
+}
+
+// RESTART TYPES ---------------------------------------------------------------
+
+pub fn restart_types_follow_gleam_otp_test() {
+  assert restart_types.fate(Permanent, FinishesNormally) == Restarted
+  assert restart_types.fate(Permanent, Crashes) == Restarted
+  assert restart_types.fate(Transient, FinishesNormally) == Removed
+  assert restart_types.fate(Transient, Crashes) == Restarted
+  assert restart_types.fate(Temporary, FinishesNormally) == Removed
+  assert restart_types.fate(Temporary, Crashes) == Removed
+}
+
+pub fn the_table_fills_in_as_the_reader_tries_test() {
+  let table = restart_types.new()
+  assert restart_types.remaining(table) == 6
+  let table = restart_types.try(table, Crashes)
+  assert restart_types.revealed(table, Permanent, Crashes)
+  assert !restart_types.revealed(table, Permanent, FinishesNormally)
+  // Trying the same combination again reveals nothing new.
+  let table = restart_types.try(table, Crashes)
+  assert restart_types.remaining(table) == 5
+  let table =
+    restart_types.pick(table, Temporary)
+    |> restart_types.try(FinishesNormally)
+  assert restart_types.remaining(table) == 4
+  assert table.last == Some(restart_types.Trial(Temporary, FinishesNormally))
+}
+
 // TOURS -----------------------------------------------------------------------
 
 fn run(model: otp.Model, msg: otp.Msg, motion: motion.Motion) -> otp.Model {
@@ -483,6 +571,46 @@ pub fn the_plug_tour_visits_three_libraries_test() {
   assert model.library == libraries.FabricStore
   let model = run(model, otp.Tour(otp.Plug, tour.Back), motion.On)
   assert model.library == libraries.Grind
+}
+
+pub fn the_signals_tour_ends_with_the_trapper_alive_and_b_dead_test() {
+  let model = next(otp.init(), otp.SignalsTour, 1)
+  assert model.pair.a == signals.KilledByLink
+  let model = next(model, otp.SignalsTour, 3)
+  assert model.pair.bond == TrappedLink
+  assert model.pair.a == signals.Alive
+  let model = next(model, otp.SignalsTour, 1)
+  assert model.pair.b == signals.KilledByLink
+  let model = next(model, otp.SignalsTour, 2)
+  assert phase(model, otp.SignalsTour) == Free
+}
+
+pub fn the_restarts_tour_leaves_two_cells_to_the_reader_test() {
+  let model = next(otp.init(), otp.RestartsTour, 5)
+  assert restart_types.remaining(model.table) == 2
+  assert !restart_types.revealed(model.table, Permanent, Crashes)
+  assert !restart_types.revealed(model.table, Temporary, FinishesNormally)
+}
+
+pub fn the_tree_states_the_gleam_otp_default_tolerance_test() {
+  let page =
+    otp.view(otp.init(), context.new(motion.On, progress.empty()))
+    |> element.to_string
+  assert string.contains(page, "default, changed with restart_tolerance, is 2")
+}
+
+pub fn modules_link_the_booklet_beside_the_course_test() {
+  assert booklets.pdf(booklets.resilience)
+    == "booklets/architecting-resilience.pdf"
+  let page =
+    otp.view(otp.init(), context.new(motion.On, progress.empty()))
+    |> element.to_string
+  assert string.contains(page, "booklets/architecting-resilience.pdf")
+}
+
+pub fn the_new_tours_have_their_keys_test() {
+  assert list.map([otp.SignalsTour, otp.RestartsTour], otp.key)
+    == ["signals", "restarts"]
 }
 
 pub fn tour_scripts_keep_the_reference_lengths_test() {
