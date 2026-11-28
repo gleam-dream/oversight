@@ -26,7 +26,6 @@ pub fn the_numbers_match_the_record_test() {
   support.settle(a, posts, within: 30_000)
   let numbers = app.numbers(a)
   let known = list.map(posts, support.occurrence(a, _))
-  let handle = support.handle(a)
   assert numbers.received == 1000
   assert numbers.duplicates == 10
   assert numbers.proceeded + numbers.waited == 1000
@@ -42,6 +41,6 @@ pub fn the_numbers_match_the_record_test() {
       sum + list.length(occurrence.verdicts(o))
     })
   assert numbers.set_aside == 0
-  assert list.length(store.heads(handle)) == 1000
+  assert list.length(store.heads(app.store_of(a))) == 1000
   app.stop(a)
 }

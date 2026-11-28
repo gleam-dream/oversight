@@ -1,6 +1,7 @@
 //// The autonomy ladder's gate: replay before publishing.
 
 import decisions/learning
+import decisions/policy
 import gleam/list
 import moderation_desk/app.{type App}
 import moderation_desk/gate
@@ -36,9 +37,9 @@ pub fn a_candidate_that_lets_abuse_through_is_held_test() {
   assert report.would_proceed >= threshold.at_least
   assert report.agreed_on_proceed < report.would_proceed
   // Nothing was published.
-  let assert Ok(current) = wiring.current_policy(support.handle(a))
-  assert current.version == 1
-  assert wiring.classifier_version(support.handle(a)) == "1"
+  let assert Ok(current) = support.reading(a, wiring.current_policy)
+  assert policy.version(current) == 1
+  assert support.reading(a, wiring.classifier_version) == "1"
   app.stop(a)
 }
 
@@ -55,9 +56,9 @@ pub fn a_candidate_that_agrees_is_published_test() {
     )
   assert report.agreed_on_proceed == report.would_proceed
   assert report.unanswered == 0
-  let assert Ok(current) = wiring.current_policy(support.handle(a))
+  let assert Ok(current) = support.reading(a, wiring.current_policy)
   assert current == point.version_2()
-  assert wiring.classifier_version(support.handle(a)) == "2"
+  assert support.reading(a, wiring.classifier_version) == "2"
   app.stop(a)
 }
 

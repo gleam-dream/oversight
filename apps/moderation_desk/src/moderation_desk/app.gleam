@@ -30,6 +30,7 @@ import decisions/store as port
 import decisions/vocabulary
 import decisions_otp/runtime
 import decisions_otp/store.{type Store, type Tx}
+import gleam/bool
 import gleam/erlang/process.{type Name, type Pid}
 import gleam/int
 import gleam/list
@@ -303,14 +304,14 @@ pub fn wait_until(condition: fn() -> Bool, within ms: Int) -> Bool {
 /// its settlement has been delivered.
 pub fn all_settled(app: App, posts: List(Post)) -> Bool {
   let s = store_of(app)
-  let handle = store.handle(s)
   let undelivered = case store.backlog(s).undelivered(1) {
     Ok([]) -> True
     _ -> False
   }
-  undelivered
-  && list.all(posts, fn(post) {
-    case wiring.visibility(handle, post.id) {
+  use <- bool.guard(when: !undelivered, return: False)
+  use tx <- wiring.reading(s)
+  list.all(posts, fn(post) {
+    case wiring.visibility(tx, post.id) {
       Ok(domain.Pending) | Error(Nil) -> False
       Ok(_) -> True
     }
@@ -321,10 +322,10 @@ pub fn all_settled(app: App, posts: List(Post)) -> Bool {
 /// accepted and held in its undo window.
 pub fn all_settled_or_held(app: App, posts: List(Post)) -> Bool {
   let s = store_of(app)
-  let handle = store.handle(s)
-  let heads = store.heads(handle)
+  let heads = store.heads(s)
+  use tx <- wiring.reading(s)
   list.all(posts, fn(post) {
-    case wiring.visibility(handle, post.id) {
+    case wiring.visibility(tx, post.id) {
       Ok(domain.Pending) | Error(Nil) ->
         case list.key_find(heads, wiring.key(post)) {
           Ok(head) -> head.status == port.Held
@@ -339,24 +340,23 @@ pub fn all_settled_or_held(app: App, posts: List(Post)) -> Bool {
 /// point: expected, superseded before a recommendation, still expected.
 pub fn coverage(app: App) -> learning.Coverage {
   let s = store_of(app)
-  let handle = store.handle(s)
-  records(handle, None, [])
+  records(s, None, [])
   |> list.filter_map(fn(id) {
-    decisions.read_record(wiring.desk(), handle, key: id)
+    store.transaction(s, decisions.read_record(wiring.desk(), _, key: id))
     |> result.replace_error(Nil)
   })
   |> learning.coverage
 }
 
 fn records(
-  handle: Tx,
+  s: Store,
   after: option.Option(store.Cursor),
   so_far: List(String),
 ) -> List(String) {
-  let page = store.occurrences_of(handle, point.name, after:, limit: 1000)
+  let page = store.occurrences_of(s, point.name, after:, limit: 1000)
   let so_far = list.append(so_far, page.ids)
   case page.next {
-    Some(next) -> records(handle, Some(next), so_far)
+    Some(next) -> records(s, Some(next), so_far)
     None -> so_far
   }
 }

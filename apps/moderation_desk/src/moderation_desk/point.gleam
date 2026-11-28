@@ -15,8 +15,7 @@
 import decisions
 import decisions/fact.{type Key}
 import decisions/policy.{
-  type Policy, AnyOf, AnyoneHolding, Ask, Never, PerCent, Policy, Proceed,
-  Several, When,
+  type Policy, AnyOf, AnyoneHolding, Ask, Never, PerCent, Proceed, Several, When,
 }
 import decisions/vocabulary.{ApproveRejectOrCorrect}
 import decisions/wire
@@ -112,53 +111,60 @@ fn escalation() -> policy.Rule {
 /// Version 1: the rule model's answers proceed, a moderator decides the
 /// rest.
 pub fn version_1() -> Policy {
-  Policy(
-    version: 1,
-    rules: [rules_settle(), escalation()],
-    otherwise: Ask(AnyoneHolding(moderators)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 1,
+      rules: [rules_settle(), escalation()],
+      otherwise: AnyoneHolding(moderators),
+    )
+  policy
 }
 
 /// Version 2, as published once the replay gate passes.
 pub fn version_2() -> Policy {
-  Policy(
-    version: 2,
-    rules: [
-      rules_settle(),
-      When(
-        AnyOf([
-          policy.is(category(), domain.violation_name(domain.SelfHarm)),
-          policy.is(category(), domain.violation_name(domain.Violence)),
-        ]),
-        Ask(AnyoneHolding(seniors)),
-      ),
-      When(
-        policy.All([
-          policy.is(action(), "publish"),
-          policy.at_least(confidence(), confident),
-          policy.is(new_author(), False),
-        ]),
-        Proceed(sample: PerCent(2), hold: None),
-      ),
-      When(
-        policy.All([
-          policy.is(action(), "hide"),
-          policy.is(category(), domain.violation_name(domain.Spam)),
-          policy.at_least(confidence(), confident),
-        ]),
-        // A senior may take a confident hide of spam back within the undo
-        // window, and an edit during it supersedes the hide.
-        Proceed(sample: PerCent(2), hold: Some(duration.minutes(undo_minutes))),
-      ),
-      escalation(),
-      When(
-        policy.All([
-          policy.is(action(), "hide"),
-          policy.is(category(), domain.violation_name(domain.Abuse)),
-        ]),
-        Ask(Several(2, AnyoneHolding(moderators))),
-      ),
-    ],
-    otherwise: Ask(AnyoneHolding(moderators)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 2,
+      rules: [
+        rules_settle(),
+        When(
+          AnyOf([
+            policy.is(category(), domain.violation_name(domain.SelfHarm)),
+            policy.is(category(), domain.violation_name(domain.Violence)),
+          ]),
+          Ask(AnyoneHolding(seniors)),
+        ),
+        When(
+          policy.All([
+            policy.is(action(), "publish"),
+            policy.at_least(confidence(), confident),
+            policy.is(new_author(), False),
+          ]),
+          Proceed(sample: PerCent(2), hold: None),
+        ),
+        When(
+          policy.All([
+            policy.is(action(), "hide"),
+            policy.is(category(), domain.violation_name(domain.Spam)),
+            policy.at_least(confidence(), confident),
+          ]),
+          // A senior may take a confident hide of spam back within the undo
+          // window, and an edit during it supersedes the hide.
+          Proceed(
+            sample: PerCent(2),
+            hold: Some(duration.minutes(undo_minutes)),
+          ),
+        ),
+        escalation(),
+        When(
+          policy.All([
+            policy.is(action(), "hide"),
+            policy.is(category(), domain.violation_name(domain.Abuse)),
+          ]),
+          Ask(Several(2, AnyoneHolding(moderators))),
+        ),
+      ],
+      otherwise: AnyoneHolding(moderators),
+    )
+  policy
 }

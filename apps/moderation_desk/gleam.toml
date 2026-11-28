@@ -8,15 +8,15 @@ licences = ["Apache-2.0"]
 [dependencies]
 # decisions is on Hex. decisions_otp is released as a Git tag of
 # gleam-dream/decisions.
-decisions = ">= 0.1.1 and < 0.2.0"
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.1.1", path = "integrations/decisions_otp" }
+decisions = ">= 0.2.0 and < 0.3.0"
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.2.0", path = "integrations/decisions_otp" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_erlang = ">= 1.3.0 and < 2.0.0"
 gleam_otp = ">= 1.3.0 and < 2.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

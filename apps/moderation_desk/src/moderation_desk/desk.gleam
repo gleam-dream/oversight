@@ -287,10 +287,9 @@ type NotOpened {
 /// Open the first card of the queue that nobody else holds, read it, and
 /// give the verdict. `None` when there is none to take.
 fn take(state: State) -> Option(State) {
-  let handle = store.handle(state.store)
   let candidates = case state.person.role {
-    Moderating -> store.queue_page_for(handle, state.person.validator, 20)
-    Reviewing -> store.review_queue_of(handle, point.name, 20)
+    Moderating -> store.queue_page_for(state.store, state.person.validator, 20)
+    Reviewing -> store.review_queue_of(state.store, point.name, 20)
   }
   list.find_map(candidates, fn(id) {
     open(state, id) |> result.replace_error(Nil)

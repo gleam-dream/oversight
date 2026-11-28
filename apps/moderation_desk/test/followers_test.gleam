@@ -48,10 +48,10 @@ pub fn a_release_publishes_hides_or_escalates_once_test() {
   assert support.visibility(a, spam) == Ok(domain.Hidden(domain.Spam))
   assert support.visibility(a, threat)
     == Ok(domain.WithSafetyTeam("threat of violence"))
-  let handle = support.handle(a)
-  let assert Ok(author) = wiring.author(handle, spam.author)
+  let assert Ok(author) = support.reading(a, wiring.author(_, spam.author))
   assert author.strikes == 1
-  assert store.get(handle, wiring.safety, threat.id) == Ok("threat of violence")
+  assert support.reading(a, store.get(_, wiring.safety, threat.id))
+    == Ok("threat of violence")
   assert list.sort(support.notified(a), fn(x, y) { compare(x.0, y.0) })
     == list.sort(list.map(posts, fn(p) { #(wiring.key(p), 1) }), fn(x, y) {
       compare(x.0, y.0)
@@ -89,7 +89,7 @@ pub fn an_undecided_post_escalates_then_expires_test() {
   assert support.visibility(a, insult)
     == Ok(domain.HiddenPendingReview(domain.NobodyDecided))
   let assert [#(_, _, domain.YourPostAwaitsReview)] =
-    wiring.notifications(support.handle(a))
+    support.reading(a, wiring.notifications)
   app.stop(a)
 }
 
@@ -115,7 +115,7 @@ pub fn escalations_survive_a_runtime_stopped_and_started_again_test() {
   store.advance(s, duration.minutes(31))
   process.sleep(100)
   assert list.all(posts, fn(p) { support.awaiting(a, p) == [point.moderators] })
-  assert list.length(store.wakes(support.handle(a))) == 6
+  assert list.length(store.wakes(app.store_of(a))) == 6
   let assert Ok(Nil) = app.restart_runtime(a)
   let assert True =
     app.wait_until(
@@ -199,11 +199,11 @@ pub fn an_edit_supersedes_a_waiting_recommendation_test() {
   assert edited.post.revision == 2
   support.settle(a, [edited.post], within: 5000)
   let assert Ok(old) =
-    decisions.read(
+    store.transaction(app.store_of(a), decisions.read(
       app.desk_of(a),
-      support.handle(a),
+      _,
       occurrence: wiring.key(insult),
-    )
+    ))
   assert old.status == occurrence.Expired(Superseded(point.edited))
   assert support.visibility(a, insult) == Ok(domain.Published)
   // One notification, about the new revision.
@@ -231,7 +231,7 @@ pub fn an_upheld_appeal_is_an_assessment_and_publishes_the_post_test() {
   let assert [Assessment(finding: Wrong(Some(domain.Publish)), ..)] =
     occurrence.assessments(after)
   assert support.visibility(a, insult) == Ok(domain.Published)
-  let assert Ok(author) = wiring.author(support.handle(a), insult.author)
+  let assert Ok(author) = support.reading(a, wiring.author(_, insult.author))
   assert author.strikes == 0
   // A post still waiting has nothing to appeal.
   let waiting = scripted.post(92)
@@ -302,9 +302,9 @@ pub fn a_senior_takes_back_a_held_hide_test() {
   support.settle(a, [spam], within: 5000)
   assert support.occurrence(a, spam).status == occurrence.Withdrawn("carla")
   assert support.visibility(a, spam) == Ok(domain.Published)
-  assert store.count(support.handle(a), wiring.released) == 0
+  assert support.reading(a, store.count(_, wiring.released)) == 0
   let assert [#(_, _, domain.YourPostIsLive)] =
-    wiring.notifications(support.handle(a))
+    support.reading(a, wiring.notifications)
   support.check(a)
   app.stop(a)
 }
@@ -327,15 +327,15 @@ pub fn an_edit_during_the_hold_supersedes_the_held_hide_test() {
   store.advance(s, duration.minutes(point.undo_minutes + 1))
   process.sleep(50)
   let assert Ok(old) =
-    decisions.read(
+    store.transaction(app.store_of(a), decisions.read(
       app.desk_of(a),
-      support.handle(a),
+      _,
       occurrence: wiring.key(spam),
-    )
+    ))
   assert old.status == occurrence.Expired(Superseded(point.edited))
   assert support.visibility(a, spam) == Ok(domain.Published)
   // One release: the new revision's publish.
-  assert store.count(support.handle(a), wiring.released) == 1
+  assert support.reading(a, store.count(_, wiring.released)) == 1
   assert support.notified(a) == [#(wiring.key(edited.post), 1)]
   support.check(a)
   app.stop(a)

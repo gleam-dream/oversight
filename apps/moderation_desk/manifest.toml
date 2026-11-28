@@ -7,8 +7,8 @@
 # You should check this file into your source control repository.
 
 packages = [
-  { name = "decisions", version = "0.1.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib", "gleam_time", "json_blueprint"], otp_app = "decisions", source = "hex", outer_checksum = "D7C25B54E5A3C0B898F56FCB986886FF6F4513408A866A17DAE9CBA0F93F6EBF" },
-  { name = "decisions_otp", version = "0.1.1", build_tools = ["gleam"], requirements = ["decisions", "gleam_erlang", "gleam_otp", "gleam_stdlib", "gleam_time", "sinal"], source = "git", repo = "https://github.com/gleam-dream/decisions.git", commit = "84e9bc3600930934398457c93a470a709a01f9ac", path = "integrations/decisions_otp" },
+  { name = "decisions", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib", "gleam_time", "json_blueprint"], otp_app = "decisions", source = "hex", outer_checksum = "416C6816010753564AFF20F3B5A705303B3B7C89B4FB5160B0DABAA690974334" },
+  { name = "decisions_otp", version = "0.2.0", build_tools = ["gleam"], requirements = ["decisions", "gleam_erlang", "gleam_otp", "gleam_stdlib", "gleam_time", "sinal"], source = "git", repo = "https://github.com/gleam-dream/decisions.git", commit = "13d76cc5910acb7740b6f8b490d76069c7bc3a27", path = "integrations/decisions_otp" },
   { name = "gleam_crypto", version = "1.6.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_crypto", source = "hex", outer_checksum = "2DE9E4EF53CF6FEE049D4F765731F7178F7A11AEFAE00EEE63BF7536B354AD3F" },
   { name = "gleam_erlang", version = "1.3.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_erlang", source = "hex", outer_checksum = "1124AD3AA21143E5AF0FC5CF3D9529F6DB8CA03E43A55711B60B6B7B3874375C" },
   { name = "gleam_json", version = "3.1.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_json", source = "hex", outer_checksum = "44FDAA8847BE8FC48CA7A1C089706BD54BADCC4C45B237A992EDDF9F2CDB2836" },
@@ -16,19 +16,19 @@ packages = [
   { name = "gleam_stdlib", version = "1.2.0", build_tools = ["gleam"], requirements = [], otp_app = "gleam_stdlib", source = "hex", outer_checksum = "93D27B978967D61211E06BB1F1062BCF36B6E546F67A575EFA928605F467AF65" },
   { name = "gleam_time", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleam_time", source = "hex", outer_checksum = "3AB789C3ED4EB9DDA7283F46C3CF83A5487C9CFB790DC3FF8F8ACB5BF7B7A6C1" },
   { name = "gleeunit", version = "1.11.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "gleeunit", source = "hex", outer_checksum = "EC31ABA74256AEA531EDF8169931D775BBB384FED0A8A1BDC4DD9354E3E21826" },
-  { name = "json_blueprint", version = "2.2.1", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], source = "git", repo = "https://github.com/gleam-dream/json_blueprint.git", commit = "0cc991164771a85cf6496efe0d2413fd59b300cf" },
-  { name = "sinal", version = "0.1.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "telemetry"], source = "git", repo = "https://github.com/gleam-dream/sinal.git", commit = "02d386e070c6a99900225c613e8d273f3bebe3c2" },
+  { name = "json_blueprint", version = "3.0.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib"], otp_app = "json_blueprint", source = "hex", outer_checksum = "95B0B7D0CB98184FE05C7B8D4C0FB6312097FFCD6E1F22A563267F417D9154F3" },
+  { name = "sinal", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_erlang", "gleam_otp", "gleam_stdlib", "telemetry"], otp_app = "sinal", source = "hex", outer_checksum = "189D51F9DF72FDC25B0644CD0479523339D00CA2F9BA09E91515E5160EE68E0C" },
   { name = "telemetry", version = "1.4.3", build_tools = ["rebar3"], requirements = [], otp_app = "telemetry", source = "hex", outer_checksum = "17A63581CF2E832A238287F5FE6811E8CA1F333249F1376AD653164A3C4770D4" },
 ]
 
 [requirements]
-decisions = { version = ">= 0.1.1 and < 0.2.0" }
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.1.1", path = "integrations/decisions_otp" }
+decisions = { version = ">= 0.2.0 and < 0.3.0" }
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.2.0", path = "integrations/decisions_otp" }
 gleam_erlang = { version = ">= 1.3.0 and < 2.0.0" }
 gleam_json = { version = ">= 3.1.0 and < 4.0.0" }
 gleam_otp = { version = ">= 1.3.0 and < 2.0.0" }
 gleam_stdlib = { version = ">= 0.70.0 and < 2.0.0" }
 gleam_time = { version = ">= 1.11.0 and < 2.0.0" }
 gleeunit = { version = ">= 1.0.0 and < 2.0.0" }
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+json_blueprint = { version = ">= 3.0.0 and < 3.1.0" }
+sinal = { version = ">= 0.2.0 and < 0.3.0" }

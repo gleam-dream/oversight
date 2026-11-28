@@ -74,7 +74,7 @@ pub fn a_card_corrected_by_a_senior_is_refused_as_stale_test() {
   let key = wiring.key(insult)
   let assert True =
     app.wait_until(
-      fn() { store.get(support.handle(a), wiring.claims, key) == Ok("ana") },
+      fn() { support.reading(a, store.get(_, wiring.claims, key)) == Ok("ana") },
       within: 5000,
     )
   let correction = domain.Escalate("repeated harassment")
@@ -100,7 +100,7 @@ pub fn a_card_corrected_by_a_senior_is_refused_as_stale_test() {
   assert final == correction
   assert support.visibility(a, insult)
     == Ok(domain.WithSafetyTeam("repeated harassment"))
-  assert store.get(support.handle(a), wiring.claims, key) == Error(Nil)
+  assert support.reading(a, store.get(_, wiring.claims, key)) == Error(Nil)
   app.stop(a)
 }
 
@@ -129,8 +129,7 @@ pub fn a_reviewer_works_the_sampled_queue_test() {
   let posts = scripted.posts(1, 1000)
   support.receive_all(a, posts)
   support.settle(a, posts, within: 30_000)
-  let handle = support.handle(a)
-  let sampled = store.review_queue(handle)
+  let sampled = store.review_queue(app.store_of(a))
   assert sampled != []
   let assert [first, ..] = sampled
   let refused =
@@ -152,10 +151,18 @@ pub fn a_reviewer_works_the_sampled_queue_test() {
   assert refused == Error(decisions.NotEligible)
   desk.on_duty(support.person(a, "dev"), True)
   let assert True =
-    app.wait_until(fn() { store.review_queue(handle) == [] }, within: 10_000)
+    app.wait_until(
+      fn() { store.review_queue(app.store_of(a)) == [] },
+      within: 10_000,
+    )
   assert desk.snapshot(support.person(a, "dev")).reviewed
     == list.length(sampled)
-  let known = decisions.read(app.desk_of(a), handle, occurrence: first)
+  let known =
+    store.transaction(app.store_of(a), decisions.read(
+      app.desk_of(a),
+      _,
+      occurrence: first,
+    ))
   let assert Ok(known) = known
   let assert [#("dev", _)] = occurrence.reviews(known)
   support.check(a)

@@ -225,13 +225,10 @@ fn time_passes(a: App) -> Nil {
   list.each(posts, fn(post) {
     let assert Ok(_) = app.receive(a, post)
   })
-  let handle = store.handle(s)
   let assert True =
     app.wait_until(
       fn() {
-        list.all(posts, fn(post) {
-          awaiting(handle, post) == [point.moderators]
-        })
+        list.all(posts, fn(post) { awaiting(s, post) == [point.moderators] })
       },
       within: 10_000,
     )
@@ -241,14 +238,14 @@ fn time_passes(a: App) -> Nil {
   store.advance(s, duration.minutes(31))
   process.sleep(100)
   let assert True =
-    list.all(posts, fn(post) { awaiting(handle, post) == [point.moderators] })
+    list.all(posts, fn(post) { awaiting(s, post) == [point.moderators] })
   // Stop the runtime's whole tree; the root starts it again over the same
   // store. The escalations are rows, so they are still due.
   let assert Ok(Nil) = app.restart_runtime(a)
   let assert True =
     app.wait_until(
       fn() {
-        list.all(posts, fn(post) { awaiting(handle, post) == [point.seniors] })
+        list.all(posts, fn(post) { awaiting(s, post) == [point.seniors] })
       },
       within: 10_000,
     )
@@ -260,7 +257,7 @@ fn time_passes(a: App) -> Nil {
     app.wait_until(
       fn() {
         list.all(posts, fn(post) {
-          wiring.visibility(handle, post.id)
+          wiring.reading(s, wiring.visibility(_, post.id))
           == Ok(domain.HiddenPendingReview(domain.NobodyDecided))
         })
       },
@@ -270,8 +267,8 @@ fn time_passes(a: App) -> Nil {
   io.println("")
 }
 
-fn awaiting(handle: store.Tx, post: domain.Post) -> List(String) {
-  store.heads(handle)
+fn awaiting(s: store.Store, post: domain.Post) -> List(String) {
+  store.heads(s)
   |> list.key_find(wiring.key(post))
   |> result.map(fn(head: port.Head) { head.awaiting })
   |> result.unwrap([])
@@ -281,11 +278,10 @@ fn awaiting(handle: store.Tx, post: domain.Post) -> List(String) {
 fn edits_and_appeals(a: App) -> Nil {
   io.println("5. Edits, the undo window and an appeal")
   let s = app.store_of(a)
-  let handle = store.handle(s)
   let insult = scripted.post(20_391)
   let assert Ok(_) = app.receive(a, insult)
   let assert True =
-    app.wait_until(fn() { awaiting(handle, insult) != [] }, within: 10_000)
+    app.wait_until(fn() { awaiting(s, insult) != [] }, within: 10_000)
   let assert Ok(edited) =
     intake.edit(
       s,
@@ -300,7 +296,10 @@ fn edits_and_appeals(a: App) -> Nil {
   )
   let assert True =
     app.wait_until(
-      fn() { wiring.visibility(handle, insult.id) == Ok(domain.Published) },
+      fn() {
+        wiring.reading(s, wiring.visibility(_, insult.id))
+        == Ok(domain.Published)
+      },
       within: 10_000,
     )
   say("the new revision proceeded under version 2 and is published")
@@ -311,18 +310,23 @@ fn edits_and_appeals(a: App) -> Nil {
   })
   // An insult hidden by moderators in step 3, appealed and upheld.
   let appealed = "post-1088"
-  let assert Ok(domain.Hidden(_)) = wiring.visibility(handle, appealed)
+  let assert Ok(domain.Hidden(_)) =
+    wiring.reading(s, wiring.visibility(_, appealed))
   let assert Ok(Nil) = intake.appeal(s, app.desk_of(a), appealed, intake.Upheld)
-  let assert Ok(post) = wiring.post(handle, appealed)
+  let assert Ok(post) = wiring.reading(s, wiring.post(_, appealed))
   let assert Ok(known) =
-    decisions.read(app.desk_of(a), handle, occurrence: wiring.key(post))
+    store.transaction(s, decisions.read(
+      app.desk_of(a),
+      _,
+      occurrence: wiring.key(post),
+    ))
   say(
     "an appeal on "
     <> appealed
     <> " was upheld: "
     <> count(list.length(occurrence.assessments(known)))
     <> " assessment on the record, the post is "
-    <> visibility_name(wiring.visibility(handle, appealed)),
+    <> visibility_name(wiring.reading(s, wiring.visibility(_, appealed))),
   )
   io.println("")
 }
@@ -350,7 +354,6 @@ fn visibility_name(found: Result(domain.Visibility, Nil)) -> String {
 /// one back, and an edit supersedes another before its release.
 fn undo_window(a: App) -> Nil {
   let s = app.store_of(a)
-  let handle = store.handle(s)
   // Posts 20 581 and 20 582 are crypto spam by established authors.
   let taken_back = scripted.post(20_581)
   let edited = scripted.post(20_582)
@@ -382,11 +385,11 @@ fn undo_window(a: App) -> Nil {
     "two confident spam hides were held for "
     <> count(point.undo_minutes)
     <> " minutes: carla took one back and the post is "
-    <> visibility_name(wiring.visibility(handle, taken_back.id))
+    <> visibility_name(wiring.reading(s, wiring.visibility(_, taken_back.id)))
     <> "; the other's author edited it during the hold, "
     <> count(new.superseded)
     <> " held hide superseded, and the new revision is "
-    <> visibility_name(wiring.visibility(handle, edited.id)),
+    <> visibility_name(wiring.reading(s, wiring.visibility(_, edited.id))),
   )
 }
 
@@ -405,7 +408,6 @@ fn coverage_line(a: App) -> String {
 fn stale_card(a: App) -> Nil {
   io.println("6. A senior corrects a card a moderator is reading")
   let s = app.store_of(a)
-  let handle = store.handle(s)
   desk.on_duty(person(a, "bruno"), False)
   desk.on_duty(person(a, "carla"), False)
   desk.pace(person(a, "ana"), 500)
@@ -416,7 +418,7 @@ fn stale_card(a: App) -> Nil {
   let assert True =
     app.wait_until(
       fn() {
-        case store.get(handle, wiring.claims, key) {
+        case wiring.reading(s, store.get(_, wiring.claims, key)) {
           Ok("ana") -> True
           _ -> False
         }
@@ -439,7 +441,8 @@ fn stale_card(a: App) -> Nil {
   let assert True =
     app.wait_until(fn() { app.all_settled(a, [insult]) }, within: 10_000)
   let after = desk.snapshot(person(a, "ana"))
-  let assert Ok(known) = decisions.read(app.desk_of(a), handle, occurrence: key)
+  let assert Ok(known) =
+    store.transaction(s, decisions.read(app.desk_of(a), _, occurrence: key))
   desk.pace(person(a, "ana"), 0)
   list.each(["bruno", "carla"], fn(name) { desk.on_duty(person(a, name), True) })
   say(
@@ -461,7 +464,7 @@ fn stale_card(a: App) -> Nil {
       ", ",
     )
     <> "; the post is "
-    <> visibility_name(wiring.visibility(handle, insult.id)),
+    <> visibility_name(wiring.reading(s, wiring.visibility(_, insult.id))),
   )
   io.println("")
 }
@@ -516,11 +519,14 @@ fn report(a: App) -> Nil {
   )
   let s = app.store_of(a)
   let checked =
-    testing.check(store.handle(s), store.inspection(), [
-      testing.audit(app.desk_of(a), effects: fn(tx) {
-        Ok(store.count(tx, wiring.released))
-      }),
-    ])
+    store.transaction(
+      s,
+      testing.check(_, store.inspection(), [
+        testing.audit(app.desk_of(a), effects: fn(tx) {
+          Ok(store.count(tx, wiring.released))
+        }),
+      ]),
+    )
   case checked {
     Ok(summary) ->
       io.println(

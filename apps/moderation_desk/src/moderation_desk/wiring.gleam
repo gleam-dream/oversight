@@ -90,7 +90,7 @@ pub fn gated() -> decisions.Gated(Action, Tx) {
         Ok(found) -> Ok([post_ref(found)])
         // A judgement about the release: there is nothing to apply it to.
         Error(Nil) ->
-          Error(decisions.Refuse(
+          Error(vocabulary.Refuse(
             "the post " <> subject.id <> " no longer exists",
           ))
       }
@@ -294,7 +294,7 @@ pub fn latest(tx: Tx) -> fn(Ref) -> String {
 /// through it, never through the world as it is now.
 pub fn content(s: Store) -> fn(Ref) -> Result(String, Failure) {
   fn(ref: Ref) {
-    let tx = store.handle(s)
+    use tx <- reading(s)
     case ref.kind {
       "post" ->
         store.get(tx, revisions, revision_key(ref.id, ref.revision))
@@ -362,4 +362,12 @@ fn decode_field(
 
 fn decode_success(value: a) -> decode.Decoder(a) {
   decode.success(value)
+}
+
+/// Run `read` in a transaction of its own and return what it read. A
+/// verb or a row read runs only in a transaction, so a read made outside
+/// a verb opens one.
+pub fn reading(s: Store, read: fn(Tx) -> a) -> a {
+  let assert Ok(value) = store.transaction(s, fn(tx) { Ok(read(tx)) })
+  value
 }

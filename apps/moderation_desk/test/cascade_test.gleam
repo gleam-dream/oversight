@@ -99,11 +99,11 @@ pub fn a_raising_classifier_is_set_aside_after_three_attempts_test() {
   assert submitted.key == wiring.key(broken)
   assert attempts == 3
   let assert Error(decisions.NotRecommended(attempts:)) =
-    decisions.read(
+    store.transaction(s, decisions.read(
       app.desk_of(a),
-      store.handle(s),
+      _,
       occurrence: wiring.key(broken),
-    )
+    ))
   assert list.length(attempts) == 3
   assert list.all(attempts, fn(attempt) {
     case attempt.failure {

@@ -61,7 +61,7 @@ fn failing_refusals(faults: Subject(Fault)) -> port.Port(Tx) {
 }
 
 fn refusals(a: App, id: String) -> Int {
-  store.entries(support.handle(a), id)
+  store.entries(app.store_of(a), id)
   |> list.count(fn(entry: port.Stored) { entry.kind == "verdict_refused" })
 }
 
@@ -93,7 +93,7 @@ pub fn a_failed_refusal_write_restarts_the_moderator_test() {
   support.receive_all(a, [post])
   let assert True =
     app.wait_until(
-      fn() { store.get(support.handle(a), wiring.claims, key) == Ok("ana") },
+      fn() { support.reading(a, store.get(_, wiring.claims, key)) == Ok("ana") },
       within: 5000,
     )
   let assert Ok(Nil) =
@@ -139,7 +139,7 @@ pub fn a_refused_verdict_takes_the_card_off_every_queue_test() {
   support.receive_all(a, [post])
   let assert True =
     app.wait_until(
-      fn() { store.get(support.handle(a), wiring.claims, key) == Ok("ana") },
+      fn() { support.reading(a, store.get(_, wiring.claims, key)) == Ok("ana") },
       within: 5000,
     )
   let assert Ok(Nil) =
@@ -164,6 +164,6 @@ pub fn a_refused_verdict_takes_the_card_off_every_queue_test() {
     fn() { store.backlog(app.store_of(a)).undelivered(1) == Ok([]) },
     within: 5000,
   )
-  assert store.get(support.handle(a), wiring.claims, key) == Error(Nil)
+  assert support.reading(a, store.get(_, wiring.claims, key)) == Error(Nil)
   app.stop(a)
 }

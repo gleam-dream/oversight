@@ -3,8 +3,8 @@
 import decisions
 import decisions/fact
 import decisions/policy.{
-  AnyoneHolding, Ask, Never, PerCent, Policy, Proceed, Several, Step,
-  UndeclaredFact, When,
+  AnyoneHolding, Ask, Never, PerCent, Proceed, Several, Step, UndeclaredFact,
+  When,
 }
 import decisions/vocabulary.{type Facts, Classifier, Rules}
 import gleam/option.{None, Some}
@@ -19,13 +19,12 @@ fn facts(
   confidence: Float,
   new_author: Bool,
 ) -> Facts {
-  let p = point.declaration()
   [
     fact.set(point.stage(), stage),
     fact.set(point.category(), category),
     fact.set(point.confidence(), confidence),
     fact.set(point.new_author(), new_author),
-    ..decisions.facts_of(p, action)
+    fact.set(point.action(), domain.action_name(action)),
   ]
 }
 
@@ -39,13 +38,13 @@ pub fn both_versions_are_publishable_test() {
 }
 
 pub fn a_policy_reading_an_undeclared_fact_is_refused_test() {
-  let typo =
-    Policy(
+  let assert Ok(typo) =
+    policy.new(
       version: 3,
       rules: [
         When(policy.Known("confidense"), Proceed(sample: Never, hold: None)),
       ],
-      otherwise: Ask(AnyoneHolding(point.moderators)),
+      otherwise: AnyoneHolding(point.moderators),
     )
   assert decisions.publishable(point.declaration(), typo)
     == Error([UndeclaredFact("confidense")])
@@ -104,12 +103,16 @@ pub fn version_2_asks_for_new_authors_doubt_and_abuse_test() {
 }
 
 pub fn version_2_asks_two_moderators_to_hide_for_abuse_test() {
-  assert policy.evaluate(
+  // The escalation rule before it reads how long the occurrence waited,
+  // which the desk supplies through `timeline`.
+  let #(now, _) =
+    policy.timeline(
       point.version_2(),
       classifier,
       facts(Hide(domain.Abuse), "classifier", "abuse", 0.95, False),
+      waited: 0,
     )
-    == Ask(Several(2, AnyoneHolding(point.moderators)))
+  assert now == Ask(Several(2, AnyoneHolding(point.moderators)))
 }
 
 pub fn version_2_asks_a_senior_for_a_sensitive_category_test() {
@@ -123,13 +126,27 @@ pub fn version_2_asks_a_senior_for_a_sensitive_category_test() {
 
 pub fn an_unknown_fact_never_proceeds_test() {
   // No confidence and no author: a classifier that reported less asks.
-  let p = point.declaration()
   let sparse = [
     fact.set(point.stage(), "classifier"),
-    ..decisions.facts_of(p, Publish)
+    fact.set(point.action(), domain.action_name(Publish)),
   ]
   assert policy.evaluate(point.version_2(), classifier, sparse)
     == Ask(AnyoneHolding(point.moderators))
+}
+
+pub fn an_unknown_category_asks_before_a_later_rule_proceeds_test() {
+  // A confident publish by an established author, but no category: the
+  // sensitive-category rule cannot be read, so a moderator is asked
+  // rather than the publish rule after it proceeding.
+  let without_category = [
+    fact.set(point.stage(), "classifier"),
+    fact.set(point.confidence(), 0.99),
+    fact.set(point.new_author(), False),
+    fact.set(point.action(), domain.action_name(Publish)),
+  ]
+  let #(now, _) =
+    policy.timeline(point.version_2(), classifier, without_category, waited: 0)
+  assert now == Ask(AnyoneHolding(point.moderators))
 }
 
 pub fn a_waiting_occurrence_escalates_to_seniors_after_30_minutes_test() {
