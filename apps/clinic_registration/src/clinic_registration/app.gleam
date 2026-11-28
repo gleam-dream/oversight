@@ -109,9 +109,12 @@ pub fn default_config(
 
 pub type App {
   App(
+    /// The application's own rows: patients, messages, evidence.
     db: pog.Connection,
+    /// The same pool, as the decision record's transactions start on it.
+    pool: decisions_postgres.Pool,
     jobs: grind.Grind,
-    desk: Desk(Registration, pog.Connection),
+    desk: Desk(Registration, decisions_postgres.Tx),
     /// The decision record's store, for its queue and wake-up functions.
     records: decisions_postgres.Store,
     /// What the start-up `sweep` admitted.
@@ -140,6 +143,7 @@ pub fn start(config: Config) -> Result(App, String) {
     |> decisions_postgres.with_name("clinic_registration")
     |> decisions_postgres.with_clock_offset(config.clock_offset)
   let registration = desk.new(over: decisions_postgres.port(store))
+  let pool = decisions_postgres.pool(pool_name)
   use http <- result.try(
     http_gun.start(
       http_config.default()
@@ -158,6 +162,7 @@ pub fn start(config: Config) -> Result(App, String) {
   let env =
     jobs.Env(
       jobs: grind_handle,
+      pool:,
       desk: registration,
       configuration: config.configuration,
       provider: llm.provider(config.llm_base, config.model_deadline),
@@ -204,13 +209,13 @@ pub fn start(config: Config) -> Result(App, String) {
   let db = grind.connection(grind_handle)
   let prepared = {
     use swept <- result.try(
-      decisions_postgres.sweep(store, db)
+      decisions_postgres.sweep(store, pool)
       |> result.map_error(port.describe),
     )
     use Nil <- result.try(first_policy(db))
     Ok(swept)
   }
-  let admit = fn(message: Inbound) { jobs.admit(env, db, message, register) }
+  let admit = fn(message: Inbound) { jobs.admit(env, message, register) }
   let served = {
     use swept <- result.try(prepared)
     use collector <- result.try(telemetry.start())
@@ -223,6 +228,7 @@ pub fn start(config: Config) -> Result(App, String) {
         web.start(
           web.Routes(
             db:,
+            pool:,
             desk: registration,
             admit:,
             sign_in:,
@@ -244,6 +250,7 @@ pub fn start(config: Config) -> Result(App, String) {
     Ok(#(#(port, server), swept, collector)) ->
       Ok(App(
         db:,
+        pool:,
         jobs: grind_handle,
         desk: registration,
         records: store,
@@ -297,8 +304,10 @@ fn migrate(url: String) -> Result(Nil, String) {
       pog.start(pog.pool_size(config, 1))
       |> result.replace_error("no database to migrate"),
     )
+    // Every migration of the record's, the second included: a 0.3 node
+    // refuses to append to a schema without it.
     use Nil <- result.try(
-      decisions_postgres.migrate(started.data)
+      decisions_postgres.migrate(decisions_postgres.pool(config.pool_name))
       |> result.map_error(decisions_postgres.describe_migrate_error),
     )
     store.migrate(started.data)
@@ -328,7 +337,7 @@ pub fn stop(app: App) -> Nil {
 
 /// Deliver an inbound message, as the channel's webhook does.
 pub fn admit(app: App, message: Inbound) -> Result(jobs.Admission, String) {
-  jobs.admit(app.env, app.db, message, app.register)
+  jobs.admit(app.env, message, app.register)
 }
 
 /// The desk's HTTP root.

@@ -17,17 +17,17 @@ pog = ">= 4.1.0 and < 4.2.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
-http_gun = { git = "https://github.com/gleam-dream/http_gun.git", ref = "0a1e5b9c8db5d40b2277df3fd76d89e9563fe84c" }
-llm_wire = { git = "https://github.com/gleam-dream/llm_wire.git", ref = "5bed4249fc91416ca7c862afbe6eb920ec56bdd6" }
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
+grind = ">= 0.3.0 and < 0.4.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+llm_wire = ">= 0.3.0 and < 0.4.0"
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
+hellhound = ">= 0.4.0 and < 0.5.0"
 # The core is on Hex. The two integrations are released as Git tags of
 # gleam-dream/decisions.
-decisions = ">= 0.1.1 and < 0.2.0"
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.1.1", path = "integrations/decisions_otp" }
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.2.1", path = "integrations/decisions_postgres" }
+decisions = ">= 0.2.0 and < 0.3.0"
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.2.0", path = "integrations/decisions_otp" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.3.0", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

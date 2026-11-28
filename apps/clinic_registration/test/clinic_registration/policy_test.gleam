@@ -13,9 +13,12 @@ import clinic_registration/scripted
 import clinic_registration/store
 import clinic_registration/telemetry
 import decisions
+import decisions/fact
 import decisions/occurrence
-import decisions/policy.{AnyoneHolding, Ask, Never, Policy, Proceed, When}
-import decisions/vocabulary.{DeadlinePassed, Flag, Performed, Superseded}
+import decisions/policy.{AnyoneHolding, Ask, Never, Proceed, When}
+import decisions/vocabulary.{
+  DeadlinePassed, Flag, ModelCall, Performed, Superseded,
+}
 import decisions_postgres
 import gleam/dynamic/decode
 import gleam/erlang/process
@@ -23,13 +26,42 @@ import gleam/http
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/time/duration
-import pog
 import support
+
+/// A registration the model reported without the insurer's answer cannot
+/// be read by the rule that lets a sure registration proceed, so reception
+/// is asked, and stays the one asked after the escalation's 30 minutes:
+/// the reading stops at the first condition it cannot tell.
+pub fn a_registration_missing_a_fact_asks_reception_test() {
+  let without_insurer = [
+    fact.set(domain.confidence(), 0.99),
+    fact.set(domain.missing_fields(), 0.0),
+    fact.set(domain.similar_patient(), False),
+    fact.set(domain.consent(), True),
+  ]
+  let model = ModelCall(configuration: "registration", version: "1")
+  let #(now, _) =
+    policy.timeline(
+      domain.proceed_when_sure(),
+      model,
+      without_insurer,
+      waited: 0,
+    )
+  assert now == Ask(AnyoneHolding(domain.reception))
+  let #(later, _) =
+    policy.timeline(
+      domain.proceed_when_sure(),
+      model,
+      without_insurer,
+      waited: 45,
+    )
+  assert later == Ask(AnyoneHolding(domain.reception))
+}
 
 pub fn a_policy_version_is_checked_before_it_is_stored_test() {
   use env <- support.with_app(fn(config) { config })
-  let misspelt =
-    Policy(
+  let assert Ok(misspelt) =
+    policy.new(
       version: 3,
       rules: [
         When(
@@ -37,12 +69,12 @@ pub fn a_policy_version_is_checked_before_it_is_stored_test() {
           Proceed(sample: Never, hold: None),
         ),
       ],
-      otherwise: Ask(AnyoneHolding(domain.reception)),
+      otherwise: AnyoneHolding(domain.reception),
     )
   let assert Error(desk.Unpublishable([policy.UndeclaredFact("confidense")])) =
     desk.publish(env.app.db, misspelt)
-  let wrong_kind =
-    Policy(
+  let assert Ok(wrong_kind) =
+    policy.new(
       version: 3,
       rules: [
         When(
@@ -50,7 +82,7 @@ pub fn a_policy_version_is_checked_before_it_is_stored_test() {
           Proceed(sample: Never, hold: None),
         ),
       ],
-      otherwise: Ask(AnyoneHolding(domain.reception)),
+      otherwise: AnyoneHolding(domain.reception),
     )
   let assert Error(desk.Unpublishable([policy.WrongKind(fact: "confidence", ..)])) =
     desk.publish(env.app.db, wrong_kind)
@@ -283,7 +315,7 @@ pub fn an_escalation_pending_across_a_restart_is_delivered_test() {
   let assert Ok(delivered) =
     decisions_postgres.deliver_due(
       second.app.records,
-      second.app.db,
+      second.app.pool,
       [decisions.waker(second.app.desk)],
       limit: 10,
     )
@@ -390,7 +422,7 @@ pub fn a_verdict_after_the_validity_passed_is_refused_test() {
 
   // The validity wake-up, delivered now, expires it.
   let assert Ok(decisions.Woken(expired)) =
-    pog.transaction(later.app.db, decisions.wake(
+    decisions_postgres.refusing(later.app.pool, decisions.wake(
       later.app.desk,
       _,
       occurrence: waiting.id,

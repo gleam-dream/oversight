@@ -18,6 +18,7 @@ import decisions/policy.{type Policy}
 import decisions/store as port
 import decisions/view.{type View}
 import decisions/vocabulary.{type Ref, Ref}
+import decisions_postgres.{type Tx}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -34,17 +35,17 @@ pub const tool_name = "register_patient"
 /// stays as the database's own backstop. A failure that judges the release
 /// is `Refuse`; one that could not tell (a query that failed) is `Unsure`,
 /// which rolls back, records no refusal and is tried again.
-pub fn register_patient() -> Gated(Registration, pog.Connection) {
+pub fn register_patient() -> Gated(Registration, Tx) {
   Gated(
     name: tool_name,
     guard: fn(tx, subject) { no_patient_with(tx, subject.id) },
     execute: fn(tx, released) {
       let registration: Registration = decisions.output(released)
       case registration.birth_date {
-        None -> Error(decisions.Refuse("the record has no birth date"))
+        None -> Error(vocabulary.Refuse("the record has no birth date"))
         Some(birth_date) ->
           store.insert_patient(
-            tx,
+            decisions_postgres.connection(tx),
             id: decisions.occurrence_of(released),
             registration:,
             birth_date:,
@@ -57,8 +58,8 @@ pub fn register_patient() -> Gated(Registration, pog.Connection) {
           |> result.map_error(fn(error) {
             case error {
               pog.ConstraintViolated(..) ->
-                decisions.Refuse(store.describe(error))
-              _ -> decisions.Unsure(store.describe(error))
+                vocabulary.Refuse(store.describe(error))
+              _ -> vocabulary.Unsure(store.describe(error))
             }
           })
       }
@@ -71,14 +72,14 @@ pub fn register_patient() -> Gated(Registration, pog.Connection) {
 /// have corrected away from the contact's. Its evidence is recorded beside
 /// the guard's.
 pub fn release_check(
-  tx: pog.Connection,
+  tx: Tx,
   release: decisions.ToRelease(Registration),
-) -> Result(List(Ref), decisions.Stop) {
+) -> Result(List(Ref), vocabulary.Stop) {
   let registration = release.output
   case registration.birth_date, registration.consent {
-    None, _ -> Error(decisions.Refuse("the record has no birth date"))
+    None, _ -> Error(vocabulary.Refuse("the record has no birth date"))
     _, False ->
-      Error(decisions.Refuse("the patient has not agreed to be registered"))
+      Error(vocabulary.Refuse("the patient has not agreed to be registered"))
     Some(_), True ->
       case registration.phone == release.subject.id {
         // The guard checked the contact's phone already.
@@ -89,14 +90,14 @@ pub fn release_check(
 }
 
 fn no_patient_with(
-  tx: pog.Connection,
+  tx: Tx,
   phone: String,
-) -> Result(List(Ref), decisions.Stop) {
-  case store.patient_by_phone(tx, phone) {
+) -> Result(List(Ref), vocabulary.Stop) {
+  case store.patient_by_phone(decisions_postgres.connection(tx), phone) {
     Ok(None) ->
       Ok([Ref(kind: "patients.by_phone", id: phone, revision: "absent")])
     Ok(Some(existing)) ->
-      Error(decisions.Refuse(
+      Error(vocabulary.Refuse(
         "a patient with phone "
         <> phone
         <> " is already registered ("
@@ -104,7 +105,7 @@ fn no_patient_with(
         <> ")",
       ))
     Error(error) ->
-      Error(decisions.Unsure(
+      Error(vocabulary.Unsure(
         "the patient table could not be read: " <> store.describe(error),
       ))
   }
@@ -112,13 +113,13 @@ fn no_patient_with(
 
 /// The desk over `port`: the point, the tool and its release check, and
 /// the newest stored policy version, read in the verb's own transaction.
-pub fn new(
-  over port: port.Port(pog.Connection),
-) -> Desk(Registration, pog.Connection) {
+pub fn new(over port: port.Port(Tx)) -> Desk(Registration, Tx) {
   decisions.desk(
     domain.point(),
     drives: fn(_) { register_patient() },
-    under: fn(tx) { store.current_policy(tx, domain.point_name) },
+    under: fn(tx) {
+      store.current_policy(decisions_postgres.connection(tx), domain.point_name)
+    },
     over: port,
   )
   |> decisions.checking(with: release_check)

@@ -65,6 +65,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import hellhound
+import json/blueprint/codec
 import mist
 import pog
 import wisp
@@ -73,8 +74,11 @@ import wisp/wisp_mist
 /// What the routes need.
 pub type Routes {
   Routes(
+    /// The application's own rows: patients, messages, evidence.
     db: pog.Connection,
-    desk: Desk(Registration, pog.Connection),
+    /// The pool the decision record's transactions start on.
+    pool: decisions_postgres.Pool,
+    desk: Desk(Registration, decisions_postgres.Tx),
     admit: fn(Inbound) -> Result(jobs.Admission, String),
     /// How staff sign in, and as whom they use the desk. `None` refuses
     /// every desk request.
@@ -313,7 +317,7 @@ fn unauthenticated() -> wisp.Response {
 fn show_queue(routes: Routes, validator: Validator) -> wisp.Response {
   case
     queue.page_at(
-      routes.db,
+      routes.pool,
       point: domain.point_name,
       for: validator,
       limit: 50,
@@ -346,7 +350,7 @@ fn show_queue(routes: Routes, validator: Validator) -> wisp.Response {
 /// window. The point lets reception do it (`withdrawn_by`).
 fn withdraw(routes: Routes, validator: Validator, id: String) -> wisp.Response {
   case
-    decisions_postgres.transaction(routes.db, decisions.withdraw_as(
+    decisions_postgres.transaction(routes.pool, decisions.withdraw_as(
       routes.desk,
       _,
       occurrence: id,
@@ -369,7 +373,7 @@ fn withdraw(routes: Routes, validator: Validator, id: String) -> wisp.Response {
 /// failed.
 fn show_pending(routes: Routes) -> wisp.Response {
   case
-    queue.pending(routes.db, point: domain.point_name, limit: 50, after: None)
+    queue.pending(routes.pool, point: domain.point_name, limit: 50, after: None)
   {
     Ok(records) ->
       json.object([
@@ -395,7 +399,7 @@ fn show_pending(routes: Routes) -> wisp.Response {
 }
 
 fn show_reviews(routes: Routes) -> wisp.Response {
-  case queue.review_queue(routes.db, domain.point_name, limit: 50) {
+  case queue.review_queue(routes.pool, domain.point_name, limit: 50) {
     Ok(ids) ->
       json.object([#("reviews", json.array(ids, json.string))])
       |> json.to_string
@@ -407,7 +411,7 @@ fn show_reviews(routes: Routes) -> wisp.Response {
 
 fn open(routes: Routes, validator: Validator, id: String) -> wisp.Response {
   let opened =
-    decisions_postgres.transaction(routes.db, decisions.open(
+    decisions_postgres.transaction(routes.pool, decisions.open(
       routes.desk,
       _,
       occurrence: id,
@@ -434,16 +438,21 @@ fn verdict(
   id: String,
   giving: Giving,
 ) -> wisp.Response {
-  use body <- wisp.require_json(req)
-  let decoder = {
-    use seen <- decode.field("seen", decode.int)
-    use verdict <- decode.field(
+  use body <- wisp.require_string_body(req)
+  // Read strictly: a key given twice is refused and a corrected output's
+  // numbers stay exact.
+  let given = {
+    use seen <- codec.field("seen", codec.int(), get: fn(given: #(Int, _)) {
+      given.0
+    })
+    use verdict <- codec.field(
       "verdict",
-      wire.verdict_decoder(decisions.codec(domain.point())),
+      wire.verdict_codec(decisions.codec(domain.point())),
+      get: fn(given: #(Int, _)) { given.1 },
     )
-    decode.success(#(seen, verdict))
+    codec.success(#(seen, verdict))
   }
-  case decode.run(body, decoder) {
+  case codec.decode_json(given, body) {
     Error(_) ->
       error_response(
         422,
@@ -455,13 +464,13 @@ fn verdict(
       let decided = case giving {
         Deciding ->
           decisions_postgres.decide(
-            routes.db,
+            routes.pool,
             routes.desk,
             decisions.resume(routes.desk, _, ticket, by: validator),
             verdict,
           )
         Reviewing ->
-          decisions_postgres.transaction(routes.db, fn(tx) {
+          decisions_postgres.transaction(routes.pool, fn(tx) {
             use card <- result.try(decisions.resume(
               routes.desk,
               tx,
@@ -608,7 +617,9 @@ pub fn refusal_response(refusal: Refusal) -> wisp.Response {
     | decisions.NotSampled
     | decisions.NotSettled
     | decisions.NotConsulting
-    | decisions.KeyTaken(..) -> error_response(409, "not_possible", detail)
+    | decisions.KeyTaken(..)
+    | // The desk admits no bundle member: no registration is one.
+      decisions.BadBundle(..) -> error_response(409, "not_possible", detail)
     decisions.ConsultFailed(..)
     | decisions.NoPolicy(..)
     | decisions.Unpublishable(..)

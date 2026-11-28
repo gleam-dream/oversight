@@ -15,6 +15,7 @@ import decisions/entry
 import decisions/occurrence
 import decisions/policy
 import decisions/vocabulary.{Performed}
+import decisions_postgres
 import envoy
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -375,7 +376,13 @@ fn await_loop(
   ready: fn(occurrence.Occurrence(domain.Registration)) -> Bool,
   tries: Int,
 ) -> Result(occurrence.Occurrence(domain.Registration), String) {
-  case decisions.read(clinic.desk, clinic.db, occurrence: key) {
+  case
+    decisions_postgres.refusing(clinic.pool, decisions.read(
+      clinic.desk,
+      _,
+      occurrence: key,
+    ))
+  {
     Ok(known) ->
       case ready(known) {
         True -> Ok(known)

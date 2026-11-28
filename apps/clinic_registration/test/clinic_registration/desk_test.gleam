@@ -8,7 +8,7 @@ import clinic_registration/scripted
 import clinic_registration/store
 import clinic_registration/telemetry
 import decisions/occurrence
-import decisions/policy.{AnyoneHolding, Ask, Policy, Several}
+import decisions/policy.{AnyoneHolding, Several}
 import gleam/dynamic/decode
 import gleam/http
 import gleam/list
@@ -37,15 +37,13 @@ pub fn the_desk_needs_a_validator_test() {
 pub fn a_card_made_stale_by_a_correction_is_refused_test() {
   use env <- support.with_app(fn(config) { config })
   // Two receptionists approve each registration in this version.
-  let assert Ok(Nil) =
-    desk.publish(
-      env.app.db,
-      Policy(
-        version: 2,
-        rules: [],
-        otherwise: Ask(Several(count: 2, of: AnyoneHolding(domain.reception))),
-      ),
+  let assert Ok(two_receptionists) =
+    policy.new(
+      version: 2,
+      rules: [],
+      otherwise: Several(count: 2, of: AnyoneHolding(domain.reception)),
     )
+  let assert Ok(Nil) = desk.publish(env.app.db, two_receptionists)
   let phone = support.phone()
   scripted.script(env.services, phone, [
     scripted.Answer(support.ana_answer(phone)),

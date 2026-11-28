@@ -216,7 +216,11 @@ pub fn read(
   env: Env,
   message_id: String,
 ) -> Result(Occurrence(Registration), decisions.Refusal) {
-  decisions.read(env.app.desk, env.app.db, occurrence: domain.key(message_id))
+  decisions_postgres.refusing(env.app.pool, decisions.read(
+    env.app.desk,
+    _,
+    occurrence: domain.key(message_id),
+  ))
 }
 
 /// Wait until the message's occurrence has a status named `status`.
@@ -441,7 +445,7 @@ pub fn race(count: Int, work: fn(Int) -> a) -> List(a) {
 pub fn registrations(env: Env) -> Int {
   let assert Ok(page) =
     queue.occurrences_of(
-      env.app.db,
+      env.app.pool,
       point: domain.point_name,
       limit: 1000,
       after: None,
@@ -467,7 +471,7 @@ pub fn later(env: Env, minutes: Int) -> #(Env, Int) {
   let assert Ok(delivered) =
     decisions_postgres.deliver_due(
       later.app.records,
-      later.app.db,
+      later.app.pool,
       [decisions.waker(later.app.desk)],
       limit: 50,
     )
@@ -487,12 +491,13 @@ pub fn with_restarts(body: fn(Env) -> Env) -> Nil {
 }
 
 /// Run `body` on a pool of its own over `url`, closed afterwards.
-pub fn with_pool(url: String, body: fn(pog.Connection) -> a) -> Nil {
-  let assert Ok(config) = pog.url_config(process.new_name("clinic_side"), url)
+pub fn with_pool(url: String, body: fn(decisions_postgres.Pool) -> a) -> Nil {
+  let name = process.new_name("clinic_side")
+  let assert Ok(config) = pog.url_config(name, url)
   let assert Ok(#(Nil, pool)) =
     owner.start(fn() {
-      let assert Ok(started) = pog.start(pog.pool_size(config, 1))
-      let _ = body(started.data)
+      let assert Ok(_) = pog.start(pog.pool_size(config, 1))
+      let _ = body(decisions_postgres.pool(name))
       Ok(Nil)
     })
   owner.stop(pool)

@@ -188,6 +188,6 @@ pub fn an_operator_sees_the_messages_still_waiting_for_a_recommendation_test() {
   let assert [#(occurrence, since)] = pending
   assert occurrence == domain.key(message.id)
   assert since > 0
-  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  let assert Ok(coverage) = evaluation.coverage(env.app.pool, env.app.desk)
   assert coverage.still_expected == 1
 }
