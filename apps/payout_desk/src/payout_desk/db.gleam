@@ -363,7 +363,7 @@ pub fn publish(
      ON CONFLICT (point, version) DO NOTHING",
   )
   |> pog.parameter(pog.text(decisions.name(point)))
-  |> pog.parameter(pog.int(published.version))
+  |> pog.parameter(pog.int(policy.version(published)))
   |> pog.parameter(pog.text(json.to_string(policy.to_json(published))))
   |> exec(db, _)
 }

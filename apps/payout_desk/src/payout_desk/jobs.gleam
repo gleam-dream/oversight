@@ -73,6 +73,8 @@ pub const queue = "payouts"
 pub type Deps {
   Deps(
     jobs: grind.Grind,
+    /// The pool the decision record's transactions start on.
+    pool: decisions_postgres.Pool,
     runs: Store,
     agent: Agent(Session, Reply),
     desks: Desks,
@@ -89,7 +91,7 @@ pub type Deps {
   )
 }
 
-fn payouts(deps: Deps) -> Desk(Payout, pog.Connection) {
+fn payouts(deps: Deps) -> Desk(Payout, decisions_postgres.Tx) {
   desks.payout(deps.desks)
 }
 
@@ -175,7 +177,6 @@ pub const max_request_id_bytes = 64
 /// proposes. A request id over `max_request_id_bytes` is refused.
 pub fn request(
   deps: Deps,
-  db: pog.Connection,
   request: domain.Request,
   requested_by requested_by: String,
 ) -> Result(Nil, String) {
@@ -185,9 +186,9 @@ pub fn request(
       False -> Error("a request id is at most 64 bytes")
     },
   )
-  decisions_postgres.transaction_with(db, fn(tx) {
+  decisions_postgres.transaction_with(deps.pool, fn(tx) {
     use Nil <- result.try(
-      db.put_request(tx, request, requested_by)
+      db.put_request(decisions_postgres.connection(tx), request, requested_by)
       |> result.map_error(fn(e) { decisions_postgres.Own(db.describe(e)) }),
     )
     use Nil <- result.try(
@@ -200,7 +201,14 @@ pub fn request(
       )
       |> decisions_postgres.desk,
     )
-    submit(deps, tx, agent_worker(deps), request.id, request.id, None)
+    submit(
+      deps,
+      decisions_postgres.connection(tx),
+      agent_worker(deps),
+      request.id,
+      request.id,
+      None,
+    )
     |> result.map_error(decisions_postgres.Own)
   })
   |> result.map_error(fn(failure) {
@@ -228,7 +236,7 @@ pub fn propose(
   case db.request(conn, request_id) {
     Error(error) -> worker.Discarded(db.describe(error))
     Ok(#(request, requested_by)) ->
-      case prior(deps, conn, request.id) {
+      case prior(deps, request.id) {
         Ended(vocabulary.Superseded(_)) ->
           worker.Succeeded("superseded before the agent proposed")
         Ended(vocabulary.DeadlinePassed) ->
@@ -258,9 +266,9 @@ type Prior {
   Unread(detail: String)
 }
 
-fn prior(deps: Deps, conn: pog.Connection, request: String) -> Prior {
+fn prior(deps: Deps, request: String) -> Prior {
   case
-    decisions_postgres.transaction(conn, decisions.read_record(
+    decisions_postgres.transaction(deps.pool, decisions.read_record(
       payouts(deps),
       _,
       key: request_key(request),
@@ -316,7 +324,7 @@ fn drive_and_admit(
         // attempts (`prior`), so the job fails only once the attempt is
         // on it; until then the next delivery finds the same stopped run.
         case
-          decisions_postgres.transaction(conn, decisions.record_failure(
+          decisions_postgres.transaction(deps.pool, decisions.record_failure(
             payouts(deps),
             _,
             key: request_key(request.id),
@@ -368,7 +376,7 @@ fn admit(
         |> decisions.asked_by(requested_by)
         |> decisions.hanging_from(ParentRun(run.id_to_string(call.action.run)))
       let admitted =
-        decisions_postgres.transaction_with(conn, fn(tx) {
+        decisions_postgres.transaction_with(deps.pool, fn(tx) {
           use known <- result.try(
             decisions.recommend_once(
               payouts(deps),
@@ -378,7 +386,7 @@ fn admit(
             )
             |> decisions_postgres.desk,
           )
-          db.admitted(tx, request.id, known.id)
+          db.admitted(decisions_postgres.connection(tx), request.id, known.id)
           |> result.replace(known)
           |> result.map_error(decisions_postgres.Own)
         })
@@ -429,11 +437,11 @@ fn admit(
 pub fn follower(deps: Deps) -> decisions_postgres.Follower {
   #(domain.payout_point_name, fn(tx, id) {
     case decisions.read(payouts(deps), tx, occurrence: id) {
-      Ok(known) -> follow(deps, tx, id, known)
+      Ok(known) -> follow(deps, decisions_postgres.connection(tx), id, known)
       // Superseded before the agent proposed: there is no occurrence and no
       // handed-over call to continue from, so the seller is told here, once.
       Error(decisions.SupersededBefore(event:)) ->
-        tell_superseded_before(tx, id, event)
+        tell_superseded_before(decisions_postgres.connection(tx), id, event)
       Error(refusal) -> Error(decisions.DeskRefused(refusal))
     }
   })
@@ -517,7 +525,7 @@ fn pay(
   let handler = process.self()
   let found = {
     use known <- result.try(
-      decisions_postgres.transaction(conn, decisions.read(
+      decisions_postgres.transaction(deps.pool, decisions.read(
         payouts(deps),
         _,
         occurrence: id,
@@ -549,21 +557,20 @@ fn pay(
         | Ok(execution.CompletedWithUnknownEffects(receipt, _)) ->
           settle(
             deps,
-            conn,
             id,
             Performed(workflow.receipt(instruction.release_key, receipt)),
           )
         Ok(execution.Failed(
           cause: execution.StepFailed(error: workflow.Declined(reason), ..),
           ..,
-        )) -> settle(deps, conn, id, NotPerformed(reason))
+        )) -> settle(deps, id, NotPerformed(reason))
         Ok(execution.Unresolved(failure:, ..)) ->
-          uncertain(deps, conn, id, case failure {
+          uncertain(deps, id, case failure {
             saga.Returned(error) -> workflow.describe_fault(error)
             saga.Crashed(crash) -> "crashed: " <> crash.reason
             saga.TimedOut -> "timed out"
           })
-        Ok(other) -> uncertain(deps, conn, id, string.inspect(other))
+        Ok(other) -> uncertain(deps, id, string.inspect(other))
         Error(error) ->
           case durable.error_kind(error) {
             // Another runner holds the execution, or it was interrupted:
@@ -573,7 +580,7 @@ fn pay(
                 duration.milliseconds(300),
                 durable.describe_error(error),
               )
-            _ -> uncertain(deps, conn, id, durable.describe_error(error))
+            _ -> uncertain(deps, id, durable.describe_error(error))
           }
       }
     }
@@ -583,23 +590,20 @@ fn pay(
 /// Report a known effect and queue the telling, in one transaction.
 fn settle(
   deps: Deps,
-  conn: pog.Connection,
   id: String,
   effect: Effect,
 ) -> worker.Response(String, String) {
-  report_then(deps, conn, id, effect, tell_worker(deps), None)
+  report_then(deps, id, effect, tell_worker(deps), None)
 }
 
 /// Report that nobody knows yet, and queue the lookup that settles it.
 fn uncertain(
   deps: Deps,
-  conn: pog.Connection,
   id: String,
   reason: String,
 ) -> worker.Response(String, String) {
   report_then(
     deps,
-    conn,
     id,
     Uncertain(reason),
     reconcile_worker(deps),
@@ -616,16 +620,15 @@ type ReportError {
 /// Report `effect` and queue `next` for the occurrence, in one transaction.
 fn report_then(
   deps: Deps,
-  conn: pog.Connection,
   id: String,
   effect: Effect,
   next: Worker(String, String, String),
   after: Option(duration.Duration),
 ) -> worker.Response(String, String) {
   let reported =
-    decisions_postgres.transaction_with(conn, fn(tx) {
+    decisions_postgres.transaction_with(deps.pool, fn(tx) {
       use request <- result.try(
-        db.request_of(tx, id)
+        db.request_of(decisions_postgres.connection(tx), id)
         |> result.map_error(fn(e) { decisions_postgres.Own(NoRequest(e)) }),
       )
       use _ <- result.try(
@@ -633,7 +636,14 @@ fn report_then(
         |> decisions_postgres.desk,
       )
       use Nil <- result.try(
-        submit(deps, tx, next, id, request, after)
+        submit(
+          deps,
+          decisions_postgres.connection(tx),
+          next,
+          id,
+          request,
+          after,
+        )
         |> result.map_error(fn(e) { decisions_postgres.Own(NotQueued(e)) }),
       )
       Ok(request)
@@ -688,7 +698,7 @@ fn reconcile(
 ) -> worker.Response(String, String) {
   let key = {
     use known <- result.try(
-      decisions_postgres.transaction(conn, decisions.read(
+      decisions_postgres.transaction(deps.pool, decisions.read(
         payouts(deps),
         _,
         occurrence: id,
@@ -707,7 +717,7 @@ fn reconcile(
         provider.Found(receipt) ->
           case db.post(conn, key, receipt) {
             Ok(Nil) ->
-              settle(deps, conn, id, Performed(workflow.receipt(key, receipt)))
+              settle(deps, id, Performed(workflow.receipt(key, receipt)))
             Error(error) ->
               worker.Snoozed(duration.milliseconds(200), db.describe(error))
           }
@@ -716,7 +726,6 @@ fn reconcile(
             Ok(Nil) ->
               settle(
                 deps,
-                conn,
                 id,
                 NotPerformed(
                   "the provider holds no payment under the release key",
@@ -742,7 +751,7 @@ pub fn tell(
 ) -> worker.Response(String, String) {
   let found = {
     use known <- result.try(
-      decisions_postgres.transaction(conn, decisions.read(
+      decisions_postgres.transaction(deps.pool, decisions.read(
         payouts(deps),
         _,
         occurrence: id,

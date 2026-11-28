@@ -18,18 +18,18 @@ import decisions/vocabulary.{
   type Ref, Manifest, ParentOccurrence, Recommendation, Ref, RuleFired, Rules,
   Subject, Trigger,
 }
+import decisions_postgres.{type Tx}
 import gleam/int
 import gleam/option.{Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import payout_desk/db
 import payout_desk/domain.{type Payout, type Risk}
-import pog
 
 /// What the desks are built over.
 pub type Desks {
   Desks(
-    port: Port(pog.Connection),
+    port: Port(Tx),
     validity: Duration,
     /// A fault point for the tests: `True` makes the payout's guard lose
     /// its database connection once more. `fn() { False }` otherwise.
@@ -37,11 +37,16 @@ pub type Desks {
   )
 }
 
-pub fn payout(desks: Desks) -> Desk(Payout, pog.Connection) {
+pub fn payout(desks: Desks) -> Desk(Payout, Tx) {
   decisions.desk(
     domain.payout_point(validity: desks.validity),
     drives: fn(_) { write_instruction(desks) },
-    under: db.current_policy(_, domain.payout_point_name),
+    under: fn(tx) {
+      db.current_policy(
+        decisions_postgres.connection(tx),
+        domain.payout_point_name,
+      )
+    },
     over: desks.port,
   )
   |> decisions.checking(with: covered)
@@ -55,11 +60,16 @@ pub fn payout(desks: Desks) -> Desk(Payout, pog.Connection) {
   })
 }
 
-pub fn risk(desks: Desks) -> Desk(Risk, pog.Connection) {
+pub fn risk(desks: Desks) -> Desk(Risk, Tx) {
   decisions.desk(
     domain.risk_point(),
     drives: fn(_) { inform_payout(desks) },
-    under: db.current_policy(_, domain.risk_point_name),
+    under: fn(tx) {
+      db.current_policy(
+        decisions_postgres.connection(tx),
+        domain.risk_point_name,
+      )
+    },
     over: desks.port,
   )
 }
@@ -69,12 +79,13 @@ pub fn risk(desks: Desks) -> Desk(Risk, pog.Connection) {
 /// balance that does not cover it refuses the release; a database that
 /// does not answer says nothing about it (`Unsure`), so it is tried again.
 fn covered(
-  tx: pog.Connection,
+  tx: Tx,
   release: decisions.ToRelease(Payout),
-) -> Result(List(Ref), decisions.Stop) {
+) -> Result(List(Ref), vocabulary.Stop) {
   let payout = release.output
   use #(_, available) <- result.try(
-    db.available(tx, payout.seller) |> result.map_error(unsure),
+    db.available(decisions_postgres.connection(tx), payout.seller)
+    |> result.map_error(unsure),
   )
   case available >= payout.amount_cents {
     True ->
@@ -87,7 +98,7 @@ fn covered(
       ])
     False ->
       Error(
-        decisions.Refuse(
+        vocabulary.Refuse(
           db.describe(db.Insufficient(available, payout.amount_cents)),
         ),
       )
@@ -95,33 +106,34 @@ fn covered(
 }
 
 /// A database failure is no judgment about the release: try again.
-fn unsure(error: db.DbError) -> decisions.Stop {
-  decisions.Unsure(db.describe(error))
+fn unsure(error: db.DbError) -> vocabulary.Stop {
+  vocabulary.Unsure(db.describe(error))
 }
 
 /// The payout's gated tool. Its guard re-checks that the seller's account
 /// is active; the release check above compares the amount.
-fn write_instruction(desks: Desks) -> Gated(Payout, pog.Connection) {
+fn write_instruction(desks: Desks) -> Gated(Payout, Tx) {
   Gated(
     name: "write_payout_instruction",
     guard: fn(tx, subject) {
       use Nil <- result.try(case desks.guard_fault() {
-        True -> Error(decisions.Unsure("the database connection dropped"))
+        True -> Error(vocabulary.Unsure("the database connection dropped"))
         False -> Ok(Nil)
       })
       use #(status, _) <- result.try(
-        db.available(tx, subject.id) |> result.map_error(unsure),
+        db.available(decisions_postgres.connection(tx), subject.id)
+        |> result.map_error(unsure),
       )
       case status {
         "active" ->
           Ok([Ref(kind: "seller_status", id: subject.id, revision: status)])
-        _ -> Error(decisions.Refuse("the seller's account is " <> status))
+        _ -> Error(vocabulary.Refuse("the seller's account is " <> status))
       }
     },
     execute: fn(tx, released) {
       let payout: Payout = decisions.output(released)
       db.write_instruction(
-        tx,
+        decisions_postgres.connection(tx),
         db.Instruction(
           release_key: decisions.key(released),
           occurrence: decisions.occurrence_of(released),
@@ -139,12 +151,13 @@ fn write_instruction(desks: Desks) -> Gated(Payout, pog.Connection) {
 /// per consulting payout.
 fn assess(
   desks: Desks,
-  tx: pog.Connection,
+  tx: Tx,
   payout: String,
   seller: String,
 ) -> Result(Nil, String) {
   use chargebacks <- result.try(
-    db.chargebacks_90_days(tx, seller) |> result.map_error(db.describe),
+    db.chargebacks_90_days(decisions_postgres.connection(tx), seller)
+    |> result.map_error(db.describe),
   )
   decisions.recommend_once(
     risk(desks),
@@ -173,14 +186,14 @@ fn assess(
 
 /// The risk point's gated tool: its released answer becomes a fact of the
 /// payout that consulted it.
-fn inform_payout(desks: Desks) -> Gated(Risk, pog.Connection) {
+fn inform_payout(desks: Desks) -> Gated(Risk, Tx) {
   Gated(
     name: "inform_payout",
     guard: fn(_, _) { Ok([]) },
     execute: fn(tx, released) {
       use consulted_by <- result.try(case decisions.parent(released) {
         Some(ParentOccurrence(id:)) -> Ok(id)
-        _ -> Error(decisions.Refuse("the risk answer hangs from no payout"))
+        _ -> Error(vocabulary.Refuse("the risk answer hangs from no payout"))
       })
       let answer: Risk = decisions.output(released)
       decisions.inform(
@@ -194,9 +207,9 @@ fn inform_payout(desks: Desks) -> Gated(Risk, pog.Connection) {
       |> result.map_error(fn(refusal) {
         case decisions.disposition(refusal) {
           decisions.Transient | decisions.Retry ->
-            decisions.Unsure(decisions.describe(refusal))
+            vocabulary.Unsure(decisions.describe(refusal))
           decisions.Poisoned | decisions.Final ->
-            decisions.Refuse(decisions.describe(refusal))
+            vocabulary.Refuse(decisions.describe(refusal))
         }
       })
     },

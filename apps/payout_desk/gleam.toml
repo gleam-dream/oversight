@@ -15,19 +15,19 @@ pog = ">= 4.1.0 and < 4.2.0"
 pgo = ">= 0.20.0 and < 0.21.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "a547a79418cf24249b81c837b474731fa388625c" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "a547a79418cf24249b81c837b474731fa388625c", path = "integrations/fabric_postgres" }
-grind = { git = "https://github.com/gleam-dream/grind.git", ref = "beb23feb47133ea5dc7996881855e21bfd2412f0" }
-saga = { git = "https://github.com/gleam-dream/saga.git", ref = "ec31675925d65552c3c70a4b4e5a8742661f8329" }
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "ccea2bef2884ca92aa4962b38977de83308494b7", path = "integrations/saga_postgres" }
-relay = { git = "https://github.com/gleam-dream/relay.git", ref = "4374f1c69c05988b5743c9eaa8c4ebaa0c41af37" }
-hellhound = { git = "https://github.com/gleam-dream/hellhound.git", ref = "2f7d1e79c73d1ee761e40dd8e7a440f156bfd01a" }
-json_blueprint = { git = "https://github.com/gleam-dream/json_blueprint.git", ref = "0cc991164771a85cf6496efe0d2413fd59b300cf" }
-sinal = { git = "https://github.com/gleam-dream/sinal.git", ref = "02d386e070c6a99900225c613e8d273f3bebe3c2" }
+fabric = ">= 0.6.0 and < 0.7.0"
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "fabric_postgres-v0.5.0", path = "integrations/fabric_postgres" }
+grind = ">= 0.3.0 and < 0.4.0"
+saga = ">= 0.3.0 and < 0.4.0"
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.2.0", path = "integrations/saga_postgres" }
+relay = ">= 0.3.0 and < 0.4.0"
+hellhound = ">= 0.4.0 and < 0.5.0"
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
 # decisions is on Hex. decisions_postgres is released as a Git tag of
 # gleam-dream/decisions, as fabric_postgres and saga_postgres are above.
-decisions = ">= 0.1.1 and < 0.2.0"
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.2.1", path = "integrations/decisions_postgres" }
+decisions = ">= 0.2.0 and < 0.3.0"
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.3.0", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

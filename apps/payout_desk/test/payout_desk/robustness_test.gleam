@@ -20,6 +20,7 @@ import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import gleam/time/duration
 import grind/worker
@@ -38,7 +39,7 @@ import support
 
 fn payouts_of_dora(running: app.App) -> Int {
   let assert Ok(about) =
-    queue.about(running.db, Subject("seller", "dora"), limit: 100)
+    queue.about(running.deps.pool, Subject("seller", "dora"), limit: 100)
   list.count(about, fn(summary) { summary.point == "payout" })
 }
 
@@ -289,7 +290,7 @@ pub fn withdraw_during_the_hold_and_after_it_test() {
   let desk = app.payout_desk(running)
   let withdraw = fn(id, subject) {
     let assert Ok(validator) = db.validator(running.db, subject)
-    decisions_postgres.transaction(running.db, decisions.withdraw_as(
+    decisions_postgres.transaction(running.deps.pool, decisions.withdraw_as(
       desk,
       _,
       occurrence: id,
@@ -382,7 +383,10 @@ pub fn a_settlement_notice_delivered_twice_tells_once_test() {
   // The notice's follower runs again, as a second delivery would: the job
   // it admits has the id of the one already admitted, so nothing new runs.
   let #(_, follow) = jobs.follower(running.deps)
-  let assert Ok(Nil) = pog.transaction(running.db, fn(tx) { follow(tx, id) })
+  let assert Ok(Nil) =
+    decisions_postgres.transaction_with(running.deps.pool, fn(tx) {
+      follow(tx, id) |> result.map_error(decisions_postgres.Own)
+    })
   // The telling runs twice more at once, as a replayed job would: each
   // finds the follow-on run by the request and reads its answer.
   let again = support.race(2, fn(_) { jobs.tell(running.deps, running.db, id) })

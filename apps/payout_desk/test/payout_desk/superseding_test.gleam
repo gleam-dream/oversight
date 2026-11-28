@@ -76,14 +76,15 @@ pub fn a_suspension_before_the_agent_proposed_supersedes_the_expectation_test() 
     app.request(running, world.request("r-s3", "O-6103"), requested_by: "fiona")
   // The expectation is work in flight an operator can list.
   let assert Ok(pending) =
-    queue.pending(running.db, point: "payout", limit: 10, after: None)
+    queue.pending(running.deps.pool, point: "payout", limit: 10, after: None)
   assert list.map(pending, fn(p) { p.occurrence }) == [jobs.request_key("r-s3")]
   let assert Ok(superseded) = app.suspend_seller(running, "dora")
   assert superseded.not_begun == [jobs.request_key("r-s3")]
   // The agent's job, delivered now, does not drive a run for it.
   assert jobs.propose(running.deps, running.db, "r-s3")
     == worker.Succeeded("superseded before the agent proposed")
-  let assert Ok(records) = review.records(running.db, app.payout_desk(running))
+  let assert Ok(records) =
+    review.records(running.deps.pool, app.payout_desk(running))
   assert review.summary(records).coverage
     == learning.Coverage(
       expected: 1,
@@ -127,7 +128,7 @@ pub fn a_suspension_while_the_agent_is_working_leaves_nothing_to_cancel_test() {
   assert told.outcome == "superseded"
   assert !told.from_agent
   let read = fn() {
-    decisions_postgres.transaction(running.db, decisions.read_record(
+    decisions_postgres.transaction(running.deps.pool, decisions.read_record(
       app.payout_desk(running),
       _,
       key:,

@@ -2,8 +2,9 @@
 //// time it crosses a process. Grind copies each worker, with the `Deps` it
 //// captures, into the processes that run each job; Relay holds the desk's
 //// tool list and Fabric copies the agent into each run. These bounds hold
-//// those terms; they are set from json_blueprint 2.2.0 measurements and fail
-//// on 2.1.1. See the codec practice guide, rule 4:
+//// those terms; the workers' and the tools' are set from json_blueprint
+//// 2.2.0 measurements and fail on 2.1.1. Fabric 0.6 copies the agent's
+//// builder, 232 bytes here, instead of the built agent with its tool codecs. See the codec practice guide, rule 4:
 //// https://github.com/gleam-dream/json_blueprint/blob/main/docs/CODEC-PRACTICE.md#4-test-the-copy-size
 
 import gleam/list
@@ -20,7 +21,7 @@ pub fn crossing() -> List(#(String, Int, Int)) {
   use running <- support.with_app("copy_cost", fn(settings) { settings })
   let deps = running.deps
   [
-    #("fabric agent", flat_size_bytes(deps.agent), 12_288),
+    #("fabric agent", flat_size_bytes(deps.agent), 1024),
     #("agent worker", flat_size_bytes(jobs.agent_worker(deps)), 24_576),
     #("pay worker", flat_size_bytes(jobs.pay_worker(deps)), 24_576),
     #("reconcile worker", flat_size_bytes(jobs.reconcile_worker(deps)), 24_576),

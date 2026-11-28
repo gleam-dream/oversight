@@ -41,8 +41,8 @@ pub type Summary {
 
 /// Every payout record, whether or not its agent proposed.
 pub fn records(
-  db: pog.Connection,
-  desk: decisions.Desk(Payout, pog.Connection),
+  db: decisions_postgres.Pool,
+  desk: decisions.Desk(Payout, decisions_postgres.Tx),
 ) -> Result(List(decisions.Record(Payout)), String) {
   decisions_postgres.transaction(db, fn(tx) {
     use ids <- result.try(

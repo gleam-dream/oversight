@@ -32,7 +32,12 @@ import pog
 import relay/tool
 
 pub type Deps {
-  Deps(db: pog.Connection, desk: fn() -> Desk(Payout, pog.Connection))
+  Deps(
+    db: pog.Connection,
+    /// The pool the decision record's transactions start on.
+    pool: decisions_postgres.Pool,
+    desk: fn() -> Desk(Payout, decisions_postgres.Tx),
+  )
 }
 
 // -- The queue ------------------------------------------------------------------------
@@ -270,7 +275,7 @@ pub fn payout_queue(
   use validator <- result.try(validator(deps, principal))
   use page <- result.try(
     queue.page_at(
-      deps.db,
+      deps.pool,
       point: domain.payout_point_name,
       for: validator,
       limit:,
@@ -298,7 +303,7 @@ pub fn payout_queue(
 }
 
 fn read(deps: Deps, id: String) -> Result(Occurrence(Payout), String) {
-  decisions_postgres.transaction(deps.db, decisions.read(
+  decisions_postgres.transaction(deps.pool, decisions.read(
     deps.desk(),
     _,
     occurrence: id,
@@ -325,7 +330,7 @@ pub fn open(
 ) -> Result(View(Payout), String) {
   use validator <- result.try(validator(deps, principal))
   use card <- result.map(
-    decisions_postgres.transaction(deps.db, fn(tx) {
+    decisions_postgres.transaction(deps.pool, fn(tx) {
       decisions.open(
         deps.desk(),
         tx,
@@ -375,7 +380,7 @@ pub fn decide(
   let ticket = Ticket(occurrence: request.occurrence, seen: request.seen)
   use decided <- result.map(
     decisions_postgres.decide(
-      deps.db,
+      deps.pool,
       deps.desk(),
       fn(tx) {
         use card <- result.try(decisions.resume(

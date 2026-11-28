@@ -11,8 +11,8 @@ import decisions/fact
 import decisions/model.{type Reader, type Sources}
 import decisions/occurrence.{type Occurrence}
 import decisions/policy.{
-  type Policy, All, AnyoneHolding, Ask, Consult, Either, Never, Not, Policy,
-  Proceed, Several, SomeoneElseHolding, When,
+  type Policy, All, AnyoneHolding, Ask, Consult, Either, Never, Not, Proceed,
+  Several, SomeoneElseHolding, When,
 }
 import decisions/vocabulary.{
   type Manifest, ApproveRejectOrCorrect, NotPerformed, Performed, Uncertain,
@@ -135,7 +135,7 @@ pub fn payout_point(validity validity: Duration) -> Point(Payout) {
   })
   |> decisions.signal(dispute_for_seller())
   |> decisions.signal(recent_chargeback())
-  |> decisions.signal(risk_level())
+  |> decisions.answer(risk_level(), from: risk_point_name)
   |> decisions.withdrawn_by(finance)
   |> decisions.superseded_by(seller_suspended)
   |> decisions.valid_for(validity)
@@ -175,42 +175,53 @@ pub const escalate_after_minutes = 60
 pub fn payout_policy(version version: Int, hold hold: Duration) -> Policy {
   let large = policy.at_least(amount(), int.to_float(large_from_cents) /. 100.0)
   let small = policy.below(amount(), int.to_float(small_below_cents) /. 100.0)
-  Policy(
-    version:,
-    rules: [
-      When(
-        All([
-          policy.is(recent_chargeback(), True),
-          Not(policy.known(risk_level())),
-        ]),
-        Consult(risk_point_name),
-      ),
-      When(
-        policy.is(risk_level(), "high"),
-        Ask(Several(2, SomeoneElseHolding(finance))),
-      ),
-      When(
-        All([large, policy.waited(escalate_after_minutes)]),
-        Ask(
-          Either([
-            Several(2, SomeoneElseHolding(finance)),
-            AnyoneHolding(head_of_finance),
+  let assert Ok(policy) =
+    policy.new(
+      version:,
+      rules: [
+        When(
+          All([
+            policy.is(recent_chargeback(), True),
+            Not(policy.known(risk_level())),
           ]),
+          Consult(risk_point_name),
         ),
-      ),
-      When(large, Ask(Several(2, SomeoneElseHolding(finance)))),
-      When(
-        All([small, policy.is(dispute_for_seller(), True)]),
-        Proceed(sample: Never, hold: Some(hold)),
-      ),
-    ],
-    otherwise: Ask(SomeoneElseHolding(finance)),
-  )
+        // Without a risk answer there is nothing to read: no consult was
+        // needed, so the rule does not apply.
+        When(
+          All([policy.known(risk_level()), policy.is(risk_level(), "high")]),
+          Ask(Several(2, SomeoneElseHolding(finance))),
+        ),
+        When(
+          All([large, policy.waited(escalate_after_minutes)]),
+          Ask(
+            Either([
+              Several(2, SomeoneElseHolding(finance)),
+              AnyoneHolding(head_of_finance),
+            ]),
+          ),
+        ),
+        When(large, Ask(Several(2, SomeoneElseHolding(finance)))),
+        When(
+          All([small, policy.is(dispute_for_seller(), True)]),
+          Proceed(sample: Never, hold: Some(hold)),
+        ),
+      ],
+      otherwise: SomeoneElseHolding(finance),
+    )
+  policy
 }
 
-/// The risk point lets its rule's answer through.
+/// The risk point lets its rule's answer through. Only a rule answers it,
+/// so its default, which no reading reaches, asks finance.
 pub fn risk_policy() -> Policy {
-  Policy(version: 1, rules: [], otherwise: Proceed(sample: Never, hold: None))
+  let assert Ok(policy) =
+    policy.new(
+      version: 1,
+      rules: [When(policy.Always, Proceed(sample: Never, hold: None))],
+      otherwise: AnyoneHolding(finance),
+    )
+  policy
 }
 
 /// The risk rule: two or more chargebacks in 90 days is high.
