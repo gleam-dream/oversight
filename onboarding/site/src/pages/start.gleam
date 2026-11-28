@@ -246,13 +246,7 @@ fn info(layer: Layer) -> LayerInfo {
 }
 
 type Phase {
-  Phase(
-    label: String,
-    title: String,
-    time: String,
-    colour: String,
-    modules: List(Entry),
-  )
+  Phase(label: String, title: String, colour: String, modules: List(Entry))
 }
 
 type Entry {
@@ -263,7 +257,6 @@ const phases = [
   Phase(
     label: "Phase 1",
     title: "The runtime",
-    time: "about 55 min",
     colour: "#2B2862",
     modules: [
       Entry(
@@ -286,7 +279,6 @@ const phases = [
   Phase(
     label: "Phase 2",
     title: "The mental model",
-    time: "about 35 min",
     colour: "#B0186E",
     modules: [
       Entry(
@@ -304,7 +296,6 @@ const phases = [
   Phase(
     label: "Phase 3",
     title: "The building blocks",
-    time: "about 85 min",
     colour: "#0F766E",
     modules: [
       Entry(
@@ -332,7 +323,6 @@ const phases = [
   Phase(
     label: "Phase 4",
     title: "Putting it together",
-    time: "about 40 min",
     colour: "#B45309",
     modules: [
       Entry(
@@ -592,7 +582,7 @@ fn phase(p: Phase, context: Context) -> Element(Msg) {
           ],
         ),
         html.h3([css("font-size:24px")], [html.text(p.title)]),
-        html.span([class("meta")], [html.text(p.time)]),
+        html.span([class("meta")], [html.text(phase_time(p))]),
       ],
     ),
     html.div(
@@ -664,4 +654,12 @@ fn one_sentence() -> Element(Msg) {
       ]),
     ]),
   ])
+}
+
+/// A phase's time is the sum of its modules' times, so it cannot drift
+/// from the module cards.
+fn phase_time(phase: Phase) -> String {
+  let minutes =
+    list.fold(phase.modules, 0, fn(sum, e) { sum + route.minutes(e.module) })
+  "about " <> int.to_string(minutes) <> " min"
 }
