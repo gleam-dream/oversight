@@ -14,10 +14,8 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 pog = ">= 4.1.0 and < 4.2.0"
 mist = ">= 6.0.2 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-# fabric_postgres has no release tag for Fabric 0.6 yet, and it depends on
-# the Fabric core in its own repository, so both come from one Fabric commit.
-fabric = { git = "https://github.com/gleam-dream/fabric.git", ref = "e451366ee7318127f1077965139b5481b1ae4128" }
-fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "e451366ee7318127f1077965139b5481b1ae4128", path = "integrations/fabric_postgres" }
+fabric = ">= 0.6.0 and < 0.7.0"
+fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "fabric_postgres-v0.5.0", path = "integrations/fabric_postgres" }
 grind = ">= 0.3.0 and < 0.4.0"
 saga = ">= 0.3.0 and < 0.4.0"
 saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.2.0", path = "integrations/saga_postgres" }
