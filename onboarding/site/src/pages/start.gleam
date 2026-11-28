@@ -563,7 +563,7 @@ fn how_modules_work() -> Element(Msg) {
 
 fn path(context: Context) -> Element(Msg) {
   html.section([class("wrap"), css("padding-bottom:72px")], [
-    html.div([class("k")], [html.text("Your path · about 3½ hours")]),
+    html.div([class("k")], [html.text("Your path · about 3¾ hours")]),
     html.h2([css("font-size:32px;margin:10px 0 8px")], [
       html.text("Four phases, eleven modules"),
     ]),

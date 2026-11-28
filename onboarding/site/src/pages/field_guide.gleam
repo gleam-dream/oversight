@@ -12,6 +12,7 @@ import lustre/element/html
 import lustre/event
 import pages/field_guide/glossary.{type Group}
 import pages/field_guide/retrace.{type Classification, type Strategy}
+import site/booklets
 import site/context.{type Context}
 import site/tour
 import site/ui.{css}
@@ -602,6 +603,14 @@ fn reading_plan() -> Element(Msg) {
             ),
           ],
         ),
+        html.div([class("row"), css("gap:8px;margin-top:20px")], [
+          html.span([class("meta")], [html.text("Booklets")]),
+          ..list.map(booklets.all, fn(booklet) {
+            ui.external(booklets.pdf(booklet), [class("pill")], [
+              html.text(booklet.title),
+            ])
+          })
+        ]),
         html.div([class("row"), css("gap:8px;margin-top:20px")], [
           html.span([class("meta")], [html.text("Repositories")]),
           ..list.map(repositories, fn(repo) {

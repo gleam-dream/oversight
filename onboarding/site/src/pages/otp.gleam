@@ -15,7 +15,10 @@ import pages/otp/cart.{type Cart}
 import pages/otp/libraries.{type Library}
 import pages/otp/mailbox.{type Mode, Call, Send}
 import pages/otp/mailbox_widget.{type Commands, Commands}
+import pages/otp/restart_types.{type RestartType, type Table}
+import pages/otp/signals.{type Bond, type Pair}
 import pages/otp/supervision.{type Child, type Restart, type Strategy, type Tree}
+import site/booklets
 import site/browser
 import site/context.{type Context}
 import site/motion.{type Motion}
@@ -28,7 +31,9 @@ import site/ui.{css}
 pub type TourId {
   Actor
   LoadTour
+  SignalsTour
   TreeTour
+  RestartsTour
   Plug
 }
 
@@ -42,7 +47,9 @@ pub type Model {
   Model(
     cart: Cart,
     load: Load,
+    pair: Pair,
     tree: Tree,
+    table: Table,
     library: Library,
     tours: tour.Tours(TourId),
   )
@@ -57,12 +64,18 @@ pub type Msg {
   ReaderPickedMode(Mode)
   ReaderSetRate(Int)
   ReaderAdvancedOneSecond
+  ReaderPickedBond(Bond)
+  ReaderEnded(signals.Ending)
+  ReaderResetPair
   ReaderPickedStrategy(Strategy)
   ReaderCrashedChild(Child)
   /// The supervisor's restart, scheduled when a child crashed.
   SupervisorRestarted(Restart)
   ReaderLetFiveSecondsPass
   ReaderResetTree
+  ReaderPickedRestartType(RestartType)
+  ReaderEndedChild(restart_types.Ending)
+  ReaderResetTable
   ReaderPickedLibrary(Library)
   Tour(TourId, tour.Command)
 }
@@ -81,7 +94,9 @@ pub fn init() -> Model {
         advance_rate: 6,
       ),
     ),
+    pair: signals.new(),
     tree: supervision.new(0),
+    table: restart_types.new(),
     library: libraries.HttpGun,
     tours: tour.new(),
   )
@@ -146,6 +161,19 @@ pub fn update(
       effect.none(),
     )
 
+    ReaderPickedBond(bond) -> #(
+      Model(..model, pair: signals.pick(model.pair, bond)),
+      effect.none(),
+    )
+    ReaderEnded(ending) -> #(
+      Model(..model, pair: signals.end(model.pair, ending)),
+      effect.none(),
+    )
+    ReaderResetPair -> #(
+      Model(..model, pair: signals.reset(model.pair)),
+      effect.none(),
+    )
+
     ReaderPickedStrategy(strategy) -> #(
       Model(..model, tree: supervision.pick(model.tree, strategy)),
       effect.none(),
@@ -169,6 +197,19 @@ pub fn update(
     )
     ReaderResetTree -> #(
       Model(..model, tree: supervision.reset(model.tree)),
+      effect.none(),
+    )
+
+    ReaderPickedRestartType(restart) -> #(
+      Model(..model, table: restart_types.pick(model.table, restart)),
+      effect.none(),
+    )
+    ReaderEndedChild(ending) -> #(
+      Model(..model, table: restart_types.try(model.table, ending)),
+      effect.none(),
+    )
+    ReaderResetTable -> #(
+      Model(..model, table: restart_types.reset(model.table)),
       effect.none(),
     )
 
@@ -206,7 +247,9 @@ pub fn key(id: TourId) -> String {
   case id {
     Actor -> "actor"
     LoadTour -> "load"
+    SignalsTour -> "signals"
     TreeTour -> "tree"
+    RestartsTour -> "restarts"
     Plug -> "plug"
   }
 }
@@ -247,6 +290,68 @@ pub fn script(id: TourId, motion: Motion) -> tour.Script(Model, Msg) {
           "One process, one message at a time: that’s why actors need no locks. Now drive it yourself.",
         ),
       ])
+    SignalsTour -> {
+      let try = fn(bond, ending) {
+        send([ReaderPickedBond(bond), ReaderEnded(ending)])
+      }
+      tour.Script(reset: send([ReaderPickedBond(signals.Link)]), steps: [
+        tour.say(
+          "Two processes, A and B. Every supervisor is built from the way two processes can be joined. Try each bond, and watch what reaches A.",
+        ),
+        tour.act(
+          "A link. B crashes: its exit signal travels the link and kills A, which did nothing wrong. Links share fate.",
+          try(signals.Link, signals.BCrashes),
+        ),
+        tour.act(
+          "Same link, but B finishes its work normally. A normal exit kills nobody: links carry only abnormal exits.",
+          try(signals.Link, signals.BFinishes),
+        ),
+        tour.act(
+          "A monitor instead. B crashes and A just gets a ProcessDown message saying why. It keeps running.",
+          try(signals.Monitor, signals.BCrashes),
+        ),
+        tour.act(
+          "A link again, but A traps exits. B's crash arrives as an ExitMessage in A's mailbox: A survives and can start B again. That is a supervisor.",
+          try(signals.TrappedLink, signals.BCrashes),
+        ),
+        tour.act(
+          "Now A crashes. B was not trapping exits, so the link kills it. Trapping protects only the process that traps.",
+          try(signals.TrappedLink, signals.ACrashes),
+        ),
+        tour.say(
+          "Isolation contains a crash, a link carries the news, trapping turns it into a message. The next playground composes these into a tree.",
+        ),
+      ])
+    }
+    RestartsTour -> {
+      let try = fn(restart, ending) {
+        send([ReaderPickedRestartType(restart), ReaderEndedChild(ending)])
+      }
+      tour.Script(reset: send([ReaderResetTable]), steps: [
+        tour.say(
+          "The strategy says which children restart together. Each child's restart type says whether it comes back at all.",
+        ),
+        tour.act(
+          "Permanent, the default. The child finishes its work normally, and the supervisor starts it again anyway: permanent means always.",
+          try(restart_types.Permanent, restart_types.FinishesNormally),
+        ),
+        tour.act(
+          "Transient: the child crashes. The job did not get done, so it is restarted.",
+          try(restart_types.Transient, restart_types.Crashes),
+        ),
+        tour.act(
+          "Transient again, but this time it finishes normally. The job is done, so the supervisor removes it.",
+          try(restart_types.Transient, restart_types.FinishesNormally),
+        ),
+        tour.act(
+          "Temporary: it crashes and is removed. Whoever started it handles the failure.",
+          try(restart_types.Temporary, restart_types.Crashes),
+        ),
+        tour.say(
+          "Two cells are still blank. Predict them, then try them yourself.",
+        ),
+      ])
+    }
     TreeTour -> {
       let crash = fn(strategy, child) {
         send([ReaderPickedStrategy(strategy), ReaderCrashedChild(child)])
@@ -368,8 +473,17 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
           "Instead of defending every line against every failure, write the normal case clearly and let unexpected errors crash the process. A supervisor, written once and tested by decades of telecom use, restarts it from a known good state.",
         ),
       ]),
+      html.p([class("lead"), css("margin-top:12px")], [
+        html.text(
+          "A supervisor is no magic layered on the VM. It is three rules composed: isolation keeps a crash inside one process, a link carries the news of the crash, and trapping exits turns that news into a message. Try the three bonds first.",
+        ),
+      ]),
+      lab(SignalsTour, [], signals_lab(model.pair)),
       lab(TreeTour, [], tree(model.tree)),
+      choosing(),
+      lab(RestartsTour, [], restarts_lab(model.table)),
     ]),
+    misuses(),
     html.section([class("wrap sec")], [
       html.div([class("k")], [html.text("Read · your tree, their children")]),
       html.h2([class("h2")], [html.text("Where gleam-dream plugs in")]),
@@ -383,6 +497,10 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
         ),
       ]),
       lab(Plug, [], plugs(model.library)),
+      booklets.card(
+        booklets.resilience,
+        "This module in depth: the three primitives, every supervisor option, restart intensity and escalation, dynamic children, and the anti-patterns above, with a chapter on how supervisors sit beside circuit breakers and Kubernetes. Its code is Elixir; the ideas carry over to gleam_otp.",
+      ),
       ui.carry_forward(
         "Write the happy path and let supervisors handle the rest. Libraries give you children; your application decides where they live, when they start, and when they stop.",
       ),
@@ -418,7 +536,17 @@ fn hero() -> Element(Msg) {
           ]),
           html.span([], [
             html.text(
+              "→ how links, monitors and trapped exits differ, and why a supervisor traps exits",
+            ),
+          ]),
+          html.span([], [
+            html.text(
               "→ how a supervisor decides what to restart, and when it gives up",
+            ),
+          ]),
+          html.span([], [
+            html.text(
+              "→ which strategy and restart type a child needs, from what it depends on",
             ),
           ]),
           html.span([], [
@@ -796,6 +924,338 @@ fn note(load: Load) -> String {
   }
 }
 
+// Links, monitors and trapped exits -------------------------------------------
+
+fn signals_lab(pair: Pair) -> List(Element(Msg)) {
+  let process = fn(name, status) {
+    let #(bg, fg) = case status {
+      signals.Alive -> #("#DCD9FF", "#241F6B")
+      signals.Finished -> #("#EDEFF3", "#3B4452")
+      signals.Crashed | signals.KilledByLink -> #("#FDECEA", "#7A1A12")
+    }
+    html.div(
+      [
+        css(
+          "padding:12px 18px;border-radius:12px;text-align:center;min-width:150px;background:"
+          <> bg
+          <> ";color:"
+          <> fg,
+        ),
+      ],
+      [
+        html.b([], [html.text(name)]),
+        html.div([css("font-size:13px;margin-top:4px")], [
+          html.text(signals.status_label(status)),
+        ]),
+      ],
+    )
+  }
+  let bond_line = case pair.bond {
+    signals.Link -> "⟷ link"
+    signals.Monitor -> "watches →"
+    signals.TrappedLink -> "⟷ link · A traps exits"
+  }
+  let can = signals.running(pair)
+  [
+    lab_head(
+      "Playground",
+      "Links, monitors and trapped exits",
+      "Join two processes one of three ways, then end one of them. Watch what reaches the other: death, a message, or nothing.",
+      "660px",
+      button("btn sm", ReaderResetPair, [], "Reset"),
+    ),
+    html.div([class("row"), css("margin-bottom:16px;gap:16px")], [
+      html.span([class("meta")], [html.text("Bond")]),
+      html.div(
+        [class("seg")],
+        list.map(signals.bonds, fn(bond) {
+          html.button(
+            [
+              attribute.type_("button"),
+              ui.on_class("", pair.bond == bond),
+              ui.pressed(pair.bond == bond),
+              event.on_click(ReaderPickedBond(bond)),
+            ],
+            [html.text(signals.bond_name(bond))],
+          )
+        }),
+      ),
+    ]),
+    html.p([class("tour-hide"), css("margin-bottom:20px;font-size:15px")], [
+      html.b([], [html.text(signals.bond_name(pair.bond) <> ":")]),
+      html.text(" " <> signals.bond_description(pair.bond)),
+    ]),
+    html.div(
+      [
+        css(
+          "display:flex;align-items:center;justify-content:center;gap:16px;flex-wrap:wrap",
+        ),
+      ],
+      [
+        process("A", pair.a),
+        html.span([class("meta"), css("min-width:120px;text-align:center")], [
+          html.text(bond_line),
+        ]),
+        process("B", pair.b),
+      ],
+    ),
+    html.div(
+      [class("row"), css("margin-top:20px;gap:8px;justify-content:center")],
+      [
+        button(
+          "btn",
+          ReaderEnded(signals.BCrashes),
+          [attribute.disabled(!can)],
+          "Crash B",
+        ),
+        button(
+          "btn",
+          ReaderEnded(signals.BFinishes),
+          [attribute.disabled(!can)],
+          "B finishes normally",
+        ),
+        button(
+          "btn",
+          ReaderEnded(signals.ACrashes),
+          [attribute.disabled(!can)],
+          "Crash A",
+        ),
+      ],
+    ),
+    html.div([class("card"), css("margin-top:20px;padding:16px")], [
+      html.div([class("k"), css("margin-bottom:8px")], [
+        html.text("Timeline · what each process saw"),
+      ]),
+      msc.Chart(
+        ..msc.chart("sig", ["A", "B"], case pair.events {
+          [] -> [msc.Note(0, "both running: end one to see signals", msc.Grey)]
+          events -> events
+        }),
+        lane_gap: 220,
+        row: 30,
+        right_pad: 260,
+        aria: "Sequence chart of exit signals and messages between two processes",
+      )
+        |> msc.view,
+    ]),
+    html.div([class("note"), css("margin-top:10px")], [
+      html.text(signals.lesson(pair)),
+    ]),
+  ]
+}
+
+// Choosing a strategy -----------------------------------------------------------
+
+fn choosing() -> Element(Msg) {
+  let card = fn(question, answer, example) {
+    html.div([class("card")], [
+      html.span([class("chip"), css("background:#DCD9FF;color:#241F6B")], [
+        html.text(answer),
+      ]),
+      html.h3([], [html.text(question)]),
+      html.p([], [html.text(example)]),
+    ])
+  }
+  html.div([css("margin-top:40px")], [
+    html.div([class("k")], [html.text("Read · choosing a strategy")]),
+    html.h2([class("h2")], [html.text("Ask about dependencies, not failures")]),
+    html.p([class("lead")], [
+      html.text(
+        "Every child can crash, so \"what might fail?\" picks nothing. Ask instead what each child needs from its siblings. The answer names the strategy, and the order of the children list states the dependencies.",
+      ),
+    ]),
+    html.div([class("cards")], [
+      card(
+        "Does each child stand alone?",
+        "one-for-one",
+        "Independent services: a cache, a mailer, a metrics reporter. One crash should touch nobody else. This is the usual answer.",
+      ),
+      card(
+        "Does each child depend on the ones started before it?",
+        "rest-for-one",
+        "A pipeline: a connection, then the reader that uses it, then the writer after the reader. A crash restarts that child and everything after it.",
+      ),
+      card(
+        "Is the group useless unless all of it runs?",
+        "one-for-all",
+        "Tightly coupled peers that share state they cannot rebuild alone. Any crash restarts the whole group from a clean slate.",
+      ),
+    ]),
+  ])
+}
+
+// Restart types -------------------------------------------------------------------
+
+fn restarts_lab(table: Table) -> List(Element(Msg)) {
+  let cell = fn(restart, ending) {
+    let last = table.last == Some(restart_types.Trial(restart, ending))
+    let #(text, bg, fg) = case restart_types.revealed(table, restart, ending) {
+      False -> #("?", "#F4F2EE", "#8A8698")
+      True ->
+        case restart_types.fate(restart, ending) {
+          restart_types.Restarted -> #("↻ restarted", "#E2F4E7", "#15803D")
+          restart_types.Removed -> #("— removed", "#EDEFF3", "#3B4452")
+        }
+    }
+    html.td([], [
+      html.div(
+        [
+          css(
+            "padding:10px;border-radius:10px;text-align:center;font-weight:600;background:"
+            <> bg
+            <> ";color:"
+            <> fg
+            <> case last {
+              True -> ";outline:2px solid #241F6B"
+              False -> ""
+            },
+          ),
+        ],
+        [html.text(text)],
+      ),
+    ])
+  }
+  let left = restart_types.remaining(table)
+  [
+    lab_head(
+      "Playground",
+      "Restart types",
+      "One child under a supervisor. Give it a restart type, then let it finish or crash. Each answer lands in the table; fill in all six.",
+      "660px",
+      button("btn sm", ReaderResetTable, [], "Reset"),
+    ),
+    html.div([class("row"), css("margin-bottom:16px;gap:16px")], [
+      html.span([class("meta")], [html.text("Restart type")]),
+      html.div(
+        [class("seg")],
+        list.map(restart_types.restart_types, fn(restart) {
+          html.button(
+            [
+              attribute.type_("button"),
+              ui.on_class("", table.restart == restart),
+              ui.pressed(table.restart == restart),
+              event.on_click(ReaderPickedRestartType(restart)),
+            ],
+            [html.text(restart_types.restart_name(restart))],
+          )
+        }),
+      ),
+    ]),
+    html.p([class("tour-hide"), css("margin-bottom:16px;font-size:15px")], [
+      html.b([], [html.text(restart_types.restart_name(table.restart) <> ":")]),
+      html.text(" " <> restart_types.restart_use(table.restart) <> "."),
+    ]),
+    html.div([class("row"), css("gap:8px;margin-bottom:20px")], [
+      button(
+        "btn",
+        ReaderEndedChild(restart_types.FinishesNormally),
+        [],
+        "The child finishes normally",
+      ),
+      button(
+        "btn",
+        ReaderEndedChild(restart_types.Crashes),
+        [],
+        "The child crashes",
+      ),
+    ]),
+    html.div([css("overflow-x:auto")], [
+      html.table(
+        [
+          css(
+            "width:100%;border-collapse:separate;border-spacing:6px;table-layout:fixed",
+          ),
+          attribute("aria-label", "Whether each restart type is restarted"),
+        ],
+        [
+          html.thead([], [
+            html.tr([], [
+              html.th([css("width:120px")], []),
+              ..list.map(restart_types.endings, fn(ending) {
+                html.th([class("meta"), css("text-align:center")], [
+                  html.text(restart_types.ending_name(ending)),
+                ])
+              })
+            ]),
+          ]),
+          html.tbody(
+            [],
+            list.map(restart_types.restart_types, fn(restart) {
+              html.tr([], [
+                html.th(
+                  [class("mono"), css("text-align:right;padding-right:8px")],
+                  [
+                    html.text(restart_types.restart_name(restart)),
+                  ],
+                ),
+                ..list.map(restart_types.endings, fn(ending) {
+                  cell(restart, ending)
+                })
+              ])
+            }),
+          ),
+        ],
+      ),
+    ]),
+    html.div([class("note"), css("margin-top:10px")], [
+      html.text(
+        restart_types.lesson(table)
+        <> case left {
+          0 -> " The table is complete."
+          1 -> " One cell left."
+          n -> " " <> int.to_string(n) <> " cells left."
+        },
+      ),
+    ]),
+  ]
+}
+
+// Misuses ---------------------------------------------------------------------------
+
+fn misuses() -> Element(Msg) {
+  let card = fn(title, wrong, fix) {
+    html.div([class("card")], [
+      html.span([class("chip"), css("background:#FDECEA;color:#B42318")], [
+        html.text("anti-pattern"),
+      ]),
+      html.h3([], [html.text(title)]),
+      html.p([], [html.text(wrong)]),
+      html.p([css("margin-top:8px;color:#15803D")], [html.text(fix)]),
+    ])
+  }
+  html.section([class("wrap sec")], [
+    html.div([class("k")], [html.text("Read · what not to do")]),
+    html.h2([class("h2")], [html.text("Four ways to misuse a process")]),
+    html.p([class("lead")], [
+      html.text(
+        "Processes are cheap, which makes them easy to misuse. These four mistakes are common in every BEAM language, and each has a plain fix.",
+      ),
+    ]),
+    html.div([class("cards")], [
+      card(
+        "A process outside the tree",
+        "A long-lived process started with a bare spawn has no supervisor. When it dies, nothing restarts it, and at shutdown nothing stops it in order.",
+        "Start everything that lives longer than a call under a supervisor, even if it should never be restarted.",
+      ),
+      card(
+        "A process to organise code",
+        "An actor that only runs pure functions makes every caller queue behind one mailbox, on one scheduler, for no state.",
+        "Use a plain module. Reach for a process only for state, concurrency or failure isolation.",
+      ),
+      card(
+        "A protocol scattered across callers",
+        "When every caller builds an actor's messages itself, changing a message means changing every caller.",
+        "Give the actor's module a public function per request. In Gleam, the typed Subject keeps the message type in one place.",
+      ),
+      card(
+        "Large messages",
+        "A message is copied into the receiver's heap, so its size is paid twice: once to copy it, again to collect it. Sending a whole data set to use one field pays for all of it.",
+        "Send only what the receiver needs. Binaries over 64 bytes are shared by reference, not copied.",
+      ),
+    ]),
+  ])
+}
+
 // Supervision tree -------------------------------------------------------------
 
 fn tree(tree: Tree) -> List(Element(Msg)) {
@@ -809,7 +1269,7 @@ fn tree(tree: Tree) -> List(Element(Msg)) {
     lab_head(
       "Playground",
       "Supervision tree simulator",
-      "A small shop service. Pick a restart strategy, then crash a child. Crash things more than 3 times in 5 seconds to see the supervisor give up and escalate. Those 5 seconds are simulated: real time never clears the window, only \"Let 5 seconds pass\" or Reset does.",
+      "A small shop service. Pick a restart strategy, then crash a child. Crash things more than 3 times in 5 seconds to see the supervisor give up and escalate. This supervisor is set to tolerate 3 restarts in 5 seconds; gleam_otp's default, changed with restart_tolerance, is 2. Those 5 seconds are simulated: real time never clears the window, only \"Let 5 seconds pass\" or Reset does.",
       "660px",
       button("btn sm", ReaderResetTree, [], "Reset"),
     ),

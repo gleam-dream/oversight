@@ -30,7 +30,7 @@ pub fn modules_link_to_neighbours_and_wrap_to_the_map_test() {
 
 pub fn module_minutes_sum_to_the_course_length_test() {
   assert list.fold(route.modules, 0, fn(sum, m) { sum + route.minutes(m) })
-    == 215
+    == 225
 }
 
 pub fn document_titles_name_the_place_test() {
