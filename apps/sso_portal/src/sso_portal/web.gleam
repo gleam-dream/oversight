@@ -66,10 +66,8 @@ fn traced(context: Context, next: fn(Context) -> Response) -> Response {
 
 // --- Login ------------------------------------------------------------------
 
-fn login(request: Request, context: Context) -> Response {
-  case
-    hellhound.begin_login(context.hellhound, request, hellhound.default_login())
-  {
+fn login(_request: Request, context: Context) -> Response {
+  case hellhound.begin_login(context.hellhound, hellhound.default_login()) {
     Ok(redirect) -> hellhound.login_response(wisp.response(303), redirect)
     Error(error) ->
       page(

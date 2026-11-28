@@ -104,7 +104,7 @@ pub fn ask(
 
 pub fn read(running: App, id: String) -> Occurrence(Payout) {
   let assert Ok(known) =
-    decisions_postgres.transaction(running.db, decisions.read(
+    decisions_postgres.transaction(running.deps.pool, decisions.read(
       app.payout_desk(running),
       _,
       occurrence: id,
@@ -202,7 +202,7 @@ pub fn decide(
 ) -> Result(Occurrence(Payout), decisions_postgres.Failure) {
   let assert Ok(validator) = db.validator(running.db, subject)
   decisions_postgres.decide(
-    running.db,
+    running.deps.pool,
     app.payout_desk(running),
     fn(tx) {
       decisions.open(
@@ -226,7 +226,7 @@ pub fn open(
   let assert Ok(validator) = db.validator(running.db, subject)
   let assert Ok(card) =
     decisions_postgres.transaction(
-      running.db,
+      running.deps.pool,
       decisions.open(
         app.payout_desk(running),
         _,
@@ -246,7 +246,7 @@ pub fn decide_on(
 ) -> Result(Occurrence(Payout), decisions_postgres.Failure) {
   let holder = decisions.holder(card)
   decisions_postgres.decide(
-    running.db,
+    running.deps.pool,
     app.payout_desk(running),
     decisions.resume(
       app.payout_desk(running),

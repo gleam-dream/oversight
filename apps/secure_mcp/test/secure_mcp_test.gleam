@@ -604,3 +604,36 @@ pub fn introspection_joins_mcp_request_test() {
     l.package == "relay" && l.event == "authorization.decided"
   })
 }
+
+@external(erlang, "owned_handlers_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process owns its handlers: they record what the
+/// application does while the collector runs, and once it stops they are
+/// detached and the collector holds nothing.
+pub fn telemetry_handlers_live_as_long_as_the_collector_test() {
+  let assert Ok(collector) = telemetry.start()
+  {
+    use running <- with_app
+    let _ = sign_in(running, "alice")
+    Nil
+  }
+  assert telemetry.lines(collector) != []
+  telemetry.stop(collector)
+  // Sinal detaches them once it sees the collector's process exit.
+  assert eventually(2000, fn() {
+    collector_handlers("sinal/collector:secure_mcp_telemetry") == 0
+  })
+  assert telemetry.lines(collector) == []
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
+}

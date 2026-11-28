@@ -61,7 +61,7 @@ pub fn model(provider: Provider, base_url: String, api_key: String) -> Model {
     provider:,
     settings: settings
       |> llm_wire.with_endpoint(base_url <> path)
-      |> llm_wire.with_call_timeout(llm_wire.After(duration.seconds(10)))
+      |> llm_wire.with_call_timeout(duration.seconds(10))
       |> llm_wire.with_first_token_timeout(llm_wire.After(duration.seconds(5)))
       |> llm_wire.with_idle_timeout(llm_wire.After(duration.seconds(5))),
     model: model_name,
@@ -77,6 +77,9 @@ pub type ExtractError {
   Refused(reason: String)
   Truncated
   UnexpectedToolCall
+  /// The provider ended with a stop reason llm_wire does not know. What
+  /// arrived before it is not a decoded invoice.
+  UnrecognizedStop(reason: String)
 }
 
 const instructions =
@@ -121,6 +124,8 @@ pub fn extract(
     Ok(llm_wire.Refused(reason:, ..)) -> Error(Refused(reason))
     Ok(llm_wire.OutputLimited(..)) -> Error(Truncated)
     Ok(llm_wire.NeedsTools(..)) -> Error(UnexpectedToolCall)
+    Ok(llm_wire.UnrecognizedStop(reason:, ..)) ->
+      Error(UnrecognizedStop(reason))
     Error(failure) -> Error(CallFailed(failure))
   }
 }

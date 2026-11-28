@@ -15,8 +15,7 @@
 import decisions
 import decisions/fact.{type Key}
 import decisions/policy.{
-  type Policy, AnyOf, AnyoneHolding, Ask, Never, PerCent, Policy, Proceed,
-  Several, When,
+  type Policy, AnyOf, AnyoneHolding, Ask, Never, PerCent, Proceed, Several, When,
 }
 import decisions/vocabulary.{ApproveRejectOrCorrect}
 import decisions/wire
@@ -38,6 +37,12 @@ pub const reviewers = "reviewers"
 
 /// The world event that supersedes a waiting recommendation about a post.
 pub const edited = "post_edited"
+
+/// The world event that supersedes a waiting recommendation about a post
+/// when the gated tool refused a verdict's release about it: whatever
+/// made the tool refuse, no verdict can be released through it, so no
+/// moderator is asked again.
+pub const release_refused = "release_refused"
 
 /// Minutes an occurrence waits before it goes to seniors.
 pub const escalate_after_minutes = 30
@@ -90,6 +95,7 @@ pub fn declaration() -> decisions.Point(Action) {
   |> decisions.signal(new_author())
   |> decisions.valid_for(duration.minutes(valid_minutes))
   |> decisions.superseded_by(edited)
+  |> decisions.superseded_by(release_refused)
   |> decisions.reviewed_by(reviewers)
   |> decisions.withdrawn_by(seniors)
 }
@@ -105,53 +111,60 @@ fn escalation() -> policy.Rule {
 /// Version 1: the rule model's answers proceed, a moderator decides the
 /// rest.
 pub fn version_1() -> Policy {
-  Policy(
-    version: 1,
-    rules: [rules_settle(), escalation()],
-    otherwise: Ask(AnyoneHolding(moderators)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 1,
+      rules: [rules_settle(), escalation()],
+      otherwise: AnyoneHolding(moderators),
+    )
+  policy
 }
 
 /// Version 2, as published once the replay gate passes.
 pub fn version_2() -> Policy {
-  Policy(
-    version: 2,
-    rules: [
-      rules_settle(),
-      When(
-        AnyOf([
-          policy.is(category(), domain.violation_name(domain.SelfHarm)),
-          policy.is(category(), domain.violation_name(domain.Violence)),
-        ]),
-        Ask(AnyoneHolding(seniors)),
-      ),
-      When(
-        policy.All([
-          policy.is(action(), "publish"),
-          policy.at_least(confidence(), confident),
-          policy.is(new_author(), False),
-        ]),
-        Proceed(sample: PerCent(2), hold: None),
-      ),
-      When(
-        policy.All([
-          policy.is(action(), "hide"),
-          policy.is(category(), domain.violation_name(domain.Spam)),
-          policy.at_least(confidence(), confident),
-        ]),
-        // A senior may take a confident hide of spam back within the undo
-        // window, and an edit during it supersedes the hide.
-        Proceed(sample: PerCent(2), hold: Some(duration.minutes(undo_minutes))),
-      ),
-      escalation(),
-      When(
-        policy.All([
-          policy.is(action(), "hide"),
-          policy.is(category(), domain.violation_name(domain.Abuse)),
-        ]),
-        Ask(Several(2, AnyoneHolding(moderators))),
-      ),
-    ],
-    otherwise: Ask(AnyoneHolding(moderators)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 2,
+      rules: [
+        rules_settle(),
+        When(
+          AnyOf([
+            policy.is(category(), domain.violation_name(domain.SelfHarm)),
+            policy.is(category(), domain.violation_name(domain.Violence)),
+          ]),
+          Ask(AnyoneHolding(seniors)),
+        ),
+        When(
+          policy.All([
+            policy.is(action(), "publish"),
+            policy.at_least(confidence(), confident),
+            policy.is(new_author(), False),
+          ]),
+          Proceed(sample: PerCent(2), hold: None),
+        ),
+        When(
+          policy.All([
+            policy.is(action(), "hide"),
+            policy.is(category(), domain.violation_name(domain.Spam)),
+            policy.at_least(confidence(), confident),
+          ]),
+          // A senior may take a confident hide of spam back within the undo
+          // window, and an edit during it supersedes the hide.
+          Proceed(
+            sample: PerCent(2),
+            hold: Some(duration.minutes(undo_minutes)),
+          ),
+        ),
+        escalation(),
+        When(
+          policy.All([
+            policy.is(action(), "hide"),
+            policy.is(category(), domain.violation_name(domain.Abuse)),
+          ]),
+          Ask(Several(2, AnyoneHolding(moderators))),
+        ),
+      ],
+      otherwise: AnyoneHolding(moderators),
+    )
+  policy
 }

@@ -14,6 +14,7 @@
 import decisions_otp/telemetry as library
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Name, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option
 import gleam/otp/actor
@@ -274,10 +275,28 @@ pub opaque type Message {
 }
 
 /// The collector as a child of the application's tree, registered under
-/// `name`.
-pub fn supervised(name: Name(Message)) -> supervision.ChildSpecification(Nil) {
+/// `name`. Its process attaches one handler per event while it starts, all
+/// or nothing, and owns them: they live as long as this process, and sinal
+/// detaches them when it stops or crashes. Each handler counts only the
+/// events of the application instance called `source`.
+pub fn supervised(
+  name: Name(Message),
+  source source: String,
+) -> supervision.ChildSpecification(Nil) {
   supervision.worker(fn() {
-    actor.new(dict.new())
+    actor.new_with_initialiser(5000, fn(_) {
+      use _attachments <- result.try(
+        subscriptions(name, source)
+        |> list.index_map(fn(subscription, index) {
+          // Stable ids: a restarted collector takes them over from the
+          // incarnation it replaces, so no event is counted twice.
+          sinal.with_id(subscription, source <> ":" <> int.to_string(index))
+        })
+        |> sinal.attach_all
+        |> result.map_error(sinal.describe_scope_error),
+      )
+      actor.initialised(dict.new()) |> actor.returning(Nil) |> Ok
+    })
     |> actor.named(name)
     |> actor.on_message(fn(counts, message) {
       case message {
@@ -297,7 +316,6 @@ pub fn supervised(name: Name(Message)) -> supervision.ChildSpecification(Nil) {
       }
     })
     |> actor.start
-    |> result.map(fn(started) { actor.Started(..started, data: Nil) })
   })
 }
 
@@ -332,12 +350,12 @@ pub fn numbers(name: Name(Message)) -> Numbers {
   )
 }
 
-/// Attach one handler per event, each sending its count to the collector
-/// named `name`. Detach them with `detach` when the application stops.
-pub fn attach(
+/// One subscription per event, each sending its count to the collector
+/// named `name`.
+fn subscriptions(
   name: Name(Message),
-  source source: String,
-) -> List(sinal.Attachment) {
+  source: String,
+) -> List(sinal.Subscription) {
   let add = fn(from: String, key: String, count: Int) {
     case from == source {
       True -> process.send(process.named_subject(name), Add(key, count))
@@ -345,13 +363,13 @@ pub fn attach(
     }
   }
   [
-    sinal.observe(post_received(), fn(_, m) {
+    sinal.subscription(post_received(), fn(_, m) {
       case m.duplicate {
         True -> add(m.source, "duplicates", 1)
         False -> add(m.source, "received", 1)
       }
     }),
-    sinal.observe(post_recommended(), fn(_, m) {
+    sinal.subscription(post_recommended(), fn(_, m) {
       add(m.source, "by_" <> m.stage, 1)
       add(m.source, outcome_name(m.outcome) |> rename_outcome, 1)
       case m.sampled {
@@ -359,44 +377,44 @@ pub fn attach(
         False -> Nil
       }
     }),
-    sinal.observe(verdict_given(), fn(_, m) {
+    sinal.subscription(verdict_given(), fn(_, m) {
       add(m.source, given_name(m.given), 1)
     }),
-    sinal.observe(card_refused(), fn(_, m) {
+    sinal.subscription(card_refused(), fn(_, m) {
       case m.stale {
         True -> add(m.source, "stale_cards", 1)
         False -> add(m.source, "other_refusals", 1)
       }
     }),
-    sinal.observe(hints_missed(), fn(c, m) {
+    sinal.subscription(hints_missed(), fn(c, m) {
       add(m.source, "hints_missed", c.count)
     }),
-    sinal.observe(library.model_failed(), fn(_, m) {
+    sinal.subscription(library.model_failed(), fn(_, m) {
       case m.failure {
         library.ModelDeadline -> add(m.source, "deadlines", 1)
         library.ModelRaised -> add(m.source, "raised", 1)
       }
     }),
-    sinal.observe(library.job_failed(), fn(_, m) {
+    sinal.subscription(library.job_failed(), fn(_, m) {
       // A transient failure is reported with no attempt counted.
       case m.attempts {
         0 -> add(m.source, "jobs_retried", 1)
         _ -> add(m.source, "jobs_failed", 1)
       }
     }),
-    sinal.observe(library.job_dropped(), fn(_, m) {
+    sinal.subscription(library.job_dropped(), fn(_, m) {
       add(m.source, "jobs_dropped", 1)
     }),
-    sinal.observe(library.job_set_aside(), fn(_, m) {
+    sinal.subscription(library.job_set_aside(), fn(_, m) {
       add(m.source, "set_aside", 1)
     }),
-    sinal.observe(library.trigger_worked(), fn(_, m) {
+    sinal.subscription(library.trigger_worked(), fn(_, m) {
       add(m.source, "triggers_worked", 1)
     }),
-    sinal.observe(library.settlement_delivered(), fn(_, m) {
+    sinal.subscription(library.settlement_delivered(), fn(_, m) {
       add(m.source, "settlements", 1)
     }),
-    sinal.observe(library.wake_delivered(), fn(_, m) {
+    sinal.subscription(library.wake_delivered(), fn(_, m) {
       add(m.source, "wakes", 1)
     }),
   ]
@@ -407,12 +425,4 @@ fn rename_outcome(name: String) -> String {
     "waiting" -> "waited"
     other -> other
   }
-}
-
-/// Detach handlers made by `attach`.
-pub fn detach(attachments: List(sinal.Attachment)) -> Nil {
-  list.each(attachments, fn(attachment) {
-    let _ = sinal.detach(attachment)
-    Nil
-  })
 }

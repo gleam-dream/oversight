@@ -146,7 +146,7 @@ fn step(
         ),
       )
     Some("extension") ->
-      Ok(#(state, [message.ProviderExtension("scripted-fourth", event.data)]))
+      Ok(#(state, [message.UnrecognizedEvent("scripted-fourth", "extension")]))
     _ -> Ok(#(state, []))
   }
 }

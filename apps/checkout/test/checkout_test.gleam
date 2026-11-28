@@ -12,7 +12,6 @@ import checkout/jobs
 import checkout/orders
 import checkout/providers
 import checkout/telemetry
-import checkout/web
 import envoy
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -22,7 +21,7 @@ import gleam/http/request
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/duration
@@ -81,7 +80,17 @@ fn order(
   address: String,
 ) -> domain.Order {
   let token = providers.tokenise(application.providers, card)
-  domain.Order(id, "alice", sku, 1, 2500, token, address, id <> "@example.test")
+  let assert Ok(order_id) = domain.order_id(id)
+  domain.Order(
+    order_id,
+    "alice",
+    sku,
+    1,
+    2500,
+    token,
+    address,
+    id <> "@example.test",
+  )
 }
 
 /// Lists `sku` at 2500 cents with `available` units.
@@ -119,7 +128,7 @@ pub fn order_api_confirms_and_sends_receipt_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "happy-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(customer) = http_gun.start(gateway.customer_config())
 
   let placed =
@@ -144,7 +153,15 @@ pub fn order_api_confirms_and_sends_receipt_test() {
   let assert Ok(reply) = http_gun.send(customer, req)
   http_gun.stop(customer)
 
-  assert reply.response.status == 201
+  assert reply.response.status == 202
+  assert eventually(
+    fn() {
+      db.order_status(pool, "alice", "happy-1")
+      |> option.map(fn(found) { found.0 })
+      == Some(domain.Confirmed)
+    },
+    200,
+  )
   assert stock(application, "happy-sku") == 2
   let assert Some(charge) =
     providers.charge_for(application.providers, "pay-" <> key("happy-1"))
@@ -172,12 +189,30 @@ pub fn order_api_confirms_and_sends_receipt_test() {
 
 // --- failure paths ------------------------------------------------------------
 
+/// Places `placed` and waits until its checkout job has finished; returns
+/// the order's recorded status and detail.
+fn place_and_finish(
+  application: App,
+  placed: domain.Order,
+) -> #(domain.OrderStatus, String) {
+  let assert Ok(orders.Started(job_id)) =
+    orders.place(application.services, application.checkout_worker, placed)
+  let _ = await_job(application, job_id)
+  let assert Some(recorded) =
+    db.order_status(
+      application.services.pool,
+      "alice",
+      domain.order_id_to_string(placed.order_id),
+    )
+  recorded
+}
+
 pub fn payment_declined_releases_stock_test() {
   use application <- with_app(fn(c) { c })
   let assert Ok(Nil) = set_stock(application.services.pool, "decline-sku", 3)
-  let assert Ok(orders.Started(report)) =
-    orders.place_local(
-      application.services,
+  let #(status, detail) =
+    place_and_finish(
+      application,
       order(
         application,
         "decline-1",
@@ -186,10 +221,8 @@ pub fn payment_declined_releases_stock_test() {
         "10 Main St",
       ),
     )
-  assert report.status == domain.Rejected
-  assert report.error == Ok(domain.Declined("insufficient_funds"))
-  assert web.status_code(report) == 402
-  assert report.undone == ["reserve_stock"]
+  assert status == domain.Rejected
+  assert string.contains(detail, "insufficient_funds")
   assert stock(application, "decline-sku") == 3
   assert providers.shipment_for(
       application.providers,
@@ -201,9 +234,9 @@ pub fn payment_declined_releases_stock_test() {
 pub fn shipment_timeout_after_charge_voids_the_charge_test() {
   use application <- with_app(fn(c) { c })
   let assert Ok(Nil) = set_stock(application.services.pool, "slow-sku", 3)
-  let assert Ok(orders.Started(report)) =
-    orders.place_local(
-      application.services,
+  let #(status, _) =
+    place_and_finish(
+      application,
       order(
         application,
         "slow-1",
@@ -212,11 +245,7 @@ pub fn shipment_timeout_after_charge_voids_the_charge_test() {
         providers.address_slow,
       ),
     )
-  // The step error carries http_gun's typed failure and evidence.
-  assert report.error
-    == Ok(ProviderUnreachable(domain.Shipping, timed_out_after_send()))
-  assert web.status_code(report) == 504
-  assert report.undone == ["charge_card", "reserve_stock"]
+  assert status == domain.Rejected
   let assert Some(charge) =
     providers.charge_for(application.providers, "pay-" <> key("slow-1"))
   assert charge.status == providers.Voided
@@ -225,8 +254,6 @@ pub fn shipment_timeout_after_charge_voids_the_charge_test() {
     providers.shipment_for(application.providers, "ship-" <> key("slow-1"))
   assert shipment.status == providers.Cancelled
   assert stock(application, "slow-sku") == 3
-  // Saga names the shipment attempt whose effect was unknown when it ended.
-  assert report.unknown_effects == 1
 }
 
 pub fn unknown_payment_outcome_is_reported_by_saga_test() {
@@ -257,7 +284,7 @@ pub fn unknown_payment_outcome_is_reported_by_saga_test() {
     == 1
 
   // Every answer lost: the decider holds. The outcome is Unresolved with the
-  // typed http_gun evidence, stock stays reserved, nothing is voided, and
+  // typed http_gun failure, stock stays reserved, nothing is voided, and
   // both attempts are named as unknown effects.
   let hole =
     order(
@@ -267,11 +294,14 @@ pub fn unknown_payment_outcome_is_reported_by_saga_test() {
       providers.card_black_hole,
       "1 St",
     )
-  let assert Ok(execution.Unresolved(step, evidence, settlement)) =
+  let assert Ok(execution.Unresolved(step, failure, settlement)) =
     execution.run(services.workflow, hole, services.saga_config)
   assert saga.address_to_string(step) == "charge_card"
-  assert evidence
-    == ProviderUnreachable(domain.Payments, timed_out_after_send())
+  assert failure
+    == saga.Returned(ProviderUnreachable(
+      domain.Payments,
+      timed_out_after_send(),
+    ))
   assert list.map(settlement.unknown_effects, fn(u) { #(u.action, u.ending) })
     == [
       #(execution.StepAttempt(1), execution.ActionReturnedUnknown),
@@ -314,10 +344,13 @@ pub fn unknown_payment_keeps_the_typed_failure_test() {
   ]
 
   let held = charge_only("charge-only-hold", fn(step) { step })
-  let assert Ok(execution.Unresolved(_, evidence, settlement)) =
+  let assert Ok(execution.Unresolved(_, failure, settlement)) =
     execution.run(held, hole, services.saga_config)
-  assert evidence
-    == ProviderUnreachable(domain.Payments, timed_out_after_send())
+  assert failure
+    == saga.Returned(ProviderUnreachable(
+      domain.Payments,
+      timed_out_after_send(),
+    ))
   assert list.map(settlement.unknown_effects, fn(u) { #(u.action, u.ending) })
     == unknown_attempt
 
@@ -419,7 +452,7 @@ pub fn durable_checkout_survives_a_killed_runner_test() {
   let arrivals = process.new_subject()
   providers.watch_shipments(application.providers, arrivals)
   let assert Ok(orders.Started(job_id)) =
-    orders.place_durable(services, application.checkout_worker, placed)
+    orders.place(services, application.checkout_worker, placed)
 
   // The shipment request reached the provider (which books it, then holds
   // the answer). Kill the runner that owns the saga execution right now.
@@ -491,7 +524,7 @@ pub fn durable_checkout_after_job_crash_replays_without_an_operator_test() {
   let arrivals = process.new_subject()
   providers.watch_shipments(application.providers, arrivals)
   let assert Ok(orders.Started(job_id)) =
-    orders.place_durable(services, application.checkout_worker, placed)
+    orders.place(services, application.checkout_worker, placed)
   let assert Ok(runner) = process.receive(runners, 10_000)
   let assert Ok(arrived) = process.receive(arrivals, 10_000)
   assert arrived == "ship-" <> key("crash-1")
@@ -559,7 +592,7 @@ pub fn durable_checkout_cancelled_through_grind_rolls_back_test() {
       providers.address_hold,
     )
   let assert Ok(orders.Started(job_id)) =
-    orders.place_durable(services, application.checkout_worker, placed)
+    orders.place(services, application.checkout_worker, placed)
   let assert Ok(arrived) = process.receive(arrivals, 10_000)
   assert arrived == "ship-" <> key("cancel-1")
   let jobs = services.jobs
@@ -616,9 +649,13 @@ pub fn receipt_job_commits_with_the_order_test() {
   let assert Error(pog.TransactionRolledBack(handle)) =
     pog.transaction(pool, fn(tx) {
       let assert Ok(Nil) =
-        db.set_status(tx, placed, domain.Confirmed, "rolled back")
+        db.set_status(tx, domain.ref(placed), domain.Confirmed, "rolled back")
       let assert Ok(grind.Inserted(handle)) =
-        grind.submit_in(services.jobs, tx, orders.receipt_job(services, placed))
+        grind.submit_in(
+          services.jobs,
+          tx,
+          orders.receipt_job(services, domain.ref(placed)),
+        )
       Error(handle)
     })
   assert grind.state(services.jobs, handle) == Error(grind.JobNotFound)
@@ -627,9 +664,9 @@ pub fn receipt_job_commits_with_the_order_test() {
 
   // Committed: the job runs; a resubmission under the same id converges.
   let assert Ok(first) =
-    orders.confirm_with_receipt(services, placed, "committed")
+    orders.confirm_with_receipt(services, domain.ref(placed), "committed")
   let assert Ok(again) =
-    orders.confirm_with_receipt(services, placed, "committed")
+    orders.confirm_with_receipt(services, domain.ref(placed), "committed")
   assert again == first
   let assert Ok(handle) =
     grind.bind(services.jobs, services.receipt_worker, first)
@@ -699,6 +736,194 @@ pub fn provider_refuses_a_negative_content_length_test() {
   assert providers.snapshot(application.providers).charge_requests == 0
 }
 
+// --- supervision ------------------------------------------------------------------
+
+@external(erlang, "checkout_test_ffi", "children")
+fn children(supervisor: process.Pid) -> List(process.Pid)
+
+@external(erlang, "checkout_test_ffi", "fail")
+fn fail(pid: process.Pid) -> Nil
+
+/// The application's processes one level below its two groups: the
+/// forwarder, the collector, the provider client, grind, the endpoint, the
+/// listener and the sweeper.
+fn workers(application: App) -> List(process.Pid) {
+  list.flat_map(children(application.root), children)
+}
+
+fn job_id(text: String) -> Result(Int, json.DecodeError) {
+  json.parse(text, decode.at(["job_id"], decode.int))
+}
+
+/// The abnormal exit of any one process of the application leaves the
+/// application running: its supervisor starts a replacement, and a durable order placed
+/// through the API afterwards is charged, shipped, confirmed and traced.
+/// Nothing the caller holds (the `App`, its services, the collector) is
+/// replaced; the handles are names.
+pub fn a_failed_process_is_replaced_and_orders_still_complete_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(probe) = app.start(app.default_config(url))
+  let count = list.length(workers(probe))
+  app.stop(probe)
+  assert count == 7
+
+  list.each([0, 1, 2, 3, 4, 5, 6], fn(index) {
+    use application <- with_app(fn(c) { c })
+    let services = application.services
+    let id = "killed-" <> int.to_string(index)
+    let sku = id <> "-sku"
+    let assert Ok(Nil) = set_stock(services.pool, sku, 1)
+    let before = workers(application)
+    let assert Ok(victim) = list.first(list.drop(before, index))
+
+    let monitor = process.monitor(victim)
+    fail(victim)
+    let assert Ok(Nil) =
+      process.new_selector()
+      |> process.select_specific_monitor(monitor, fn(_) { Nil })
+      |> process.selector_receive(5000)
+    assert eventually(
+      fn() {
+        let now = workers(application)
+        list.length(now) == count
+        && !list.contains(now, victim)
+        && list.all(now, process.is_alive)
+        && result.is_ok(app.port(application))
+      },
+      100,
+    )
+
+    let assert Ok(port) = app.port(application)
+    let token = providers.tokenise(application.providers, providers.card_ok)
+    let #(status, text) =
+      post_order(port, body(order_fields(id, sku, 1, token)), "")
+    assert #(index, status) == #(index, 202)
+    let assert Ok(job) = job_id(text)
+    let assert grind.Succeeded(_) = await_job(application, job)
+    let assert Some(#(domain.Confirmed, _)) =
+      db.order_status(services.pool, "alice", id)
+    assert eventually(fn() { db.receipt_sent(services.pool, "alice", id) }, 100)
+    assert eventually(
+      fn() {
+        let sources =
+          telemetry.trace(services.collector, telemetry.order(key(id)))
+          |> list.map(fn(e) { e.source })
+        list.contains(sources, telemetry.Saga)
+        && list.contains(sources, telemetry.Http)
+        && list.contains(sources, telemetry.Grind)
+      },
+      40,
+    )
+  })
+}
+
+// --- recording the outcome ------------------------------------------------------
+
+/// Makes every write that sets `order_id` to `status` fail, the way a
+/// database fault between the saga and its bookkeeping would. Returns the
+/// function that removes the fault.
+fn refuse_status(
+  pool: pog.Connection,
+  order_id: String,
+  status: String,
+) -> fn() -> Nil {
+  let run = fn(sql) {
+    let assert Ok(_) = pog.query(sql) |> pog.execute(pool)
+    Nil
+  }
+  let name = "refuse_" <> string.replace(order_id, "-", "_")
+  run("CREATE FUNCTION " <> name <> "() RETURNS trigger AS $$
+     BEGIN RAISE EXCEPTION 'order store fault'; END $$ LANGUAGE plpgsql")
+  run("CREATE TRIGGER " <> name <> " BEFORE UPDATE ON orders FOR EACH ROW
+     WHEN (NEW.order_id = '" <> order_id <> "' AND NEW.status = '" <> status <> "')
+     EXECUTE FUNCTION " <> name <> "()")
+  fn() {
+    run("DROP TRIGGER " <> name <> " ON orders")
+    run("DROP FUNCTION " <> name <> "()")
+  }
+}
+
+/// A durable checkout whose confirmation cannot be written keeps its job:
+/// the job does not succeed while the order row is pending. Once the store
+/// accepts the write, the redelivered job reads the saga's saved outcome,
+/// records it with the receipt job, and charges nothing again.
+pub fn durable_checkout_retries_an_unrecorded_confirmation_test() {
+  use application <- with_app(fn(c) { c })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "redo-sku", 2)
+  let placed =
+    order(application, "redo-1", "redo-sku", providers.card_ok, "10 Main St")
+  let restore = refuse_status(services.pool, "redo-1", "confirmed")
+  let assert Ok(orders.Started(job_id)) =
+    orders.place(services, application.checkout_worker, placed)
+  let assert Ok(handle) =
+    grind.bind(services.jobs, application.checkout_worker, job_id)
+
+  // The saga finished: the shipment is booked. The job stays unfinished
+  // while the order row cannot be written.
+  assert eventually(
+    fn() {
+      providers.shipment_for(application.providers, "ship-" <> key("redo-1"))
+      != None
+    },
+    200,
+  )
+  let assert Ok(grind.Pending(_)) =
+    grind.await(services.jobs, handle, within: duration.milliseconds(1000))
+  let assert Some(#(domain.Pending, _)) =
+    db.order_status(services.pool, "alice", "redo-1")
+  restore()
+
+  let assert grind.Succeeded(_) = await_job(application, job_id)
+  let assert Some(#(domain.Confirmed, _)) =
+    db.order_status(services.pool, "alice", "redo-1")
+  assert eventually(
+    fn() { db.receipt_sent(services.pool, "alice", "redo-1") },
+    100,
+  )
+  let snapshot = providers.snapshot(application.providers)
+  assert snapshot.charge_requests == 1
+  assert snapshot.shipment_requests == 1
+  assert stock(application, "redo-sku") == 1
+}
+
+// --- telemetry bound ----------------------------------------------------------------
+
+/// The collector holds at most its capacity. Beyond it the oldest entries
+/// are discarded and counted, so a long-running application's telemetry
+/// does not grow with the number of orders, and the newest events stay
+/// readable.
+pub fn the_collector_keeps_at_most_its_capacity_test() {
+  use application <- with_app(fn(c) { app.Config(..c, telemetry_capacity: 8) })
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "bound-sku", 3)
+  let place = fn(id) {
+    let assert Ok(orders.Started(job_id)) =
+      orders.place(
+        services,
+        application.checkout_worker,
+        order(application, id, "bound-sku", providers.card_ok, "10 Main St"),
+      )
+    let assert grind.Succeeded(_) = await_job(application, job_id)
+    let assert Some(#(domain.Confirmed, _)) =
+      db.order_status(services.pool, "alice", id)
+    assert eventually(fn() { db.receipt_sent(services.pool, "alice", id) }, 100)
+  }
+  place("bound-1")
+  place("bound-2")
+  // Let forwarded events of the last order arrive.
+  let _ = telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+
+  let usage = telemetry.usage(services.collector)
+  assert usage.held == 8
+  assert usage.dropped > 0
+  // The first order's events were the oldest; the last order's remain.
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-1")))
+    == []
+  assert telemetry.trace(services.collector, telemetry.order(key("bound-2")))
+    != []
+}
+
 // --- error bodies ----------------------------------------------------------------
 
 fn post_order(port: Int, body: String, query: String) -> #(Int, String) {
@@ -728,16 +953,33 @@ fn call_api(
   let assert Ok(reply) = http_gun.send(customer, req)
   http_gun.stop(customer)
   let assert Ok(text) = bit_array.to_string(reply.response.body)
+  // A placement answers at once; wait until its checkout job has recorded
+  // an outcome, so the test reads the order as the customer later would.
+  case method, reply.response.status {
+    http.Post, 202 -> {
+      let assert Ok(order_id) =
+        json.parse(text, decode.at(["order_id"], decode.string))
+      assert eventually(
+        fn() {
+          let #(_, now) =
+            call_api(port, http.Get, "/orders/" <> order_id, token, "")
+          json.parse(now, decode.at(["status"], decode.string)) != Ok("pending")
+        },
+        200,
+      )
+    }
+    _, _ -> Nil
+  }
   #(reply.response.status, text)
 }
 
-/// An internal failure answers with a stable error code and message; the
-/// driver's error term goes to the log, not to the client.
-pub fn internal_errors_stay_out_of_response_bodies_test() {
+/// An internal failure reaches the customer as a stable detail on the
+/// order; the driver's error term goes to the log, not to the order row.
+pub fn internal_errors_stay_out_of_stored_details_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "broken-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let rename = fn(from, to) {
     let assert Ok(_) =
       pog.query("ALTER TABLE " <> from <> " RENAME TO " <> to)
@@ -746,39 +988,100 @@ pub fn internal_errors_stay_out_of_response_bodies_test() {
   }
   rename("reservations", "reservations_hidden")
   let token = providers.tokenise(application.providers, providers.card_ok)
+  // The placement waits until the checkout job has recorded its outcome.
   let #(status, body) =
     post_order(port, body(order_fields("broken-1", "broken-sku", 1, token)), "")
   rename("reservations_hidden", "reservations")
 
-  assert status == 503
+  assert status == 202
+  let #(_, shown) =
+    call_api(port, http.Get, "/orders/broken-1", Some(alice_token), "")
   list.each(["Postgresql", "QueryError", "reservations", "42P01"], fn(term) {
     assert !string.contains(body, term)
+    assert !string.contains(shown, term)
   })
-  let assert Ok("store_unavailable") =
-    json.parse(body, decode.at(["error"], decode.string))
-  // The stored order detail is the same stable text.
   let assert Some(#(domain.Rejected, detail)) =
     db.order_status(pool, "alice", "broken-1")
   assert !string.contains(detail, "Postgresql")
 }
 
+// --- order ids and provider paths ----------------------------------------------------
+
+/// An order id is 1 to 64 characters of letters, digits, `.`, `_` and `-`.
+/// Anything else is refused at the request boundary, before pricing, so it
+/// never reaches a job, a saga or a provider.
+pub fn order_ids_outside_the_safe_alphabet_are_refused_test() {
+  use application <- with_app(fn(c) { c })
+  let assert Ok(Nil) = set_stock(application.services.pool, "id-sku", 9)
+  let assert Ok(port) = app.port(application)
+  let token = providers.tokenise(application.providers, providers.card_ok)
+  list.each(
+    ["", "a/b", "a#b", "a?b", "a b", "a%2Fb", "..", string.repeat("a", 65)],
+    fn(id) {
+      let #(status, text) =
+        post_order(port, body(order_fields(id, "id-sku", 1, token)), "")
+      assert #(id, status) == #(id, 422)
+      let assert Ok("invalid_order") = error_code(text)
+    },
+  )
+  assert providers.snapshot(application.providers).charge_requests == 0
+  assert stock(application, "id-sku") == 9
+
+  let #(status, _) =
+    post_order(
+      port,
+      body(order_fields("A.b_c-" <> string.repeat("9", 58), "id-sku", 1, token)),
+      "",
+    )
+  assert status == 202
+}
+
+/// The gateway sends a provider key as one path segment whatever it
+/// contains: a lookup or a cancel reaches the record the key was created
+/// under. (A customer id comes from configuration and is not restricted to
+/// the order id's alphabet.)
+pub fn provider_keys_are_sent_as_one_path_segment_test() {
+  use application <- with_app(fn(c) { c })
+  let gateway = application.services.gateway
+  let placed =
+    order(application, "segment-1", "segment-sku", providers.card_ok, "1 St")
+  let key = "3:a/b:x#1?y z"
+
+  let assert Ok(charge_id) =
+    gateway.charge(gateway, gateway.client, placed, "pay-" <> key)
+  assert gateway.find_charge(gateway, gateway.client, "pay-" <> key)
+    == Ok(gateway.ChargeFound(charge_id, False))
+
+  let assert Ok(shipment_id) =
+    gateway.book(gateway, gateway.client, placed, "ship-" <> key)
+  let assert Ok(Nil) =
+    gateway.cancel_shipment(gateway, gateway.client, "ship-" <> key)
+  assert gateway.find_shipment(gateway, gateway.client, "ship-" <> key)
+    == Ok(gateway.ShipmentFound(shipment_id, True))
+}
+
 // --- wisp secret key base ----------------------------------------------------------
 
 /// The signing secret comes from `CHECKOUT_SECRET_KEY_BASE`; one shorter
-/// than wisp's 64-character minimum stops startup, and an unset variable
-/// falls back to a random per-boot secret.
+/// than wisp's 64-character minimum stops startup before any process
+/// starts, and an unset variable falls back to a random per-boot secret.
 pub fn secret_key_base_comes_from_the_environment_test() {
-  use application <- with_app(fn(c) { c })
+  let assert Ok(url) = envoy.get("DATABASE_URL")
   let variable = "CHECKOUT_SECRET_KEY_BASE"
+  let boot = fn() {
+    app.start(app.default_config(url))
+    |> result.map(app.stop)
+  }
   envoy.set(variable, "too-short")
-  let short = web.start(application)
+  let short = boot()
   envoy.set(variable, string.repeat("k", 64))
-  let configured = web.start(application)
+  let configured = boot()
   envoy.unset(variable)
-  let generated = web.start(application)
-  assert result.is_error(short)
-  assert result.is_ok(configured)
-  assert result.is_ok(generated)
+  let generated = boot()
+  assert short
+    == Error("CHECKOUT_SECRET_KEY_BASE must be at least 64 characters")
+  assert configured == Ok(Nil)
+  assert generated == Ok(Nil)
 }
 
 // --- pricing and payment tokens ------------------------------------------------------
@@ -828,12 +1131,12 @@ pub fn server_prices_the_order_from_the_catalog_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "priced-sku", unit_price_cents: 1250, available: 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(token) = tokenise(application, providers.card_ok)
 
   let #(status, _) =
     post_order(port, body(order_fields("priced-1", "priced-sku", 3, token)), "")
-  assert status == 201
+  assert status == 202
   let assert Some(charge) =
     providers.charge_for(application.providers, "pay-" <> key("priced-1"))
   assert charge.amount_cents == 3750
@@ -860,7 +1163,7 @@ pub fn client_amount_and_card_fields_are_refused_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "strict-sku", unit_price_cents: 4999, available: 10)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   // The request shape the API used to accept: a client-chosen amount and a
   // raw card number.
   let legacy =
@@ -925,19 +1228,15 @@ pub fn card_digits_never_reach_stored_rows_test() {
   let pool = application.services.pool
   let assert Ok(Nil) =
     db.set_product(pool, "token-sku", unit_price_cents: 900, available: 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let assert Ok(token) = tokenise(application, providers.card_ok)
   assert !string.contains(token, providers.card_ok)
 
   let #(status, _) =
     post_order(port, body(order_fields("token-1", "token-sku", 1, token)), "")
-  assert status == 201
+  assert status == 202
   let #(status, placed) =
-    post_order(
-      port,
-      body(order_fields("token-2", "token-sku", 2, token)),
-      "?mode=durable",
-    )
+    post_order(port, body(order_fields("token-2", "token-sku", 2, token)), "")
   assert status == 202
   let assert Ok(job_id) = json.parse(placed, decode.at(["job_id"], decode.int))
   let assert grind.Succeeded(_) = await_job(application, job_id)
@@ -957,7 +1256,7 @@ pub fn requests_without_a_customer_identity_are_refused_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "anon-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let token = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("anon-1", "anon-sku", 1, token))
 
@@ -978,12 +1277,12 @@ pub fn another_customers_order_reads_as_not_found_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "owned-sku", 3)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let token = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("owned-1", "owned-sku", 1, token))
   let #(status, _) =
     call_api(port, http.Post, "/orders", Some(alice_token), placement)
-  assert status == 201
+  assert status == 202
 
   let #(status, text) =
     call_api(port, http.Get, "/orders/owned-1", Some(alice_token), "")
@@ -1004,12 +1303,12 @@ pub fn repeated_order_id_never_reruns_the_saga_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "repeat-sku", 5)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let alice_card = providers.tokenise(application.providers, providers.card_ok)
   let placement = body(order_fields("repeat-1", "repeat-sku", 1, alice_card))
   let #(status, _) =
     call_api(port, http.Post, "/orders", Some(alice_token), placement)
-  assert status == 201
+  assert status == 202
   let before = providers.snapshot(application.providers)
   let assert Some(#(domain.Confirmed, detail)) =
     db.order_status(pool, "alice", "repeat-1")
@@ -1021,13 +1320,7 @@ pub fn repeated_order_id_never_reruns_the_saga_test() {
   let assert Ok("confirmed") =
     json.parse(text, decode.at(["status"], decode.string))
   let #(status, _) =
-    call_api(
-      port,
-      http.Post,
-      "/orders?mode=durable",
-      Some(alice_token),
-      placement,
-    )
+    call_api(port, http.Post, "/orders", Some(alice_token), placement)
   assert status == 200
 
   // The same customer with a different placement.
@@ -1037,13 +1330,7 @@ pub fn repeated_order_id_never_reruns_the_saga_test() {
   assert status == 409
   assert error_code(text) == Ok("order_id_conflict")
   let #(status, _) =
-    call_api(
-      port,
-      http.Post,
-      "/orders?mode=durable",
-      Some(alice_token),
-      changed,
-    )
+    call_api(port, http.Post, "/orders", Some(alice_token), changed)
   assert status == 409
 
   let after = providers.snapshot(application.providers)
@@ -1061,10 +1348,10 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
   use application <- with_app(fn(c) { c })
   let pool = application.services.pool
   let assert Ok(Nil) = set_stock(pool, "shared-sku", 10)
-  let assert Ok(#(_, port)) = web.start(application)
+  let assert Ok(port) = app.port(application)
   let alice_card = providers.tokenise(application.providers, providers.card_ok)
   let bob_card = providers.tokenise(application.providers, providers.card_ok)
-  let #(status, _) =
+  let #(status, alice_placed) =
     call_api(
       port,
       http.Post,
@@ -1072,7 +1359,10 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
       Some(alice_token),
       body(order_fields("shared-1", "shared-sku", 1, alice_card)),
     )
-  assert status == 201
+  assert status == 202
+  let assert Ok(alice_job) =
+    json.parse(alice_placed, decode.at(["job_id"], decode.int))
+  let assert grind.Succeeded(_) = await_job(application, alice_job)
   let assert Ok(Some(alice_before)) = db.order_for(pool, "alice", "shared-1")
 
   // Bob reuses Alice's id, locally and durably, with his own placement.
@@ -1084,14 +1374,14 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
       Some(bob_token),
       body(order_fields("shared-1", "shared-sku", 2, bob_card)),
     )
-  assert status == 201
-  let assert Ok("confirmed") =
+  assert status == 202
+  let assert Ok("pending") =
     json.parse(text, decode.at(["status"], decode.string))
   let #(status, placed) =
     call_api(
       port,
       http.Post,
-      "/orders?mode=durable",
+      "/orders",
       Some(bob_token),
       body(order_fields("shared-2", "shared-sku", 3, bob_card)),
     )
@@ -1100,7 +1390,7 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
     call_api(
       port,
       http.Post,
-      "/orders?mode=durable",
+      "/orders",
       Some(alice_token),
       body(order_fields("shared-2", "shared-sku", 1, alice_card)),
     )
@@ -1133,76 +1423,6 @@ pub fn another_customers_order_id_creates_a_separate_order_test() {
   )
   assert eventually(fn() { db.receipt_sent(pool, "bob", "shared-1") }, 100)
   assert db.receipt_sent(pool, "alice", "shared-1")
-}
-
-/// A local checkout whose saga cannot start records the rejection it
-/// reports, so a retry of the order reads the same answer instead of an
-/// order left pending.
-pub fn local_checkout_that_cannot_start_is_recorded_rejected_test() {
-  use application <- with_app(fn(c) { c })
-  let services = application.services
-  let assert Ok(Nil) = set_stock(services.pool, "nostart-sku", 2)
-  let broken =
-    orders.Services(
-      ..services,
-      saga_config: execution.config()
-        |> execution.with_max_concurrency(0),
-    )
-  let placed =
-    order(application, "nostart-1", "nostart-sku", providers.card_ok, "1 St")
-  let assert Ok(orders.Started(report)) = orders.place_local(broken, placed)
-  assert report.status == domain.Rejected
-  assert db.order_status(services.pool, "alice", "nostart-1")
-    == Some(#(domain.Rejected, report.detail))
-  let assert Ok(orders.Existing(existing)) =
-    orders.place_local(services, placed)
-  assert existing.status == domain.Rejected
-  assert providers.snapshot(application.providers).charge_requests == 0
-  assert stock(application, "nostart-sku") == 2
-}
-
-/// A local checkout that outlasts the request's budget is cancelled and
-/// settled before the request answers: its rolled-back outcome is recorded,
-/// nothing keeps running unobserved, and a retry neither re-reserves nor
-/// re-charges.
-pub fn local_checkout_over_budget_is_settled_and_recorded_test() {
-  use application <- with_app(fn(c) {
-    app.Config(..c, shipping_deadline: duration.seconds(5))
-  })
-  let services = application.services
-  let assert Ok(Nil) = set_stock(services.pool, "budget-sku", 2)
-  let hurried =
-    orders.Services(..services, local_budget: duration.milliseconds(500))
-  let placed =
-    order(
-      application,
-      "budget-1",
-      "budget-sku",
-      providers.card_ok,
-      providers.address_hold,
-    )
-  let assert Ok(orders.Started(report)) = orders.place_local(hurried, placed)
-  assert report.status != domain.Pending
-  let assert Some(#(status, _)) =
-    db.order_status(services.pool, "alice", "budget-1")
-  assert status == report.status
-  assert status == domain.Rejected
-  // Every effect was reversed before the answer.
-  let assert Some(charge) =
-    providers.charge_for(application.providers, "pay-" <> key("budget-1"))
-  assert charge.status == providers.Voided
-  assert stock(application, "budget-sku") == 2
-  assert db.reservation(services.pool, placed) == Ok(db.Released)
-
-  // A retry returns the recorded order and runs nothing again.
-  let before = providers.snapshot(application.providers)
-  let assert Ok(orders.Existing(existing)) =
-    orders.place_local(services, placed)
-  assert existing.status == domain.Rejected
-  let after = providers.snapshot(application.providers)
-  assert after.charge_requests == before.charge_requests
-  assert after.shipment_requests == before.shipment_requests
-  assert stock(application, "budget-sku") == 2
 }
 
 /// The schema this app created before orders, reservations and receipts
@@ -1268,4 +1488,124 @@ pub fn an_outdated_schema_is_refused_at_boot_test() {
     |> pog.returning(decode.at([0], decode.int))
     |> pog.execute(legacy)
   assert columns.rows == [0]
+}
+
+@external(erlang, "checkout_test_ffi", "registered_name")
+fn registered_name(pid: process.Pid) -> String
+
+@external(erlang, "checkout_test_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process attaches the twelve handlers and owns them:
+/// while the application runs they are attached once, a replacement
+/// collector takes them over instead of adding a second set, and once the
+/// application stops none is left.
+pub fn telemetry_handlers_live_as_long_as_the_collector_test() {
+  let assert Ok(url) = envoy.get("DATABASE_URL")
+  let assert Ok(application) = app.start(app.default_config(url))
+  let prefix = "sinal/collector:checkout_collector"
+  assert collector_handlers(prefix) == 12
+  let is_collector = fn(pid) {
+    string.starts_with(registered_name(pid), "checkout_collector")
+  }
+  let assert Ok(collector) = list.find(workers(application), is_collector)
+  let monitor = process.monitor(collector)
+  fail(collector)
+  let assert Ok(Nil) =
+    process.new_selector()
+    |> process.select_specific_monitor(monitor, fn(_) { Nil })
+    |> process.selector_receive(5000)
+  assert eventually(
+    fn() {
+      case list.find(workers(application), is_collector) {
+        Ok(replacement) -> replacement != collector
+        Error(Nil) -> False
+      }
+    },
+    100,
+  )
+  assert collector_handlers(prefix) == 12
+  app.stop(application)
+  assert eventually(fn() { collector_handlers(prefix) == 0 }, 100)
+}
+
+// --- stale pending orders -------------------------------------------------------
+
+/// The application with a sweeper that looks at every pending order at
+/// once, ten times a second.
+fn sweeping(config: app.Config) -> app.Config {
+  app.Config(
+    ..config,
+    sweep_every: duration.milliseconds(100),
+    stale_after: duration.milliseconds(0),
+  )
+}
+
+fn status_of(application: App, id: String) -> Option(domain.OrderStatus) {
+  db.order_status(application.services.pool, "alice", id)
+  |> option.map(fn(found) { found.0 })
+}
+
+/// A checkout job that ends before the order row holds the saga's outcome
+/// leaves the order pending with nothing left to finish it. The sweeper
+/// reads the saga's saved outcome and records it with the receipt job,
+/// without running a step or charging again.
+pub fn the_sweeper_records_the_outcome_of_a_job_that_ended_test() {
+  use application <- with_app(sweeping)
+  let services = application.services
+  let assert Ok(Nil) = set_stock(services.pool, "swept-sku", 2)
+  let placed =
+    order(application, "swept-1", "swept-sku", providers.card_ok, "10 Main St")
+  let restore = refuse_status(services.pool, "swept-1", "confirmed")
+  let assert Ok(orders.Started(job_id)) =
+    orders.place(services, application.checkout_worker, placed)
+  let assert Ok(handle) =
+    grind.bind(services.jobs, application.checkout_worker, job_id)
+  assert eventually(
+    fn() {
+      providers.shipment_for(application.providers, "ship-" <> key("swept-1"))
+      != None
+    },
+    200,
+  )
+  // An operator cancels the job while the store refuses the write.
+  let assert Ok(_) = grind.cancel(services.jobs, handle)
+  let assert grind.Cancelled(_) = await_job(application, job_id)
+  assert status_of(application, "swept-1") == Some(domain.Pending)
+
+  restore()
+  assert eventually(
+    fn() { status_of(application, "swept-1") == Some(domain.Confirmed) },
+    100,
+  )
+  assert eventually(
+    fn() { db.receipt_sent(services.pool, "alice", "swept-1") },
+    100,
+  )
+  let snapshot = providers.snapshot(application.providers)
+  assert snapshot.charge_requests == 1
+  assert snapshot.shipment_requests == 1
+}
+
+/// An order left pending with no checkout job, as the removed in-request
+/// placement left one when its node stopped mid-checkout, is held for
+/// reconciliation: no saga record says what the providers did.
+pub fn the_sweeper_holds_a_pending_order_without_a_job_test() {
+  use application <- with_app(sweeping)
+  let placed =
+    order(
+      application,
+      "stranded-1",
+      "stranded-sku",
+      providers.card_ok,
+      "10 Main St",
+    )
+  let assert Ok(db.Inserted) =
+    db.insert_order(application.services.pool, placed)
+  assert eventually(
+    fn() {
+      status_of(application, "stranded-1") == Some(domain.NeedsReconciliation)
+    },
+    100,
+  )
 }

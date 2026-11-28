@@ -43,7 +43,6 @@ pub fn default_settings() -> Settings {
 pub fn config(settings: Settings) -> config.Config {
   let base =
     config.default()
-    |> config.with_request_timeout(config.After(settings.deadline))
     |> config.with_destination(
       destination.default() |> destination.allow_loopback,
     )
@@ -56,7 +55,10 @@ pub fn config(settings: Settings) -> config.Config {
 
 pub fn start(settings: Settings) -> Result(Egress, http_gun.StartError) {
   use client <- result.map(settings.start_client(config(settings)))
-  Egress(client:, internal_hosts: settings.internal_hosts)
+  Egress(
+    client: http_gun.with_timeout(client, settings.deadline),
+    internal_hosts: settings.internal_hosts,
+  )
 }
 
 pub fn stop(egress: Egress) -> Nil {

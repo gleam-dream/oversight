@@ -3,13 +3,15 @@
 //// and grind keep their own tables on the same pool.
 
 import checkout/domain.{
-  type CheckoutError, type Order, type OrderStatus, OutOfStock, StockStoreFailed,
+  type CheckoutError, type Order, type OrderRef, type OrderStatus, OutOfStock,
+  StockStoreFailed,
 }
 import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
+import gleam/time/duration.{type Duration}
 import pog
 
 const schema = [
@@ -38,6 +40,8 @@ const schema = [
      status text NOT NULL,
      detail text NOT NULL DEFAULT '',
      updated_at timestamptz NOT NULL DEFAULT now(),
+     email text NOT NULL,
+     job_id bigint,
      PRIMARY KEY (customer_id, order_id))",
   "CREATE TABLE IF NOT EXISTS receipts_sent (
      customer_id text NOT NULL,
@@ -59,7 +63,7 @@ const expected_shape = [
     "orders",
     [
       "customer_id", "order_id", "sku", "quantity", "amount_cents", "status",
-      "detail", "updated_at",
+      "detail", "updated_at", "email", "job_id",
     ],
     ["customer_id", "order_id"],
   ),
@@ -217,7 +221,7 @@ pub fn reserve(
          ON CONFLICT (customer_id, order_id) DO NOTHING",
       )
       |> pog.parameter(pog.text(order.customer_id))
-      |> pog.parameter(pog.text(order.order_id))
+      |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
       |> pog.parameter(pog.text(order.sku))
       |> pog.parameter(pog.int(order.quantity))
       |> pog.execute(tx)
@@ -259,7 +263,7 @@ pub fn release(
          RETURNING sku, quantity",
       )
       |> pog.parameter(pog.text(order.customer_id))
-      |> pog.parameter(pog.text(order.order_id))
+      |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
       |> pog.returning({
         use sku <- decode.field(0, decode.string)
         use quantity <- decode.field(1, decode.int)
@@ -296,7 +300,7 @@ pub fn reservation(
     "SELECT released FROM reservations WHERE customer_id = $1 AND order_id = $2",
   )
   |> pog.parameter(pog.text(order.customer_id))
-  |> pog.parameter(pog.text(order.order_id))
+  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
   |> pog.returning(decode.at([0], decode.bool))
   |> pog.execute(conn)
   |> result.map_error(store_failed)
@@ -343,15 +347,16 @@ pub fn insert_order(
   use inserted <- result.try(
     pog.query(
       "INSERT INTO orders
-         (order_id, customer_id, sku, quantity, amount_cents, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')
+         (order_id, customer_id, sku, quantity, amount_cents, status, email)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6)
        ON CONFLICT (customer_id, order_id) DO NOTHING",
     )
-    |> pog.parameter(pog.text(order.order_id))
+    |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
     |> pog.parameter(pog.text(order.customer_id))
     |> pog.parameter(pog.text(order.sku))
     |> pog.parameter(pog.int(order.quantity))
     |> pog.parameter(pog.int(order.amount_cents))
+    |> pog.parameter(pog.text(order.email))
     |> pog.execute(conn),
   )
   case inserted.count {
@@ -359,7 +364,7 @@ pub fn insert_order(
     _ ->
       select_orders(
         "WHERE customer_id = $1 AND order_id = $2",
-        [order.customer_id, order.order_id],
+        [order.customer_id, domain.order_id_to_string(order.order_id)],
         conn,
       )
       |> result.map(fn(rows) {
@@ -373,7 +378,7 @@ pub fn insert_order(
 
 pub fn set_status(
   conn: pog.Connection,
-  order: Order,
+  order: OrderRef,
   status: OrderStatus,
   detail: String,
 ) -> Result(Nil, pog.QueryError) {
@@ -387,6 +392,60 @@ pub fn set_status(
   |> pog.parameter(pog.text(detail))
   |> pog.execute(conn)
   |> result.replace(Nil)
+}
+
+/// Names the checkout job that finishes the order, in the transaction that
+/// admits it.
+pub fn set_job(
+  conn: pog.Connection,
+  order: Order,
+  job_id: Int,
+) -> Result(Nil, pog.QueryError) {
+  pog.query(
+    "UPDATE orders SET job_id = $3 WHERE customer_id = $1 AND order_id = $2",
+  )
+  |> pog.parameter(pog.text(order.customer_id))
+  |> pog.parameter(pog.text(domain.order_id_to_string(order.order_id)))
+  |> pog.parameter(pog.int(job_id))
+  |> pog.execute(conn)
+  |> result.replace(Nil)
+}
+
+/// A pending order as the sweeper reads it: what recording its outcome
+/// needs, and the checkout job that should finish it. An order placed
+/// before checkout was durable has no job.
+pub type PendingOrder {
+  PendingOrder(ref: OrderRef, job_id: Option(Int))
+}
+
+/// Up to `limit` orders still `pending` that have not changed for
+/// `older_than`, oldest first.
+pub fn stale_pending(
+  conn: pog.Connection,
+  older_than: Duration,
+  limit limit: Int,
+) -> Result(List(PendingOrder), pog.QueryError) {
+  pog.query(
+    "SELECT customer_id, order_id, email, amount_cents, job_id FROM orders
+     WHERE status = 'pending'
+       AND updated_at <= now() - make_interval(secs => $1::float8 / 1000)
+     ORDER BY updated_at LIMIT $2",
+  )
+  |> pog.parameter(pog.int(duration.to_milliseconds(older_than)))
+  |> pog.parameter(pog.int(limit))
+  |> pog.returning({
+    use customer_id <- decode.field(0, decode.string)
+    use order_id <- decode.field(1, decode.string)
+    use email <- decode.field(2, decode.string)
+    use amount_cents <- decode.field(3, decode.int)
+    use job_id <- decode.field(4, decode.optional(decode.int))
+    decode.success(PendingOrder(
+      ref: domain.OrderRef(customer_id:, order_id:, email:, amount_cents:),
+      job_id:,
+    ))
+  })
+  |> pog.execute(conn)
+  |> result.map(fn(r) { r.rows })
 }
 
 pub fn record_receipt(

@@ -416,6 +416,8 @@ fn run_lookup_example(
     llm_wire.OutputLimited(..) ->
       Error("provider output reached the configured limit")
     llm_wire.Refused(reason:, ..) -> Error(reason)
+    llm_wire.UnrecognizedStop(reason:, ..) ->
+      Error("provider ended with an unrecognized stop reason: " <> reason)
   }
 }
 

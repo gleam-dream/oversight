@@ -1,8 +1,9 @@
 //// The composition root. It owns one pool (which Grind builds from the
 //// application's `pog.Config` and which also serves the clinic's tables
 //// and `decisions_postgres`), the Grind runtime with every worker, one
-//// HTTP Gun client for the two providers, the telemetry collector and the
-//// desk's HTTP server. `stop` closes all of them.
+//// HTTP Gun client for the two providers, the telemetry collector, the
+//// Hellhound client staff sign in through, and the desk's HTTP server.
+//// `stop` closes all of them.
 ////
 //// Start-up order follows `decisions_postgres`: the tables are migrated on
 //// a pool of their own before any worker polls (in production a deploy
@@ -12,6 +13,7 @@
 //// a job for every pending wake-up and undelivered settlement notice that
 //// has none, such as one whose job was lost or pruned.
 
+import clinic_registration/access.{type ChannelSecret, type SignIn}
 import clinic_registration/desk
 import clinic_registration/domain.{type Inbound, type Registration}
 import clinic_registration/jobs
@@ -27,11 +29,13 @@ import decisions_postgres
 import gleam/erlang/process
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import grind
 import grind/queue
 import grind/worker.{type Worker}
+import hellhound
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
@@ -62,6 +66,16 @@ pub type Config {
     lease: Duration,
     /// The Grind schema; a restart reuses it.
     jobs_schema: String,
+    /// The loopback port the desk listens on; 0 picks a free one. With
+    /// sign-in configured it is the port of the relying party's redirect
+    /// URI, which the provider must know before the listener binds.
+    port: Int,
+    /// How staff sign in to the desk and who is staff. `None`, the
+    /// default, refuses every desk request.
+    sign_in: Option(SignIn),
+    /// The messaging channel's signing secret. `None`, the default,
+    /// refuses every webhook delivery.
+    channel: Option(ChannelSecret),
   )
 }
 
@@ -87,14 +101,20 @@ pub fn default_config(
     after_model: fn(_) { Nil },
     lease: duration.seconds(6),
     jobs_schema: "clinic_jobs",
+    port: 0,
+    sign_in: None,
+    channel: None,
   )
 }
 
 pub type App {
   App(
+    /// The application's own rows: patients, messages, evidence.
     db: pog.Connection,
+    /// The same pool, as the decision record's transactions start on it.
+    pool: decisions_postgres.Pool,
     jobs: grind.Grind,
-    desk: Desk(Registration, pog.Connection),
+    desk: Desk(Registration, decisions_postgres.Tx),
     /// The decision record's store, for its queue and wake-up functions.
     records: decisions_postgres.Store,
     /// What the start-up `sweep` admitted.
@@ -123,6 +143,7 @@ pub fn start(config: Config) -> Result(App, String) {
     |> decisions_postgres.with_name("clinic_registration")
     |> decisions_postgres.with_clock_offset(config.clock_offset)
   let registration = desk.new(over: decisions_postgres.port(store))
+  let pool = decisions_postgres.pool(pool_name)
   use http <- result.try(
     http_gun.start(
       http_config.default()
@@ -141,6 +162,7 @@ pub fn start(config: Config) -> Result(App, String) {
   let env =
     jobs.Env(
       jobs: grind_handle,
+      pool:,
       desk: registration,
       configuration: config.configuration,
       provider: llm.provider(config.llm_base, config.model_deadline),
@@ -187,26 +209,48 @@ pub fn start(config: Config) -> Result(App, String) {
   let db = grind.connection(grind_handle)
   let prepared = {
     use swept <- result.try(
-      decisions_postgres.sweep(store, db)
+      decisions_postgres.sweep(store, pool)
       |> result.map_error(port.describe),
     )
     use Nil <- result.try(first_policy(db))
     Ok(swept)
   }
-  let collector = telemetry.start()
-  let admit = fn(message: Inbound) { jobs.admit(env, db, message, register) }
+  let admit = fn(message: Inbound) { jobs.admit(env, message, register) }
   let served = {
     use swept <- result.try(prepared)
+    use collector <- result.try(telemetry.start())
     let secret = wisp.random_string(64)
-    owner.start(fn() {
-      web.start(web.Routes(db:, desk: registration, admit:), secret)
-    })
-    |> result.map(fn(started) { #(started, swept) })
+    // The Hellhound client is started by the owner, so it stops with the
+    // listener that uses it.
+    case
+      owner.start(fn() {
+        use sign_in <- result.try(start_sign_in(config.sign_in))
+        web.start(
+          web.Routes(
+            db:,
+            pool:,
+            desk: registration,
+            admit:,
+            sign_in:,
+            channel: config.channel,
+          ),
+          config.port,
+          secret,
+        )
+      })
+    {
+      Ok(started) -> Ok(#(started, swept, collector))
+      Error(reason) -> {
+        telemetry.stop(collector)
+        Error(reason)
+      }
+    }
   }
   case served {
-    Ok(#(#(port, server), swept)) ->
+    Ok(#(#(port, server), swept, collector)) ->
       Ok(App(
         db:,
+        pool:,
         jobs: grind_handle,
         desk: registration,
         records: store,
@@ -222,8 +266,28 @@ pub fn start(config: Config) -> Result(App, String) {
     Error(reason) -> {
       let _ = grind.stop(grind_handle)
       http_gun.stop(http)
-      telemetry.stop(collector)
       Error(reason)
+    }
+  }
+}
+
+/// Build and start the Hellhound client the desk signs staff in through.
+fn start_sign_in(
+  sign_in: Option(SignIn),
+) -> Result(Option(web.SignIn), String) {
+  case sign_in {
+    None -> Ok(None)
+    Some(access.SignIn(relying_party:, staff:)) -> {
+      let describe = fn(error) {
+        "sign-in: " <> hellhound.describe_start_error(error)
+      }
+      use client <- result.try(
+        hellhound.new(relying_party) |> result.map_error(describe),
+      )
+      use Nil <- result.try(
+        hellhound.start(client) |> result.map_error(describe),
+      )
+      Ok(Some(web.SignIn(client:, staff:)))
     }
   }
 }
@@ -240,8 +304,10 @@ fn migrate(url: String) -> Result(Nil, String) {
       pog.start(pog.pool_size(config, 1))
       |> result.replace_error("no database to migrate"),
     )
+    // Every migration of the record's, the second included: a 0.3 node
+    // refuses to append to a schema without it.
     use Nil <- result.try(
-      decisions_postgres.migrate(started.data)
+      decisions_postgres.migrate(decisions_postgres.pool(config.pool_name))
       |> result.map_error(decisions_postgres.describe_migrate_error),
     )
     store.migrate(started.data)
@@ -271,7 +337,7 @@ pub fn stop(app: App) -> Nil {
 
 /// Deliver an inbound message, as the channel's webhook does.
 pub fn admit(app: App, message: Inbound) -> Result(jobs.Admission, String) {
-  jobs.admit(app.env, app.db, message, app.register)
+  jobs.admit(app.env, message, app.register)
 }
 
 /// The desk's HTTP root.

@@ -417,7 +417,7 @@ reviews:
         - Flag built tools, codecs, agents or `Run` handles captured by a
           builder or sent to another process per request; send the run id
           and `open` it there.
-        - Flag a subject, name or table made inside the `agent.build_with`
+        - Flag a subject, name or table made inside the `agent.build`
           builder; it is remade in each process.
         - Flag a per-run capture whose agent shares its name with another
           agent or is listed in `sweeper.agent`.

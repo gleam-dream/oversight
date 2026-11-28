@@ -128,9 +128,9 @@ fn request(
   use browser <- result.try(
     gun_config.default()
     |> gun_config.with_trust(gun_config.Anchors([trust]))
-    |> gun_config.with_request_timeout(gun_config.After(duration.seconds(10)))
     |> gun_config.with_destination(destination.loopback_only())
     |> http_gun.start
+    |> result.map(http_gun.with_timeout(_, duration.seconds(10)))
     |> result.map_error(fn(e) { failed(http_gun.describe_start_error(e)) }),
   )
   let sent = http_gun.send(browser, req)

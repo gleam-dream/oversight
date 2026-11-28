@@ -214,7 +214,7 @@ fn migrate(settings: Settings) -> Result(Nil, String) {
       db.migrate(database, settings.schema) |> result.map_error(db.describe),
     )
     use Nil <- result.try(
-      decisions_postgres.migrate(database)
+      decisions_postgres.migrate(decisions_postgres.pool(name))
       |> result.map_error(decisions_postgres.describe_migrate_error),
     )
     use fabric <- result.try(fabric_settings(settings, database))
@@ -269,6 +269,7 @@ pub fn start(settings: Settings) -> Result(App, String) {
   let deps =
     jobs.Deps(
       jobs: grind.named(jobs_name),
+      pool: decisions_postgres.pool(pool_name),
       runs:,
       agent:,
       desks:,
@@ -320,7 +321,7 @@ pub fn start(settings: Settings) -> Result(App, String) {
   // Every pending wake-up and undelivered notice gets a job, whatever
   // became of the one it had (a job pruned, lost or ended).
   use swept <- result.try(
-    case decisions_postgres.sweep(store, grind.connection(jobs_handle)) {
+    case decisions_postgres.sweep(store, decisions_postgres.pool(pool_name)) {
       Ok(swept) -> Ok(swept)
       Error(error) -> {
         shutdown(infrastructure.pid)
@@ -331,7 +332,12 @@ pub fn start(settings: Settings) -> Result(App, String) {
 
   let port = free_port()
   let mcp_url = "http://127.0.0.1:" <> int.to_string(port) <> "/mcp"
-  let tools = desk_tools.Deps(db: database, desk: payout_desk)
+  let tools =
+    desk_tools.Deps(
+      db: database,
+      pool: decisions_postgres.pool(pool_name),
+      desk: payout_desk,
+    )
   let started = {
     use provider <- result.try(
       identity.provider_options()
@@ -428,7 +434,9 @@ pub fn token(app: App, subject: String) -> String {
 }
 
 /// The payout desk over this application's store.
-pub fn payout_desk(app: App) -> decisions.Desk(domain.Payout, pog.Connection) {
+pub fn payout_desk(
+  app: App,
+) -> decisions.Desk(domain.Payout, decisions_postgres.Tx) {
   desks.payout(app.desks)
 }
 
@@ -437,7 +445,7 @@ pub fn payout_desk(app: App) -> decisions.Desk(domain.Payout, pog.Connection) {
 /// store clock runs ahead (`record_skew`), since a wake-up's Grind job waits
 /// on the database's clock. Safe beside the worker.
 pub fn deliver_due(app: App, limit: Int) -> Result(Int, String) {
-  decisions_postgres.deliver_due(app.store, app.db, app.wakers, limit:)
+  decisions_postgres.deliver_due(app.store, app.deps.pool, app.wakers, limit:)
   |> result.map_error(decisions_store.describe)
 }
 
@@ -449,9 +457,13 @@ pub fn suspend_seller(
   app: App,
   seller: String,
 ) -> Result(decisions.Supersession(domain.Payout), String) {
-  decisions_postgres.transaction_with(app.db, fn(tx) {
+  decisions_postgres.transaction_with(app.deps.pool, fn(tx) {
     use Nil <- result.try(
-      db.set_seller_status(tx, seller, "suspended")
+      db.set_seller_status(
+        decisions_postgres.connection(tx),
+        seller,
+        "suspended",
+      )
       |> result.map_error(fn(e) { decisions_postgres.Own(db.describe(e)) }),
     )
     decisions.happened(
@@ -477,7 +489,7 @@ pub fn request(
   request: domain.Request,
   requested_by requested_by: String,
 ) -> Result(Nil, String) {
-  jobs.request(app.deps, app.db, request, requested_by:)
+  jobs.request(app.deps, request, requested_by:)
 }
 
 /// The occurrence a request's gated call was admitted as, waiting up to

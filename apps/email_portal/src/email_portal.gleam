@@ -14,9 +14,11 @@ import envoy
 import gleam/bit_array
 import gleam/crypto
 import gleam/dict.{type Dict}
+import gleam/erlang/process
 import gleam/http/request
 import gleam/io
 import gleam/list
+import gleam/otp/static_supervisor
 import gleam/result
 import gleam/string
 
@@ -313,9 +315,15 @@ pub fn main() {
         <> "Challenges issued before a restart, or by another instance, will not verify.",
       )
   }
-  let assert Ok(runtime) = memory.start(10)
+  // The challenge store runs only as a child of the application's supervisor.
+  let challenges = process.new_name("email_portal_challenges")
+  let assert Ok(store_config) = memory.new(challenges, 10)
+  let assert Ok(_) =
+    static_supervisor.new(static_supervisor.OneForOne)
+    |> static_supervisor.add(memory.supervised(store_config))
+    |> static_supervisor.start
   let assert Ok(capture) = capture.start(10)
-  let assert Ok(service) = service(memory.store(runtime), key)
+  let assert Ok(service) = service(memory.store(challenges), key)
   let assert Ok(from) = address.parse("login@example.com")
   let assert Ok(email) = address.parse("alice@example.com")
   let account = Account(AccountId(42), email, True)
@@ -339,7 +347,6 @@ pub fn main() {
   let assert Principal(AccountId(42), EmailVerification) = principal(session)
   let assert 1 = session_count(portal)
   let assert Ok(Nil) = capture.stop(capture)
-  let assert Ok(Nil) = memory.stop(runtime)
   io.println(
     "Email portal: delivery, mailbox inspection, intentional verification, and session recovery passed.",
   )

@@ -26,6 +26,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
+import gleam/uri
 import mist
 
 /// Approved immediately.
@@ -391,12 +392,18 @@ fn payments(
         Error(Nil) -> reply(404, json.object([]))
       }
     Get, ["charges", "by-key", key] ->
-      case actor.call(state, 1000, FindCharge(key, _)) {
+      case actor.call(state, 1000, FindCharge(path_key(key), _)) {
         Some(record) -> reply(200, charge_json(record))
         None -> reply(404, json.object([]))
       }
     _, _ -> reply(404, json.object([]))
   }
+}
+
+/// The key a path segment names: the segment percent-decoded. A segment
+/// that does not decode names no key.
+fn path_key(segment: String) -> String {
+  uri.percent_decode(segment) |> result.unwrap("")
 }
 
 fn shipping(
@@ -422,12 +429,12 @@ fn shipping(
       }
     }
     Post, ["shipments", "by-key", key, "cancel"] ->
-      case actor.call(state, 1000, CancelShipment(key, _)) {
+      case actor.call(state, 1000, CancelShipment(path_key(key), _)) {
         Some(record) -> reply(200, shipment_json(record))
         None -> reply(404, json.object([]))
       }
     Get, ["shipments", "by-key", key] ->
-      case actor.call(state, 1000, FindShipment(key, _)) {
+      case actor.call(state, 1000, FindShipment(path_key(key), _)) {
         Some(record) -> reply(200, shipment_json(record))
         None -> reply(404, json.object([]))
       }

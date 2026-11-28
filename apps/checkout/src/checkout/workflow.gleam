@@ -140,13 +140,13 @@ fn charge_card(
       saga.Returned(error) ->
         case domain.effect_uncertain(error), failed.attempts_left > 0 {
           True, True -> saga.Retry
-          True, False -> saga.Hold(error)
+          True, False -> saga.Hold
           False, _ -> saga.Abort(error)
         }
       saga.Crashed(_) | saga.TimedOut ->
         case failed.attempts_left > 0 {
           True -> saga.Retry
-          False -> saga.Hold(Interrupted("charge_card"))
+          False -> saga.Hold
         }
     }
   })

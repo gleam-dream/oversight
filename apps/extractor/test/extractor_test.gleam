@@ -10,6 +10,7 @@ import extractor/outcome
 import extractor/scripted
 import extractor/store
 import extractor/telemetry
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -222,7 +223,7 @@ pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
   let rate_limited =
     wire_testing.failure(
       message.Anthropic,
-      error.Status(429, "{}", Some(duration.seconds(1))),
+      error.Status(429, None, None, "{}", Some(duration.seconds(1))),
     )
   let assert outcome.Snooze(delay, _) =
     outcome.decide(outcome.ExtractFailed(llm.CallFailed(rate_limited)))
@@ -233,13 +234,16 @@ pub fn rate_limit_snoozes_for_the_retry_after_hint_test() {
 
   // No hint means backoff, which spends an attempt; an unbounded hint is cut.
   let overloaded =
-    wire_testing.failure(message.OpenAI, error.Status(503, "{}", None))
+    wire_testing.failure(
+      message.OpenAI,
+      error.Status(503, None, None, "{}", None),
+    )
   let assert outcome.Retry(outcome.Transient(outcome.Extract, _)) =
     outcome.decide(outcome.ExtractFailed(llm.CallFailed(overloaded)))
   let parked =
     wire_testing.failure(
       message.OpenAI,
-      error.Status(429, "{}", Some(duration.hours(3))),
+      error.Status(429, None, None, "{}", Some(duration.hours(3))),
     )
   let assert outcome.Snooze(delay, _) =
     outcome.decide(outcome.ExtractFailed(llm.CallFailed(parked)))
@@ -693,4 +697,52 @@ pub fn the_scripted_provider_refuses_a_negative_length_test() {
   let head = "POST /openai/v1/responses HTTP/1.1\r\nhost: 127.0.0.1\r\n"
   let assert Ok(400) = raw_status(port, head <> "content-length: -1\r\n\r\n{}")
   assert scripted.provider_calls(services, "") == 0
+}
+
+// Telemetry ---------------------------------------------------------------
+
+@external(erlang, "telemetry_test_ffi", "handlers")
+fn handlers(prefix: List(String)) -> Int
+
+fn observed_handlers() -> Int {
+  handlers(["grind"]) + handlers(["http_gun"]) + handlers(["llm_wire"])
+}
+
+/// The collector's process owns the handlers: they are attached while it
+/// runs and record what the pipeline does. Once it stops they are detached
+/// and the collector holds nothing.
+pub fn telemetry_handlers_live_as_long_as_the_collector_test() {
+  let collector = {
+    use context <- with_pipeline("extract_telemetry", fixtures.batch(), live)
+    // Four Grind events, one http_gun event and one LLM Wire event.
+    assert observed_handlers() == 6
+    let assert grind.Succeeded(_) =
+      finish(context, submit(context, "acme", llm.OpenAi))
+    assert telemetry.snapshot(context.collector) != []
+    context.collector
+  }
+  assert eventually(2000, fn() { observed_handlers() == 0 })
+  assert telemetry.snapshot(collector) == []
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
+}
+
+/// A response that ends with a stop reason llm_wire does not know carries
+/// no decoded invoice: the job is discarded and the reason is named.
+pub fn an_unrecognized_stop_reason_is_discarded_test() {
+  assert outcome.decide(
+      outcome.ExtractFailed(llm.UnrecognizedStop("pause_turn")),
+    )
+    == outcome.Discard(
+      "provider ended with an unrecognized stop reason: pause_turn",
+    )
 }

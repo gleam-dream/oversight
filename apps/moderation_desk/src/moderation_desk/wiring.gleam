@@ -63,11 +63,17 @@ pub const renderer = "moderation-card-1"
 /// The desk of the point over the store. It holds no state: build it
 /// wherever it is needed.
 pub fn desk() -> Desk(Action, Tx) {
+  desk_over(store.port())
+}
+
+/// The desk of the point over `port`: the store's own port, or one a test
+/// wraps to make a write fail.
+pub fn desk_over(port: port.Port(Tx)) -> Desk(Action, Tx) {
   decisions.desk(
     point.declaration(),
     drives: fn(_) { gated() },
     under: current_policy,
-    over: store.port(),
+    over: port,
   )
 }
 
@@ -84,7 +90,7 @@ pub fn gated() -> decisions.Gated(Action, Tx) {
         Ok(found) -> Ok([post_ref(found)])
         // A judgement about the release: there is nothing to apply it to.
         Error(Nil) ->
-          Error(decisions.Refuse(
+          Error(vocabulary.Refuse(
             "the post " <> subject.id <> " no longer exists",
           ))
       }
@@ -151,6 +157,19 @@ pub fn post_ref(post: Post) -> Ref {
 
 fn revision_key(id: String, revision: String) -> String {
   id <> "@" <> revision
+}
+
+/// Take the lock `decisions.happened` takes for the point and `subject`,
+/// until the transaction ends. A transaction that changes an occurrence
+/// before it reports a world event about the occurrence's subject takes
+/// this lock first, as `happened` would, so that it and an edit of the
+/// post lock in one order.
+pub fn lock_subject(tx: Tx, subject: Subject) -> Result(Nil, port.StoreError) {
+  store.port().load(
+    tx,
+    decisions.subject_lock(point: point.name, subject: subject),
+  )
+  |> result.replace(Nil)
 }
 
 /// Lock a post's visibility until the transaction ends, so that a
@@ -275,7 +294,7 @@ pub fn latest(tx: Tx) -> fn(Ref) -> String {
 /// through it, never through the world as it is now.
 pub fn content(s: Store) -> fn(Ref) -> Result(String, Failure) {
   fn(ref: Ref) {
-    let tx = store.handle(s)
+    use tx <- reading(s)
     case ref.kind {
       "post" ->
         store.get(tx, revisions, revision_key(ref.id, ref.revision))
@@ -343,4 +362,12 @@ fn decode_field(
 
 fn decode_success(value: a) -> decode.Decoder(a) {
   decode.success(value)
+}
+
+/// Run `read` in a transaction of its own and return what it read. A
+/// verb or a row read runs only in a transaction, so a read made outside
+/// a verb opens one.
+pub fn reading(s: Store, read: fn(Tx) -> a) -> a {
+  let assert Ok(value) = store.transaction(s, fn(tx) { Ok(read(tx)) })
+  value
 }

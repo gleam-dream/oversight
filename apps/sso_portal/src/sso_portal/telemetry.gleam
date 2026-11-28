@@ -13,18 +13,17 @@
 //// A request makes one `Correlation` and hands it to Hellhound and to http_gun.
 //// Nothing here maps processes to requests.
 
-import gleam/erlang/process.{type Pid, type Subject}
+import gleam/erlang/process.{type Pid}
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{type Option, Some}
-import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import gleam/result
 import gleam/string
 import hellhound/telemetry as hellhound_telemetry
 import http_gun/telemetry as gun_telemetry
-import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 import sinal/forwarder.{type Forwarder}
 
@@ -45,165 +44,101 @@ pub type Record {
   )
   GunLifecycle(correlation: Option(Correlation), milestone: String)
   ForwarderDropped(rejected: Int, lost: Int, unavailable: Int)
+  /// The application began tracing a request (`begin_request`).
+  RequestBegan(correlation: Correlation)
 }
 
+/// How many records the collector keeps; older records are overwritten.
+pub const capacity = 4096
+
+/// The http_gun forwarder and a `sinal/collector`, under one supervisor.
+/// The collector's process attaches the handlers and owns them, so they
+/// are attached exactly while it runs.
 pub opaque type Telemetry {
   Telemetry(
-    collector: Subject(Message),
+    recent: collector.Collector(Record),
     forwarder: Forwarder,
-    attachments: List(sinal.Attachment),
     supervisor: Pid,
   )
 }
 
-type State {
-  State(records: List(Record), last: Option(Correlation), echo_: Bool)
-}
-
-type Message {
-  Add(Record)
-  Begin(Correlation)
-  All(reply: Subject(#(List(Record), Option(Correlation))))
-}
-
-/// Start the collector and the http_gun forwarder, and attach handlers to
-/// every package's events. `print` echoes each event as it arrives.
+/// Start the http_gun forwarder and the collector, which attaches handlers
+/// to every package's events. `print` echoes each event as it arrives.
 pub fn start(print: Bool) -> Result(Telemetry, String) {
-  use collector <- result.try(
-    actor.new(State([], option.None, print))
-    |> actor.on_message(collect)
-    |> actor.start
-    |> result.map(fn(started) { started.data })
-    |> result.replace_error("collector did not start"),
-  )
+  let recent =
+    collector.new(process.new_name("sso_portal_telemetry"))
+    |> collector.with_capacity(capacity)
   let forwarder = forwarder.new(process.new_name("sso_portal_http_gun_events"))
-  use sup <- result.try(
-    supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(forwarder.supervised(forwarder))
-    |> supervisor.start
-    |> result.replace_error("forwarder did not start"),
-  )
-  let hellhound_http =
-    sinal.observe_labelled(
-      hellhound_telemetry.http_request(),
-      "sso_portal_hellhound",
-      fn(m, r) {
-        process.send(
-          collector,
-          Add(HellhoundHttp(
-            correlation: r.correlation,
-            method: case r.method {
-              hellhound_telemetry.Get -> "GET"
-              hellhound_telemetry.Post -> "POST"
-            },
-            path: r.path,
-            outcome: case r.outcome {
-              hellhound_telemetry.Status(code) -> int.to_string(code)
-              hellhound_telemetry.Failed(evidence:, reason:) ->
-                "failed("
-                <> hellhound_telemetry.transport_reason_name(reason)
-                <> ", "
-                <> case evidence {
-                  hellhound_telemetry.NotSent -> "not sent"
-                  hellhound_telemetry.MaybeSent -> "maybe sent"
-                }
-                <> ")"
-            },
-            duration_ms: m.duration_ms,
-          )),
-        )
-      },
-    )
-  let hellhound_login =
-    sinal.observe_labelled(
-      hellhound_telemetry.login(),
-      "sso_portal_hellhound_login",
-      fn(_, l) {
-        process.send(
-          collector,
-          Add(HellhoundSession(
-            l.correlation,
-            "login",
-            string.inspect(l.outcome),
-          )),
-        )
-      },
-    )
-  let hellhound_refresh =
-    sinal.observe_labelled(
-      hellhound_telemetry.refresh(),
-      "sso_portal_hellhound_refresh",
-      fn(_, r) {
-        process.send(
-          collector,
-          Add(HellhoundSession(
-            r.correlation,
-            "refresh",
-            string.inspect(r.outcome),
-          )),
-        )
-      },
-    )
-  let hellhound_logout =
-    sinal.observe_labelled(
-      hellhound_telemetry.logout(),
-      "sso_portal_hellhound_logout",
-      fn(_, l) {
-        process.send(
-          collector,
-          Add(HellhoundSession(
-            l.correlation,
-            "logout",
-            string.inspect(l.revocation),
-          )),
-        )
-      },
-    )
-  let gun_attachment =
-    sinal.observe_labelled(
-      gun_telemetry.event(),
-      "sso_portal_http_gun",
-      fn(_timing, meta) {
-        process.send(
-          collector,
-          Add(GunLifecycle(
-            correlation: meta.correlation,
-            milestone: milestone(meta.milestone),
-          )),
-        )
-      },
-    )
-  let drop_attachment =
-    sinal.observe_labelled(
-      forwarder.dropped_event(),
-      "sso_portal_dropped",
-      fn(d, _meta) {
-        process.send(
-          collector,
-          Add(ForwarderDropped(d.rejected, d.lost, d.unavailable)),
-        )
-      },
-    )
-  Ok(Telemetry(
-    collector:,
-    forwarder:,
-    attachments: [
-      hellhound_http,
-      hellhound_login,
-      hellhound_refresh,
-      hellhound_logout,
-      gun_attachment,
-      drop_attachment,
-    ],
-    supervisor: sup.pid,
-  ))
+  supervisor.new(supervisor.OneForOne)
+  |> supervisor.add(forwarder.supervised(forwarder))
+  |> supervisor.add(collector.supervised(recent, sources(print)))
+  |> supervisor.start
+  |> result.map(fn(started) {
+    Telemetry(recent:, forwarder:, supervisor: started.pid)
+  })
+  |> result.replace_error("telemetry did not start")
 }
 
+fn sources(print: Bool) -> List(collector.Source(Record)) {
+  let keep = fn(record: Record) {
+    case print {
+      True -> io.println("    telemetry " <> describe(record))
+      False -> Nil
+    }
+    record
+  }
+  [
+    collector.source(hellhound_telemetry.http_request(), fn(m, r) {
+      keep(HellhoundHttp(
+        correlation: r.correlation,
+        method: case r.method {
+          hellhound_telemetry.Get -> "GET"
+          hellhound_telemetry.Post -> "POST"
+        },
+        path: r.path,
+        outcome: case r.outcome {
+          hellhound_telemetry.Status(code) -> int.to_string(code)
+          hellhound_telemetry.Failed(evidence:, reason:) ->
+            "failed("
+            <> hellhound_telemetry.transport_reason_name(reason)
+            <> ", "
+            <> case evidence {
+              hellhound_telemetry.NotSent -> "not sent"
+              hellhound_telemetry.MaybeSent -> "maybe sent"
+            }
+            <> ")"
+        },
+        duration_ms: m.duration_ms,
+      ))
+    }),
+    collector.source(hellhound_telemetry.login(), fn(_, l) {
+      keep(HellhoundSession(l.correlation, "login", string.inspect(l.outcome)))
+    }),
+    collector.source(hellhound_telemetry.refresh(), fn(_, r) {
+      keep(HellhoundSession(r.correlation, "refresh", string.inspect(r.outcome)))
+    }),
+    collector.source(hellhound_telemetry.logout(), fn(_, l) {
+      keep(HellhoundSession(
+        l.correlation,
+        "logout",
+        string.inspect(l.revocation),
+      ))
+    }),
+    collector.source(gun_telemetry.event(), fn(_timing, meta) {
+      keep(GunLifecycle(
+        correlation: meta.correlation,
+        milestone: milestone(meta.milestone),
+      ))
+    }),
+    collector.source(forwarder.dropped_event(), fn(d, _meta) {
+      keep(ForwarderDropped(d.rejected, d.lost, d.unavailable))
+    }),
+  ]
+}
+
+/// Stop the forwarder and the collector. Sinal detaches the handlers the
+/// collector's process owned.
 pub fn stop(telemetry: Telemetry) -> Nil {
-  list.each(telemetry.attachments, fn(a) {
-    let _ = sinal.detach(a)
-    Nil
-  })
   process.unlink(telemetry.supervisor)
   process.kill(telemetry.supervisor)
 }
@@ -214,10 +149,11 @@ pub fn forwarder(telemetry: Telemetry) -> Forwarder {
 }
 
 /// Start tracing a request: the correlation to give both
-/// `hellhound.with_correlation` and `http_gun.with_correlation`.
+/// `hellhound.with_correlation` and `http_gun.with_correlation`. The
+/// collector records that the request began.
 pub fn begin_request(telemetry: Telemetry) -> Correlation {
   let request = correlation.unique()
-  process.send(telemetry.collector, Begin(request))
+  collector.record(telemetry.recent, RequestBegan(request))
   request
 }
 
@@ -225,24 +161,32 @@ pub fn begin_request(telemetry: Telemetry) -> Correlation {
 /// events arrive asynchronously, so this waits briefly first.
 pub fn last_request_trace(telemetry: Telemetry) -> List(Record) {
   process.sleep(100)
-  let #(records, last) = actor.call(telemetry.collector, 1000, All)
+  let all = records(telemetry)
+  let last =
+    list.fold(all, option.None, fn(last, record) {
+      case record {
+        RequestBegan(id) -> Some(id)
+        _ -> last
+      }
+    })
   case last {
     option.None -> []
     Some(id) ->
-      list.filter(records, fn(record) {
+      list.filter(all, fn(record) {
         case record {
           HellhoundHttp(correlation:, ..)
           | HellhoundSession(correlation:, ..)
           | GunLifecycle(correlation:, ..) -> correlation == Some(id)
-          ForwarderDropped(..) -> False
+          ForwarderDropped(..) | RequestBegan(..) -> False
         }
       })
   }
 }
 
-/// All events recorded so far, oldest first.
+/// The records the collector holds, oldest first: at most `capacity`.
+/// Empty once it has stopped.
 pub fn records(telemetry: Telemetry) -> List(Record) {
-  actor.call(telemetry.collector, 1000, All).0
+  collector.entries(telemetry.recent)
 }
 
 pub fn describe(record: Record) -> String {
@@ -273,23 +217,8 @@ pub fn describe(record: Record) -> String {
       <> int.to_string(lost)
       <> " unavailable="
       <> int.to_string(unavailable)
-  }
-}
-
-fn collect(state: State, message: Message) -> actor.Next(State, Message) {
-  case message {
-    Add(record) -> {
-      case state.echo_ {
-        True -> io.println("    telemetry " <> describe(record))
-        False -> Nil
-      }
-      actor.continue(State(..state, records: [record, ..state.records]))
-    }
-    Begin(id) -> actor.continue(State(..state, last: Some(id)))
-    All(reply) -> {
-      process.send(reply, #(list.reverse(state.records), state.last))
-      actor.continue(state)
-    }
+    RequestBegan(correlation:) ->
+      "[request] began " <> correlation.to_string(correlation)
   }
 }
 

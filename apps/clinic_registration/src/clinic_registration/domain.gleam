@@ -9,7 +9,7 @@
 import decisions
 import decisions/fact
 import decisions/policy.{
-  type Policy, AnyoneHolding, Ask, Either, PerCent, Policy, Proceed, When,
+  type Policy, AnyoneHolding, Ask, Either, PerCent, Proceed, When,
 }
 import decisions/vocabulary.{
   type Facts, type Subject, type Trigger, type Validator, ApproveRejectOrCorrect,
@@ -253,11 +253,13 @@ fn escalation() -> policy.Rule {
 
 /// Version 1: reception decides every registration.
 pub fn always_ask() -> Policy {
-  Policy(
-    version: 1,
-    rules: [escalation()],
-    otherwise: Ask(AnyoneHolding(reception)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 1,
+      rules: [escalation()],
+      otherwise: AnyoneHolding(reception),
+    )
+  policy
 }
 
 /// Version 2: a confident, complete, consented registration with an
@@ -266,24 +268,26 @@ pub fn always_ask() -> Policy {
 /// five of those is sampled for a review after the fact. A possible duplicate asks
 /// the manager. Anything else asks reception.
 pub fn proceed_when_sure() -> Policy {
-  Policy(
-    version: 2,
-    rules: [
-      When(
-        policy.All([
-          policy.at_least(confidence(), 0.9),
-          policy.below(missing_fields(), 1.0),
-          policy.is(insurer_accepted(), True),
-          policy.is(similar_patient(), False),
-          policy.is(consent(), True),
-        ]),
-        Proceed(sample: PerCent(20), hold: Some(undo_window())),
-      ),
-      escalation(),
-      When(policy.is(similar_patient(), True), Ask(AnyoneHolding(manager))),
-    ],
-    otherwise: Ask(AnyoneHolding(reception)),
-  )
+  let assert Ok(policy) =
+    policy.new(
+      version: 2,
+      rules: [
+        When(
+          policy.All([
+            policy.at_least(confidence(), 0.9),
+            policy.below(missing_fields(), 1.0),
+            policy.is(insurer_accepted(), True),
+            policy.is(similar_patient(), False),
+            policy.is(consent(), True),
+          ]),
+          Proceed(sample: PerCent(20), hold: Some(undo_window())),
+        ),
+        escalation(),
+        When(policy.is(similar_patient(), True), Ask(AnyoneHolding(manager))),
+      ],
+      otherwise: AnyoneHolding(reception),
+    )
+  policy
 }
 
 /// A validator as the desk sees them: a name and the sets they hold.

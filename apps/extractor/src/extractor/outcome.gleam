@@ -81,6 +81,8 @@ fn decide_extract(extract_error: llm.ExtractError) -> Decision {
     llm.Refused(reason) -> Discard("provider refused: " <> reason)
     llm.Truncated -> Discard("structured output hit the token limit")
     llm.UnexpectedToolCall -> Discard("provider asked for an undeclared tool")
+    llm.UnrecognizedStop(reason) ->
+      Discard("provider ended with an unrecognized stop reason: " <> reason)
     llm.CallFailed(failure) -> decide_call(failure)
   }
 }

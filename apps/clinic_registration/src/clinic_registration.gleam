@@ -3,6 +3,7 @@
 //// her confirmation. The model and the messaging provider are scripted on
 //// loopback; the desk is the application's own HTTP API.
 
+import clinic_registration/access
 import clinic_registration/app.{type App}
 import clinic_registration/domain
 import clinic_registration/jobs
@@ -14,6 +15,7 @@ import decisions/entry
 import decisions/occurrence
 import decisions/policy
 import decisions/vocabulary.{Performed}
+import decisions_postgres
 import envoy
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -53,19 +55,46 @@ const ana_phone = "+5511987654321"
 const ana_says =
   "Oi! Queria marcar uma consulta com a Dra. Paula. Sou Ana Souza, nasci em 12/04/1990, tenho Unimed Flex. Pode me cadastrar."
 
-const felipe = "felipe; reception"
+/// Who a request of this run is from: a member of staff, by the desk
+/// session cookie their sign-in set, or the messaging channel, which signs
+/// what it delivers.
+type Sender {
+  Staff(cookie: String)
+  Channel(secret: access.ChannelSecret)
+}
 
 pub fn run(url: String) -> Result(Nil, String) {
   wisp.set_logger_level(wisp.ErrorLevel)
   use services <- result.try(scripted.start())
-  use clinic <- result.try(
-    app.start(app.default_config(
-      database_url: url,
-      llm_base: scripted.llm_base(services),
-      messaging_base: scripted.messaging_base(services),
-      provider_ports: scripted.ports(services),
-    )),
+  // Felipe at reception signs in through the clinic's OpenID provider as
+  // subject `felipe`; the channel signs its deliveries with this run's
+  // secret. The provider must know the desk's callback address before the
+  // desk listens, so the desk takes a port chosen first.
+  let port = scripted.free_port()
+  use sign_in <- result.try(
+    scripted.staff_sign_in(services, port, [
+      #("felipe", domain.validator("felipe", [domain.reception])),
+    ]),
   )
+  use channel <- result.try(access.channel_secret(wisp.random_string(32)))
+  use clinic <- result.try(app.start(
+    app.Config(
+      ..app.default_config(
+        database_url: url,
+        llm_base: scripted.llm_base(services),
+        messaging_base: scripted.messaging_base(services),
+        provider_ports: scripted.ports(services),
+      ),
+      port:,
+      sign_in: Some(sign_in),
+      channel: Some(channel),
+    ),
+  ))
+  use felipe <- result.try(scripted.sign_in(
+    services,
+    app.base_url(clinic),
+    "felipe",
+  ))
   let assert Ok(client) =
     http_gun.start(
       config.default() |> config.with_destination(destination.loopback_only()),
@@ -84,7 +113,8 @@ pub fn run(url: String) -> Result(Nil, String) {
       confidence: 0.81,
     )),
   ])
-  let outcome = narrate(clinic, client, services)
+  let outcome =
+    narrate(clinic, client, services, Staff(felipe), Channel(channel))
   http_gun.stop(client)
   app.stop(clinic)
   scripted.stop(services)
@@ -95,6 +125,8 @@ fn narrate(
   clinic: App,
   client: http_gun.Client,
   services: scripted.Services,
+  felipe: Sender,
+  channel: Sender,
 ) -> Result(Nil, String) {
   let message_id = "wamid." <> wisp.random_string(12)
   let key = domain.key(message_id)
@@ -113,7 +145,7 @@ fn narrate(
     client,
     http.Post,
     "/inbound",
-    "",
+    channel,
     webhook,
   ))
   io.println("POST /inbound -> " <> int.to_string(status))
@@ -122,7 +154,7 @@ fn narrate(
     client,
     http.Post,
     "/inbound",
-    "",
+    channel,
     webhook,
   ))
   io.println(
@@ -298,7 +330,7 @@ fn call(
   client: http_gun.Client,
   method: http.Method,
   path: String,
-  validator: String,
+  sender: Sender,
   body: String,
 ) -> Result(#(Int, String), String) {
   let assert Ok(req) = request.to(app.base_url(clinic) <> path)
@@ -307,9 +339,17 @@ fn call(
     |> request.set_method(method)
     |> request.set_header("content-type", "application/json")
     |> request.set_body(bit_array.from_string(body))
-  let req = case validator {
-    "" -> req
-    validator -> request.set_header(req, "x-clinic-validator", validator)
+  let req = case sender {
+    Staff(cookie) ->
+      req
+      |> request.set_header("cookie", cookie)
+      |> request.set_header("origin", app.base_url(clinic))
+    Channel(secret) ->
+      request.set_header(
+        req,
+        access.signature_header,
+        access.sign(secret, bit_array.from_string(body)),
+      )
   }
   http_gun.send(client, req)
   |> result.map(fn(reply) {
@@ -336,7 +376,13 @@ fn await_loop(
   ready: fn(occurrence.Occurrence(domain.Registration)) -> Bool,
   tries: Int,
 ) -> Result(occurrence.Occurrence(domain.Registration), String) {
-  case decisions.read(clinic.desk, clinic.db, occurrence: key) {
+  case
+    decisions_postgres.refusing(clinic.pool, decisions.read(
+      clinic.desk,
+      _,
+      occurrence: key,
+    ))
+  {
     Ok(known) ->
       case ready(known) {
         True -> Ok(known)

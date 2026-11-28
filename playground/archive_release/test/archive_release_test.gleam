@@ -156,7 +156,7 @@ pub fn cancellation_and_admission_refusal_are_distinct_test() {
     fabric.start(runs, agent, run.new_id(), context, "release", None)
   let pending = pending(handle)
   let assert Error(approvers.NotAuthorized(_)) =
-    approvers.check(gate, no_scope, pending.reference.requirement)
+    approvers.check(gate, no_scope, pending.reference)
   let assert Ok(_) = fabric.cancel(handle)
   fabric.await(handle, duration.seconds(10))
   |> should.equal(Ok(run.Finished(run.Cancelled)))
@@ -260,8 +260,7 @@ fn proof(
   gate: approvers.Approvers(String),
   pending: run.PendingApproval,
 ) -> approvers.Proof {
-  let assert Ok(proof) =
-    approvers.check(gate, f.token, pending.reference.requirement)
+  let assert Ok(proof) = approvers.check(gate, f.token, pending.reference)
   proof
 }
 

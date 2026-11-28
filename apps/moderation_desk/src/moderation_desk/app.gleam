@@ -5,7 +5,7 @@
 //// root (rest for one)
 //// ├── store owner      the record and the platform's rows, in memory
 //// ├── platform         seeds an empty store: authors, threads, policy 1
-//// ├── collector        the operator's counts
+//// ├── collector        the operator's counts; owns the telemetry handlers
 //// ├── desk (one for one)
 //// │   └── one process per person on duty
 //// └── runtime          decisions_otp/runtime: sweeper, dispatcher, workers
@@ -15,7 +15,7 @@
 //// | --- | --- | --- |
 //// | store owner | everything: the record, the backlog and the platform's rows live in its memory | the root, with an empty store under the same name; every later child restarts with it and takes the new handle |
 //// | platform | nothing; it only seeds a store that holds no policy | the root |
-//// | collector | the counts so far | the root; handlers address it by name |
+//// | collector | the counts so far, and its handlers, which sinal detaches with it | the root; the new process attaches the handlers again under the same ids |
 //// | desk person | the card being read and its verdict transaction; the claim row survives and names the person | the desk supervisor; the new process finds its claim again |
 //// | runtime | the transaction in hand, which rolls back; its job stays in the backlog, because each child acts on rows and keeps none | the runtime's own supervisor for a child, the root for the runtime |
 ////
@@ -30,6 +30,7 @@ import decisions/store as port
 import decisions/vocabulary
 import decisions_otp/runtime
 import decisions_otp/store.{type Store, type Tx}
+import gleam/bool
 import gleam/erlang/process.{type Name, type Pid}
 import gleam/int
 import gleam/list
@@ -49,7 +50,6 @@ import moderation_desk/point
 import moderation_desk/scripted.{type Fault}
 import moderation_desk/telemetry
 import moderation_desk/wiring
-import sinal
 
 /// Everything the application can be started with.
 pub type Config {
@@ -64,6 +64,9 @@ pub type Config {
     timing: models.Timing,
     faults: fn(Post, Int) -> Fault,
     people: List(Person),
+    /// The port every desk of the application writes the record through.
+    /// A test wraps the store's own port to make a write fail.
+    port: port.Port(Tx),
   )
 }
 
@@ -93,6 +96,7 @@ pub fn config() -> Config {
       person(desk.senior("carla"), Moderating),
       person(desk.reviewer("dev"), Reviewing),
     ],
+    port: store.port(),
   )
 }
 
@@ -110,7 +114,6 @@ pub opaque type App {
     control: runtime.Control,
     collector: Name(telemetry.Message),
     people: List(#(String, Name(desk.Message))),
-    attachments: List(sinal.Attachment),
   )
 }
 
@@ -125,8 +128,7 @@ pub fn start(config: Config) -> Result(App, String) {
     list.map(config.people, fn(person) {
       #(person, process.new_name("moderation_desk_person"))
     })
-  let attachments = telemetry.attach(collector, source:)
-  let desk = wiring.desk()
+  let desk = wiring.desk_over(config.port)
   let desk_tree =
     list.fold(
       people,
@@ -144,7 +146,7 @@ pub fn start(config: Config) -> Result(App, String) {
     |> supervisor.restart_tolerance(intensity: 10, period: 5)
     |> supervisor.add(store.supervised(config.store, named: store_name))
     |> supervisor.add(platform(store_name))
-    |> supervisor.add(telemetry.supervised(collector))
+    |> supervisor.add(telemetry.supervised(collector, source:))
     |> supervisor.add(supervisor.supervised(desk_tree))
     |> supervisor.add(
       runtime.supervised_from(fn() {
@@ -165,12 +167,8 @@ pub fn start(config: Config) -> Result(App, String) {
         people: list.map(people, fn(pair) {
           #({ pair.0 }.validator.subject, pair.1)
         }),
-        attachments:,
       ))
-    Error(error) -> {
-      telemetry.detach(attachments)
-      Error(string.inspect(error))
-    }
+    Error(error) -> Error(string.inspect(error))
   }
 }
 
@@ -180,7 +178,7 @@ fn runtime_config(
   source: String,
   control: runtime.Control,
 ) -> runtime.Config(Tx) {
-  let desk = wiring.desk()
+  let desk = wiring.desk_over(config.port)
   let env =
     models.Env(
       store: s,
@@ -221,7 +219,6 @@ fn platform(name: store.Name) -> supervision.ChildSpecification(Nil) {
 /// Stop every process of the application. Everything the store held is
 /// lost.
 pub fn stop(app: App) -> Nil {
-  telemetry.detach(app.attachments)
   process.unlink(app.root)
   stop_supervisor(app.root)
 }
@@ -307,14 +304,14 @@ pub fn wait_until(condition: fn() -> Bool, within ms: Int) -> Bool {
 /// its settlement has been delivered.
 pub fn all_settled(app: App, posts: List(Post)) -> Bool {
   let s = store_of(app)
-  let handle = store.handle(s)
   let undelivered = case store.backlog(s).undelivered(1) {
     Ok([]) -> True
     _ -> False
   }
-  undelivered
-  && list.all(posts, fn(post) {
-    case wiring.visibility(handle, post.id) {
+  use <- bool.guard(when: !undelivered, return: False)
+  use tx <- wiring.reading(s)
+  list.all(posts, fn(post) {
+    case wiring.visibility(tx, post.id) {
       Ok(domain.Pending) | Error(Nil) -> False
       Ok(_) -> True
     }
@@ -325,10 +322,10 @@ pub fn all_settled(app: App, posts: List(Post)) -> Bool {
 /// accepted and held in its undo window.
 pub fn all_settled_or_held(app: App, posts: List(Post)) -> Bool {
   let s = store_of(app)
-  let handle = store.handle(s)
-  let heads = store.heads(handle)
+  let heads = store.heads(s)
+  use tx <- wiring.reading(s)
   list.all(posts, fn(post) {
-    case wiring.visibility(handle, post.id) {
+    case wiring.visibility(tx, post.id) {
       Ok(domain.Pending) | Error(Nil) ->
         case list.key_find(heads, wiring.key(post)) {
           Ok(head) -> head.status == port.Held
@@ -343,24 +340,23 @@ pub fn all_settled_or_held(app: App, posts: List(Post)) -> Bool {
 /// point: expected, superseded before a recommendation, still expected.
 pub fn coverage(app: App) -> learning.Coverage {
   let s = store_of(app)
-  let handle = store.handle(s)
-  records(handle, None, [])
+  records(s, None, [])
   |> list.filter_map(fn(id) {
-    decisions.read_record(wiring.desk(), handle, key: id)
+    store.transaction(s, decisions.read_record(wiring.desk(), _, key: id))
     |> result.replace_error(Nil)
   })
   |> learning.coverage
 }
 
 fn records(
-  handle: Tx,
+  s: Store,
   after: option.Option(store.Cursor),
   so_far: List(String),
 ) -> List(String) {
-  let page = store.occurrences_of(handle, point.name, after:, limit: 1000)
+  let page = store.occurrences_of(s, point.name, after:, limit: 1000)
   let so_far = list.append(so_far, page.ids)
   case page.next {
-    Some(next) -> records(handle, Some(next), so_far)
+    Some(next) -> records(s, Some(next), so_far)
     None -> so_far
   }
 }

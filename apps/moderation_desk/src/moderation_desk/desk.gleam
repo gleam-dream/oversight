@@ -16,6 +16,18 @@
 //// moderator to look again. When the store drops hints for a process that
 //// is not keeping up, the process is told how many it missed and reads
 //// its queues again.
+////
+//// A verdict the gated tool refuses at release rolls back. The tool
+//// refused the verdict, not the person: in a transaction of its own, the
+//// desk keeps the attempt on the record as a `verdict_refused` entry,
+//// reports the refused release as the world event
+//// `point.release_refused`, which supersedes every waiting occurrence
+//// about the post, and removes the claim. The card has then ended, so it
+//// is in nobody's queue, and its settlement says the release was refused.
+//// When that transaction fails, the process crashes before it lets go of
+//// the claim: its supervisor starts it again, and the new process finds
+//// the claim, opens the card again and records the refusal of that
+//// showing. A refusal is recorded once per card, after a restart too.
 
 import decisions.{type Desk, type Ticket}
 import decisions/model
@@ -258,10 +270,10 @@ fn poll(state: State) -> State {
   }
 }
 
-/// A card opened for the person: its ticket and the verdict they reached
-/// reading it.
+/// A card opened for the person: its ticket, who it is about, and the
+/// verdict they reached reading it.
 type Opened {
-  Opened(ticket: Ticket, verdict: Verdict(Action))
+  Opened(ticket: Ticket, subject: vocabulary.Subject, verdict: Verdict(Action))
 }
 
 /// Why a card could not be opened.
@@ -275,10 +287,9 @@ type NotOpened {
 /// Open the first card of the queue that nobody else holds, read it, and
 /// give the verdict. `None` when there is none to take.
 fn take(state: State) -> Option(State) {
-  let handle = store.handle(state.store)
   let candidates = case state.person.role {
-    Moderating -> store.queue_page_for(handle, state.person.validator, 20)
-    Reviewing -> store.review_queue_of(handle, point.name, 20)
+    Moderating -> store.queue_page_for(state.store, state.person.validator, 20)
+    Reviewing -> store.review_queue_of(state.store, point.name, 20)
   }
   list.find_map(candidates, fn(id) {
     open(state, id) |> result.replace_error(Nil)
@@ -358,6 +369,7 @@ fn open(state: State, id: String) -> Result(Opened, NotOpened) {
     )
     Ok(Opened(
       ticket: decisions.ticket(card),
+      subject: decisions.shown(card).subject,
       verdict: scripted.judge(
         post,
         shown.standing,
@@ -420,32 +432,50 @@ fn give(state: State, opened: Opened, tries: Int) -> State {
           process.sleep(5)
           give(state, opened, tries - 1)
         }
-        _, _ -> refused(state, id, refusal)
+        _, _ -> refused(state, opened, refusal)
       }
   }
 }
 
-fn refused(state: State, id: String, refusal: decisions.Refusal) -> State {
+fn refused(state: State, opened: Opened, refusal: decisions.Refusal) -> State {
   let me = state.person.validator.subject
+  let id = opened.ticket.occurrence
   case refusal {
-    // Keep the attempt on the record, in a transaction of its own.
+    // The tool refused the verdict, not the person: the card ends for
+    // everyone, with the attempt on the record. The process must not go
+    // on without that commit: it crashes still holding the claim, and the
+    // restarted process opens the card again.
     decisions.ToolRefused(rollback:, ..) -> {
+      let assert Ok(Nil) =
+        store.transaction(state.store, fn(tx) {
+          // The subject lock before the record, in the order `happened`
+          // takes them, so an edit of the post cannot deadlock with this.
+          use Nil <- result.try(
+            wiring.lock_subject(tx, opened.subject)
+            |> result.map_error(decisions.StoreFailed),
+          )
+          use _ <- result.try(decisions.record_refusal(state.desk, tx, rollback))
+          use _ <- result.try(decisions.happened(
+            state.desk,
+            tx,
+            point.release_refused,
+            about: opened.subject,
+          ))
+          release_claim(tx, id, me)
+          Ok(Nil)
+        })
+        as "the refused verdict was not recorded"
+      Nil
+    }
+    _ -> {
       let _ =
         store.transaction(state.store, fn(tx) {
-          decisions.record_refusal(state.desk, tx, rollback)
+          release_claim(tx, id, me)
+          Ok(Nil)
         })
       Nil
     }
-    _ -> Nil
   }
-  let _ =
-    store.transaction(state.store, fn(tx) {
-      case store.get(tx, wiring.claims, id) {
-        Ok(holder) if holder == me -> store.remove(tx, wiring.claims, id)
-        _ -> Nil
-      }
-      Ok(Nil)
-    })
   let stale = refusal == decisions.OutputChanged
   sinal.emit(
     telemetry.card_refused(),
@@ -462,6 +492,14 @@ fn refused(state: State, id: String, refusal: decisions.Refusal) -> State {
     True -> Snapshot(..state.snapshot, stale: state.snapshot.stale + 1)
     False -> state.snapshot
   })
+}
+
+/// Remove `me`'s claim on the card, in the caller's transaction.
+fn release_claim(tx: Tx, id: String, me: String) -> Nil {
+  case store.get(tx, wiring.claims, id) {
+    Ok(holder) if holder == me -> store.remove(tx, wiring.claims, id)
+    _ -> Nil
+  }
 }
 
 /// The decision sets a moderator, a senior and a reviewer hold.

@@ -795,7 +795,7 @@ fn trace_lab(model: Model) -> List(Element(Msg)) {
       html.div([], [
         html.span([class("tag")], [html.text("Trace")]),
         html.h2([css("font-size:24px;margin-top:10px"), class("mono")], [
-          html.text("POST /orders?mode=durable"),
+          html.text("POST /orders"),
         ]),
       ]),
       html.div(

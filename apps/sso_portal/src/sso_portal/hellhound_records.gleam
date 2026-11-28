@@ -32,8 +32,7 @@ pub fn migrate(
   |> result.replace(Nil)
 }
 
-/// A `hellhound/store` over `table`. Pass it to `config.with_custody_store` and
-/// `config.with_transaction_store`.
+/// A `hellhound/store` over `table`. Pass it to `config.with_custody_store`.
 pub fn new(db: pog.Connection, table: String) -> Store {
   let table = identifier(table)
   store.new(

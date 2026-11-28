@@ -52,7 +52,9 @@ pub const queue = "clinic"
 pub type Env {
   Env(
     jobs: grind.Grind,
-    desk: Desk(Registration, pog.Connection),
+    /// The pool the decision record's transactions start on.
+    pool: decisions_postgres.Pool,
+    desk: Desk(Registration, decisions_postgres.Tx),
     configuration: llm.Configuration,
     provider: llm.Provider,
     llm_client: http_gun.Client,
@@ -107,12 +109,14 @@ pub type Admission {
 /// included, and admits nothing.
 pub fn admit(
   env: Env,
-  db: pog.Connection,
   message: Inbound,
   register: Worker(String, String, String),
 ) -> Result(Admission, String) {
+  let not_admitted = fn(refusal) {
+    decisions_postgres.Own(NotAdmitted(decisions.describe(refusal)))
+  }
   let ran =
-    pog.transaction(db, fn(tx) {
+    decisions_postgres.transaction_with(env.pool, fn(tx) {
       use superseded <- result.try(
         decisions.happened(
           env.desk,
@@ -120,17 +124,17 @@ pub fn admit(
           domain.newer_message,
           about: domain.subject(message.contact),
         )
-        |> result.map_error(fn(refusal) {
-          NotAdmitted(decisions.describe(refusal))
-        }),
+        |> result.map_error(not_admitted),
       )
       use new <- result.try(
-        store.insert_message(tx, message)
-        |> result.map_error(fn(error) { NotAdmitted(store.describe(error)) }),
+        store.insert_message(decisions_postgres.connection(tx), message)
+        |> result.map_error(fn(error) {
+          decisions_postgres.Own(NotAdmitted(store.describe(error)))
+        }),
       )
       use Nil <- result.try(case new {
         True -> Ok(Nil)
-        False -> Error(Redelivered)
+        False -> Error(decisions_postgres.Own(Redelivered))
       })
       use Nil <- result.try(
         decisions.expect(
@@ -140,14 +144,12 @@ pub fn admit(
           trigger: domain.trigger(message.id),
           about: domain.subject(message.contact),
         )
-        |> result.map_error(fn(refusal) {
-          NotAdmitted(decisions.describe(refusal))
-        }),
+        |> result.map_error(not_admitted),
       )
       use _ <- result.try(
         grind.submit_in(
           env.jobs,
-          tx,
+          decisions_postgres.connection(tx),
           job.new(register, message.id)
             // Keys built from the channel's id are bounded
             // (`domain.bounded`): the store refuses an occurrence id over
@@ -158,7 +160,9 @@ pub fn admit(
             ),
         )
         |> result.map_error(fn(error) {
-          NotAdmitted(grind.describe_submit_error(error))
+          decisions_postgres.Own(
+            NotAdmitted(grind.describe_submit_error(error)),
+          )
         }),
       )
       Ok(
@@ -170,10 +174,11 @@ pub fn admit(
     })
   case ran {
     Ok(admission) -> Ok(admission)
-    Error(pog.TransactionRolledBack(Redelivered)) -> Ok(Duplicate)
+    Error(decisions_postgres.OwnFailed(Redelivered)) -> Ok(Duplicate)
     // Nothing was kept: the channel delivers the message again.
-    Error(pog.TransactionRolledBack(NotAdmitted(reason))) -> Error(reason)
-    Error(pog.TransactionQueryError(error)) -> Error(store.describe(error))
+    Error(decisions_postgres.OwnFailed(NotAdmitted(reason))) -> Error(reason)
+    Error(decisions_postgres.LibraryFailed(failure)) ->
+      Error(decisions_postgres.describe(failure))
   }
   |> result.map(fn(admission) {
     telemetry.emit(
@@ -226,7 +231,13 @@ pub fn register(
     Ok(Some(message)) ->
       // A delivery after the recommendation, or after the record ended
       // before it began, has nothing to do; the record says which.
-      case decisions.read_record(env.desk, db, key:) {
+      case
+        decisions_postgres.refusing(env.pool, decisions.read_record(
+          env.desk,
+          _,
+          key:,
+        ))
+      {
         Ok(decisions.Begun(_)) ->
           worker.Succeeded("recommended by an earlier delivery")
         Ok(decisions.NotBegun(occurrence.Pending(
@@ -266,6 +277,13 @@ fn refused(refusal: Refusal) -> worker.Response(String, String) {
   }
 }
 
+/// The heap the model's process may grow to before it is killed and its
+/// call is a raise: the provider's answer and the prepared request.
+fn model_heap() -> isolated.HeapLimit {
+  let assert Ok(heap) = isolated.heap_limit(megabytes: 256)
+  heap
+}
+
 fn attempt(
   env: Env,
   db: pog.Connection,
@@ -274,15 +292,15 @@ fn attempt(
 ) -> worker.Response(String, String) {
   let chosen =
     llm.live(env.configuration, env.provider, env.llm_client, llm.capture(db))
-    |> isolated.model(within: duration.add(
-      env.provider.deadline,
-      duration.seconds(1),
-    ))
+    |> isolated.model(
+      within: duration.add(env.provider.deadline, duration.seconds(1)),
+      heap: model_heap(),
+    )
     |> after_answer(env.after_model, message.id)
   let attempted =
     isolated.recommend(
       env.desk,
-      in: decisions_postgres.refusing(db, _),
+      in: decisions_postgres.refusing(env.pool, _),
       request: isolated.Request(
         source: "clinic_registration",
         key:,
@@ -382,9 +400,7 @@ pub fn confirm_worker(env: Env) -> Worker(Confirmation, String, String) {
     "clinic.confirm",
     input: confirmation_codec(),
     output: text_codec(),
-    handle: fn(context, confirmation) {
-      confirm(env, worker.connection(context), confirmation)
-    },
+    handle: fn(_context, confirmation) { confirm(env, confirmation) },
   )
   |> worker.with_queue(queue)
   |> worker.with_error_codec(text_codec())
@@ -414,12 +430,11 @@ fn first_name(name: String) -> String {
 /// first, so a send whose answer was lost is never repeated blindly.
 pub fn confirm(
   env: Env,
-  db: pog.Connection,
   confirmation: Confirmation,
 ) -> worker.Response(String, String) {
   let report = fn(effect, done: worker.Response(String, String)) {
     case
-      decisions_postgres.transaction(db, decisions.report(
+      decisions_postgres.transaction(env.pool, decisions.report(
         env.desk,
         _,
         occurrence: confirmation.occurrence,
@@ -501,7 +516,7 @@ pub fn follower(
       occurrence.Done(final:, key:, ..) ->
         grind.submit_in(
           env.jobs,
-          tx,
+          decisions_postgres.connection(tx),
           job.new(
             confirm,
             Confirmation(

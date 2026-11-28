@@ -1,5 +1,5 @@
 -module(checkout_test_ffi).
--export([parent/1, raw_http/3]).
+-export([parent/1, raw_http/3, children/1, fail/1, handlers_with_id_prefix/1, registered_name/1]).
 
 %% The process that spawned Pid (OTP 25+). Used only to find the grind
 %% attempt process that started a saga runner.
@@ -8,6 +8,23 @@ parent(Pid) ->
         {parent, Parent} when is_pid(Parent) -> {ok, Parent};
         _ -> {error, nil}
     end.
+
+%% The running children of a supervisor.
+children(Supervisor) ->
+    [Pid || {_, Pid, _, _} <- supervisor:which_children(Supervisor), is_pid(Pid)].
+
+%% Makes a process exit abnormally. A worker is killed. A supervisor is
+%% told to terminate with an abnormal reason, so it stops its own children
+%% first, as it does when it gives up on them; killing it instead would
+%% leave them exiting, still registered, while its replacement starts.
+fail(Pid) ->
+    case proc_lib:translate_initial_call(Pid) of
+        {supervisor, _, _} ->
+            try proc_lib:stop(Pid, fault, 10000) catch exit:_ -> ok end;
+        _ ->
+            exit(Pid, kill)
+    end,
+    nil.
 
 %% Sends Request verbatim to 127.0.0.1:Port and returns the status code of
 %% the reply. Used to send framings an HTTP client would not choose, such as
@@ -34,4 +51,17 @@ read_status(Socket, Buffer, TimeoutMs) ->
                 {ok, More} -> read_status(Socket, <<Buffer/binary, More/binary>>, TimeoutMs);
                 {error, _} -> {error, nil}
             end
+    end.
+
+%% How many telemetry handlers have an id that starts with Prefix.
+handlers_with_id_prefix(Prefix) ->
+    length([H || #{id := Id} = H <- telemetry:list_handlers([]),
+                 is_binary(Id),
+                 binary:longest_common_prefix([Id, Prefix]) =:= byte_size(Prefix)]).
+
+%% The name Pid is registered under, or an empty string.
+registered_name(Pid) ->
+    case erlang:process_info(Pid, registered_name) of
+        {registered_name, Name} -> atom_to_binary(Name);
+        _ -> <<>>
     end.

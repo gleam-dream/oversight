@@ -2,6 +2,7 @@ name = "checkout"
 version = "0.1.0"
 target = "erlang"
 description = "Composition app: an order API built from saga, grind, http_gun and sinal on wisp, mist and pog."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
@@ -15,11 +16,11 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-saga = ">= 0.2.0 and < 0.3.0"
-saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.1.0", path = "integrations/saga_postgres" }
-grind = ">= 0.1.1 and < 0.2.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-sinal = ">= 0.1.0 and < 0.2.0"
+saga = ">= 0.3.0 and < 0.4.0"
+saga_postgres = { git = "https://github.com/gleam-dream/saga.git", ref = "saga_postgres-v0.2.0", path = "integrations/saga_postgres" }
+grind = ">= 0.3.0 and < 0.4.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+sinal = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

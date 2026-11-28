@@ -68,7 +68,7 @@ fn with_node(schema: String, body: fn(Fixture) -> a) -> a {
   let assert Ok(world) = services.start()
   let notices = process.new_subject()
   services.watch(world, notices)
-  let observed = telemetry.start(False)
+  let assert Ok(observed) = telemetry.start()
   let assert Ok(node) =
     app.start(settings(world, "test-node", schema, Some(observed)))
   let result = body(Fixture(world, node, notices, observed))
@@ -170,6 +170,96 @@ pub fn common_path_publishes_and_checkpoints_the_conversation_test() {
   let assert Error(Nil) = list.key_find(trace.unattributed, "llm_wire")
   let assert Error(Nil) = list.key_find(trace.unattributed, "saga")
   let assert Error(Nil) = list.key_find(trace.unattributed, "http_gun")
+}
+
+// Failure: the research row cannot be written ---------------------------------
+
+/// Makes every write that moves a research row to `state` fail, the way a
+/// database fault after the publication would. Returns the function that
+/// removes the fault.
+fn refuse_state(db: pog.Connection, state: String) -> fn() -> Nil {
+  let run = fn(sql) {
+    let assert Ok(_) = pog.query(sql) |> pog.execute(db)
+    Nil
+  }
+  run(
+    "CREATE FUNCTION refuse_state() RETURNS trigger AS $$
+     BEGIN RAISE EXCEPTION 'research store fault'; END $$ LANGUAGE plpgsql",
+  )
+  run("CREATE TRIGGER refuse_state BEFORE UPDATE ON research FOR EACH ROW
+     WHEN (NEW.state = '" <> state <> "') EXECUTE FUNCTION refuse_state()")
+  fn() {
+    run("DROP TRIGGER refuse_state ON research")
+    run("DROP FUNCTION refuse_state()")
+  }
+}
+
+/// A published article whose state cannot be written keeps its job: the
+/// job does not succeed while the row still says `publishing`. Once the
+/// row accepts the write, the redelivered job resumes the finished run and
+/// saga, records the state, and publishes nothing again.
+pub fn unrecorded_publication_keeps_the_job_test() {
+  use f <- with_node("t_unrecorded_publication")
+  services.script(f.world, "otp", services.happy_script(f.world, "otp"))
+  let restore = refuse_state(f.node.db, "published")
+  let assert Ok(id) = app.start_research(f.node, "otp")
+  let assert Ok(services.MutationApplied(services.Publication)) =
+    wait_for(
+      f.notices,
+      fn(notice) { notice == services.MutationApplied(services.Publication) },
+      15_000,
+    )
+  let assert Ok(grind.Pending(_)) =
+    app.await_outcome(f.node, id, duration.milliseconds(1500))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "publishing" = row.state
+  restore()
+
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "published" = row.state
+  let assert 1 = services.counts(f.world).published
+}
+
+/// A run whose `researching` state cannot be written is not stopped for
+/// good: the store fault is transient, so the job waits and the run goes on
+/// once the row accepts the write.
+pub fn unrecorded_start_keeps_the_job_test() {
+  use f <- with_node("t_unrecorded_start")
+  services.script(f.world, "otp", services.happy_script(f.world, "otp"))
+  let restore = refuse_state(f.node.db, "researching")
+  let assert Ok(id) = app.start_research(f.node, "otp")
+  let assert Ok(grind.Pending(_)) =
+    app.await_outcome(f.node, id, duration.milliseconds(1500))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "queued" = row.state
+  restore()
+
+  let assert Ok(grind.Succeeded(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "published" = row.state
+}
+
+/// A publication left uncertain is not reported uncertain while its row
+/// still says `publishing`: an operator reading the row would not look.
+pub fn unrecorded_uncertainty_keeps_the_job_test() {
+  use f <- with_node("t_unrecorded_uncertain")
+  services.script(f.world, "lost", [services.article("Lost", "Body")])
+  services.fault(f.world, services.Creation, services.DropReply)
+  let restore = refuse_state(f.node.db, "uncertain")
+  let assert Ok(id) = app.start_research(f.node, "lost")
+  let assert Ok(grind.Pending(_)) =
+    app.await_outcome(f.node, id, duration.milliseconds(3000))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "publishing" = row.state
+  restore()
+  let assert Ok(grind.Uncertain(_)) =
+    app.await_outcome(f.node, id, duration.seconds(15))
+  let assert Ok(row) = app.row(f.node, id)
+  let assert "uncertain" = row.state
+  let assert 1 = services.calls(f.world, services.Creation)
 }
 
 // Failure: search API down during a turn --------------------------------------
@@ -338,7 +428,7 @@ fn crash_and_recover(
   // A new node in this VM. Once Grind's lease (6 s) expires, the worker's
   // abandonment policy (`ReplayAfterLeaseExpiry`) requeues the job, and
   // this node's consumer runs it again: no app sweep, no operator decision.
-  let observed = telemetry.start(False)
+  let assert Ok(observed) = telemetry.start()
   let assert Ok(survivor) =
     app.start(settings(world, "node-b", schema, Some(observed)))
   check(Fixture(world, survivor, notices, observed), id)

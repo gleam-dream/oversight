@@ -1,7 +1,8 @@
 name = "clinic_registration"
 version = "0.1.0"
 target = "erlang"
-description = "Composition app: registering a patient from a conversation through a decision point, built from decisions, decisions_postgres, decisions_otp, llm_wire, grind, wisp and sinal on pog and mist."
+description = "Composition app: registering a patient from a conversation through a decision point, built from decisions, decisions_postgres, decisions_otp, llm_wire, grind, hellhound, wisp and sinal on pog and mist."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
@@ -16,16 +17,17 @@ pog = ">= 4.1.0 and < 4.2.0"
 wisp = ">= 2.0.0 and < 3.0.0"
 mist = ">= 6.0.0 and < 7.0.0"
 envoy = ">= 1.0.0 and < 2.0.0"
-grind = ">= 0.1.1 and < 0.2.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-llm_wire = ">= 0.2.0 and < 0.3.0"
-json_blueprint = ">= 2.2.0 and < 3.0.0"
-sinal = ">= 0.1.0 and < 0.2.0"
+grind = ">= 0.3.0 and < 0.4.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+llm_wire = ">= 0.3.0 and < 0.4.0"
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
+hellhound = ">= 0.4.0 and < 0.5.0"
 # The core is on Hex. The two integrations are released as Git tags of
 # gleam-dream/decisions.
-decisions = ">= 0.1.0 and < 0.2.0"
-decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.1.0", path = "integrations/decisions_otp" }
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.1.0", path = "integrations/decisions_postgres" }
+decisions = ">= 0.2.0 and < 0.3.0"
+decisions_otp = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_otp-v0.2.0", path = "integrations/decisions_otp" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.3.0", path = "integrations/decisions_postgres" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

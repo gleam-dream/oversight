@@ -55,14 +55,14 @@ pub fn two_triggers_with_one_key_make_one_occurrence_test() {
         jobs.submit(tx, wiring.key(post), models.payload(post))
       jobs.submit(tx, wiring.key(post), models.payload(post))
     })
-  wiring.set_visibility(support.handle(a), post.id, domain.Pending)
+  support.reading(a, wiring.set_visibility(_, post.id, domain.Pending))
   support.settle(a, [post], within: 5000)
   // Both triggers were worked; the second found the occurrence.
   let assert True =
     app.wait_until(fn() { app.numbers(a).triggers_worked == 2 }, within: 5000)
   process.sleep(50)
   assert support.check(a).occurrences == 1
-  assert store.count(support.handle(a), wiring.released) == 1
+  assert support.reading(a, store.count(_, wiring.released)) == 1
   assert support.notified(a) == [#(wiring.key(post), 1)]
   app.stop(a)
 }
@@ -83,11 +83,11 @@ pub fn an_edit_before_the_answer_supersedes_the_expected_recommendation_test() {
   let assert Ok(Nil) = app.resume_runtime(a)
   support.settle(a, [edited.post, ..posts], within: 20_000)
   let assert Ok(decisions.NotBegun(pending)) =
-    decisions.read_record(
+    store.transaction(app.store_of(a), decisions.read_record(
       app.desk_of(a),
-      support.handle(a),
+      _,
       key: wiring.key(first),
-    )
+    ))
   assert pending.ended == Some(Superseded(point.edited))
   let assert Ok([]) = store.backlog(s).undelivered(10)
   assert app.coverage(a)
@@ -123,7 +123,7 @@ pub fn two_edits_at_once_run_one_after_the_other_test() {
     })
   assert list.sort(list.map(edits, fn(e) { e.post.revision }), int.compare)
     == [2, 3]
-  let assert Ok(latest) = wiring.post(support.handle(a), post.id)
+  let assert Ok(latest) = support.reading(a, wiring.post(_, post.id))
   assert latest.revision == 3
   let assert Ok(Nil) = app.resume_runtime(a)
   support.settle(a, [latest], within: 5000)

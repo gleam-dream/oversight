@@ -74,7 +74,7 @@ pub fn the_store_owner_killed_restarts_the_tree_on_an_empty_store_test() {
     )
   assert store.owner(app.store_of(a)) != old
   // The record went with the old owner.
-  assert store.heads(support.handle(a)) == []
+  assert store.heads(app.store_of(a)) == []
   let next = scripted.post(2)
   support.receive_all(a, [next])
   support.settle(a, [next], within: 5000)
@@ -159,11 +159,11 @@ pub fn the_dispatcher_killed_mid_handler_loses_nothing_test() {
     app.wait_until(
       fn() {
         case
-          decisions.read(
+          store.transaction(s, decisions.read(
             app.desk_of(a),
-            store.handle(s),
+            _,
             occurrence: wiring.key(thanks),
-          )
+          ))
         {
           Ok(known) -> occurrence.is_settled(known.status)
           Error(_) -> False
@@ -203,7 +203,7 @@ pub fn a_moderator_killed_mid_verdict_loses_nothing_test() {
   support.receive_all(a, [insult])
   let assert True =
     app.wait_until(
-      fn() { store.get(store.handle(s), wiring.claims, key) == Ok("ana") },
+      fn() { wiring.reading(s, store.get(_, wiring.claims, key)) == Ok("ana") },
       within: 5000,
     )
   let release = support.hold_occurrence(s, key)
@@ -320,11 +320,11 @@ pub fn chaos_while_thousands_of_posts_move_test() {
     == list.sort(list.map(broken, wiring.key), string.compare)
   list.each(broken, fn(post) {
     let assert Error(decisions.NotRecommended(attempts:)) =
-      decisions.read(
+      store.transaction(s, decisions.read(
         app.desk_of(a),
-        store.handle(s),
+        _,
         occurrence: wiring.key(post),
-      )
+      ))
     assert list.length(attempts) >= 3
   })
   // The tree is whole after all of it.

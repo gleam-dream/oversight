@@ -83,7 +83,8 @@ pub fn start() -> App {
   let assert Ok(runs) =
     fabric_postgres.store(process.new_name("history_delivery_runs"), backend)
   let assert Ok(runs) = store.with_drain(runs, duration.milliseconds(1))
-  let agent =
+  let agent = {
+    use <- agent.build
     agent.new(
       "history-delivery-agent",
       model.new(fn(request) {
@@ -106,7 +107,7 @@ pub fn start() -> App {
       [],
       fn(_context: Bool, _action) { Ok(policy.Allow) },
     )
-    |> agent.build
+  }
   let assert Ok(agent) = agent
   let deps = Dependencies(runs, agent, notices)
   let worker =

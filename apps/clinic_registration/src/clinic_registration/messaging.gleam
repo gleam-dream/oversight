@@ -13,7 +13,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/time/duration.{type Duration}
 import http_gun
-import http_gun/config
 import http_gun/error
 
 /// Where the provider is and how long one request may take.
@@ -92,7 +91,7 @@ pub fn send(
 }
 
 fn view(messaging: Messaging) -> http_gun.Client {
-  http_gun.with_timeout(messaging.client, config.After(messaging.deadline))
+  http_gun.with_timeout(messaging.client, messaging.deadline)
 }
 
 fn receipt(body: BitArray) -> Result(String, String) {

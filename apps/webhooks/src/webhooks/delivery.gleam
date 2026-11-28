@@ -120,20 +120,27 @@ fn deliver(
       )
     }
   }
-  let db = worker.connection(context)
-  let _ =
+  let disabling = case disposition {
+    attempt.Gone(reason) | attempt.Refused(reason) ->
+      Some(store.Disabling(subscription_id: sub.id, reason:))
+    _ -> None
+  }
+  // The attempt settles only once its record (and a disablement) is
+  // stored: otherwise the tenant's record would not show it and a gone
+  // endpoint would keep receiving. The next attempt sends again under the
+  // same delivery id, which the receiver deduplicates.
+  let disposition = case
     store.record_attempt(
-      db,
+      worker.connection(context),
       delivery.delivery_id,
       status,
       describe(disposition),
+      disabling,
     )
-  case disposition {
-    attempt.Gone(reason) | attempt.Refused(reason) -> {
-      let _ = store.disable(db, sub.id, reason)
-      Nil
-    }
-    _ -> Nil
+  {
+    Ok(Nil) -> disposition
+    Error(_) ->
+      attempt.Retry(attempt.Unrecorded("the attempt's record was not stored"))
   }
   sinal.emit(
     telemetry.delivery_attempted(),

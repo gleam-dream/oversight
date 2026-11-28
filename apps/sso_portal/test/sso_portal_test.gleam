@@ -1,3 +1,4 @@
+import envoy
 import gleam/bit_array
 import gleam/crypto
 import gleam/dynamic/decode
@@ -22,6 +23,7 @@ import sso_portal/app.{type App}
 import sso_portal/billing_api
 import sso_portal/browser.{type Browser}
 import sso_portal/hellhound_records
+import sso_portal/keys
 import sso_portal/server
 import sso_portal/session_store
 import sso_portal/telemetry
@@ -30,8 +32,23 @@ import wisp
 import wisp/simulate
 
 pub fn main() -> Nil {
+  // The keys a deployment configures; every portal in this run uses them.
+  envoy.set(sealing_key_variable, test_sealing_key)
+  envoy.set(secret_key_base_variable, test_secret_key_base)
   gleeunit.main()
 }
+
+const sealing_key_variable = "SSO_PORTAL_SEALING_KEY"
+
+const secret_key_base_variable = "SSO_PORTAL_SECRET_KEY_BASE"
+
+/// 32 bytes, hex-encoded.
+const test_sealing_key =
+  "6f1c2a9e4b7d03581f6e2c9a7b4d1e08c3a5f7092e4b6d81c0f3a5e7d9b2c4a6"
+
+/// 64 characters, wisp's minimum.
+const test_secret_key_base =
+  "portal-test-secret-key-base-0123456789abcdef0123456789abcdef0123"
 
 // --- Harness ----------------------------------------------------------------
 
@@ -277,7 +294,7 @@ pub fn tampered_callback_state_is_rejected_test() {
   let tampered = before <> "state=x" <> after
   let assert Ok(#(_, page)) = browser.get(b, tampered)
   assert page.status == 400
-  assert string.contains(page.body, "unknown state")
+  assert string.contains(page.body, "no login cookie for this state")
   // The code was never exchanged and no session exists.
   assert testing.requests(portal.provider).code_grants == 0
   assert rows(portal) == 0
@@ -514,8 +531,8 @@ pub fn hellhound_records_hold_nothing_readable_test() {
     pog.query("select sealed from hellhound_records")
     |> pog.returning(decode.at([0], decode.bit_array))
     |> pog.execute(portal.db)
-  // Custody and the pending login are in the table, sealed: neither the
-  // token nor the reference nor the subject appears in any row.
+  // Custody is in the table, sealed: neither the token nor the reference
+  // nor the subject appears in any row.
   assert sealed != []
   let forbidden = [
     hellhound.access_token_value(access.token),
@@ -699,4 +716,89 @@ pub fn commit_connection_loss_preserves_unknown_outcome_test() {
   // Independent subsequent evidence can settle this attempt; the failed
   // acknowledgement itself must not claim that knowledge.
   assert store.get(records, original.key) == Ok(Some(original))
+}
+
+// --- Telemetry ---------------------------------------------------------------
+
+@external(erlang, "owned_handlers_ffi", "handlers_with_id_prefix")
+fn collector_handlers(prefix: String) -> Int
+
+/// The collector's process owns its handlers: they record the portal's
+/// requests while the portal runs, and once it stops they are detached and
+/// the collector holds nothing.
+pub fn telemetry_handlers_live_as_long_as_the_portal_test() {
+  let assert Ok(portal) = app.start(options())
+  let b = browser.new(testing.trust_anchor_der(portal.provider))
+  let _ = sign_in(portal, b)
+  browser.close(b)
+  assert telemetry.records(portal.telemetry) != []
+  app.stop(portal)
+  assert eventually(2000, fn() {
+    collector_handlers("sinal/collector:sso_portal_telemetry") == 0
+  })
+  assert telemetry.records(portal.telemetry) == []
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
+}
+
+// --- Keys --------------------------------------------------------------------
+
+/// Runs `body` with `variable` set to `value`, or unset for `Error(Nil)`,
+/// and puts the test value back afterwards.
+fn with_variable(
+  variable: String,
+  value: Result(String, Nil),
+  restore: String,
+  body: fn() -> a,
+) -> a {
+  case value {
+    Ok(value) -> envoy.set(variable, value)
+    Error(Nil) -> envoy.unset(variable)
+  }
+  let result = body()
+  envoy.set(variable, restore)
+  result
+}
+
+/// The portal refuses to start without its keys, or with keys that would
+/// not keep sealed custody and signed cookies across a restart, and names
+/// the variable at fault.
+pub fn the_portal_does_not_start_without_valid_keys_test() {
+  let refused = fn(variable, value, restore) {
+    use <- with_variable(variable, value, restore)
+    let assert Error(reason) = app.start(options())
+    assert string.contains(reason, variable)
+  }
+  refused(sealing_key_variable, Error(Nil), test_sealing_key)
+  refused(sealing_key_variable, Ok("not a key"), test_sealing_key)
+  // 31 bytes, and 32 zero bytes.
+  refused(sealing_key_variable, Ok(string.repeat("ab", 31)), test_sealing_key)
+  refused(sealing_key_variable, Ok(string.repeat("00", 32)), test_sealing_key)
+  refused(secret_key_base_variable, Error(Nil), test_secret_key_base)
+  refused(secret_key_base_variable, Ok("short"), test_secret_key_base)
+}
+
+/// A sealing key is accepted as hex or as base64 of 32 bytes.
+pub fn a_sealing_key_is_hex_or_base64_test() {
+  let bytes = crypto.strong_random_bytes(32)
+  let secret = test_secret_key_base
+  let assert Ok(_) =
+    keys.from(
+      sealing_key: Ok(bit_array.base16_encode(bytes)),
+      secret_key_base: Ok(secret),
+    )
+  let assert Ok(_) =
+    keys.from(
+      sealing_key: Ok(bit_array.base64_encode(bytes, True)),
+      secret_key_base: Ok(secret),
+    )
 }

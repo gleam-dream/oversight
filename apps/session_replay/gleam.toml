@@ -3,10 +3,11 @@ version = "0.1.0"
 target = "erlang"
 gleam = ">= 1.16.0"
 description = "Public Retrace consumer: typed cart recording, reconstruction and recovery."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
-retrace = ">= 0.1.0 and < 0.2.0"
+retrace = ">= 0.2.0 and < 0.3.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

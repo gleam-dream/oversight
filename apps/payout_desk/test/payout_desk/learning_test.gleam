@@ -22,7 +22,8 @@ pub fn finance_decisions_are_tallied_and_replayed_test() {
   let assert Ok(_) =
     support.decide(running, rejected, "carl", Reject(Reason("buyer_won", None)))
 
-  let assert Ok(records) = review.records(running.db, app.payout_desk(running))
+  let assert Ok(records) =
+    review.records(running.deps.pool, app.payout_desk(running))
   let summary = review.summary(records)
   let known = review.begun(records)
   // Finance let two through, one as proposed; it lowered one and rejected

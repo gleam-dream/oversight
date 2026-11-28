@@ -23,9 +23,9 @@ import gleam/http
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import grind/worker
-import pog
 import support
 
 pub fn a_message_delivered_twice_at_once_admits_one_registration_test() {
@@ -168,7 +168,11 @@ pub fn an_older_model_call_finishing_late_leaves_no_waiting_card_test() {
     )
     == []
   let assert Ok(decisions.NotBegun(pending)) =
-    decisions.read_record(env.app.desk, env.app.db, key: domain.key(first.id))
+    decisions_postgres.refusing(env.app.pool, decisions.read_record(
+      env.app.desk,
+      _,
+      key: domain.key(first.id),
+    ))
   assert pending.ended == Some(Superseded(domain.newer_message))
   let cards =
     support.call(env, http.Get, "/queue", support.felipe, "").body
@@ -179,7 +183,7 @@ pub fn an_older_model_call_finishing_late_leaves_no_waiting_card_test() {
   assert cards == [next.id]
   // The operator's coverage: two messages expected, one superseded before
   // its recommendation, none still waiting.
-  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  let assert Ok(coverage) = evaluation.coverage(env.app.pool, env.app.desk)
   assert coverage
     == learning.Coverage(
       expected: 2,
@@ -193,10 +197,15 @@ pub fn a_late_recommendation_is_refused_and_writes_nothing_test() {
   use env <- support.with_app(fn(config) { config })
   let #(first, _) = overtaken(env)
   let key = domain.key(first.id)
-  let assert Ok(before) = decisions.read_record(env.app.desk, env.app.db, key:)
+  let assert Ok(before) =
+    decisions_postgres.refusing(env.app.pool, decisions.read_record(
+      env.app.desk,
+      _,
+      key:,
+    ))
 
   let late =
-    decisions_postgres.transaction(env.app.db, decisions.recommend_once(
+    decisions_postgres.transaction(env.app.pool, decisions.recommend_once(
       env.app.desk,
       _,
       key:,
@@ -219,7 +228,12 @@ pub fn a_late_recommendation_is_refused_and_writes_nothing_test() {
   let assert Error(decisions_postgres.Refused(decisions.SupersededBefore(
     event: "newer_message",
   ))) = late
-  let assert Ok(after) = decisions.read_record(env.app.desk, env.app.db, key:)
+  let assert Ok(after) =
+    decisions_postgres.refusing(env.app.pool, decisions.read_record(
+      env.app.desk,
+      _,
+      key:,
+    ))
   assert after == before
 }
 
@@ -228,8 +242,11 @@ pub fn a_notice_for_a_record_superseded_before_it_began_ends_delivered_test() {
   let #(first, _) = overtaken(env)
   let #(_, follow) =
     jobs.follower(env.app.env, jobs.confirm_worker(env.app.env))
-  let assert Error(pog.TransactionRolledBack(failure)) =
-    pog.transaction(env.app.db, follow(_, domain.key(first.id)))
+  let assert Error(decisions_postgres.OwnFailed(failure)) =
+    decisions_postgres.transaction_with(env.app.pool, fn(tx) {
+      follow(tx, domain.key(first.id))
+      |> result.map_error(decisions_postgres.Own)
+    })
   let assert decisions.DeskRefused(decisions.SupersededBefore(..)) = failure
   // A dropped notice: delivered, nothing follows.
   assert decisions.handling(failure) == decisions.Drop
@@ -264,11 +281,11 @@ pub fn two_messages_from_one_contact_at_once_leave_one_expected_test() {
     let records =
       list.map(messages, fn(message) {
         let assert Ok(record) =
-          decisions.read_record(
+          decisions_postgres.refusing(env.app.pool, decisions.read_record(
             env.app.desk,
-            env.app.db,
+            _,
             key: domain.key(message.id),
-          )
+          ))
         record
       })
     let superseded =
@@ -284,11 +301,11 @@ pub fn two_messages_from_one_contact_at_once_leave_one_expected_test() {
     let assert Ok(survivor) =
       list.find(messages, fn(message) {
         case
-          decisions.read_record(
+          decisions_postgres.refusing(env.app.pool, decisions.read_record(
             env.app.desk,
-            env.app.db,
+            _,
             key: domain.key(message.id),
-          )
+          ))
         {
           Ok(decisions.NotBegun(pending)) -> pending.ended == None
           Ok(decisions.Begun(_)) -> True
@@ -318,7 +335,7 @@ pub fn an_admission_that_waits_too_long_for_the_contact_is_delivered_again_test(
   let held = process.new_subject()
   process.spawn(fn() {
     support.with_pool(env.url, fn(db) {
-      pog.transaction(db, fn(tx) {
+      decisions_postgres.transaction(db, fn(tx) {
         let assert Ok(_) =
           decisions_postgres.port(env.app.records).load(
             tx,
@@ -340,14 +357,14 @@ pub fn an_admission_that_waits_too_long_for_the_contact_is_delivered_again_test(
     <> "\",\"from\":\""
     <> phone
     <> "\",\"profile_name\":\"Ana\",\"text\":\"Oi\"}"
-  let first = support.call(env, http.Post, "/inbound", "", body)
+  let first = support.deliver(env, body)
   // The admission ended as contention and kept nothing: the channel is
   // told to deliver it again.
   assert first.status == 503
   assert support.status_of(env, message.id) == "absent"
   // Delivered again once the other transaction ended, it is admitted.
   process.sleep(2500)
-  let again = support.call(env, http.Post, "/inbound", "", body)
+  let again = support.deliver(env, body)
   assert again.status == 202
   let _ = support.await_status(env, message.id, "awaiting")
 }

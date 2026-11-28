@@ -173,12 +173,24 @@ pub fn classifier(
 /// deadline.
 pub fn cascade(version: String, fault: Fault, timing: Timing) -> Model(Action) {
   model.cascade([
-    model.stage(isolated.model(rules(), within: timing.rules_within)),
+    model.stage(isolated.model(
+      rules(),
+      within: timing.rules_within,
+      heap: model_heap(),
+    )),
     model.stage(isolated.model(
       classifier(version, fault, timing.classifier_ms),
       within: timing.classifier_within,
+      heap: model_heap(),
     )),
   ])
+}
+
+/// The heap a model's process may grow to before it is killed and its
+/// call is a raise. The scripted models hold one post and its context.
+fn model_heap() -> isolated.HeapLimit {
+  let assert Ok(heap) = isolated.heap_limit(megabytes: 64)
+  heap
 }
 
 /// The cascade as a pure candidate for a replay: no process, no deadline,
@@ -195,17 +207,18 @@ pub fn candidate(version: String) -> Model(Action) {
 /// and a replay get the same content later.
 pub fn sources(s: Store) -> Sources {
   Sources(resolve: wiring.content(s), read: fn(name, argument) {
-    let handle = store.handle(s)
-    model.capture(
-      store.evidence(),
-      handle,
-      source: name,
-      request: argument,
-      fetch: fn() {
-        wiring.read_body(handle, name, argument)
-        |> result.replace_error("nothing to read")
-      },
-    )
+    store.transaction(s, fn(tx) {
+      model.capture(
+        store.evidence(),
+        tx,
+        source: name,
+        request: argument,
+        fetch: fn() {
+          wiring.read_body(tx, name, argument)
+          |> result.replace_error("nothing to read")
+        },
+      )
+    })
     |> result.map_error(fn(reason) {
       model.ReadFailed(read: name, argument:, reason:)
     })
@@ -244,8 +257,13 @@ pub fn payload(post: Post) -> String {
 /// trigger aside when it keeps failing.
 pub fn work(env: Env) -> fn(Submitted) -> Result(Nil, HandlerFailure) {
   fn(submitted: Submitted) {
-    let handle = store.handle(env.store)
-    case decisions.read(env.desk, handle, occurrence: submitted.key) {
+    case
+      store.transaction(env.store, decisions.read(
+        env.desk,
+        _,
+        occurrence: submitted.key,
+      ))
+    {
       Ok(_) -> Ok(Nil)
       Error(decisions.NotRecommended(attempts:)) ->
         attempt(env, submitted, list.length(attempts) + 1)
@@ -260,9 +278,8 @@ fn attempt(
   submitted: Submitted,
   number: Int,
 ) -> Result(Nil, HandlerFailure) {
-  let handle = store.handle(env.store)
   use post <- result.try(
-    post_in(handle, submitted.payload)
+    wiring.reading(env.store, post_in(_, submitted.payload))
     |> result.map_error(decisions.ApplicationFailed),
   )
   let request =
@@ -279,7 +296,7 @@ fn attempt(
     )
   let model =
     cascade(
-      wiring.classifier_version(handle),
+      wiring.reading(env.store, wiring.classifier_version),
       env.faults(post, number),
       env.timing,
     )

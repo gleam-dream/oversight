@@ -13,7 +13,7 @@ import tool_hub
 import tool_hub/assistant
 import tool_hub/inventory
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "tool_hub_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// Each term handed to another process: its name, its copied size in bytes

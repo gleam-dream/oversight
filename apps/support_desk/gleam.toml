@@ -2,6 +2,7 @@ name = "support_desk"
 version = "0.1.0"
 target = "erlang"
 description = "Composition app: a customer-support agent whose refunds need approval and run as a compensating saga, built from fabric, llm_wire, http_gun, json_blueprint, saga and sinal."
+licences = ["Apache-2.0"]
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
@@ -11,13 +12,13 @@ gleam_http = ">= 4.4.0 and < 5.0.0"
 gleam_json = ">= 3.1.0 and < 4.0.0"
 gleam_time = ">= 1.11.0 and < 2.0.0"
 mist = ">= 6.0.2 and < 7.0.0"
-fabric = ">= 0.4.0 and < 0.5.0"
-saga = ">= 0.2.0 and < 0.3.0"
-llm_wire = ">= 0.2.0 and < 0.3.0"
-http_gun = ">= 0.2.0 and < 0.3.0"
-json_blueprint = ">= 2.2.0 and < 3.0.0"
-sinal = ">= 0.1.0 and < 0.2.0"
-hellhound = ">= 0.3.0 and < 0.4.0"
+fabric = ">= 0.6.0 and < 0.7.0"
+saga = ">= 0.3.0 and < 0.4.0"
+llm_wire = ">= 0.3.0 and < 0.4.0"
+http_gun = ">= 0.4.0 and < 0.5.0"
+json_blueprint = ">= 3.0.0 and < 3.1.0"
+sinal = ">= 0.2.0 and < 0.3.0"
+hellhound = ">= 0.4.0 and < 0.5.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

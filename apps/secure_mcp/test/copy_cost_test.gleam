@@ -11,7 +11,7 @@ import gleam/list
 import secure_mcp/app
 import secure_mcp/tools
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "secure_mcp_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// Each term handed to another process: its name, its copied size in bytes

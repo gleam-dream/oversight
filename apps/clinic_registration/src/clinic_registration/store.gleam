@@ -378,7 +378,7 @@ pub fn store_policy(
     "INSERT INTO clinic_policies (point, version, body) VALUES ($1, $2, $3)",
   )
   |> pog.parameter(pog.text(point))
-  |> pog.parameter(pog.int(version.version))
+  |> pog.parameter(pog.int(policy.version(version)))
   |> pog.parameter(pog.text(json.to_string(policy.to_json(version))))
   |> pog.execute(db)
   |> result.replace(Nil)

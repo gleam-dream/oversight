@@ -8,7 +8,7 @@ import clinic_registration/jobs
 import gleam/list
 import support
 
-@external(erlang, "copy_cost_ffi", "flat_size_bytes")
+@external(erlang, "clinic_registration_copy_cost_ffi", "flat_size_bytes")
 fn flat_size_bytes(term: a) -> Int
 
 /// The terms Grind copies into the processes that run each job: both workers

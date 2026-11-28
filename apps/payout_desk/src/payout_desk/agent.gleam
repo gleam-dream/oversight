@@ -210,13 +210,14 @@ pub fn build(
   script: Script,
   unavailable: fn() -> Bool,
 ) -> Result(Agent(Session, Reply), String) {
-  agent.new("payout_support", scripted(script, unavailable), tools(), gate)
-  |> agent.with_system_prompt(
-    "You help marketplace sellers with payouts. Read the order, its dispute and the seller's history, then propose a payout. Tell the seller only what the proposal's result says.",
-  )
-  |> agent.with_answer(domain.reply_codec())
-  |> agent.with_max_turns(6)
-  |> agent.build
+  agent.build(fn() {
+    agent.new("payout_support", scripted(script, unavailable), tools(), gate)
+    |> agent.with_system_prompt(
+      "You help marketplace sellers with payouts. Read the order, its dispute and the seller's history, then propose a payout. Tell the seller only what the proposal's result says.",
+    )
+    |> agent.with_answer(domain.reply_codec())
+    |> agent.with_max_turns(6)
+  })
   |> result.map_error(agent.describe_config_errors)
 }
 

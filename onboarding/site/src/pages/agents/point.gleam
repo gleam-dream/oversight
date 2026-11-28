@@ -537,7 +537,7 @@ pub fn why(point: Point) -> String {
       <> int.to_string(point.confidence)
       <> "% confidence. Admitted once under its trigger’s key: a duplicate delivery would land on this same occurrence."
     Accepted ->
-      "No person needed. Next comes the release check and the gated tool, inside your transaction."
+      "No person needed. Next comes the release check and the gated tool, in the same transaction as your own writes."
     Awaiting(_) ->
       "A card shows the approver exactly what the model saw. "
       <> case need > 1 {

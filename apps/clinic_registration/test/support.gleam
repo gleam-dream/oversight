@@ -3,6 +3,7 @@
 //// application over them, and small helpers to wait for an outcome and to
 //// call the desk over HTTP.
 
+import clinic_registration/access
 import clinic_registration/app.{type App}
 import clinic_registration/domain.{type Inbound, type Registration, Inbound}
 import clinic_registration/owner
@@ -10,10 +11,12 @@ import clinic_registration/scripted.{type Services}
 import clinic_registration/store
 import decisions
 import decisions/occurrence.{type Occurrence}
+import decisions/vocabulary.{type Validator}
 import decisions_postgres
 import decisions_postgres/queue
 import envoy
 import gleam/bit_array
+import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
@@ -39,6 +42,10 @@ fn quiet_pool_shutdown() -> Nil
 /// True the first time it is called with `key` on this node.
 @external(erlang, "support_ffi", "once")
 pub fn once(key: String) -> Bool
+
+/// How many telemetry handlers are attached to events under `prefix`.
+@external(erlang, "support_ffi", "handlers")
+pub fn handlers(prefix: List(String)) -> Int
 
 @external(erlang, "support_ffi", "ensure")
 fn ensure(body: fn() -> a, cleanup: fn() -> b) -> a
@@ -85,7 +92,15 @@ fn split_last(text: String, on: String) -> Result(#(String, String), Nil) {
 }
 
 pub type Env {
-  Env(app: App, services: Services, url: String, config: app.Config)
+  Env(
+    app: App,
+    services: Services,
+    url: String,
+    config: app.Config,
+    /// The desk session cookie of each member of staff who signed in when
+    /// the application started (`felipe`, `bia`, `marta`), by name.
+    sessions: Dict(String, String),
+  )
 }
 
 /// Start the scripted providers and the application over a fresh database,
@@ -124,12 +139,33 @@ pub fn boot(
       messaging_base: scripted.messaging_base(services),
       provider_ports: scripted.ports(services),
     )
+    |> fn(config) {
+      let port = scripted.free_port()
+      let assert Ok(sign_in) = scripted.staff_sign_in(services, port, staff())
+      app.Config(
+        ..config,
+        port:,
+        sign_in: Some(sign_in),
+        channel: Some(channel()),
+      )
+    }
     |> configure
   let assert Ok(application) = app.start(config)
   list.each(insurers, fn(name) {
     let assert Ok(Nil) = store.accept_insurer(application.db, name)
   })
-  Env(app: application, services:, url:, config:)
+  // Custody is in memory, so every start signs the staff in again.
+  let sessions = case config.sign_in {
+    None -> dict.new()
+    Some(_) ->
+      list.map(staff(), fn(member) {
+        let assert Ok(cookie) =
+          scripted.sign_in(services, app.base_url(application), member.0)
+        #(member.0, cookie)
+      })
+      |> dict.from_list
+  }
+  Env(app: application, services:, url:, config:, sessions:)
 }
 
 pub const insurers = ["Bradesco Saúde", "SulAmérica", "Unimed"]
@@ -180,7 +216,11 @@ pub fn read(
   env: Env,
   message_id: String,
 ) -> Result(Occurrence(Registration), decisions.Refusal) {
-  decisions.read(env.app.desk, env.app.db, occurrence: domain.key(message_id))
+  decisions_postgres.refusing(env.app.pool, decisions.read(
+    env.app.desk,
+    _,
+    occurrence: domain.key(message_id),
+  ))
 }
 
 /// Wait until the message's occurrence has a status named `status`.
@@ -236,13 +276,34 @@ pub fn client() -> http_gun.Client {
   client
 }
 
-/// Call the desk as `validator` (the `x-clinic-validator` header), or
-/// anonymously with `""`.
+/// Call the desk from its own origin as a member of staff who signed in
+/// at start-up (`felipe`, `marta`, `bia`), or anonymously with `""`. Any
+/// other name sends a cookie no sign-in set.
 pub fn call(
   env: Env,
   method: http.Method,
   path: String,
   as_validator: String,
+  body: String,
+) -> Answer {
+  let origin = #("origin", app.base_url(env.app))
+  let headers = case as_validator, dict.get(env.sessions, as_validator) {
+    "", _ -> [origin]
+    _, Ok(cookie) -> [origin, #("cookie", cookie)]
+    name, Error(Nil) -> [
+      origin,
+      #("cookie", scripted.session_cookie <> "=" <> name),
+    ]
+  }
+  send(env, method, path, headers, body)
+}
+
+/// One request to the application with exactly these headers.
+pub fn send(
+  env: Env,
+  method: http.Method,
+  path: String,
+  headers: List(#(String, String)),
   body: String,
 ) -> Answer {
   let http = client()
@@ -252,10 +313,10 @@ pub fn call(
     |> request.set_method(method)
     |> request.set_header("content-type", "application/json")
     |> request.set_body(bit_array.from_string(body))
-  let req = case as_validator {
-    "" -> req
-    header -> request.set_header(req, "x-clinic-validator", header)
-  }
+  let req =
+    list.fold(headers, req, fn(req, header) {
+      request.set_header(req, header.0, header.1)
+    })
   let assert Ok(reply) = http_gun.send(http, req)
   http_gun.stop(http)
   Answer(
@@ -264,9 +325,46 @@ pub fn call(
   )
 }
 
-pub const felipe = "felipe; reception"
+/// Deliver a webhook body as the messaging channel does: signed with the
+/// channel's secret.
+pub fn deliver(env: Env, body: String) -> Answer {
+  send(
+    env,
+    http.Post,
+    "/inbound",
+    [
+      #(
+        access.signature_header,
+        access.sign(channel(), bit_array.from_string(body)),
+      ),
+    ],
+    body,
+  )
+}
 
-pub const marta = "marta; manager"
+/// The test clinic's staff, by the subject they sign in as: Felipe and Bia
+/// at reception, Marta the manager.
+pub const felipe = "felipe"
+
+pub const bia = "bia"
+
+pub const marta = "marta"
+
+/// Each member of staff's subject and the validator the desk acts as.
+pub fn staff() -> List(#(String, Validator)) {
+  [
+    #(felipe, domain.validator("felipe", [domain.reception])),
+    #(bia, domain.validator("bia", [domain.reception])),
+    #(marta, domain.validator("marta", [domain.manager])),
+  ]
+}
+
+/// The secret the test channel signs with.
+pub fn channel() -> access.ChannelSecret {
+  let assert Ok(secret) =
+    access.channel_secret("test-channel-secret-7b2e9c41d08f5a36")
+  secret
+}
 
 /// Open a card over HTTP and return its ticket's `seen` with the document.
 pub fn open(
@@ -347,7 +445,7 @@ pub fn race(count: Int, work: fn(Int) -> a) -> List(a) {
 pub fn registrations(env: Env) -> Int {
   let assert Ok(page) =
     queue.occurrences_of(
-      env.app.db,
+      env.app.pool,
       point: domain.point_name,
       limit: 1000,
       after: None,
@@ -373,7 +471,7 @@ pub fn later(env: Env, minutes: Int) -> #(Env, Int) {
   let assert Ok(delivered) =
     decisions_postgres.deliver_due(
       later.app.records,
-      later.app.db,
+      later.app.pool,
       [decisions.waker(later.app.desk)],
       limit: 50,
     )
@@ -393,12 +491,13 @@ pub fn with_restarts(body: fn(Env) -> Env) -> Nil {
 }
 
 /// Run `body` on a pool of its own over `url`, closed afterwards.
-pub fn with_pool(url: String, body: fn(pog.Connection) -> a) -> Nil {
-  let assert Ok(config) = pog.url_config(process.new_name("clinic_side"), url)
+pub fn with_pool(url: String, body: fn(decisions_postgres.Pool) -> a) -> Nil {
+  let name = process.new_name("clinic_side")
+  let assert Ok(config) = pog.url_config(name, url)
   let assert Ok(#(Nil, pool)) =
     owner.start(fn() {
-      let assert Ok(started) = pog.start(pog.pool_size(config, 1))
-      let _ = body(started.data)
+      let assert Ok(_) = pog.start(pog.pool_size(config, 1))
+      let _ = body(decisions_postgres.pool(name))
       Ok(Nil)
     })
   owner.stop(pool)

@@ -7,7 +7,7 @@ import decisions
 import decisions/fact
 import decisions/occurrence
 import decisions/policy
-import decisions/vocabulary.{Approve, Reason, Reject}
+import decisions/vocabulary.{Agent, Approve, Reason, Reject}
 import decisions_postgres
 import decisions_postgres/queue
 import gleam/list
@@ -46,7 +46,11 @@ pub fn a_seller_with_chargebacks_is_assessed_by_risk_first_test() {
   let assert occurrence.Awaiting(eligible:) = known.status
   assert policy.approvals(eligible) == 2
   let assert Ok(about) =
-    queue.about(running.db, vocabulary.Subject("seller", "dora"), limit: 10)
+    queue.about(
+      running.deps.pool,
+      vocabulary.Subject("seller", "dora"),
+      limit: 10,
+    )
   assert list.map(about, fn(s) { s.point }) |> list.sort(string.compare)
     == ["payout", "risk"]
 }
@@ -142,4 +146,37 @@ pub fn a_new_policy_version_changes_the_undo_window_only_for_new_payouts_test() 
   let assert Some(told) = support.told(running, first, 20_000)
   assert told.outcome == "paid"
   let assert occurrence.Held(..) = support.read(running, second).status
+}
+
+fn small_won_dispute(
+  chargeback: List(#(String, vocabulary.Fact)),
+) -> policy.Outcome {
+  let facts = [
+    fact.set(domain.amount(), 20.0),
+    fact.set(domain.dispute_for_seller(), True),
+    ..chargeback
+  ]
+  let #(now, _) =
+    policy.timeline(
+      domain.payout_policy(version: 1, hold: duration.minutes(10)),
+      Agent(kind: "payout-agent", version: "1"),
+      facts,
+      waited: 0,
+    )
+  now
+}
+
+/// A small payout whose dispute the seller won proceeds when the seller has
+/// no recent chargeback: no consult was needed, so the absent risk answer
+/// stops nothing.
+pub fn a_small_won_dispute_without_chargebacks_proceeds_test() {
+  assert small_won_dispute([fact.set(domain.recent_chargeback(), False)])
+    == policy.Proceed(sample: policy.Never, hold: Some(duration.minutes(10)))
+}
+
+/// Without the seller's history the policy cannot tell whether risk must be
+/// consulted, so finance is asked instead of the payout proceeding.
+pub fn a_payout_without_the_sellers_history_asks_finance_test() {
+  assert small_won_dispute([])
+    == policy.Ask(policy.SomeoneElseHolding(domain.finance))
 }

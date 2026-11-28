@@ -105,11 +105,10 @@ fn judged(
   after: Option(store.Cursor),
   so_far: List(occurrence.Occurrence(Action)),
 ) -> List(occurrence.Occurrence(Action)) {
-  let handle = store.handle(s)
-  let page = store.occurrences_of(handle, point.name, after:, limit: 500)
+  let page = store.occurrences_of(s, point.name, after:, limit: 500)
   let found =
     list.filter_map(page.ids, fn(id) {
-      decisions.read(desk, handle, occurrence: id)
+      store.transaction(s, decisions.read(desk, _, occurrence: id))
       |> result.replace_error(Nil)
       |> result.try(fn(known) {
         case occurrence.verdicts(known) {
@@ -145,7 +144,7 @@ pub fn replay(
         _ -> Error(Nil)
       }
     })
-  let latest = wiring.latest(store.handle(s))
+  let latest = fn(ref) { wiring.reading(s, fn(tx) { wiring.latest(tx)(ref) }) }
   Report(
     examples: list.length(examples),
     model_agreed: scored.tally.agreed,

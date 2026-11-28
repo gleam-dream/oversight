@@ -72,6 +72,24 @@ pub fn an_undecodable_answer_is_an_attempt_with_its_exchange_kept_test() {
     == 2
 }
 
+/// An answer that ends with a stop reason llm_wire does not know is not a
+/// reading: it is an undecodable attempt, and the job tries again.
+pub fn an_unrecognized_stop_is_an_attempt_test() {
+  use env <- support.with_app(fn(config) { config })
+  let phone = support.phone()
+  scripted.script(env.services, phone, [
+    scripted.UnrecognizedStop("pause_turn"),
+    scripted.Answer(support.ana_answer(phone)),
+  ])
+  let message = support.message(phone, "Ana", support.ana_says)
+  let known = support.arrive(env, message)
+
+  let assert [model.Undecodable(reason)] = failures(known)
+  assert reason
+    == "the provider ended with an unrecognized stop reason: pause_turn"
+  assert scripted.llm_calls(env.services, phone) == 2
+}
+
 pub fn a_missed_deadline_is_an_attempt_test() {
   use env <- support.with_app(fn(config) {
     app.Config(..config, model_deadline: duration.milliseconds(300))
@@ -170,6 +188,6 @@ pub fn an_operator_sees_the_messages_still_waiting_for_a_recommendation_test() {
   let assert [#(occurrence, since)] = pending
   assert occurrence == domain.key(message.id)
   assert since > 0
-  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  let assert Ok(coverage) = evaluation.coverage(env.app.pool, env.app.desk)
   assert coverage.still_expected == 1
 }

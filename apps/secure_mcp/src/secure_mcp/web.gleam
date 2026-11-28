@@ -57,7 +57,7 @@ fn login(req: Request, context: Context) -> Response {
       login_hint: hint,
       extra_parameters: [#("resource", context.mcp_url)],
     )
-  case hellhound.begin_login(context.hellhound, req, options) {
+  case hellhound.begin_login(context.hellhound, options) {
     Ok(redirect) -> hellhound.login_response(wisp.response(303), redirect)
     Error(error) ->
       wisp.response(503)

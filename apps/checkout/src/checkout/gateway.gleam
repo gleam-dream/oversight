@@ -43,7 +43,6 @@ pub fn client_config(
   hosts: List(String),
 ) -> config.Config {
   config.default()
-  |> config.with_request_timeout(config.After(duration.seconds(5)))
   |> config.with_destination(
     destination.loopback_only() |> destination.only_hosts(hosts),
   )
@@ -115,7 +114,7 @@ pub fn void(
     client,
     Payments,
     Post,
-    gateway.payments_url <> "/charges/" <> charge_id <> "/void",
+    gateway.payments_url <> "/charges/" <> segment(charge_id) <> "/void",
     None,
     None,
     gateway.payment_deadline,
@@ -135,7 +134,7 @@ pub fn find_charge(
     client,
     Payments,
     Get,
-    gateway.payments_url <> "/charges/by-key/" <> key,
+    gateway.payments_url <> "/charges/by-key/" <> segment(key),
     None,
     None,
     gateway.payment_deadline,
@@ -181,7 +180,7 @@ pub fn cancel_shipment(
     client,
     Shipping,
     Post,
-    gateway.shipping_url <> "/shipments/by-key/" <> key <> "/cancel",
+    gateway.shipping_url <> "/shipments/by-key/" <> segment(key) <> "/cancel",
     None,
     None,
     gateway.shipping_deadline,
@@ -201,7 +200,7 @@ pub fn find_shipment(
     client,
     Shipping,
     Get,
-    gateway.shipping_url <> "/shipments/by-key/" <> key,
+    gateway.shipping_url <> "/shipments/by-key/" <> segment(key),
     None,
     None,
     gateway.shipping_deadline,
@@ -214,6 +213,13 @@ pub fn find_shipment(
     404 -> Ok(NoShipment)
     _ -> Error(ProviderRejected(Shipping, status))
   }
+}
+
+/// A key or id as exactly one URL path segment: reserved characters are
+/// percent-encoded, so a `/`, `?` or `#` in it cannot change which resource
+/// the request names.
+fn segment(text: String) -> String {
+  uri.percent_encode(text)
 }
 
 fn call(

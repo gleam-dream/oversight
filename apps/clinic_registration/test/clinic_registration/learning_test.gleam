@@ -14,7 +14,6 @@ import decisions/model
 import decisions/occurrence
 import gleam/dynamic/decode
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{Some}
 import gleam/time/timestamp
@@ -53,7 +52,7 @@ fn batch(env: support.Env) -> Nil {
 pub fn the_record_teaches_and_gates_version_2_test() {
   use env <- support.with_app(fn(config) { config })
   batch(env)
-  let assert Ok(recorded) = evaluation.recorded(env.app.db, env.app.desk)
+  let assert Ok(recorded) = evaluation.recorded(env.app.pool, env.app.desk)
   assert list.length(recorded) == 6
 
   // Export: one self-contained document per registration, holding the
@@ -62,8 +61,7 @@ pub fn the_record_teaches_and_gates_version_2_test() {
     evaluation.export(env.app.db, recorded, as_of: timestamp.system_time())
   let documents = evaluation.documents(examples)
   assert list.length(documents) == 6
-  let assert [first, ..] = documents
-  let text = json.to_string(first)
+  let assert [text, ..] = documents
   assert support.field(text, ["format"], decode.string) == "decision-example.v1"
   assert support.field(
       text,
@@ -160,7 +158,7 @@ pub fn the_record_teaches_and_gates_version_2_test() {
   assert occurrence.final(held) != option.None
 
   // Every message expected a registration, and none is still waiting.
-  let assert Ok(coverage) = evaluation.coverage(env.app.db, env.app.desk)
+  let assert Ok(coverage) = evaluation.coverage(env.app.pool, env.app.desk)
   assert coverage
     == learning.Coverage(
       expected: 7,

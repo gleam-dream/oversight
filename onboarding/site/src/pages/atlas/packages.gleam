@@ -208,7 +208,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Sinal",
         layer: Foundations,
-        status: "Hex 0.1",
+        status: "Hex 0.2",
         tiny: "Typed telemetry events and spans",
         needs: [Observe],
         deps: [],
@@ -235,7 +235,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "JSON Blueprint",
         layer: Foundations,
-        status: "Hex 2.0",
+        status: "Hex 3.0",
         tiny: "Codecs that also produce JSON Schema",
         needs: [DescribeData, CallModel, ExposeTools],
         deps: [],
@@ -260,7 +260,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "HTTP Gun",
         layer: Transport,
-        status: "Hex 0.1",
+        status: "Hex 0.4",
         tiny: "Pooled, bounded HTTP client",
         needs: [CallHttp],
         deps: [Sinal],
@@ -287,7 +287,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "LLM Wire",
         layer: OutsideWorld,
-        status: "Hex 0.1",
+        status: "Hex 0.3",
         tiny: "Typed, bounded calls to model providers",
         needs: [CallModel],
         deps: [JsonBlueprint, Sinal, HttpGun],
@@ -312,7 +312,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Relay",
         layer: OutsideWorld,
-        status: "Hex 0.2",
+        status: "Hex 0.3",
         tiny: "MCP server and client",
         needs: [ExposeTools],
         deps: [JsonBlueprint, Sinal, HttpGun],
@@ -335,7 +335,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Hellhound",
         layer: OutsideWorld,
-        status: "Hex 0.2 · pre-production",
+        status: "Hex 0.4 · pre-production",
         tiny: "OIDC sign-in, OAuth tokens, JWTs",
         needs: [SignIn],
         deps: [Sinal, HttpGun],
@@ -352,13 +352,19 @@ pub fn info(package: Package) -> Info {
           "Where durable custody is stored",
         ],
         not_for: "being an identity provider itself. It talks to one. Production use needs independent security review.",
-        apps: ["SSO portal", "secure MCP", "support desk", "payout desk"],
+        apps: [
+          "SSO portal",
+          "secure MCP",
+          "support desk",
+          "clinic",
+          "payout desk",
+        ],
       )
     Correio ->
       Info(
         name: "Correio",
         layer: OutsideWorld,
-        status: "Hex 0.1",
+        status: "Hex 0.2",
         tiny: "Transactional email and passwordless",
         needs: [SendEmail, SignIn],
         deps: [],
@@ -381,7 +387,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Grind",
         layer: DurableWork,
-        status: "Hex 0.1",
+        status: "Hex 0.3",
         tiny: "Durable background jobs on PostgreSQL",
         needs: [RunJobs],
         deps: [Sinal],
@@ -407,7 +413,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Saga",
         layer: DurableWork,
-        status: "Hex 0.2",
+        status: "Hex 0.3",
         tiny: "Typed workflows with compensation",
         needs: [RunWorkflows],
         deps: [Sinal],
@@ -433,7 +439,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Fabric",
         layer: AgentsAndOversight,
-        status: "Hex 0.3",
+        status: "Hex 0.6",
         tiny: "Bounded LLM agents and durable graphs",
         needs: [RunAgent],
         deps: [HttpGun, JsonBlueprint, LlmWire, Sinal],
@@ -456,16 +462,16 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Decisions",
         layer: AgentsAndOversight,
-        status: "Git only · not on Hex yet",
+        status: "Hex 0.2 · integrations from Git",
         tiny: "Decision points with release-once",
         needs: [PersonDecides],
         deps: [JsonBlueprint, Sinal, Grind],
         repo: github <> "decisions",
-        one: "A decision point: a model recommends, a versioned policy proceeds or asks a person, and the final output reaches a gated tool at most once. Everything is an append-only record.",
+        one: "A decision point: a model recommends, a versioned policy proceeds or asks a person (always a person when a fact it reads is unknown), and the final output reaches a gated tool at most once. Everything is an append-only record.",
         owns: [
           "Occurrences as append-only entries",
           "Policy as versioned data, approvals, holds and undo windows",
-          "Release at most once, inside your transaction",
+          "Release at most once, in the transaction that writes your rows",
           "Learning: agreement and accuracy per recommender",
         ],
         you: [
@@ -480,7 +486,7 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Retrace",
         layer: Inspection,
-        status: "Hex 0.1 · experimental",
+        status: "Hex 0.2 · experimental",
         tiny: "Session recording and replay",
         needs: [ReplaySessions],
         deps: [],

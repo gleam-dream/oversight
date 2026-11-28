@@ -8,18 +8,27 @@
 ////   `durable.with_correlation` (durable runs);
 //// - http_gun: `http_gun.with_correlation` on the client view;
 //// - grind: `job.with_correlation` at submit, in every job event's `ref`.
+////
+//// The collector is Sinal's bounded collector, a child of the application's
+//// supervisor. Its process attaches the handlers while it starts and owns
+//// them: they are attached exactly while it runs, a restart attaches them
+//// again under the same ids, and the application never attaches or
+//// detaches a handler itself. It keeps the newest `capacity` entries in a
+//// table that handlers write directly, so nothing queues in a mailbox and
+//// its memory does not grow with the number of orders. A restarted
+//// collector starts empty.
 
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process.{type Name}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/otp/actor
+import gleam/otp/supervision
 import gleam/string
 import grind/job
 import grind/telemetry as grind_telemetry
 import http_gun/telemetry as http_telemetry
 import saga/telemetry as saga_telemetry
-import sinal
+import sinal/collector
 import sinal/correlation.{type Correlation}
 
 pub type Source {
@@ -33,12 +42,17 @@ pub type Entry {
 }
 
 pub opaque type Collector {
-  Collector(subject: Subject(Message), attachments: List(sinal.Attachment))
+  Collector(recent: collector.Collector(Entry))
 }
 
-type Message {
-  Record(Entry)
-  Trace(order: Option(Correlation), reply: Subject(List(Entry)))
+/// The process name a collector registers under.
+pub type CollectorName =
+  Name(collector.Message(Entry))
+
+/// How many entries the collector holds, and how many it has overwritten
+/// to stay within its capacity since it started.
+pub type Usage {
+  Usage(held: Int, dropped: Int)
 }
 
 /// The correlation of an order, from its `domain.order_key`.
@@ -46,43 +60,41 @@ pub fn order(key: String) -> Correlation {
   correlation.from_key(key)
 }
 
-/// Starts the collector and attaches one handler per event descriptor.
-pub fn start() -> Collector {
-  let assert Ok(started) =
-    actor.new([])
-    |> actor.on_message(fn(entries, message) {
-      case message {
-        Record(entry) -> actor.continue([entry, ..entries])
-        Trace(order, reply) -> {
-          list.reverse(entries)
-          |> list.filter(fn(e) { e.order == order })
-          |> process.send(reply, _)
-          actor.continue(entries)
-        }
-      }
-    })
-    |> actor.start
-  let subject = started.data
-  Collector(subject:, attachments: attach_all(subject))
+/// A collector registered under `name` that keeps the newest `capacity`
+/// entries. It starts nothing; `supervised` runs it.
+pub fn new(name: CollectorName, capacity capacity: Int) -> Collector {
+  Collector(collector.new(name) |> collector.with_capacity(capacity))
 }
 
-pub fn stop(collector: Collector) -> Nil {
-  list.each(collector.attachments, fn(a) {
-    let _ = sinal.detach(a)
-    Nil
-  })
+/// The collector process, which attaches one handler per event while it
+/// starts and owns them.
+pub fn supervised(
+  telemetry: Collector,
+) -> supervision.ChildSpecification(collector.Collector(Entry)) {
+  collector.supervised(telemetry.recent, sources())
 }
 
 /// Every collected event attributed to `order`, in arrival order.
-pub fn trace(collector: Collector, order: Correlation) -> List(Entry) {
+pub fn trace(telemetry: Collector, order: Correlation) -> List(Entry) {
   // Forwarded events (http_gun, grind) arrive asynchronously.
   process.sleep(50)
-  actor.call(collector.subject, 1000, Trace(Some(order), _))
+  entries_of(telemetry, Some(order))
+}
+
+/// How much the collector holds and how much it has overwritten.
+pub fn usage(telemetry: Collector) -> Usage {
+  let held = list.length(collector.entries(telemetry.recent))
+  Usage(held:, dropped: collector.recorded(telemetry.recent) - held)
 }
 
 /// Events that carried no correlation.
-pub fn unattributed(collector: Collector) -> List(Entry) {
-  actor.call(collector.subject, 1000, Trace(None, _))
+pub fn unattributed(telemetry: Collector) -> List(Entry) {
+  entries_of(telemetry, None)
+}
+
+fn entries_of(telemetry: Collector, order: Option(Correlation)) -> List(Entry) {
+  collector.entries(telemetry.recent)
+  |> list.filter(fn(entry) { entry.order == order })
 }
 
 pub fn render(entry: Entry) -> String {
@@ -94,12 +106,10 @@ pub fn render(entry: Entry) -> String {
   source <> " " <> entry.line
 }
 
-// --- attachments ----------------------------------------------------------
+// --- sources ----------------------------------------------------------------
 
-fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
-  let record = fn(source, order, line) {
-    process.send(subject, Record(Entry(source, order, line)))
-  }
+fn sources() -> List(collector.Source(Entry)) {
+  let record = Entry
   let job = fn(ref: grind_telemetry.JobRef, line) {
     record(
       Grind,
@@ -115,10 +125,10 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
     )
   }
   [
-    sinal.observe(saga_telemetry.run_started(), fn(_m, d) {
+    collector.source(saga_telemetry.run_started(), fn(_m, d) {
       record(Saga, Some(d.correlation), "run start " <> d.workflow)
     }),
-    sinal.observe(saga_telemetry.run_stopped(), fn(m, d) {
+    collector.source(saga_telemetry.run_stopped(), fn(m, d) {
       record(
         Saga,
         Some(d.correlation),
@@ -128,14 +138,14 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
           <> int.to_string(m.undone),
       )
     }),
-    sinal.observe(saga_telemetry.step_started(), fn(_m, d) {
+    collector.source(saga_telemetry.step_started(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "step start " <> d.step <> " attempt=" <> int.to_string(d.attempt),
       )
     }),
-    sinal.observe(saga_telemetry.step_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.step_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
@@ -147,36 +157,36 @@ fn attach_all(subject: Subject(Message)) -> List(sinal.Attachment) {
           <> string.inspect(d.result),
       )
     }),
-    sinal.observe(saga_telemetry.compensation_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.compensation_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "compensate " <> d.step <> " " <> string.inspect(d.decision),
       )
     }),
-    sinal.observe(saga_telemetry.undo_stopped(), fn(_m, d) {
+    collector.source(saga_telemetry.undo_stopped(), fn(_m, d) {
       record(
         Saga,
         Some(d.correlation),
         "undo " <> d.step <> " " <> string.inspect(d.result),
       )
     }),
-    sinal.observe(http_telemetry.event(), fn(_m, d) {
+    collector.source(http_telemetry.event(), fn(_m, d) {
       record(Http, d.correlation, "request " <> string.inspect(d.milestone))
     }),
-    sinal.observe(grind_telemetry.admitted(), fn(_m, d) {
+    collector.source(grind_telemetry.admitted(), fn(_m, d) {
       job(d.ref, "admitted state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_telemetry.claimed(), fn(_m, d) {
+    collector.source(grind_telemetry.claimed(), fn(_m, d) {
       job(d.ref, "claimed attempt=" <> int.to_string(d.attempt.attempt))
     }),
-    sinal.observe(grind_telemetry.acknowledged(), fn(_m, d) {
+    collector.source(grind_telemetry.acknowledged(), fn(_m, d) {
       job(d.ref, "acknowledged state=" <> job.state_name(d.committed_state))
     }),
-    sinal.observe(grind_telemetry.quarantined(), fn(_m, d) {
+    collector.source(grind_telemetry.quarantined(), fn(_m, d) {
       job(d.ref, "quarantined replayed=" <> string.inspect(d.replayed))
     }),
-    sinal.observe(grind_telemetry.resolved(), fn(_m, d) {
+    collector.source(grind_telemetry.resolved(), fn(_m, d) {
       job(d.ref, "resolved " <> string.inspect(d.decision))
     }),
   ]

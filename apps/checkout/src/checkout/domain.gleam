@@ -4,15 +4,55 @@
 //// `Failure` inside the provider errors.
 
 import gleam/int
+import gleam/list
 import gleam/string
 import http_gun/error
+
+/// A customer's order id: 1 to 64 characters of ASCII letters, digits, `.`,
+/// `_` and `-`, starting with a letter or digit. The customer chooses it,
+/// and it becomes part of job ids, saga execution ids and provider keys, so
+/// it is parsed once where a request enters and carried as this type.
+pub opaque type OrderId {
+  OrderId(text: String)
+}
+
+/// Parses a customer-supplied order id.
+pub fn order_id(text: String) -> Result(OrderId, Nil) {
+  let size = string.byte_size(text)
+  case size >= 1 && size <= 64, string.to_utf_codepoints(text) {
+    True, [first, ..rest] ->
+      case
+        is_alphanumeric(string.utf_codepoint_to_int(first))
+        && list.all(rest, fn(c) { is_order_id_character(c) })
+      {
+        True -> Ok(OrderId(text))
+        False -> Error(Nil)
+      }
+    _, _ -> Error(Nil)
+  }
+}
+
+pub fn order_id_to_string(id: OrderId) -> String {
+  id.text
+}
+
+fn is_order_id_character(codepoint: UtfCodepoint) -> Bool {
+  let c = string.utf_codepoint_to_int(codepoint)
+  // '-', '.', '_'
+  is_alphanumeric(c) || c == 45 || c == 46 || c == 95
+}
+
+fn is_alphanumeric(c: Int) -> Bool {
+  // 0-9, A-Z, a-z
+  { c >= 48 && c <= 57 } || { c >= 65 && c <= 90 } || { c >= 97 && c <= 122 }
+}
 
 /// What a customer sends to `POST /orders`: what to buy, where to ship it,
 /// and the opaque token the payment provider issued for their card. It
 /// carries no price and no card number.
 pub type CheckoutRequest {
   CheckoutRequest(
-    order_id: String,
+    order_id: OrderId,
     sku: String,
     quantity: Int,
     payment_token: String,
@@ -30,7 +70,7 @@ pub const max_quantity = 100
 /// body, and the only payment credential is the provider's token.
 pub type Order {
   Order(
-    order_id: String,
+    order_id: OrderId,
     customer_id: String,
     sku: String,
     quantity: Int,
@@ -56,7 +96,33 @@ pub fn order_key(customer_id: String, order_id: String) -> String {
 
 /// The order's `order_key`.
 pub fn key(order: Order) -> String {
-  order_key(order.customer_id, order.order_id)
+  order_key(order.customer_id, order.order_id.text)
+}
+
+/// What recording an order's outcome needs: whose order it is, its id, and
+/// what its receipt says and where it goes. The order row keeps these, so
+/// an outcome can be recorded without the payment token or the address.
+pub type OrderRef {
+  OrderRef(
+    customer_id: String,
+    order_id: String,
+    email: String,
+    amount_cents: Int,
+  )
+}
+
+pub fn ref(order: Order) -> OrderRef {
+  OrderRef(
+    customer_id: order.customer_id,
+    order_id: order_id_to_string(order.order_id),
+    email: order.email,
+    amount_cents: order.amount_cents,
+  )
+}
+
+/// The `order_key` of the order `ref` names.
+pub fn ref_key(ref: OrderRef) -> String {
+  order_key(ref.customer_id, ref.order_id)
 }
 
 /// Prices a customer's request at the catalog's unit price.

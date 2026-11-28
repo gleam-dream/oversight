@@ -22,10 +22,10 @@ import decisions/learning.{type Example, type Replay, type Tally, Archive}
 import decisions/model
 import decisions/occurrence.{type Occurrence}
 import decisions/vocabulary.{type Ref}
+import decisions_postgres
 import decisions_postgres/queue
 import gleam/float
 import gleam/int
-import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -38,15 +38,15 @@ import pog
 /// that never began (still expected, or superseded before a
 /// recommendation).
 pub fn records(
-  db: pog.Connection,
-  desk: Desk(Registration, pog.Connection),
+  db: decisions_postgres.Pool,
+  desk: Desk(Registration, decisions_postgres.Tx),
 ) -> Result(List(decisions.Record(Registration)), String) {
   records_after(db, desk, None, [])
 }
 
 fn records_after(
-  db: pog.Connection,
-  desk: Desk(Registration, pog.Connection),
+  db: decisions_postgres.Pool,
+  desk: Desk(Registration, decisions_postgres.Tx),
   after: Option(String),
   so_far: List(decisions.Record(Registration)),
 ) -> Result(List(decisions.Record(Registration)), String) {
@@ -56,7 +56,11 @@ fn records_after(
   )
   use read <- result.try(
     list.try_map(page, fn(summary) {
-      decisions.read_record(desk, db, key: summary.occurrence)
+      decisions_postgres.refusing(db, decisions.read_record(
+        desk,
+        _,
+        key: summary.occurrence,
+      ))
       |> result.map_error(decisions.describe)
     }),
   )
@@ -70,8 +74,8 @@ fn records_after(
 
 /// The registrations that began: the occurrences among the records.
 pub fn recorded(
-  db: pog.Connection,
-  desk: Desk(Registration, pog.Connection),
+  db: decisions_postgres.Pool,
+  desk: Desk(Registration, decisions_postgres.Tx),
 ) -> Result(List(Occurrence(Registration)), String) {
   use all <- result.map(records(db, desk))
   list.filter_map(all, fn(record) {
@@ -85,8 +89,8 @@ pub fn recorded(
 /// How many messages expected a registration, how many a newer message
 /// superseded before a recommendation, and how many are still expected.
 pub fn coverage(
-  db: pog.Connection,
-  desk: Desk(Registration, pog.Connection),
+  db: decisions_postgres.Pool,
+  desk: Desk(Registration, decisions_postgres.Tx),
 ) -> Result(learning.Coverage, String) {
   records(db, desk) |> result.map(learning.coverage)
 }
@@ -132,8 +136,8 @@ fn describe_export_error(error: learning.ExportError) -> String {
 }
 
 /// The examples as `decision-example.v1` documents, as a training lake
-/// keeps them.
-pub fn documents(examples: List(Example(Registration))) -> List(Json) {
+/// keeps them, each as JSON text.
+pub fn documents(examples: List(Example(Registration))) -> List(String) {
   list.filter_map(examples, fn(example) {
     learning.example_to_json(example, decisions.codec(domain.point()))
   })

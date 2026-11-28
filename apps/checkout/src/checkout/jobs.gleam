@@ -6,7 +6,9 @@
 //// execution or a lost runner snoozes the job (redelivery resumes from the
 //// last checkpoint; a killed runner releases its claim, so that resume is
 //// immediate), and a saga that needs reconciliation becomes a grind
-//// `Uncertain` job, which needs an audited operator resolution.
+//// `Uncertain` job, which needs an audited operator resolution. A job ends
+//// only after the order row holds the saga's outcome; a failed write
+//// snoozes the job, and the redelivery repeats the write.
 ////
 //// The handler is idempotent by construction (the saga checkpoint decides
 //// what runs), so an abandoned attempt is replayed after its lease expires
@@ -38,7 +40,12 @@ fn attempt_budget() -> Duration {
 }
 
 pub fn execution_id(order: Order) -> String {
-  "checkout:" <> domain.key(order)
+  execution_id_of(domain.key(order))
+}
+
+/// The saga execution id of the order with this `domain.order_key`.
+pub fn execution_id_of(order_key: String) -> String {
+  "checkout:" <> order_key
 }
 
 /// `redelivery` is the snooze after a lost runner or a storage failure;
@@ -87,17 +94,23 @@ fn drive(
       |> drive_until_cancelled(context, budget(context))
   }
   case driven {
-    Ok(outcome) -> {
-      let report = orders.finalize(s, order, outcome)
-      case outcome {
-        execution.Unresolved(..) -> worker.Uncertain(report.detail)
-        execution.Cancelled(..) -> worker.Cancelled(report.detail)
-        _ ->
+    Ok(outcome) ->
+      case orders.finalize(s, domain.ref(order), outcome), outcome {
+        // The order row does not hold the outcome, so the job is not done.
+        // The saga's outcome is saved: the redelivery reads it back without
+        // running a step and only repeats the write.
+        Error(orders.Unrecorded(_)), _ ->
+          worker.Snoozed(
+            after: redelivery,
+            reason: "order outcome not recorded",
+          )
+        Ok(report), execution.Unresolved(..) -> worker.Uncertain(report.detail)
+        Ok(report), execution.Cancelled(..) -> worker.Cancelled(report.detail)
+        Ok(report), _ ->
           worker.Succeeded(
             domain.status_to_string(report.status) <> ": " <> report.detail,
           )
       }
-    }
     Error(error) ->
       case durable.error_kind(error) {
         durable.Busy ->

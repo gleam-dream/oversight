@@ -18,6 +18,7 @@ import hellhound/testing
 import http_gun
 import http_gun/config as http_config
 import http_gun/destination
+import saga
 import saga/execution
 import saga/telemetry as saga_events
 import sinal
@@ -47,6 +48,8 @@ pub fn repeated_stop_releases_owned_resources_test() {
     let before = linked_processes()
     let handlers = ticket_handler_count()
     let assert Ok(app) = app.start()
+    // The collector's process attached the ticket handler and owns it.
+    assert ticket_handler_count() == handlers + 1
     let owned = owned_since(before)
     let assert Ok(service_recorder) = process.subject_owner(app.services.calls)
     let assert Ok(provider_recorder) =
@@ -66,7 +69,10 @@ pub fn repeated_stop_releases_owned_resources_test() {
       |> result.is_error
     assert get(probe, app.provider.base_url) |> result.is_error
     assert get(app.client, app.services.base_url) |> result.is_error
-    assert ticket_handler_count() == handlers
+    // Sinal detaches the handlers once it sees the collector's process exit,
+    // and the stopped collector holds nothing.
+    assert eventually(2000, fn() { ticket_handler_count() == handlers })
+    assert telemetry.observations(app.telemetry) == []
     list.each(owned, assert_stopped)
     http_gun.stop(probe)
   })
@@ -90,7 +96,18 @@ pub fn rejected_configuration_unwinds_partial_startup_test() {
   let assert Ok(owned) = process.receive(acquired, 1000)
   assert owned != []
   list.each(owned, assert_stopped)
-  assert ticket_handler_count() == handlers
+  assert eventually(2000, fn() { ticket_handler_count() == handlers })
+}
+
+fn eventually(within: Int, ready: fn() -> Bool) -> Bool {
+  case ready() {
+    True -> True
+    False if within <= 0 -> False
+    False -> {
+      process.sleep(25)
+      eventually(within - 25, ready)
+    }
+  }
 }
 
 pub fn stopping_suspended_ticket_retires_its_store_test() {
@@ -767,11 +784,7 @@ pub fn a_proof_from_other_approvers_is_refused_test() {
       audience: app.audience,
     ))
   let assert Ok(proof) =
-    fabric_approvers.check(
-      again,
-      signed_in(app, "alice"),
-      pending.reference.requirement,
-    )
+    fabric_approvers.check(again, signed_in(app, "alice"), pending.reference)
   let assert Error(fabric.ProofRefused(fabric_approvers.OtherApprovers(
     "hellhound",
   ))) = fabric.approve(handle, pending.reference, proof:, context: session)
@@ -900,8 +913,11 @@ pub fn saga_names_a_returned_unknown_payment_as_an_unknown_effect_test() {
   // attempt as an unknown effect and, with no decider and no `on_unknown`,
   // ends the run `Unresolved` and undoes nothing; the saga recipe reports it as
   // uncertain rather than as a failure the model may retry.
-  let assert execution.Unresolved(_, shop.PaymentOutcomeUnknown(_), settlement) =
-    outcome
+  let assert execution.Unresolved(
+    _,
+    saga.Returned(shop.PaymentOutcomeUnknown(_)),
+    settlement,
+  ) = outcome
   assert settlement.undone == []
   let assert [
     execution.UnknownEffect(

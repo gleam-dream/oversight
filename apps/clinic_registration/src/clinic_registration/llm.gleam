@@ -122,7 +122,7 @@ pub fn provider(base_url: String, deadline: Duration) -> Provider {
     config: openai.new("sk-scripted")
       |> openai.config
       |> llm_wire.with_endpoint(base_url <> "/openai/v1")
-      |> llm_wire.with_call_timeout(llm_wire.After(deadline)),
+      |> llm_wire.with_call_timeout(deadline),
     deadline:,
   )
 }
@@ -415,6 +415,9 @@ pub type Ending {
   Refused
   OutputLimited
   NeedsTools
+  /// The provider ended with a stop reason llm_wire does not know; `detail`
+  /// holds the reason and `text` what arrived before it.
+  UnrecognizedStop
 }
 
 /// One request and what came back, as stored.
@@ -458,6 +461,8 @@ fn exchange_with(
     Ok(llm_wire.OutputLimited(partial_text:, usage:, ..)) ->
       document(OutputLimited, partial_text, "", usage)
     Ok(llm_wire.NeedsTools(usage:, ..)) -> document(NeedsTools, "", "", usage)
+    Ok(llm_wire.UnrecognizedStop(reason:, partial_text:, usage:, ..)) ->
+      document(UnrecognizedStop, partial_text, reason, usage)
     Error(llm_wire.Failure(
       error: error.InvalidOutput(raw_output:, failure:),
       usage:,
@@ -486,6 +491,11 @@ fn answer_of(exchange: Exchange) -> Result(Extraction, Failure) {
       Error(model.Undecodable("the answer was cut at the output limit"))
     NeedsTools ->
       Error(model.Undecodable("the model asked for tools; this call has none"))
+    UnrecognizedStop ->
+      Error(model.Undecodable(
+        "the provider ended with an unrecognized stop reason: "
+        <> exchange.detail,
+      ))
   }
 }
 
@@ -496,6 +506,7 @@ fn ending_name(ending: Ending) -> String {
     Refused -> "refused"
     OutputLimited -> "output_limited"
     NeedsTools -> "needs_tools"
+    UnrecognizedStop -> "unrecognized_stop"
   }
 }
 
@@ -535,6 +546,7 @@ fn parse(document: String) -> Result(Exchange, Failure) {
       "refused" -> Ok(Refused)
       "output_limited" -> Ok(OutputLimited)
       "needs_tools" -> Ok(NeedsTools)
+      "unrecognized_stop" -> Ok(UnrecognizedStop)
       _ -> Error(Nil)
     }
     case ending {

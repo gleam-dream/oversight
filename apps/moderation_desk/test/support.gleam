@@ -62,20 +62,25 @@ pub fn publish_version_2(a: App) -> Nil {
   Nil
 }
 
-pub fn handle(a: App) -> Tx {
-  store.handle(app.store_of(a))
+/// Run `read` in a transaction of the app's store and return what it read.
+pub fn reading(a: App, read: fn(Tx) -> b) -> b {
+  wiring.reading(app.store_of(a), read)
 }
 
 /// The occurrence about a post's current revision.
 pub fn occurrence(a: App, post: Post) -> Occurrence(Action) {
   let assert Ok(known) =
-    decisions.read(app.desk_of(a), handle(a), occurrence: wiring.key(post))
+    store.transaction(app.store_of(a), decisions.read(
+      app.desk_of(a),
+      _,
+      occurrence: wiring.key(post),
+    ))
   known
 }
 
 /// The sets an occurrence about this post waits for.
 pub fn awaiting(a: App, post: Post) -> List(String) {
-  store.heads(handle(a))
+  store.heads(app.store_of(a))
   |> list.key_find(wiring.key(post))
   |> result.map(fn(head) { head.awaiting })
   |> result.unwrap([])
@@ -85,17 +90,20 @@ pub fn awaiting(a: App, post: Post) -> List(String) {
 /// effects.
 pub fn check(a: App) -> testing.Summary {
   let assert Ok(summary) =
-    testing.check(handle(a), store.inspection(), [
-      testing.audit(app.desk_of(a), effects: fn(tx) {
-        Ok(store.count(tx, wiring.released))
-      }),
-    ])
+    store.transaction(
+      app.store_of(a),
+      testing.check(_, store.inspection(), [
+        testing.audit(app.desk_of(a), effects: fn(tx) {
+          Ok(store.count(tx, wiring.released))
+        }),
+      ]),
+    )
   summary
 }
 
 /// Notifications per occurrence: `#(occurrence, how many)`.
 pub fn notified(a: App) -> List(#(String, Int)) {
-  wiring.notifications(handle(a))
+  reading(a, wiring.notifications)
   |> list.fold([], fn(counts, triple) {
     let #(_, occurrence, _) = triple
     list.key_set(
@@ -158,5 +166,5 @@ pub fn kill(pid: process.Pid) -> Nil {
 }
 
 pub fn visibility(a: App, post: Post) -> Result(domain.Visibility, Nil) {
-  wiring.visibility(handle(a), post.id)
+  reading(a, wiring.visibility(_, post.id))
 }

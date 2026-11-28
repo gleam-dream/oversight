@@ -226,7 +226,7 @@ fn print_input(item: view.Item) -> Nil {
 
 fn read(running: app.App, id: String) -> occurrence.Occurrence(domain.Payout) {
   let assert Ok(known) =
-    decisions_postgres.transaction(running.db, decisions.read(
+    decisions_postgres.transaction(running.deps.pool, decisions.read(
       app.payout_desk(running),
       _,
       occurrence: id,
