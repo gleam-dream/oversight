@@ -35,6 +35,7 @@
           inherit pkgs;
           gleam = gleamBuild;
         };
+        booklets = import ./nix/booklets.nix { inherit pkgs; };
 
         # One derivation shared by the devShell and the mix-format formatter,
         # so `nix fmt` never formats with a different Elixir/OTP than the
@@ -103,9 +104,13 @@
           ];
         };
 
+        devShells.booklets = booklets.shell;
+
         formatter = treefmtEval.config.build.wrapper;
 
-        packages = pkgs.lib.mapAttrs (_: project: project.package) applications.projects;
+        packages = pkgs.lib.mapAttrs (_: project: project.package) applications.projects // {
+          booklets = booklets.package;
+        };
 
         checks = {
           formatting = treefmtEval.config.build.check ./.;

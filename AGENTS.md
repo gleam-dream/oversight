@@ -48,6 +48,7 @@
 - State only what the libraries do today, checked against their repositories. Mark anything planned or pre-production as such, and update it when it ships.
 - Code the course shows comes from [`onboarding/site/snippets/`](onboarding/site/snippets/) and must compile. Rerun `snippets/capture.sh` after changing a snippet or the Gleam version.
 - Validate from `onboarding/site/` with `nix develop ../.. --command gleam test` and `nix develop ../.. --command bash build.sh`.
+- [`booklets/`](booklets/) holds the Typst booklets the course links as further reading ([ADR 0045](docs/adr/0045-publish-booklets-as-pdfs-beside-the-course.md)), one PDF each. A booklet states facts with numbered sources; a course module that draws on one states the Gleam equivalent, checked against the library. Build with `nix build .#booklets`.
 
 <!-- agent-skills:begin -->
 <!-- framework-commit: cab7c0590036edaa66d8430cc5016399a9fd2c71 origin: git@github.com:lostbean/skills.git -->
