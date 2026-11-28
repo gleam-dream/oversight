@@ -10,8 +10,8 @@ packages = [
   { name = "backoff", version = "1.1.6", build_tools = ["rebar3"], requirements = [], otp_app = "backoff", source = "hex", outer_checksum = "CF0CFFF8995FB20562F822E5CC47D8CCF664C5ECDC26A684CBE85C225F9D7C39" },
   { name = "bigi", version = "4.1.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "bigi", source = "hex", outer_checksum = "44FEDF1DF5C1F426A80B67C32B976D0828D66524E11BDC2DD22B78D37C883BA7" },
   { name = "cowlib", version = "2.21.0", build_tools = ["make", "rebar3"], requirements = [], otp_app = "cowlib", source = "hex", outer_checksum = "0960248773762A5319B3C17285028BC76F54F58EF0F9451367401BDF67B46274" },
-  { name = "decisions", version = "0.2.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib", "gleam_time", "json_blueprint"], otp_app = "decisions", source = "hex", outer_checksum = "416C6816010753564AFF20F3B5A705303B3B7C89B4FB5160B0DABAA690974334" },
-  { name = "decisions_postgres", version = "0.3.0", build_tools = ["gleam"], requirements = ["decisions", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "grind", "pgo", "pog", "sinal"], source = "git", repo = "https://github.com/gleam-dream/decisions.git", commit = "13d76cc5910acb7740b6f8b490d76069c7bc3a27", path = "integrations/decisions_postgres" },
+  { name = "decisions", version = "0.3.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_json", "gleam_stdlib", "gleam_time", "json_blueprint"], otp_app = "decisions", source = "hex", outer_checksum = "39B7EA1B538BACC3BC8249B18C1B1E0C1C466548E5DC5DDFA09B66F3676B3327" },
+  { name = "decisions_postgres", version = "0.4.0", build_tools = ["gleam"], requirements = ["decisions", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "grind", "pgo", "pog", "sinal"], source = "git", repo = "https://github.com/gleam-dream/decisions.git", commit = "c822fa66400765034c782ae304013dfbecee0986", path = "integrations/decisions_postgres" },
   { name = "envoy", version = "1.2.0", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "envoy", source = "hex", outer_checksum = "9C6FBB6BFA02A52798BEEC5977A738CAD6E4A057F4B67FD0C8061AD2502C191A" },
   { name = "exception", version = "2.1.1", build_tools = ["gleam"], requirements = ["gleam_stdlib"], otp_app = "exception", source = "hex", outer_checksum = "6BDEA95248093599391C3B5DF1835C5C6A86C353C2F99CE539B450E3432FE117" },
   { name = "fabric", version = "0.6.0", build_tools = ["gleam"], requirements = ["gleam_crypto", "gleam_erlang", "gleam_json", "gleam_otp", "gleam_stdlib", "gleam_time", "http_gun", "json_blueprint", "llm_wire", "sinal"], otp_app = "fabric", source = "hex", outer_checksum = "C2ADCC5D8BC039BC3AF179717214B6A6BBFB1DF621E2CB559E20B5A13A3BE035" },
@@ -54,8 +54,8 @@ packages = [
 ]
 
 [requirements]
-decisions = { version = ">= 0.2.0 and < 0.3.0" }
-decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.3.0", path = "integrations/decisions_postgres" }
+decisions = { version = ">= 0.3.0 and < 0.4.0" }
+decisions_postgres = { git = "https://github.com/gleam-dream/decisions.git", ref = "decisions_postgres-v0.4.0", path = "integrations/decisions_postgres" }
 envoy = { version = ">= 1.0.0 and < 2.0.0" }
 fabric = { version = ">= 0.6.0 and < 0.7.0" }
 fabric_postgres = { git = "https://github.com/gleam-dream/fabric.git", ref = "fabric_postgres-v0.5.0", path = "integrations/fabric_postgres" }
