@@ -462,16 +462,16 @@ pub fn info(package: Package) -> Info {
       Info(
         name: "Decisions",
         layer: AgentsAndOversight,
-        status: "Hex 0.1 · integrations from Git",
+        status: "Hex 0.2 · integrations from Git",
         tiny: "Decision points with release-once",
         needs: [PersonDecides],
         deps: [JsonBlueprint, Sinal, Grind],
         repo: github <> "decisions",
-        one: "A decision point: a model recommends, a versioned policy proceeds or asks a person, and the final output reaches a gated tool at most once. Everything is an append-only record.",
+        one: "A decision point: a model recommends, a versioned policy proceeds or asks a person (always a person when a fact it reads is unknown), and the final output reaches a gated tool at most once. Everything is an append-only record.",
         owns: [
           "Occurrences as append-only entries",
           "Policy as versioned data, approvals, holds and undo windows",
-          "Release at most once, inside your transaction",
+          "Release at most once, in the transaction that writes your rows",
           "Learning: agreement and accuracy per recommender",
         ],
         you: [

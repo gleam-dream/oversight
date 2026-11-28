@@ -77,9 +77,8 @@ Each Fabric application passes `agent.build` a builder, and Fabric 0.6 builds
 the agent in each process that runs it, so a run copies the builder and its
 captures instead of the built agent with its tool codecs
 ([Fabric ADR 0023](https://github.com/gleam-dream/fabric/blob/main/docs/adr/0023-build-the-agent-in-each-process-from-its-builder.md)).
-The payout desk still runs on an earlier Fabric commit until the Decisions
-packages accept JSON Blueprint 3
-([issue](issues/codec-copy-cost/issues/01-adopt-fabric-agent-build.md)).
+Every application, the payout desk included, runs on Fabric 0.6 from Hex, and
+those that keep runs in PostgreSQL take `fabric_postgres` from its 0.5.0 tag.
 
 ## Run an example
 

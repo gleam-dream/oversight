@@ -1,6 +1,6 @@
 # Adopt Fabric's builder `agent.build`
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 
 AI-assisted contribution.
@@ -20,20 +20,17 @@ and runs in each process that runs the agent.
 
 Fabric 0.6.0 removes the form of `agent.build` that took a built spec; the
 only `agent.build` takes a builder. `fabric.Error` has the variant
-`AgentUnbuildable` for an agent whose builder fails in a process. The
-`fabric_postgres` adapter for Fabric 0.6 has no release tag yet, so an
-application that uses it pins the Fabric core and the adapter to one Fabric
-commit.
+`AgentUnbuildable` for an agent whose builder fails in a process.
+`fabric_postgres` 0.5.0 is the adapter for Fabric 0.6, released as the Git
+tag `fabric_postgres-v0.5.0`.
 
 ## Current state
 
 Every `agent.build` call passes a builder (tool_hub `assistant.gleam`,
 support_desk `desk.gleam`, payout_desk `agent.gleam`, research_agent
-`researcher.gleam` and `test/history_delivery.gleam`). support_desk and
-tool_hub require Fabric 0.6 from Hex; research_agent uses the Fabric 0.6
-commit that also holds `fabric_postgres`. payout_desk still uses the earlier
-Fabric integration commit: its Decisions packages require JSON Blueprint
-below 3.0 and Sinal below 0.2, so it cannot resolve the released libraries.
+`researcher.gleam` and `test/history_delivery.gleam`), and every application
+requires Fabric 0.6 from Hex. payout_desk, research_agent and the
+archive_release experiment take `fabric_postgres` from its 0.5.0 tag.
 
 ## What to do
 
@@ -51,3 +48,11 @@ below 3.0 and Sinal below 0.2, so it cannot resolve the released libraries.
 Every application passes a builder to `agent.build` on a released Fabric, the
 agents' copy-cost bounds are set from measurements on that release, and all
 application checks pass.
+
+## Comments
+
+AI-assisted contribution. Done once Decisions 0.2 accepted JSON Blueprint 3 and
+Sinal 0.2: payout_desk moved to Fabric 0.6 with the other released libraries,
+and its agent now copies 232 bytes into a run, so its `copy_cost_test` budget
+is 1 kB. research_agent and archive_release take Fabric from Hex and
+`fabric_postgres` from its tag.

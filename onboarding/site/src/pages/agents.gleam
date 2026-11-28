@@ -407,7 +407,7 @@ pub fn view(model: Model, context: Context) -> Element(Msg) {
           html.text("A "),
           html.b([], [html.text("decision point")]),
           html.text(
-            " is a place where an output must not reach the world unchecked. A model (or a rule, or a person) recommends; a versioned policy either proceeds or asks a person; the final output is released at most once to a gated tool, inside your transaction. Every step is appended to a record, and that record is what you learn from.",
+            " is a place where an output must not reach the world unchecked. A model (or a rule, or a person) recommends; a versioned policy either proceeds or asks a person; the final output is released at most once to a gated tool, in the same transaction as your own writes. Every step is appended to a record, and that record is what you learn from.",
           ),
         ]),
         cards([
